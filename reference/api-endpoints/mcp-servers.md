@@ -12,11 +12,39 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}" method="patch" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}" method="delete" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants" method="post" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}" method="patch" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}" method="delete" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 

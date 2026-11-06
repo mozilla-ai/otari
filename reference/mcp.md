@@ -72,6 +72,11 @@ header. An id that names no server in that workspace returns `404`, and a
 server that is configured but disabled is skipped rather than refusing the
 request.
 
+Which stored servers a key reaches, and which of their tools, is each server's
+[access list](#server-access). A server that denies the key answers `404` exactly
+as an unknown id does, and the tools it may not run are never offered to the
+model.
+
 The same stored servers are what
 [caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
 registered once serves both integration modes. The two read a disabled server
@@ -121,6 +126,10 @@ an owner/admin of that workspace.
   the response. A URL sent in the request body is yours to fix and still fails
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
+- `everyone_tools` (default `["*"]`) is the server's default policy, and
+  `read_tools` (default `[]`) the tools labeled read; see
+  [Server access](#server-access).
+- `GET /{server_id}` reads one server, for any member who can see the workspace.
 
 #### Connection checks
 
@@ -154,6 +163,118 @@ change when every check slot on the gateway was busy; `POST /{server_id}/check`
 answers `429` in that case and records nothing. The value describes the server
 as of `health.checked_at`; a request still checks the URL again, and nothing is
 skipped because a check once passed.
+
+### Server access
+
+Each stored server has an access list (ACL) that decides which keys reach it and
+which of its tools they may run. The dashboard steps are in
+[Control access to an MCP server](https://docs.otari.ai/tools/control-access-to-an-mcp-server).
+
+An ACL has two parts:
+
+- **Rules**, each for one key or one user. A user's rule covers every key that
+  user owns, including keys created later. A rule's `tools` are the tool patterns
+  it allows; `[]` denies. The API calls a rule a grant.
+- **The default policy**, the server's `everyone_tools`, for every key no rule
+  names. `["*"]`, the default, allows every tool; `[]` denies.
+
+A key's rule wins, then its user's rule, then the default policy. There is no
+order to manage: "deny by default, allow these keys" and "allow by default,
+except this key" are each a policy plus rules.
+
+A tool pattern is one of:
+
+| Pattern | Matches |
+|---|---|
+| `create_issue` | that tool |
+| `*` | every tool |
+| `get_*` | every tool whose name starts with `get_` |
+| `@read` | the server's read tools |
+
+Any other use of `*` or `@` is refused.
+
+The master key is not bound by any ACL. A dashboard session, which is what the
+Playground runs as, has no key, so it is bound as its user: the user's rule, else
+the default policy. The Playground offers only the servers that user reaches.
+
+#### Read tools
+
+`read_tools` on a server lists the tools a manager labeled read, as exact names,
+set with `PATCH` on the server. `@read` stands for exactly that list, so a rule of
+`["@read"]` keeps meaning "read only" as the labels change. A tool nobody labeled
+counts as write, and a new server has none labeled, so `@read` allows nothing
+until someone labels some.
+
+Otari never takes the labels from the server. A tool may declare MCP's
+`readOnlyHint`, and a connection check reports those tools as
+`health.read_only_hinted_tools`, which the dashboard offers as suggestions. A
+server can mark any tool read-only, so a hint counts only once a manager saves it.
+
+#### What a caller sees
+
+- **A denied key cannot tell the server exists.** Every route answers it as it
+  would an unknown id: `GET /api/v1/mcp/servers` leaves the server out, a
+  completion naming it in `mcp_server_ids` gets a `404`, and discovery and
+  execution answer `404 mcp_server_not_found`. A `403` would confirm the server
+  is there, so a restricted key could map a workspace's servers by probing ids.
+  To see why a key was turned away, use `GET .../access/check` (below).
+- **A tool outside the key's rule is never offered to the model.** On
+  `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
+- **In a completion, the model is told what it may not use.** The server's line in
+  the system message names the tools the caller holds and the ones it does not,
+  so the model can say the caller lacks access instead of trying. A name that is
+  not plain letters, digits, `_`, `.` and `-` is left out, since the server wrote
+  it. If the model calls a withheld tool anyway, the call never reaches the server
+  or the client: the model gets `[tool error] mcp_tool_not_allowed: ...` and the
+  trace records the call as blocked, with the rule that refused it. A tool the
+  request declares itself under the same name stays the client's.
+- **The server's `allowed_tools` comes first.** A tool it leaves out is
+  unreachable whatever a rule says, and a disabled server is unreachable to
+  everyone.
+
+Rules name the server by id, so renaming a server keeps them. Deleting the
+server, the key or the user deletes them.
+
+#### Servers named in a request
+
+`mcp_servers` in a completion request names a server by URL, which no ACL covers.
+A workspace refuses such a request with a `400` unless
+`request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around. A new
+workspace starts with it off; one that existed before ACLs, including the default
+workspace an install migrates into, keeps it on. Change it with
+`PATCH /api/v1/workspaces/{workspace_id}`.
+
+The switch also covers asking a provider to dial a server itself: a Responses tool
+of `type: "mcp"`, or a Gemini tool with a non-empty `mcp_servers`
+(`mcpServers`). The master key may always name servers; a key or a dashboard
+session follows the workspace's switch.
+
+#### Managing the ACL
+
+These routes live under `/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`
+and need an owner or admin of the organization or the workspace:
+
+| Route | Does |
+|---|---|
+| `PATCH /` with `everyone_tools` | Change the default policy. |
+| `GET /access` | List the default policy and every rule, each naming its key (with name, owner and whether it is active) or user. |
+| `POST /access/grants` | Give one rule to several `api_key_ids` and `user_ids`. A key or user that has a rule gets this one instead. |
+| `PATCH /access/grants/{grant_id}` | Change one rule's `tools`. |
+| `DELETE /access/grants/{grant_id}` | Delete one rule; its key or user falls back to the next match. |
+| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy) or `server` (disabled, or the tool is not exposed). |
+
+`GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access`
+answers the other way round: what one key reaches on each of the workspace's
+servers, and which rule matched.
+
+A rule's key must belong to the workspace. A rule's user must own a key in it, or
+be someone the Playground admits (an active member of the workspace, or an owner
+or admin of its organization), so a manager can restrict a member's Playground
+before they hold a key; such a user is named by their identity id in lowercase. A
+deleted user is refused. A user's rules on a workspace's servers are deleted when
+they leave the workspace or its organization, so inviting them again restores
+none. A server holds at most 1000 rules, so write a rule for a user rather than
+one per key.
 
 ## Limits and safety
 
@@ -223,6 +344,31 @@ authorization, credential storage, revocation, and allowlist policy on Otari's
 side of the boundary. Local `stdio` servers stay outside this: a remote Otari
 deployment cannot reach a machine-local process.
 
+### Listing the servers a key can reach
+
+```http
+GET /api/v1/mcp/servers
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "servers": [
+    {
+      "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
+      "name": "github",
+      "purpose_hint": "Use for repository and issue lookups"
+    }
+  ]
+}
+```
+
+The enabled stored servers of the key's workspace whose
+[access list](#server-access) grants it something, which is what to send in
+`mcp_server_ids`. The URL and the token are never returned. A master key has no
+workspace and is refused with `404`, as on the other routes of this section; the
+route is rate limited and refuses a blocked user as they are.
+
 ### Discovery
 
 ```http
@@ -276,7 +422,10 @@ one with a `$ref` pointing outside itself:
 
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
-back to the execution endpoint.
+back to the execution endpoint. The same code omits a name that contains `*`,
+`,`, whitespace or a control character, or starts with `@`: an access rule would
+read it as a pattern, and the dashboard's allow-list field would split it. A
+connection check leaves such a tool out of the tools it lists too.
 
 Otari does not validate an `inputSchema` against a JSON Schema dialect, and never
 truncates, rewrites, or drops a keyword. It bounds the size, depth and property
@@ -343,6 +492,17 @@ record. Neither mechanism binds the call to an immutable remote implementation.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
+Each execution is recorded in the workspace's [agent traces](https://docs.otari.ai/guides/observability/traces) as a
+step with one tool span: the tool, its server, whether it ran, and which rule
+decided the call (the key's rule, its user's rule, the server's default policy,
+or the server's own tool list). A call the rules refuse is recorded too, as a
+blocked span, so a manager can see who tried a tool they may not use; that
+includes a call to a server the key cannot reach at all, which the caller is
+still told does not exist. The
+arguments and the result are never recorded here. Send the run's
+`Otari-Conversation-Id` header on each call to file it under the agent's
+session rather than as a session of its own. Discovery is not recorded.
+
 ### Never retry an execution automatically
 
 Repeating a request with the same `client_execution_id` may execute the tool
@@ -399,9 +559,9 @@ exception text.
 | Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
 | Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
-| Server inaccessible to caller, or disabled | 404 | `mcp_server_not_found` | `not_started` |
+| Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
-| Tool absent from stored allowlist | 403 | `mcp_tool_not_allowed` | `not_started` |
+| Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
 | Authentication refused for any other reason | 502 | `mcp_resolution_failed` | `not_started` |
 | Stored credential unavailable | 500 | `mcp_credentials_unavailable` | `not_started` |
@@ -427,7 +587,7 @@ Gateway-owned ceilings, not caller-controlled request fields:
 | Request | `arguments` encoded size, nesting depth | 256 KiB, depth 32 |
 | Discovery | `tools/list` pages followed | 20 |
 | Discovery | live descriptors examined | 1,000 |
-| Discovery | returned tools | 200 |
+| Discovery | returned tools, counted after the caller's access list | 200 |
 | Discovery | per description / schema / annotations | 4 KiB / 64 KiB at depth 32 / 16 KiB |
 | Discovery | serialized response | 1 MiB |
 | Discovery | total request, concurrency, admission wait | 15 s, 4 per process, 5 s |

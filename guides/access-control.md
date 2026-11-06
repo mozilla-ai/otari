@@ -28,7 +28,8 @@ recorded against.
 
 Applications never sign in. They send an API key, and the key ties each request
 to one workspace and one user. The workspace decides which provider keys,
-aliases, routing policies and tools the request can use; the user, narrowed by
+aliases, routing policies and tools the request can use, and each stored MCP
+server's [access list](https://docs.otari.ai/reference/gateway/mcp#server-access) decides which keys reach it; the user, narrowed by
 the key, decides which models it can reach, and the user's budget is the one it
 spends. The provider keys
 Otari calls upstream with belong to the organization, and the application never
@@ -57,5 +58,5 @@ belong to its own user.
 A dashboard session authorizes the management API, not inference; see
 [Dashboard sessions and identity](https://docs.otari.ai/self-hosting/sign-in#dashboard-sessions-and-identity).
 
-The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f62c64ebf1bd69eedca1fcb1c13ede1e8a31e3a5/docs/public/openapi.json) is the source of
+The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.40.0/docs/public/openapi.json) is the source of
 truth for endpoint schemas.

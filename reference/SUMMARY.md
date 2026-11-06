@@ -25,6 +25,7 @@
   * [Hosted providers](api-endpoints/hosted-providers.md)
   * [Images](api-endpoints/images.md)
   * [Invitations](api-endpoints/invitations.md)
+  * [Key](api-endpoints/key.md)
   * [Keys](api-endpoints/keys.md)
   * [MCP](api-endpoints/mcp.md)
   * [MCP servers](api-endpoints/mcp-servers.md)

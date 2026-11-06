@@ -118,7 +118,9 @@ written as JSON. Edit and Remove change a stored tool; a `config.yml` tool,
 tools turns the model's search off, and sets the calls a request may make, the
 results per search, reading pages for hits without text, and running a
 provider's own web search here. The legacy SearXNG backend's URL and engines
-show while they are set.
+show while they are set, marked deprecated, with how to move them to a
+`searxng` search tool (see
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)).
 
 Code execution pricing lists `otari:code_execution`.
 
@@ -174,4 +176,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/f62c64ebf1bd69eedca1fcb1c13ede1e8a31e3a5/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.40.0/web/README.md).
