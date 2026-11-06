@@ -61,8 +61,10 @@ workspace from the list, and select its **Providers** tab. Each key there has:
   this key, even after the organization's default changes.
 
 A key you leave as it is follows the organization. To undo a pin, choose **Stop
-always using this key** in the same menu, and the workspace follows the
-organization's default again.
+always using this key** in the same menu. The workspace then uses the
+organization's default key, or its oldest key when it has no default or the
+workspace turned the default off; see
+[Organization provider keys](hosted-providers.md#organization-provider-keys).
 
 ![A workspace's Providers tab, with the production and backup OpenAI keys each switched on.](assets/screenshots/manage-provider-keys-workspace.png)
 

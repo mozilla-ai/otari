@@ -18,6 +18,9 @@ test("add an MCP server", async ({ page }) => {
     .fill("Use for repository and issue lookups.")
   await dialog.getByLabel("Allowed tools").fill("search_issues, get_file")
   await expect(dialog.getByRole("checkbox", { name: "Enabled" })).toBeChecked()
+  const policy = dialog.getByRole("radiogroup", { name: "Default policy" })
+  await expect(policy.getByRole("radio", { name: "Allow" })).toBeChecked()
+  await expect(policy.getByRole("radio", { name: "Deny" })).toBeVisible()
   await expect(
     dialog.getByRole("button", { name: "Add MCP server" }),
   ).toBeEnabled()
