@@ -194,7 +194,8 @@ def resolve_search(
 
     The direct endpoint passes the instance it picked as ``requested`` and,
     for an unnamed call, the workspace's organization key as
-    ``direct_credential``; the in-loop tool passes neither.
+    ``direct_credential``. With no deployment tools, only that credential is
+    supplied. The in-loop tool passes neither.
 
     Raises :class:`WebSearchOptionRefusedError` for a request option the
     provider does not take from a request, :class:`WebSearchCredentialRefusedError`
@@ -204,6 +205,10 @@ def resolve_search(
     :class:`SearchToolMisconfiguredError` for a ``requested`` instance nothing can run.
     """
     request = request_options or _NO_OPTIONS
+    if requested is None and direct_credential is not None:
+        return _search_on_credential(
+            direct_credential, name=WEB_SEARCH_TOOL_NAME, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request
+        )
     if requested is not None:
         instance = effective_search_instances(config).get(requested)
         if instance is None:

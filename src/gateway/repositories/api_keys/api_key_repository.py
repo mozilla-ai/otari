@@ -22,10 +22,47 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, APIKey)
 
+    async def issue_app_key(
+        self,
+        *,
+        key_id: str,
+        key_hash: str,
+        prefix: str,
+        suffix: str,
+        name: str,
+        user_id: str,
+        workspace_id: uuid.UUID,
+        client_id: str,
+    ) -> None:
+        """Stage a budget-enforced, self-service key with inherited access restrictions."""
+        self.db.add(
+            APIKey(
+                id=key_id,
+                key_hash=key_hash,
+                key_prefix=prefix,
+                key_suffix=suffix,
+                key_name=name,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                self_service=True,
+                exclude_from_budget=False,
+                metadata_={"oauth_client_id": client_id},
+            )
+        )
+        await self.db.flush()
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         result = await self.db.execute(select(APIKey.workspace_id).where(APIKey.id == key_id))
         return result.scalar_one_or_none()
+
+    async def deactivate_self_service_keys(self, user_id: str) -> None:
+        """Revoke keys this identity minted, including app keys, using immutable provenance."""
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.user_id == user_id, APIKey.self_service.is_(True))
+            .values(is_active=False, operator_disabled=True)
+        )
 
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""

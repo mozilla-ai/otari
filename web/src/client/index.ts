@@ -561,6 +561,7 @@ export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
 export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
+export type Workspaces = Schemas["WorkspacesPublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
 export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
@@ -756,3 +757,7 @@ export type * from "./local"
 
 export type FeedbackSubmission =
   operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]
+
+export type AppDetails = components["schemas"]["AppDetails"]
+export type AppAuthorizationResponse =
+  components["schemas"]["AppAuthorizationResponse"]

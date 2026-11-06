@@ -233,7 +233,7 @@ def test_search_unknown_tool_is_400(client: TestClient, api_key_header: dict[str
 
 
 @pytest.fixture
-def no_tools_client(test_config: GatewayConfig) -> Generator[TestClient]:
+def no_tools_client(test_config: GatewayConfig, _secret_key: None) -> Generator[TestClient]:
     yield from _client_on(test_config, search_tools={})
 
 
@@ -1330,6 +1330,81 @@ def test_an_unnamed_call_on_an_exa_key_runs_through_any_search_with_the_key(
     assert row["cost"] == pytest.approx(0.004)
 
 
+def test_an_organization_exa_key_searches_without_a_deployment_tool(
+    no_tools_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Direct search honors the organization key advertised by tool discovery without a deployment tool."""
+    client = no_tools_client
+    headers = _keyed(client, master_key_header, "exa-key-user")
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "exa", "name": "ours", "api_key": "exa-org-secret", "options": {"type": "fast"}},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    starred = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=master_key_header
+    )
+    assert starred.status_code == 200, starred.text
+    _price(client, master_key_header, "otari:web_search", 5000.0)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        hit = {"url": "https://example.com/exa", "title": "Exa", "text": "From Exa."}
+        return httpx.Response(200, json={"results": [hit], "costDollars": {"total": 0.004}})
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    catalog = client.get(f"{API_ROOT}/tools", headers=headers)
+    assert next(tool for tool in catalog.json()["data"] if tool["id"] == "otari_web_search")["direct_available"]
+    resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "include_raw": True}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["search_tool"] == "otari:web_search"
+    assert resp.json()["results"][0]["snippet"] == "From Exa."
+    [request] = seen
+    assert (request.url.host, request.headers["x-api-key"]) == ("api.exa.ai", "exa-org-secret")
+    # The key's own options, not the default tool's, which belong to another provider.
+    assert json.loads(request.content)["type"] == "fast"
+    (row,) = _search_rows(client, master_key_header, "exa-key-user")
+    assert (row["model"], row["provider"]) == ("otari:web_search", "exa")
+    # Exa's reported cost comes before the otari:web_search rate.
+    assert row["cost"] == pytest.approx(0.004)
+
+    named = client.post(f"{API_ROOT}/search/missing", json=SEARCH_PAYLOAD, headers=headers)
+    assert named.status_code == 400
+    restricted = client.patch(f"{API_ROOT}/users/exa-key-user", json={"allowed_tools": []}, headers=master_key_header)
+    assert restricted.status_code == 200
+    restricted_catalog = client.get(f"{API_ROOT}/tools", headers=headers).json()["data"]
+    restricted_search = next(tool for tool in restricted_catalog if tool["id"] == "otari_web_search")
+    assert restricted_search["available"]
+    assert not restricted_search["direct_available"]
+    assert client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers).status_code == 403
+    assert (
+        client.patch(
+            f"{API_ROOT}/users/exa-key-user", json={"allowed_tools": ["otari:web_search"]}, headers=master_key_header
+        ).status_code
+        == 200
+    )
+    assert client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
+    restored_catalog = client.get(f"{API_ROOT}/tools", headers=headers).json()["data"]
+    assert next(tool for tool in restored_catalog if tool["id"] == "otari_web_search")["direct_available"]
+    workspace_id = _default_workspace_id(client, master_key_header)
+    disabled = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
+        json={"enabled": False},
+        headers=master_key_header,
+    )
+    assert disabled.status_code == 200
+    refused = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    assert refused.status_code == 403
+    assert len(seen) == 2
+
+
 @pytest.mark.parametrize("field", [{"include_raw": True}, {"provider_options": {"search_depth": "advanced"}}])
 def test_the_new_fields_are_refused_on_a_call_a_tavily_key_serves(
     default_tool_client: TestClient, master_key_header: dict[str, str], field: dict[str, Any]
@@ -1525,6 +1600,67 @@ def test_the_route_reads_the_workspaces_policy(
     assert requested == (WebTool.SEARCH,)
     (row,) = _search_rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["model"], row["status_code"]) == ("fake-search", 403)
+
+
+@pytest.mark.parametrize("enabled,status", [(False, 403), (True, 502)])
+def test_disabled_workspace_takes_precedence_over_an_unusable_organization_credential(
+    default_tool_client: TestClient,
+    master_key_header: dict[str, str],
+    enabled: bool,
+    status: int,
+) -> None:
+    client = default_tool_client
+    headers = _keyed(client, master_key_header, "invalid-organization-key")
+    credential = WebSearchCredential(provider="exa", source=WebToolCredentialSource.ORG, api_key=None)
+    _stub_policy(client, _policy(enabled=enabled, credential=credential))
+    response = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    assert response.status_code == status, response.text
+    (row,) = _search_rows(client, master_key_header, "invalid-organization-key")
+    assert row["status_code"] == status
+    assert row["cost"] is None
+
+
+@pytest.fixture
+def organization_search_with_fetch_client(test_config: GatewayConfig, _secret_key: None) -> Generator[TestClient]:
+    yield from _client_on(
+        test_config,
+        search_tools={},
+        web_fetch_enabled=True,
+        fetch_tools={"web_search": {"provider": "fake", "options": {"text": "Fetch-only page."}}},
+    )
+
+
+def test_a_fetch_grant_cannot_authorize_organization_search(
+    organization_search_with_fetch_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = organization_search_with_fetch_client
+    headers = _keyed(client, master_key_header, "fetch-only")
+    _add_org_search_key(client, master_key_header, "tavily-key")
+    granted = client.patch(
+        f"{API_ROOT}/users/fetch-only", json={"allowed_tools": ["web_search"]}, headers=master_key_header
+    )
+    assert granted.status_code == 200, granted.text
+    tools = client.get(f"{API_ROOT}/tools", headers=headers).json()["data"]
+    assert next(tool for tool in tools if tool["id"] == "otari_web_search")["direct_available"] is False
+    assert client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers).status_code == 403
+    fetched = client.post(f"{API_ROOT}/fetch/web_search", json={"url": "https://example.com"}, headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["text"] == "Fetch-only page."
+    updated = client.patch(
+        f"{API_ROOT}/users/fetch-only", json={"allowed_tools": ["otari:web_search"]}, headers=master_key_header
+    )
+    assert updated.status_code == 200, updated.text
+    with patch(
+        "gateway.services.search_backend.run_keyed_search",
+        AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS)),
+    ):
+        searched = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    assert searched.status_code == 200, searched.text
+    assert searched.json()["search_tool"] == "otari:web_search"
+    assert (
+        client.post(f"{API_ROOT}/fetch/web_search", json={"url": "https://example.com"}, headers=headers).status_code
+        == 403
+    )
 
 
 def test_an_unnamed_call_runs_on_the_credential_the_port_answers(

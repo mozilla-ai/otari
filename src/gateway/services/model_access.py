@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
-from gateway.core.settings.tools import ALL_SEARCH_TOOLS, ToolKind, effective_fetch_instances
+from gateway.core.settings.tools import ALL_SEARCH_TOOLS, ORGANIZATION_SEARCH_TOOL, ToolKind, effective_fetch_instances
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
@@ -225,8 +225,8 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
     """Validate a write of ``allowed_tools``. ``None`` and ``[]`` pass through as-is.
 
     An entry is a search or fetch tool's name, configured or stored,
-    ``builtin_fetch`` included, or ``*``. Raises ``ValueError`` (a 400 at the
-    caller) on any other; duplicates are collapsed.
+    ``builtin_fetch`` included, the organization-key search ``otari:web_search``, or ``*``.
+    Raises ``ValueError`` (a 400 at the caller) on any other; duplicates are collapsed.
     """
     if entries is None:
         return None
@@ -238,9 +238,14 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
         if not isinstance(entry, str):
             raise ValueError("allowed_tools entries must be strings")
         name = entry.strip()
-        if name != ALL_SEARCH_TOOLS and name not in config.search_tools and name not in fetch_tools:
+        if (
+            name not in (ALL_SEARCH_TOOLS, ORGANIZATION_SEARCH_TOOL)
+            and name not in config.search_tools
+            and name not in fetch_tools
+        ):
             raise ValueError(
-                f"'{name}' is not a search or fetch tool; name a configured one, builtin_fetch, or '*' for every tool"
+                f"'{name}' is not a search or fetch tool; "
+                "name a configured one, otari:web_search, builtin_fetch, or '*' for every tool"
             )
         if name not in names:
             names.append(name)

@@ -286,18 +286,25 @@ def _stub_policy(client: TestClient, answer: ResolvedWebSearchConfig | None) -> 
     return stub
 
 
-def test_a_workspace_with_web_access_off_is_refused(
-    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+@pytest.mark.parametrize("tool,recorded_model", [(None, "unknown"), ("fake-fetch", "fake-fetch")])
+def test_a_workspace_with_web_access_off_is_refused_before_selecting_a_tool(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    tool: str | None,
+    recorded_model: str,
 ) -> None:
     stub = _stub_policy(client, _policy(enabled=False))
-    resp = client.post(f"{API_ROOT}/fetch", json=PAYLOAD, headers=api_key_header)
+    endpoint = f"{API_ROOT}/fetch/{tool}" if tool else f"{API_ROOT}/fetch"
+    resp = client.post(endpoint, json=PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == "web access is not enabled for this workspace"
     ((_, requested),) = stub.asked
     assert requested == (WebTool.FETCH,)
     (row,) = _fetch_rows(client, master_key_header, api_key_obj["user_id"])
-    assert (row["model"], row["status_code"]) == ("fake-fetch", 403)
+    assert (row["model"], row["provider"], row["status_code"], row["cost"]) == (recorded_model, None, 403, None)
 
 
 @pytest.mark.parametrize(

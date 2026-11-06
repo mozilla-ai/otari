@@ -1,7 +1,8 @@
 """Request and response models of the api-keys domain."""
 
+import uuid
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -144,3 +145,46 @@ class OAuthErrorResponse(BaseModel):
 
     error: str = Field(description="invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable")
     error_description: str
+
+
+class AppAuthorizationParameters(BaseModel):
+    """Parameters shared by the authorization URL and explicit dashboard approval.
+
+    Unrecognized parameters are ignored, as RFC 6749 section 3.1 requires.
+    """
+
+    client_id: str = Field(min_length=1, max_length=128)
+    redirect_uri: str = Field(max_length=2048)
+    state: str = Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")
+    code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    code_challenge_method: Literal["S256"]
+    response_type: Literal["code"] = "code"
+
+
+class AppAuthorizationRequest(AppAuthorizationParameters):
+    model_config = ConfigDict(extra="forbid")
+    workspace_id: uuid.UUID
+
+
+class AppTokenRequest(BaseModel):
+    """Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored."""
+
+    grant_type: Literal["authorization_code"]
+    client_id: str = Field(min_length=1, max_length=128)
+    redirect_uri: str = Field(max_length=2048)
+    code: str = Field(min_length=43, max_length=128)
+    code_verifier: str = Field(pattern=r"^[A-Za-z0-9._~-]{43,128}$")
+
+
+class AppDetails(BaseModel):
+    name: str
+    redirect_uri: str
+
+
+class AppAuthorizationResponse(BaseModel):
+    redirect_uri: str
+
+
+class AppTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["Bearer"] = "Bearer"

@@ -87,6 +87,8 @@ from gateway.models.tenancy import (
     WorkspaceAssignmentRequest,
     WorkspaceMember,
     WorkspaceMemberUpdate,
+    WorkspacePublic,
+    WorkspacesPublic,
 )
 from gateway.repositories.tenancy import (
     InvitationRepository,
@@ -455,6 +457,23 @@ class OrganizationService:
             user=user, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
         )
 
+    async def hold_delegated_workspace_access(self, *, user_id: uuid.UUID, workspace_id: uuid.UUID) -> User:
+        """Recheck a prior approval against today's identity and membership, independent of the active organization.
+
+        Hold the identity and workspace through key issuance so deactivation or
+        membership removal cannot race the delegated write.
+        """
+        user = await self.users.get_locked(user_id)
+        if user is None or not user.is_active:
+            raise NotAuthorizedError("The approving identity is no longer active")
+        organization_id = await self.get_organization_id_for_workspace(workspace_id)
+        if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        await self.hold_workspace_write_access(
+            user=user, organization_id=organization_id, workspace_id=workspace_id, revoking=False
+        )
+        return user
+
     async def require_workspace_contributor_access(
         self,
         *,
@@ -489,6 +508,24 @@ class OrganizationService:
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member of an organization."""
         return await self.members.get_active_by_organization_and_user(organization_id, user_id) is not None
+
+    async def list_app_workspaces(
+        self, *, user: User, search: str = "", skip: int = 0, limit: int = 50
+    ) -> WorkspacesPublic:
+        """List the caller's writable workspaces using the same two-level role rule as app approval."""
+        organization = await self.get_active_organization_for_user(user)
+        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
+        if membership is None or membership.role not in _CONTRIBUTOR_ROLES:
+            return WorkspacesPublic(data=[], count=0)
+        rows, count = await self.workspace_rows.page_for_contributor(
+            organization.id,
+            member_id=None if membership.role in MANAGEMENT_ROLES else user.id,
+            contributor_roles=_CONTRIBUTOR_ROLES,
+            search=search,
+            skip=skip,
+            limit=limit,
+        )
+        return WorkspacesPublic(data=[WorkspacePublic.model_validate(row) for row in rows], count=count)
 
     async def has_live_membership(self, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member anywhere, or holds an invitation it can still accept.
@@ -1005,11 +1042,15 @@ class OrganizationService:
                 # row, and each workspace lock against a member joining it after
                 # the listener's snapshot (see ``delete_workspace``).
                 await self.organizations.lock(organization.id)
+                pointed = await self.users.get_ids_by_active_organization(organization.id)
+                # App-key issuance holds identity before workspace. Pointer moves
+                # write identities too, so acquire those locks in the same order.
+                for user_id in sorted({user.id, *pointed}):
+                    await self.users.lock(user_id)
                 workspace_ids = await self.workspace_rows.get_ids_by_organization(organization.id)
-                for workspace_id in workspace_ids:
+                for workspace_id in sorted(workspace_ids):
                     await self.workspace_rows.lock(workspace_id)
 
-                pointed = await self.users.get_ids_by_active_organization(organization.id)
                 elsewhere = await self.members.first_active_organization_ids(
                     {user.id, *pointed}, excluding=organization.id
                 )
@@ -2380,6 +2421,9 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            # Suspension may move the identity's active-organization pointer.
+            # Match app-key issuance's identity-before-workspace lock order.
+            await self.users.lock(target.user_id)
             workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, update_data)
             target_user = await self.users.get(updated.user_id)
@@ -2426,6 +2470,7 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            await self.users.lock(target.user_id)
             workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, {"status": "suspended"})
             await self._require_membership_listener().organization_member_changed(updated, workspace_ids)

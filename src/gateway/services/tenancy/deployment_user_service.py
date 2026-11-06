@@ -40,11 +40,14 @@ granting yourself back a cleared flag, or reactivating the bootstrap identity,
 something an operator can still do here.
 """
 
-import uuid
+from __future__ import annotations
 
-from sqlalchemy.exc import SQLAlchemyError
+import uuid
+from typing import TYPE_CHECKING
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
@@ -66,11 +69,14 @@ from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepos
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
+if TYPE_CHECKING:
+    from gateway.services.api_keys import ApiKeyService
+
 
 class DeploymentUserService:
     """Reads and writes identities across the whole deployment."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.users = UserRepository(db)
         self.members = OrganizationMemberRepository(db)
@@ -129,6 +135,8 @@ class DeploymentUserService:
         actor: User,
         user_id: uuid.UUID,
         request: DeploymentUserUpdateRequest,
+        uow: UnitOfWork,
+        api_keys: ApiKeyService,
     ) -> DeploymentUserPublic:
         """Deactivate, reactivate, or change what one identity may administer.
 
@@ -161,30 +169,23 @@ class DeploymentUserService:
                     "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
                 )
 
-        if request.is_active is not None:
-            target.is_active = request.is_active
-        if request.is_active is False:
-            target.email_verification_token_hash = None
-            target.email_verification_token_expires_at = None
-            target.password_reset_token_hash = None
-            target.password_reset_token_expires_at = None
-        if request.is_superuser is not None:
-            target.is_superuser = request.is_superuser
-        self.db.add(target)
-        try:
+        async with uow:
+            # App-key issuance holds this lock until its credential is committed.
+            await self.users.lock(target.id)
+            await self.db.refresh(target)
+            if request.is_active is not None:
+                target.is_active = request.is_active
+            if request.is_active is False:
+                target.email_verification_token_hash = None
+                target.email_verification_token_expires_at = None
+                target.password_reset_token_hash = None
+                target.password_reset_token_expires_at = None
+            if request.is_superuser is not None:
+                target.is_superuser = request.is_superuser
+            self.db.add(target)
             if request.is_active is False:
                 await revoke_user_dashboard_sessions(self.db, target.id)
-            await self.db.commit()
-        except SQLAlchemyError:
-            # The same reason ``OrganizationService`` rolls back rather than
-            # letting the failure travel: SQLAlchemy leaves a session whose
-            # flush failed unusable, so a caller that reuses it gets
-            # ``PendingRollbackError`` from its next statement instead of the
-            # failure that actually happened. The request path is covered either
-            # way, since ``get_db`` closes the session at teardown; a
-            # service-layer caller (every service-level test here is one) is not.
-            await self.db.rollback()
-            raise
+                await api_keys.deactivate_self_service_keys(target.id)
         await self.db.refresh(target)
         # Operator access opens shared session content and, where enabled, break-glass,
         # so who granted or removed it, and who deactivated whom, is on the record.

@@ -615,7 +615,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
-    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
@@ -1329,6 +1328,10 @@ class ModelAccess(TypedDict):
 # or None where no repository holds its queries yet.
 # Its baseline names the other modules that still use the model, and a baseline only shrinks.
 MODEL_ACCESS: dict[str, ModelAccess] = {
+    "gateway.models.api_keys.OAuthAppGrant": {
+        "repository": "gateway/repositories/api_keys/oauth_app_grant_repository.py",
+        "baseline": (),
+    },
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (

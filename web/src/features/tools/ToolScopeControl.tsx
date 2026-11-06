@@ -15,6 +15,11 @@ const EVERY_TOOL: AccessOption = {
   label: "*  ·  every search and fetch tool",
 }
 
+const ORGANIZATION_SEARCH: AccessOption = {
+  id: "otari:web_search",
+  label: "Organization web search",
+}
+
 const COPY: Omit<AccessListCopy, "inherit"> = {
   only: "Selected tools",
   block: "No tool",
@@ -48,7 +53,11 @@ function pickerFor(
     label,
     catalog: listing.isLoading
       ? []
-      : [EVERY_TOOL, ...names.map((name) => ({ id: name, label: name }))],
+      : [
+          EVERY_TOOL,
+          ...(kind === "search" ? [ORGANIZATION_SEARCH] : []),
+          ...names.map((name) => ({ id: name, label: name })),
+        ],
     inputLabel: `Add a ${kind} tool`,
     placeholder: `${label}…`,
     loadingMessage: listing.isLoading ? `Loading the ${kind} tools…` : "",
@@ -59,8 +68,8 @@ function pickerFor(
 // apart from it, so no model wildcard reaches a tool. allowed_tools holds search
 // and fetch tool names in one list, builtin_fetch among the fetch ones; each kind
 // is picked from its own listing. Only the deployment operator may list the
-// tools, so anyone else is offered every tool or none, and keeps the names
-// already on the list.
+// deployment tools. Organization search is always selectable, including before
+// its provider key is configured.
 export function ToolScopeControl({
   initial,
   onChange,
@@ -85,7 +94,7 @@ export function ToolScopeControl({
 
   const hint =
     isSettled && !isOperator
-      ? "Only the deployment operator can list the tools, so you can grant every one or none here."
+      ? "Only the deployment operator can list deployment tools. You can select organization web search or grant every tool here."
       : searchTools.isError || fetchTools.isError
         ? "Could not load the tools. Reload to try again."
         : null

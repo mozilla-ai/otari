@@ -2027,6 +2027,151 @@
         "title": "AnthropicFileMetadata",
         "type": "object"
       },
+      "AppAuthorizationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "code_challenge": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Code Challenge",
+            "type": "string"
+          },
+          "code_challenge_method": {
+            "const": "S256",
+            "title": "Code Challenge Method",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "maxLength": 2048,
+            "title": "Redirect Uri",
+            "type": "string"
+          },
+          "response_type": {
+            "const": "code",
+            "default": "code",
+            "title": "Response Type",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 256,
+            "minLength": 16,
+            "pattern": "^[A-Za-z0-9._~+/=-]+$",
+            "title": "State",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "redirect_uri",
+          "state",
+          "code_challenge",
+          "code_challenge_method",
+          "workspace_id"
+        ],
+        "title": "AppAuthorizationRequest",
+        "type": "object"
+      },
+      "AppAuthorizationResponse": {
+        "properties": {
+          "redirect_uri": {
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_uri"
+        ],
+        "title": "AppAuthorizationResponse",
+        "type": "object"
+      },
+      "AppDetails": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "redirect_uri"
+        ],
+        "title": "AppDetails",
+        "type": "object"
+      },
+      "AppTokenRequest": {
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
+        "properties": {
+          "client_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 128,
+            "minLength": 43,
+            "title": "Code",
+            "type": "string"
+          },
+          "code_verifier": {
+            "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+            "title": "Code Verifier",
+            "type": "string"
+          },
+          "grant_type": {
+            "const": "authorization_code",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "maxLength": 2048,
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant_type",
+          "client_id",
+          "redirect_uri",
+          "code",
+          "code_verifier"
+        ],
+        "title": "AppTokenRequest",
+        "type": "object"
+      },
+      "AppTokenResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "Bearer",
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token"
+        ],
+        "title": "AppTokenResponse",
+        "type": "object"
+      },
       "AudioContent": {
         "description": "Audio provided to or from an LLM.",
         "properties": {
@@ -12579,6 +12724,18 @@
             "description": "What the tool does, as the model is told.",
             "title": "Description",
             "type": "string"
+          },
+          "direct_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the default direct POST /search or /fetch call is configured and permitted for this caller. Includes workspace restrictions and the key's or owner's tool grants. A legacy backend that only runs inside a model request does not qualify. Null for tools without one of these direct endpoints.",
+            "title": "Direct Available"
           },
           "example": {
             "additionalProperties": true,
@@ -37929,6 +38086,349 @@
         ]
       }
     },
+    "/api/v1/oauth/apps/authorize": {
+      "get": {
+        "description": "Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in.",
+        "operationId": "oauth-apps-authorization_redirect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "title": "Redirect Uri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^[A-Za-z0-9._~+/=-]+$",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{43}$",
+              "title": "Code Challenge",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge_method",
+            "required": true,
+            "schema": {
+              "const": "S256",
+              "title": "Code Challenge Method",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "response_type",
+            "required": false,
+            "schema": {
+              "const": "code",
+              "default": "code",
+              "title": "Response Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Continue to dashboard sign-in and consent.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "Authorization Redirect",
+        "tags": [
+          "oauth-apps"
+        ]
+      },
+      "post": {
+        "description": "Approve access to the caller's selected workspace, with normal budget enforcement.",
+        "operationId": "oauth-apps-authorize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppAuthorizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Authorize",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/clients": {
+      "get": {
+        "description": "Validate the app and redirect before the dashboard offers consent.",
+        "operationId": "oauth-apps-app_details",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "title": "Redirect Uri",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppDetails"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "App Details",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/token": {
+      "post": {
+        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
+        "operationId": "oauth-apps-exchange",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AppTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "Exchange",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/workspaces": {
+      "get": {
+        "description": "List workspaces where the signed-in identity may authorize app access.",
+        "operationId": "oauth-apps-app_workspaces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "App Workspaces",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
     "/api/v1/oauth/token": {
       "post": {
         "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
@@ -50170,7 +50670,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. `direct_available` separately describes the default search/fetch\nendpoint, including key and inherited user permissions. Every other `tools[]`\nentry, including provider-native keywords not listed here, is forwarded to the\nupstream provider untouched.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {

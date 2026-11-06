@@ -17,7 +17,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, TraceServiceDep, get_db, verify_master_key
+from gateway.api.deps import (
+    ApiKeyServiceDep,
+    CurrentIdentity,
+    IdentityServiceDep,
+    TraceServiceDep,
+    UnitOfWorkDep,
+    get_db,
+    verify_master_key,
+)
 from gateway.core.surface import Surface
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
@@ -111,6 +119,8 @@ async def list_deployment_users(
 async def update_deployment_user(
     service: DeploymentUserServiceDep,
     traces: TraceServiceDep,
+    uow: UnitOfWorkDep,
+    api_keys: ApiKeyServiceDep,
     current_identity: CurrentIdentity,
     user_id: uuid.UUID,
     body: DeploymentUserUpdateRequest,
@@ -128,7 +138,9 @@ async def update_deployment_user(
     may be taken from the deployment's bootstrap operator, which is the identity
     master-key sign-in resolves to. Granting either is unguarded.
     """
-    updated = await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    updated = await service.update_user(
+        actor=current_identity, user_id=user_id, request=body, uow=uow, api_keys=api_keys
+    )
     if body.is_active is False:
         await traces.end_shares_of(user_id)
     return updated
