@@ -123,6 +123,7 @@ class _Session:
 
 class _Port:
     label = "fake-sandbox"
+    runtime = None
 
     def __init__(self) -> None:
         self.opened = 0

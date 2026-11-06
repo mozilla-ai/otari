@@ -167,6 +167,14 @@ class CodeExecutionPort(Protocol):
         """Where code runs, for a span or a log line. Never a credential."""
         ...
 
+    @property
+    def runtime(self) -> str | None:
+        """What the code runs on, for an adapter that can promise it; the model is told in the tool's description.
+
+        ``None``, the default, where the backend decides, as one the operator runs does.
+        """
+        return None
+
     def open_session(
         self,
         *,

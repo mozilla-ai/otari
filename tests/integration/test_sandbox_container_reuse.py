@@ -67,6 +67,7 @@ class _FakePort:
     """Records every lease it was asked for; ``gone`` names sessions it no longer has."""
 
     label = "fake-provider"
+    runtime = None
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []
