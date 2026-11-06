@@ -250,6 +250,14 @@ async def test_non_boolean_valid_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+async def test_explicit_null_valid_fails_a_block_guardrail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2788: no verdict means the input was not checked, the same as a malformed result."""
+    _patch_transport(monkeypatch, _result_handler({"valid": None}))
+    with pytest.raises(GuardrailsNotReachableError):
+        await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL)
+
+
+@pytest.mark.asyncio
 async def test_explicit_null_valid_is_inconclusive_not_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit ``valid: null`` is a legitimate inconclusive verdict, not malformed."""
     _patch_transport(monkeypatch, _result_handler({"valid": None, "score": 0.5}))
