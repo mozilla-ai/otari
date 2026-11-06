@@ -38,9 +38,9 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+def client(test_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     """A client whose base URL is ``ORIGIN``, matching ``public_base_url`` below."""
-    test_config.public_base_url = ORIGIN
+    monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
     yield from build_test_client(test_config, base_url=ORIGIN)
 
 
