@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/fe9f2fca35b6df203a53460f7ee2a967044ff51b/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/fe9f2fca35b6df203a53460f7ee2a967044ff51b/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 ## Base URL
@@ -166,6 +166,18 @@ costs less than half a micro-dollar, such as a few tokens of a cheap embedding
 model, is recorded, debited and reported as `"0.000000"`. The usage row and
 the inline field always agree, and `pricing_source` still says the request was
 priced.
+
+Speech (`/audio/speech`) answers with audio bytes, so its cost rides the
+response headers instead: `Otari-Cost-USD` and `Otari-Pricing-Source` carry
+the same two values, under the same rule (both when the request was priced,
+neither when it was not), and `Otari-Usage-Unit` and `Otari-Usage-Units` name
+the meter the request was billed on and the count billed: the characters of
+`input` at a rate priced per character, or one request at a rate priced per
+request. The two usage headers are absent when nothing was billed, which is
+what a zero rate settles. A speech model with no rate is refused with `402`
+`pricing_required` under `require_pricing`, as the other priced endpoints are;
+see [Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit)
+for which rates price it.
 
 ### Who runs a built-in tool
 

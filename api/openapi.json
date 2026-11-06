@@ -16434,7 +16434,7 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
+            "description": "Price per 1M of the rate's unit: input tokens, requests, images or characters",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -16497,7 +16497,7 @@
           },
           "unit": {
             "default": "token",
-            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
+            "description": "What the rates are per: token for a model, request, image or character for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
               "token",
               "request",
@@ -16684,7 +16684,7 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
+            "description": "Price per 1M of the rate's unit: input tokens, requests, images or characters",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -16723,7 +16723,7 @@
           },
           "unit": {
             "default": "token",
-            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
+            "description": "What the rates are per: token for a model, request, image or character for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
               "token",
               "request",
@@ -18520,7 +18520,7 @@
             "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
           },
           "unit": {
-            "description": "What the rates are per: token for a model, request or image for a non-token endpoint.",
+            "description": "What the rates are per: token for a model, request, image or character for a non-token endpoint.",
             "title": "Unit",
             "type": "string"
           },
@@ -22017,7 +22017,7 @@
             "title": "Effective At"
           },
           "input_price_per_million": {
-            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
+            "description": "Price per 1M of the rate's unit: input tokens, requests, images or characters",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -22091,7 +22091,7 @@
           },
           "unit": {
             "default": "token",
-            "description": "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.",
+            "description": "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation, 'character' for speech. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.",
             "enum": [
               "token",
               "request",
@@ -30161,7 +30161,7 @@
     },
     "/api/v1/audio/speech": {
       "post": {
-        "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nBilled on the characters of ``input`` at a rate priced per character, or\none request at a rate priced per request. A model with no rate is refused\nunder ``require_pricing``. The body is audio, so the settled cost rides\nthe response headers: ``Otari-Cost-USD`` and ``Otari-Pricing-Source``, the\n``cost_usd`` and ``pricing_source`` other responses carry on ``usage``, and\n``Otari-Usage-Unit`` and ``Otari-Usage-Units`` for the meter billed and\nits count.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "audio-create_speech",
         "requestBody": {
           "content": {
@@ -30216,7 +30216,33 @@
                 }
               }
             },
-            "description": "Audio bytes in the requested format"
+            "description": "Audio bytes in the requested format",
+            "headers": {
+              "Otari-Cost-USD": {
+                "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Otari-Pricing-Source": {
+                "description": "Which rate priced it: organization, deployment or defaults; absent when it was not priced",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Otari-Usage-Unit": {
+                "description": "The meter the request was billed on, characters or requests; absent when nothing was billed",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Otari-Usage-Units": {
+                "description": "How many of that meter were billed; absent when nothing was billed",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {

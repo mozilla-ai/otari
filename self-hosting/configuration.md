@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/fe9f2fca35b6df203a53460f7ee2a967044ff51b/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/fe9f2fca35b6df203a53460f7ee2a967044ff51b/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1135,11 +1135,12 @@ keeps no cost and the needs-pricing view lists it. A rate priced at zero
 everywhere settles such a request free, so a free moderation model is free. A
 measured unit the request cannot measure prices nothing either, such as a
 per-megapixel rate on an image whose `size` is `auto` or unset. With
-`require_pricing` on, image generation, embeddings, rerank and direct search
-refuse a rate that cannot price what they report, such as an `image` rate on
-embeddings or a `megapixel` rate on an image of no stated size, rather than
-serving it unpriced. Audio and moderations are exempt: they are served, and
-their row carries no cost. A missing cost is unknown, not free.
+`require_pricing` on, speech, image generation, embeddings, rerank and direct
+search refuse a rate that cannot price what they report, such as an `image`
+rate on embeddings, a `token` rate on speech or a `megapixel` rate on an image
+of no stated size, rather than serving it unpriced. Audio transcription and
+moderations are exempt: they are served, and their row carries no cost. A
+missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
 `tokens`, `requests` and `images`, are still read for one release, in this file
@@ -1154,7 +1155,10 @@ transcription model is priced on the tokens it reports.
 
 Image generation reserves the images asked for, at the `size` asked for,
 before dispatch, and settles on the images returned. Speech reserves the
-characters of its `input`, and moderations one request. Transcription holds
+characters of its `input` and answers with its settled cost on response
+headers, since its body is audio (see
+[Request ID and inline cost](https://docs.otari.ai/reference#request-id-and-inline-cost)).
+Moderations reserve one request. Transcription holds
 nothing before dispatch, because the audio's length is not read here, so a
 priced transcription can exceed a budget by one request's price.
 
@@ -1663,7 +1667,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/fe9f2fca35b6df203a53460f7ee2a967044ff51b/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback
