@@ -415,6 +415,105 @@ def test_splitting_a_shared_entry_keeps_the_hook_items_other_fields(repo: Path) 
     ]
 
 
+def _write_repo_settings(repo: Path, entries: list[dict[str, Any]]) -> None:
+    """`PreToolUse` registered as `entries`, as if a person had written the file by hand."""
+    path = repo / ".claude" / "settings.local.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": {"PreToolUse": entries}}), encoding="utf-8")
+
+
+def _otari_commands(repo: Path) -> list[str]:
+    return [
+        item["command"]
+        for entry in _read_settings(repo)["hooks"]["PreToolUse"]
+        for item in entry["hooks"]
+        if "otari" in item["command"]
+    ]
+
+
+def test_repo_only_flags_every_existing_otari_registration(repo: Path) -> None:
+    """Claude Code runs every entry whose matcher matches, so one left unflagged still enforces personal gates."""
+    _write_repo_settings(
+        repo,
+        [
+            {
+                "matcher": "Edit|Write|NotebookEdit",
+                "hooks": [{"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"}],
+            },
+            {
+                "matcher": "Read",
+                "hooks": [{"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"}],
+            },
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    commands = _otari_commands(repo)
+    assert len(commands) == 2
+    assert all(command.endswith("--repo-only") for command in commands), commands
+
+
+def test_setup_rewrites_every_existing_otari_registration(repo: Path) -> None:
+    """The same holds without the flag: a second entry must not keep a stale command."""
+    _write_repo_settings(
+        repo,
+        [
+            {"hooks": [{"type": "command", "command": "/old/path/otari hook --harness claude-code --repo-only"}]},
+            {"hooks": [{"type": "command", "command": "/other/otari hook --harness claude-code --repo-only"}]},
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke().exit_code == 0
+
+    assert _otari_commands(repo) == [f"{_FAKE_OTARI_PATH} hook --harness claude-code"] * 2
+
+
+def test_repo_only_splits_every_shared_entry_it_finds(repo: Path) -> None:
+    """Two shared entries each owe their sibling its own matcher, so both of ours move out."""
+    _write_repo_settings(
+        repo,
+        [
+            {
+                "matcher": "Edit|Write|NotebookEdit|Read",
+                "hooks": [
+                    {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                    {"type": "command", "command": "first-sibling"},
+                ],
+            },
+            {
+                "matcher": "Bash|Read",
+                "hooks": [
+                    {"type": "command", "command": "second-sibling"},
+                    {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                ],
+            },
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    siblings = {
+        item["command"]: entry["matcher"]
+        for entry in entries
+        for item in entry["hooks"]
+        if "sibling" in item["command"]
+    }
+    assert siblings == {"first-sibling": "Edit|Write|NotebookEdit|Read", "second-sibling": "Bash|Read"}
+
+    ours = [entry for entry in entries if any("otari" in item["command"] for item in entry["hooks"])]
+    assert len(ours) == 2
+    for entry in ours:
+        assert entry["matcher"] == "Edit|Write|NotebookEdit"
+        assert [item["command"] for item in entry["hooks"]] == [
+            f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+        ]
+
+
 def test_rerunning_still_updates_a_solo_entry_in_place(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     assert _invoke().exit_code == 0
