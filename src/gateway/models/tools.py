@@ -222,6 +222,8 @@ class SandboxProvider(StrEnum):
     """A backend at ``sandbox_url`` that speaks the published code-execution protocol."""
     E2B = "e2b"
     """E2B's hosted sandboxes, driven from this process."""
+    MONTY = "monty"
+    """Pydantic's Monty interpreter, run in worker processes of this gateway."""
 
     @classmethod
     def parse(cls, value: object) -> "SandboxProvider | None":

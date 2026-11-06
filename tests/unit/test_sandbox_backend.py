@@ -1459,6 +1459,7 @@ class _RecordingPort:
     """A port that records the lease it was asked for and runs nothing."""
 
     label = "recording"
+    runtime = None
 
     def __init__(self) -> None:
         self.session_ttl_s: float | None = None

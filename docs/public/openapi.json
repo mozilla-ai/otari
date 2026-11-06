@@ -20974,7 +20974,8 @@
         "description": "What runs the code a code-execution tool call asks for, chosen per deployment.\n\nValues are read without regard to case or surrounding whitespace.",
         "enum": [
           "protocol",
-          "e2b"
+          "e2b",
+          "monty"
         ],
         "title": "SandboxProvider",
         "type": "string"
@@ -23188,7 +23189,7 @@
                 "type": "null"
               }
             ],
-            "description": "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment."
+            "description": "What runs generated code: 'protocol' (a sandbox at sandbox_url), 'e2b' or 'monty'. Set at startup, not editable here. Null for a reader who does not operate the deployment."
           }
         },
         "required": [

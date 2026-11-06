@@ -537,6 +537,21 @@ describe("ToolsGuardrailsPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("names Monty, drops the session image Monty ignores, and keeps the executor live", async () => {
+    mockApi({ settings: { ...RESPONSE, sandbox_provider: "monty" } })
+    const user = userEvent.setup()
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    expect(await screen.findByText("Monty")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    // Monty runs no images, but a URL is how an operator moves off it.
+    expect(screen.queryByText("sandbox_session_image")).not.toBeInTheDocument()
+    expect(screen.getByLabelText(SANDBOX_URL)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Takes effect once a sandbox is configured/),
+    ).not.toBeInTheDocument()
+  })
+
   it("renders a backend field no group lists (fallback)", async () => {
     // A field the backend reports for a service that no group in SERVICES names
     // must still render, so a backend addition is not hidden.

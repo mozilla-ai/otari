@@ -403,8 +403,8 @@ with the reference one rather than merely similar to it.
 
 | Setting | Env var | Meaning |
 |---|---|---|
-| `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` (the default) speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process and needs no backend of your own. |
-| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected. |
+| `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process; `monty` runs a subset of Python in the gateway's own worker processes. The last two need no backend of your own. Unset, `protocol` when `sandbox_url` is set, else `monty` when its extra is installed. |
+| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected, unless `sandbox_provider` is also unset and the `monty` extra is installed. |
 | `sandbox_purpose_hint` | `OTARI_SANDBOX_PURPOSE_HINT` | Default purpose hint for the tool, when a request supplies none. |
 | `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](tools.md#code-execution-executor). |
 
@@ -428,7 +428,8 @@ One setting does not carry over: `sandbox_session_image` (and the
 `sandbox_allowed_session_images` that curates it) names a container image,
 which is this contract's vocabulary. A hosted provider names workspaces its own
 way, so the `e2b` adapter ignores a pinned image and logs that it did. Pick the
-sandbox a run gets in the provider's own account instead.
+sandbox a run gets in the provider's own account instead. The `monty` adapter
+runs no images, and ignores a pinned one the same way.
 
 The isolation a run gets is the provider's too, and it is worth knowing what
 you traded for not running a container. What the reference backend confines,

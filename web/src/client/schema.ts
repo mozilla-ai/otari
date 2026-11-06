@@ -17881,7 +17881,7 @@ export interface components {
          *     Values are read without regard to case or surrounding whitespace.
          * @enum {string}
          */
-        SandboxProvider: "protocol" | "e2b";
+        SandboxProvider: "protocol" | "e2b" | "monty";
         /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
@@ -18948,7 +18948,7 @@ export interface components {
             fields: components["schemas"]["ToolSettingField"][];
             /** @description The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment. */
             sandbox_credential?: components["schemas"]["SandboxCredentialPublic"] | null;
-            /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
+            /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url), 'e2b' or 'monty'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
             sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
         /**
