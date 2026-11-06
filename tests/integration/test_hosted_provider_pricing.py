@@ -449,6 +449,31 @@ def test_a_hosted_upstream_the_workspace_may_not_use_is_refused_as_such_not_as_u
         assert db.scalar(select(func.count()).select_from(BillingUser).where(BillingUser.reserved > 0)) == 0
 
 
+def test_a_failure_of_the_gates_hosted_lookup_that_is_no_refusal_propagates(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the refusals the hosted dispatch answers for are deferred; any other error is raised, as from any read."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    tenant, _workspace_id = _keyless_tenant(strict_client, master, db_session_factory, slug="gus")
+    _hosted_speech(strict_client, master, tenant, monkeypatch)
+    headers = _api_key(strict_client, tenant)
+    broken = AsyncMock(side_effect=RuntimeError("the lookup broke"))
+
+    with (
+        patch("gateway.api.routes._passthrough.serve_on_hosted_provider", new=broken),
+        patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")) as provider,
+        pytest.raises(RuntimeError, match="the lookup broke"),
+    ):
+        strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": SPEECH, "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    broken.assert_awaited_once()
+    provider.assert_not_called()
+
+
 def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pricing(
     strict_client: TestClient, db_session_factory: Callable[[], Session]
 ) -> None:

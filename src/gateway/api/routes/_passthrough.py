@@ -160,6 +160,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
+    UnknownHostedUpstreamError,
     ensure_provider_country,
     hosted_implementation,
     serve_on_hosted_provider,
@@ -637,9 +638,10 @@ async def run_passthrough(
         Asked before refusing on the rate the organization resolves to, which may
         be its own override under a key it no longer uses, and which prices
         nothing the deployment hosts. The hosted dispatch below resolves and
-        judges that rate again, and raises what this raises (an upstream the
-        workspace may not use, a country not served, a failing port), so a
-        failure here is left to it.
+        judges that rate again, and answers for the refusals the lookup raises
+        (an upstream the workspace may not use, a country not served, an
+        upstream any-llm lacks), so those are left to it. Anything else, a
+        database error among them, propagates as it does from any read here.
         """
         if not lookup_pricing:
             return None
@@ -787,9 +789,9 @@ async def run_passthrough(
         ):
             try:
                 hosted_rate = await _hosted_rate(resolved)
-            except Exception:  # noqa: BLE001
+            except (HostedAccessDeniedError, CountryNotServedError, UnknownHostedUpstreamError):
                 # The hosted dispatch below repeats the lookup and answers for
-                # its failure with the status it owes and the refund, where a
+                # the refusal with the status it owes and the refund, where a
                 # refusal over pricing would name the wrong cause.
                 pricing_refusal_deferred = True
             else:
