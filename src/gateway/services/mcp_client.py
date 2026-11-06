@@ -15,6 +15,7 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -86,6 +87,8 @@ def _origin_bound_http_client(
 CLOSE_TIMEOUT_SECONDS = 10.0
 # How many withheld tool names a server's access note spells out before it counts the rest.
 _ACCESS_NOTE_MAX_NAMES = 20
+# The note is system text, so a withheld name enters it only if it cannot carry instructions; a server lists any string.
+_NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
 
 
@@ -316,7 +319,11 @@ class MCPClientPool:
 
     def _access_note(self, server: _ConnectedServer) -> str | None:
         """Which of the server's tools the caller holds and which it does not, by name, so the model can say so."""
-        withheld = [name for name in server.not_granted if name not in self._tool_owner]
+        withheld = [
+            name
+            for name in server.not_granted
+            if name not in self._tool_owner and name not in self._ceded and _NOTE_SAFE_TOOL_NAME.fullmatch(name)
+        ]
         if not withheld:
             return None
         named = ", ".join(withheld[:_ACCESS_NOTE_MAX_NAMES])
