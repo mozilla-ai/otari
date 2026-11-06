@@ -353,7 +353,9 @@ function PreflightPanel() {
               {data.affected_members_truncated ? (
                 <li className="text-caption text-subtle">
                   and {data.affected_count - data.affected_members.length}{" "}
-                  others
+                  {data.affected_count - data.affected_members.length === 1
+                    ? "other"
+                    : "others"}
                 </li>
               ) : null}
             </ul>
