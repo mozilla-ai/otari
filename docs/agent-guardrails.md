@@ -447,10 +447,12 @@ the hook.
 Pass the flag to `setup` rather than editing the settings file: a later `setup`
 run rewrites the registered command and would drop a flag added by hand.
 
-If `~/.claude/settings.json` also registers the hook for every repository (see
-below), that registration carries no `--repo-only` of its own and still
-enforces your gates in this repository too. `setup --repo-only` warns when it
-finds one. Adding the flag there turns your own gates off in every repository
+If Claude Code's user settings file also registers the hook for every
+repository (see below), that registration carries no `--repo-only` of its own
+and still enforces your gates in this repository too. That file is
+`~/.claude/settings.json`, or `settings.json` in the directory
+`CLAUDE_CONFIG_DIR` names where you set that variable. `setup --repo-only`
+warns when it finds one. Adding the flag there turns your own gates off in every repository
 that entry covers, so to keep them elsewhere remove that entry and register the
 hook in each repository you want it in instead.
 

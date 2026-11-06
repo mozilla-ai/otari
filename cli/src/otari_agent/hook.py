@@ -27,6 +27,7 @@ from typing import Any, Literal, NamedTuple, cast
 import click
 import yaml
 
+from otari_agent.claude_code_paths import claude_user_settings_path
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.definitions import GateDefinition, bounded, definition_digest
 from otari_agent.domain.evaluators import matched_changed_paths
@@ -3007,12 +3008,12 @@ _HOOK_SETUP_BY_HARNESS = {
 
 
 def _hook_global_registration_without_repo_only() -> Path | None:
-    """`~/.claude/settings.json`, if it registers otari hook there without `--repo-only`.
+    """Claude Code's user settings file, if it registers otari hook there without `--repo-only`.
 
     That registration runs in every repository on this machine, so it would still enforce the
     person's own gates in a repository whose own entry just turned them off.
     """
-    settings_path = Path.home() / ".claude" / "settings.json"
+    settings_path = claude_user_settings_path()
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

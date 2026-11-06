@@ -182,9 +182,11 @@ def test_repo_only_keeps_a_user_level_read_gate_out_of_the_matcher(repo: Path, i
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit"
 
 
-def _write_global_registration(isolated_home: Path, *, repo_only: bool = False, command: str | None = None) -> Path:
-    """A claude-code hook entry in `~/.claude/settings.json`, as if registered for every repository."""
-    path = isolated_home / ".claude" / "settings.json"
+def _write_global_registration(
+    isolated_home: Path, *, repo_only: bool = False, command: str | None = None, config_dir: Path | None = None
+) -> Path:
+    """A claude-code hook entry in the user settings file, as if registered for every repository."""
+    path = (config_dir or isolated_home / ".claude") / "settings.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     if command is None:
         command = f"{_FAKE_OTARI_PATH} hook --harness claude-code" + (" --repo-only" if repo_only else "")
@@ -255,6 +257,43 @@ def test_the_global_registration_warning_names_the_cost_and_the_alternative(repo
     assert result.exit_code == 0, result.output
     assert "every repository" in result.output
     assert "per repository" in result.output
+
+
+def test_repo_only_warns_of_a_global_registration_in_a_relocated_config_dir(
+    repo: Path, isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CONFIG_DIR moves the user settings file, and the registration there still runs here."""
+    config_dir = tmp_path / "elsewhere"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    global_settings = _write_global_registration(isolated_home, config_dir=config_dir)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+
+
+def test_a_relocated_config_dir_is_the_only_place_looked(
+    repo: Path, isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code reads the configured directory instead of the home one, so neither should this."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    home_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(home_settings) not in result.output
+
+
+def test_an_empty_config_dir_variable_falls_back_to_the_home_directory(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported but empty variable names no directory, so it must not hide the default."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
 
 
 def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
