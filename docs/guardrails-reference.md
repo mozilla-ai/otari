@@ -89,7 +89,7 @@ a `400` naming what was wrong with it.
 | `on_unavailable` | A `block` entry that cannot be evaluated |
 | --- | --- |
 | `block` (default) | Refuses the request with `502`. |
-| `monitor` | Serves the request and records the check as `unavailable`, trading enforcement for availability. |
+| `monitor` | Serves the request and records the check as `unavailable`, or `inconclusive` when the service gave no verdict, trading enforcement for availability. |
 
 ## Mandate fields
 
