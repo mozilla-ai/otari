@@ -15,8 +15,8 @@ const TONE_FILL: Record<number, string> = {
  * One face, filling whatever box the caller gives it. Decorative wherever it
  * renders: the name it stands for is always beside it.
  *
- * The pattern is cut in the surface colour, so it reads white on the light
- * theme and near-black on the dark one, where the chart slots are lighter.
+ * The background is the tone mixed into the surface by `--avatar-tint-amount`,
+ * which each theme sets, so the square keeps its edge on light and dark.
  */
 export function AvatarFace({
   id,
@@ -25,7 +25,7 @@ export function AvatarFace({
   id: number
   className?: string
 }) {
-  const { tone, path } = face(id)
+  const { tone, accent, sides, centre } = face(id)
   return (
     <svg
       aria-hidden
@@ -33,8 +33,15 @@ export function AvatarFace({
       shapeRendering="crispEdges"
       className={`block shrink-0 ${className}`}
     >
-      <rect width="7" height="7" fill={TONE_FILL[tone]} />
-      <path d={path} fill="var(--color-surface)" />
+      <rect
+        width="7"
+        height="7"
+        style={{
+          fill: `color-mix(in oklab, ${TONE_FILL[tone]} var(--avatar-tint-amount), var(--color-surface))`,
+        }}
+      />
+      <path d={sides} fill={TONE_FILL[tone]} />
+      <path d={centre} fill={TONE_FILL[accent]} />
     </svg>
   )
 }
