@@ -5,7 +5,6 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
-import uuid
 from collections.abc import Collection
 from typing import Any, TypedDict
 
@@ -76,9 +75,6 @@ class _NoSsoEnforcement:
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         return False
-
-    async def revoke_refused_sessions(self, *, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
-        return None
 
 
 NO_SSO_ENFORCEMENT = _NoSsoEnforcement()

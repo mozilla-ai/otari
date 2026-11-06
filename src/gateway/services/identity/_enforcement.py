@@ -37,7 +37,7 @@ async def sso_enforcement_blocks_any_membership(
     """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
     for membership in await organizations.members.get_by_user(user.id, active_only=True):
         organization = await organizations.organizations.get(membership.organization_id)
-        if organization is None:
+        if organization is None or not organization.sso_required:
             continue
         linked = await has_link_to_organization(organization, user.id, connections=connections, links=links)
         if sso_blocks_membership(organization=organization, user=user, is_linked=linked):

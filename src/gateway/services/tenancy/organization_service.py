@@ -422,6 +422,8 @@ class OrganizationService:
             if repair:
                 await self.users.set_active_organization(user, candidate.id)
             return candidate
+        if repair:
+            await self.users.set_active_organization(user, None)
         return None
 
     async def active_organization_id_for_sign_in(
@@ -1081,35 +1083,27 @@ class OrganizationService:
                     await self.workspace_rows.lock(workspace_id)
 
                 pointed = await self.users.get_ids_by_active_organization(organization.id)
-                elsewhere = await self.members.first_active_organization_ids(
-                    {user.id, *pointed}, excluding=organization.id
-                )
-                destination_id = elsewhere.get(user.id)
-                if destination_id is None:
+                blocks = _blocks_for(user, sso_enforcement)
+                admits_the_caller = [
+                    candidate
+                    for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id)
+                    if candidate.id != organization.id and not await blocks(candidate)
+                ]
+                if not admits_the_caller:
                     raise LastOrganizationError
-                default = await self.organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
-                fallback_id = default.id if default is not None else destination_id
-                moves: dict[uuid.UUID, list[uuid.UUID]] = {}
-                for pointed_id in pointed:
-                    if pointed_id != user.id:
-                        moves.setdefault(elsewhere.get(pointed_id, fallback_id), []).append(pointed_id)
-                for target_id, user_ids in moves.items():
-                    await self.users.move_active_organization(user_ids, target_id)
-                    await sso_enforcement.revoke_refused_sessions(organization_id=target_id, user_ids=user_ids)
-                await self.users.set_active_organization(user, destination_id)
-                await sso_enforcement.revoke_refused_sessions(organization_id=destination_id, user_ids=[user.id])
+                # Cleared rather than moved to a chosen organization: nothing here can ask whether
+                # one admits each identity, and resolving their context chooses under the rule.
+                await self.users.move_active_organization(pointed, None)
 
                 for workspace_id in workspace_ids:
                     member_ids = await self.workspaces.ids_for_workspace(workspace_id)
                     await listener.workspace_deleted(workspace_id, member_ids)
                 await self.organizations.delete(organization)
 
-                destination = await self.organizations.get(destination_id)
-                membership = await self.members.get_active_by_organization_and_user(destination_id, user.id)
-                if destination is None or membership is None:
-                    # The membership was read active a few statements ago, so
-                    # only a concurrent removal reaches this.
+                destination = await self._live_active_organization(user, repair=True, blocked=blocks)
+                if destination is None:  # pragma: no cover - the check above found one
                     raise LastOrganizationError
+                membership = await self._require_active_membership(user, destination)
         except IntegrityError:
             raise OrganizationInUseError from None
 
@@ -2394,17 +2388,15 @@ class OrganizationService:
                 await self._membership_listener.member_lost_workspaces(membership.user_id, workspace_ids)
 
     async def _move_off_ended_membership(self, membership: OrganizationMember) -> None:
-        """Stage the identity's active organization onto its oldest live membership, if it named the one that ended.
+        """Clear the identity's active organization where it named the membership that ended.
 
-        With no live membership left the pointer stays, because the column cannot be empty; every read
-        resolves it against a live membership and finds none.
+        NOTE: Cleared rather than moved to another membership, because this cannot ask whether one
+        admits the identity. Resolving their context chooses the next one, under the rule it holds.
         """
         identity = await self.users.get(membership.user_id)
         if identity is None or identity.active_organization_id != membership.organization_id:
             return
-        fallback = await self.members.get_first_active_for_user(identity.id)
-        if fallback is not None:
-            await self.users.set_active_organization(identity, fallback.organization_id)
+        await self.users.set_active_organization(identity, None)
 
     async def _identity_for_address(self, email: str, organization: Organization) -> User:
         """The identity holding an address, created claimable if none does, refusing a deactivated one.

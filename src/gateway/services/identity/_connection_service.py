@@ -1,7 +1,6 @@
 """Manage an organization's own OpenID Connect sign-in connection."""
 
 import uuid
-from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -498,38 +497,14 @@ class OIDCConnectionService:
         if blocked_ids:
             await self._sessions.delete_for_users(blocked_ids)
 
-    async def revoke_refused_sessions(self, *, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
-        """End the live session of every listed account ``organization_id`` refuses."""
-        if not user_ids:
-            return
-        wanted = set(user_ids)
-        async with self._uow:
-            organization = await self._organizations.organizations.get(organization_id)
-            if organization is None or not organization.sso_required:
-                return
-            connection = await self._connections.get_for_organization(organization_id)
-            provider = oidc_identity_provider(connection.resolved_issuer) if connection is not None else None
-            linked_ids = (
-                await self._links.linked_user_ids(provider=provider, user_ids=list(wanted))
-                if provider is not None
-                else set()
-            )
-            roster = await self._organizations.members.get_active_by_organization_with_users(organization_id)
-            refused = {
-                identity.id
-                for _, identity in roster
-                if identity.id in wanted
-                and sso_blocks_membership(
-                    organization=organization,
-                    user=identity,
-                    is_linked=provider is not None and identity.id in linked_ids,
-                )
-            }
-            if refused:
-                await self._sessions.delete_for_users(refused)
-
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
-        """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it."""
+        """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it.
+
+        An organization requiring nothing refuses nobody, which is answered off the row already in
+        hand rather than by reading its connection and the account's links.
+        """
+        if not organization.sso_required:
+            return False
         async with self._uow:
             linked = await has_link_to_organization(
                 organization, user.id, connections=self._connections, links=self._links

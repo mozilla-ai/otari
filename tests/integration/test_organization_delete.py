@@ -66,7 +66,7 @@ def _identity(
         session.close()
 
 
-def _active_organization_id(session_factory: Callable[[], Session], user_id: uuid.UUID) -> uuid.UUID:
+def _active_organization_id(session_factory: Callable[[], Session], user_id: uuid.UUID) -> uuid.UUID | None:
     session = session_factory()
     try:
         return session.get_one(User, user_id).active_organization_id
@@ -151,7 +151,7 @@ def test_the_only_organization_a_caller_belongs_to_is_kept(
     response = client.delete(_ME)
 
     assert response.status_code == 400
-    assert "only organization" in response.json()["detail"]
+    assert "no organization to act in" in response.json()["detail"]
     assert _organization_exists(db_session_factory, created["id"])
 
 
@@ -196,23 +196,36 @@ def test_an_admin_can_delete_the_organization(
     assert not _organization_exists(db_session_factory, created["id"])
 
 
-def test_everyone_pointed_at_a_deleted_organization_is_moved(
+def test_everyone_pointed_at_a_deleted_organization_is_cleared(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    """Onto another live membership where there is one, and otherwise onto the default organization."""
-    default_id = uuid.UUID(_default_organization_id(client, master_key_header))
+    """Cleared rather than moved, because a deletion cannot ask whether another organization admits them.
+
+    Reading their context afterwards is what chooses, so somebody with another membership lands on
+    it and somebody with none is told they belong to no organization.
+    """
     created = uuid.UUID(_create_and_enter(client, master_key_header)["id"])
     elsewhere = uuid.UUID(_create_and_enter(client, master_key_header, name="Elsewhere")["id"])
     client.post(f"{_ME}/switch", json={"organization_id": str(created)}, headers=master_key_header)
-    moved, _ = _identity(
+    moved, moved_token = _identity(
         db_session_factory, memberships=[(created, "member"), (elsewhere, "member")], email="moved@example.com"
     )
-    stranded, _ = _identity(db_session_factory, memberships=[(created, "member")], email="stranded@example.com")
+    stranded, stranded_token = _identity(
+        db_session_factory, memberships=[(created, "member")], email="stranded@example.com"
+    )
 
     response = client.delete(_ME, headers=master_key_header)
 
     assert response.status_code == 200, response.text
-    assert _active_organization_id(db_session_factory, moved) == elsewhere
-    assert _active_organization_id(db_session_factory, stranded) == default_id
+    assert _active_organization_id(db_session_factory, moved) is None
+    assert _active_organization_id(db_session_factory, stranded) is None
+
+    client.cookies.set(SESSION_COOKIE_NAME, moved_token)
+    repaired = client.get(_ME)
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["organization"]["id"] == str(elsewhere)
+
+    client.cookies.set(SESSION_COOKIE_NAME, stranded_token)
+    assert client.get(_ME).status_code == 404
