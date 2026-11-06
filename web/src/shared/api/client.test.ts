@@ -5,10 +5,12 @@ import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   ApiError,
   apiFetch,
+  apiStream,
   createSession,
   defaultQueryRetry,
   deleteSession,
   retryUnlessNotFound,
+  setUnauthorizedHandler,
   siteFetch,
   startOAuthSignIn,
 } from "./client"
@@ -219,6 +221,60 @@ describe("apiFetch", () => {
     )
     await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       message: expect.stringContaining("could not reach the gateway"),
+    })
+  })
+
+  it("keeps the refusal's error code, so a caller can tell refusals apart", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { detail: "Add billing details first.", code: "some_code" },
+        { status: 409 },
+      ),
+    )
+
+    await expect(apiFetch("/billing/top-up")).rejects.toMatchObject({
+      status: 409,
+      message: "Add billing details first.",
+      code: "some_code",
+    })
+  })
+
+  it("keeps the error code on a 401 as well as signing out", async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { detail: "Session expired.", code: "session_expired" },
+        { status: 401 },
+      ),
+    )
+
+    try {
+      await expect(apiFetch("/models")).rejects.toMatchObject({
+        status: 401,
+        message: "Session expired.",
+        code: "session_expired",
+      })
+      expect(onUnauthorized).toHaveBeenCalledOnce()
+    } finally {
+      setUnauthorizedHandler(null)
+    }
+  })
+})
+
+describe("apiStream", () => {
+  it("keeps the refusal's error code", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { detail: "Model not allowed.", code: "some_code" },
+        { status: 403 },
+      ),
+    )
+
+    await expect(apiStream("/chat/completions")).rejects.toMatchObject({
+      status: 403,
+      message: "Model not allowed.",
+      code: "some_code",
     })
   })
 })
