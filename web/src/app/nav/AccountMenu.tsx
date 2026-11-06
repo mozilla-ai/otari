@@ -323,7 +323,7 @@ export function AccountMenu({
    */
   onOpenDeploymentLevel?: () => void
   /**
-   * Below `md`, opens the feedback dialog, which the shell mounts outside this
+   * Below `md`, opens the Contact dialog, which the shell mounts outside this
    * popover. From `md` up the top bar carries it beside Documentation.
    */
   onOpenFeedback?: () => void
@@ -484,7 +484,7 @@ export function AccountMenu({
           />
           {feedback_enabled && onOpenFeedback ? (
             <MenuItem
-              label="Feedback"
+              label="Contact"
               icon={FiMessageCircle}
               className="md:hidden"
               onPress={() => {

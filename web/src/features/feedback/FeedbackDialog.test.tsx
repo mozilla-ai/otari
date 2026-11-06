@@ -45,7 +45,7 @@ function setup({ email }: { email?: string } = {}) {
   }
 }
 
-const field = () => screen.getByRole("textbox", { name: "Feedback" })
+const field = () => screen.getByRole("textbox", { name: "Contact" })
 
 afterEach(() => {
   onlineManager.setOnline(true)
@@ -68,9 +68,7 @@ describe("FeedbackDialog", () => {
     })
     const dialog = screen.getByRole("dialog", { name: "Thank you!" })
     await waitFor(() => expect(dialog).toHaveFocus())
-    expect(dialog).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. We read them all, and they shape what comes next.",
-    )
+    expect(dialog).toHaveAccessibleDescription("Our team has your message.")
     // The phone sheet's close control is the frame's only button.
     expect(
       [...dialog.querySelectorAll("button")].map((b) =>
@@ -82,9 +80,9 @@ describe("FeedbackDialog", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     )
     await user.click(screen.getByRole("button", { name: "Open feedback" }))
-    expect(
-      await screen.findByRole("textbox", { name: "Feedback" }),
-    ).toHaveValue("")
+    expect(await screen.findByRole("textbox", { name: "Contact" })).toHaveValue(
+      "",
+    )
   })
 
   it("sends on Cmd or Ctrl+Enter, and Enter alone is a newline", async () => {
@@ -164,9 +162,9 @@ describe("FeedbackDialog", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     )
     await user.click(screen.getByRole("button", { name: "Open feedback" }))
-    expect(
-      await screen.findByRole("textbox", { name: "Feedback" }),
-    ).toHaveValue("")
+    expect(await screen.findByRole("textbox", { name: "Contact" })).toHaveValue(
+      "",
+    )
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -187,64 +185,65 @@ describe("FeedbackDialog", () => {
     answer(new Response(null, { status: 204 }))
     await screen.findByRole("heading", { name: "Thank you!" })
   })
+  const consent = (email: string) =>
+    `By sending, you agree we can reply to ${email} about this message only.`
 
-  it("offers no email to share when the account has none", () => {
-    setup()
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  it("names no address when the account has none, and sends the message alone", async () => {
+    const { fetch, user } = setup()
+    expect(screen.queryByText(/By sending/)).not.toBeInTheDocument()
+    await user.type(field(), "Idea")
+    await user.click(screen.getByRole("button", { name: SEND }))
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ message: "Idea" })
   })
 
   it.each([
     ["no dot in the domain", "ops@intranet"],
     ["past the receiver's 254", `${"a".repeat(243)}@example.com`],
     ["a bidirectional override", "ada@example.com‮moc"],
-  ])("offers no email the gateway would refuse to attach: %s", (_, email) => {
-    setup({ email })
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-  })
+  ])(
+    "names no address the gateway would refuse to attach: %s",
+    async (_, email) => {
+      const { fetch, user } = setup({ email })
+      expect(screen.queryByText(/By sending/)).not.toBeInTheDocument()
+      await user.type(field(), "Idea")
+      await user.click(screen.getByRole("button", { name: SEND }))
+      await screen.findByRole("heading", { name: "Thank you!" })
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+        message: "Idea",
+      })
+    },
+  )
 
-  it("sends the email only when ticked, and the thanks name it", async () => {
+  it("says where replies go, sends that address, and the thanks name it", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
-    const share = screen.getByRole("checkbox", {
-      name: "Share ada@example.com so the team can reply",
-    })
-    expect(share).not.toBeChecked()
+    expect(screen.getByText(consent("ada@example.com"))).toBeInTheDocument()
     await user.type(field(), "Idea")
-    await user.click(share)
     await user.click(screen.getByRole("button", { name: SEND }))
     await screen.findByRole("heading", { name: "Thank you!" })
-    // A flag, never the address: the gateway reads it from the session.
+    // The address the line named, never trusted as such: the gateway sends the
+    // session's own, and only when it is this one.
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
       message: "Idea",
       share_email: "ada@example.com",
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
   })
 
-  it("drops the tick when the address shown changes, sending only what was agreed", async () => {
+  it("names and sends the address showing when Send is pressed", async () => {
     const { fetch, user, showEmail } = setup({ email: "ada@example.com" })
     await user.type(field(), "Idea")
-    await user.click(screen.getByRole("checkbox"))
     // Another tab signed in as someone else, and the caller query caught up.
     showEmail("grace@example.com")
-    const share = screen.getByRole("checkbox", {
-      name: "Share grace@example.com so the team can reply",
-    })
-    expect(share).not.toBeChecked()
+    expect(screen.getByText(consent("grace@example.com"))).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: SEND }))
     await screen.findByRole("heading", { name: "Thank you!" })
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ message: "Idea" })
-  })
-
-  it("keeps the tick cleared when the first address comes back", async () => {
-    const { user, showEmail } = setup({ email: "ada@example.com" })
-    await user.click(screen.getByRole("checkbox"))
-    showEmail("grace@example.com")
-    showEmail("ada@example.com")
-    expect(screen.getByRole("checkbox")).not.toBeChecked()
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      message: "Idea",
+      share_email: "grace@example.com",
+    })
   })
 
   it("thanks with the address the send carried, even if another shows meanwhile", async () => {
@@ -256,7 +255,6 @@ describe("FeedbackDialog", () => {
       }),
     )
     await user.type(field(), "Idea")
-    await user.click(screen.getByRole("checkbox"))
     await user.click(screen.getByRole("button", { name: SEND }))
     showEmail("grace@example.com")
     answer(new Response(null, { status: 204 }))
@@ -267,38 +265,15 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
   })
 
-  it("asks again every time it opens, and an unticked send stays anonymous", async () => {
-    const { fetch, user } = setup({ email: "ada@example.com" })
-    await user.click(screen.getByRole("checkbox"))
-    await user.keyboard("{Escape}")
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-    )
-    await user.click(screen.getByRole("button", { name: "Open feedback" }))
-    expect(await screen.findByRole("checkbox")).not.toBeChecked()
-    await user.type(field(), "Idea")
-    await user.click(screen.getByRole("button", { name: SEND }))
-    await screen.findByRole("heading", { name: "Thank you!" })
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ message: "Idea" })
-  })
-
-  it("sends on Cmd+Enter with focus on the tick, as the button promises", async () => {
+  it("sends on Cmd+Enter from the field, as the button promises", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
     await user.type(field(), "Idea")
-    await user.click(screen.getByRole("checkbox"))
-    expect(screen.getByRole("checkbox")).toHaveFocus()
-    // The raw keydown: user-event's Enter on an input submits the form itself,
-    // which a browser does not do for a checkbox, and would hide a shortcut
-    // that never fired.
-    fireEvent.keyDown(screen.getByRole("checkbox"), {
-      key: "Enter",
-      metaKey: true,
-    })
+    // The raw keydown: user-event's Enter would add a line to the textarea and
+    // hide a shortcut that never fired.
+    fireEvent.keyDown(field(), { key: "Enter", metaKey: true })
     await screen.findByRole("heading", { name: "Thank you!" })
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
       message: "Idea",
@@ -306,46 +281,48 @@ describe("FeedbackDialog", () => {
     })
   })
 
-  it("shows the gateway's reason for a refused email, keeping the draft and the tick", async () => {
+  it("shows the gateway's reason for a refused send, keeping the draft", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
     fetch.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           detail:
-            "Your email could not be attached. Untick it to send without it.",
+            "You're signed in as someone else now. Reload the page and try again.",
         }),
         { status: 422, headers: { "Content-Type": "application/json" } },
       ),
     )
     await user.type(field(), "Idea")
-    await user.click(screen.getByRole("checkbox"))
     await user.click(screen.getByRole("button", { name: SEND }))
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Your email could not be attached. Untick it to send without it.",
+      "You're signed in as someone else now. Reload the page and try again.",
     )
     expect(field()).toHaveValue("Idea")
-    expect(screen.getByRole("checkbox")).toBeChecked()
-    await user.click(screen.getByRole("checkbox"))
-    await user.click(screen.getByRole("button", { name: SEND }))
-    await screen.findByRole("heading", { name: "Thank you!" })
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ message: "Idea" })
   })
 
-  it("locks the tick while a send is in flight", async () => {
+  it("sends once when Send is pressed twice before the first send renders", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
-    let answer: (response: Response) => void = () => {}
-    fetch.mockReturnValueOnce(
-      new Promise<Response>((resolve) => {
-        answer = resolve
-      }),
-    )
-    await user.click(screen.getByRole("checkbox"))
+    await user.type(field(), "Idea")
+    const send = screen.getByRole("button", { name: SEND })
+    // Both presses in one act, as a double click lands before React re-renders
+    // with the first send pending.
+    act(() => {
+      send.click()
+      send.click()
+    })
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it("sends again after a failed send", async () => {
+    const { fetch, user } = setup()
+    fetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
     await user.type(field(), "Idea")
     await user.click(screen.getByRole("button", { name: SEND }))
-    await waitFor(() => expect(screen.getByRole("checkbox")).toBeDisabled())
-    expect(screen.getByRole("checkbox")).toBeChecked()
-    answer(new Response(null, { status: 204 }))
+    await screen.findByRole("alert")
+    await user.click(screen.getByRole("button", { name: SEND }))
     await screen.findByRole("heading", { name: "Thank you!" })
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it("caps the field at the gateway's 4,000", () => {
