@@ -671,9 +671,9 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     Only an edit tool moves that cutoff. A `Bash` call can write to the tree
     too, and the transcript never says which ones did, so a cutoff that
     guessed would cost more than the gap it closes: the command these gates
-    require is frequently the writer itself (`make postman` writes the
-    collection its own gate asks for), and counting it would leave those
-    gates unsatisfiable.
+    require is frequently the writer itself (`scripts/generate_openapi.py`
+    writes the spec its own gate asks for), and counting it would leave
+    those gates unsatisfiable.
 
     Returns None only when the transcript itself cannot be read (missing,
     permissions, not a file): the same fail-open sentinel
@@ -2885,9 +2885,8 @@ def _starter_gates_yaml(repo_name: str) -> str:
         #
         # A path nothing legitimately generates, on purpose. A gate over a
         # generated file warns on the very command that regenerates it, which
-        # is the trap this repo's own policy documents twice (see the
-        # postman-collection and pyproject gates in
-        # .otari/guardrails/generated-artifacts.yml).
+        # is the trap this repo's own policy documents (see the pyproject
+        # gate in .otari/guardrails/generated-artifacts.yml).
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "    enforcement: advisory\n"
         '    forbidden: [".env", "**/.env"]\n'

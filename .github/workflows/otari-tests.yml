@@ -179,6 +179,3 @@ jobs:
 
     - name: Verify OpenAPI spec is up to date
       run: make openapi-check
-
-    - name: Verify Postman collection is up to date
-      run: make postman-check
