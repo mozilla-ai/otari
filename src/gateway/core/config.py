@@ -1785,13 +1785,22 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse federation without ``OTARI_SECRET_KEY``."""
-        if self.federation_enabled and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
-            setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        """Refuse federation without ``OTARI_SECRET_KEY`` or without an audience of this deployment's own."""
+        if not self.federation_enabled:
+            return
+        setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        if not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
             msg = (
                 f"{setting} is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
                 "POST /api/v1/oauth/token issues. Set OTARI_SECRET_KEY (generate one with "
                 f"`otari gen-secret-key`) or clear {setting}"
+            )
+            raise ValueError(msg)
+        if not self.federation_audiences:
+            msg = (
+                f"{setting} is set, but federation_audiences names no audience; an identity token must name "
+                "an audience this deployment answers to, or a token minted for another service at the same "
+                f"issuer would authenticate here. Set federation_audiences or clear {setting}"
             )
             raise ValueError(msg)
 

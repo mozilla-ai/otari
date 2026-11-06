@@ -10,3 +10,8 @@ require_pricing: false
 # Lets a member give their own key a federation rule, which the workload
 # identity spec does through the dashboard.
 federation_member_rules: true
+# An identity token must name an audience this deployment answers to, so a
+# deployment that admits members' rules refuses to start without one. Nothing
+# here verifies a token, so the value only has to exist.
+federation_audiences:
+  - "http://127.0.0.1:8000"

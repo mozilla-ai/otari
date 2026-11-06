@@ -45,6 +45,7 @@ def generate_openapi_spec() -> dict[str, object]:
             # not only the ones a bare default config happens to reach. Nothing is
             # called during generation; it never authenticates anything.
             federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
+            federation_audiences=["https://openapi-generation-placeholder.invalid"],
         )
         # The token exchange needs a secret to start; a throwaway one, for this process only.
         previous = os.environ.get("OTARI_SECRET_KEY")

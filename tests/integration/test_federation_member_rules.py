@@ -95,6 +95,7 @@ def _client(config: GatewayConfig, issuer: _Issuer) -> Generator[TestClient]:
     for test_client in build_test_client(config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
             config.federation_issuers,
+            audiences=config.federation_audiences,
             member_issuers=config.federation_member_rules,
             transport_factory=issuer.transport,
         )
@@ -106,7 +107,9 @@ def client(
     test_config: GatewayConfig, clean_database: None, issuer: _Issuer, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[TestClient]:
     """A deployment that lists no issuer and lets members name their own, as a hosted one would."""
-    config = test_config.model_copy(update={"federation_member_rules": True}, deep=True)
+    config = test_config.model_copy(
+        update={"federation_member_rules": True, "federation_audiences": [AUDIENCE]}, deep=True
+    )
     yield from _client(config, issuer)
 
 
@@ -357,6 +360,7 @@ def listing_client(
         update={
             "federation_member_rules": True,
             "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=f"{ISSUER}/keys")],
+            "federation_audiences": [AUDIENCE],
         },
         deep=True,
     )
@@ -402,7 +406,11 @@ def off_client(
 ) -> Generator[TestClient]:
     """A deployment with an issuer listed and members' rules off, the default."""
     config = test_config.model_copy(
-        update={"federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=f"{ISSUER}/keys")]}, deep=True
+        update={
+            "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=f"{ISSUER}/keys")],
+            "federation_audiences": [AUDIENCE],
+        },
+        deep=True,
     )
     yield from _client(config, issuer)
 
@@ -434,6 +442,7 @@ def test_turning_the_setting_off_ends_a_members_rule(
         update={
             "federation_member_rules": False,
             "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=f"{ISSUER}/keys")],
+            "federation_audiences": [AUDIENCE],
         },
         deep=True,
     )

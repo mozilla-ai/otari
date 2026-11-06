@@ -81,7 +81,11 @@ def _assertion(*, kid: str = "k1", **overrides: Any) -> str:
 @pytest.fixture
 def federation_config(test_config: GatewayConfig) -> GatewayConfig:
     return test_config.model_copy(
-        update={"federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)]}, deep=True
+        update={
+            "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)],
+            "federation_audiences": [AUDIENCE],
+        },
+        deep=True,
     )
 
 
@@ -97,7 +101,9 @@ def client(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-            federation_config.federation_issuers, transport_factory=jwks.transport
+            federation_config.federation_issuers,
+            audiences=federation_config.federation_audiences,
+            transport_factory=jwks.transport,
         )
         yield test_client
 

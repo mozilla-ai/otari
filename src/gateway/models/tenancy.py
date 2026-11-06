@@ -1572,6 +1572,10 @@ class OAuthPendingState(SQLModel, table=True):
     it that way for providers that cannot do PKCE. Both providers this
     deployment offers can, so in practice every row carries one.
 
+    The row carries nothing binding it to a browser. The ``state`` it is keyed
+    by is derived from a token only that browser holds, so the binding is in
+    the key rather than in a column (RFC 9700, section 4.7.1).
+
     The row is deleted as it is consumed, so a replayed state matches nothing.
     """
 
@@ -1583,10 +1587,6 @@ class OAuthPendingState(SQLModel, table=True):
     # returned to GitHub's callback is a refusal that should say so, not one
     # that collapses into "unknown state".
     provider: str = Field(max_length=255)
-    # SHA-256 of the flow secret the browser holds in its cookie, so a row
-    # answers only to the browser that started it (RFC 9700, section 4.7.1).
-    # Hashed for the reason ``state_hash`` is.
-    flow_hash: str = Field(max_length=64)
     code_verifier: str | None = Field(default=None, max_length=128)
     # The OpenID nonce the authorization request sent, which the exchange
     # checks the ID token against. Null for GitHub, which is not OpenID.

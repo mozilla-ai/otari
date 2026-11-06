@@ -239,7 +239,7 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
 
     async def _exchange(
-        _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
+        _config: GatewayConfig, provider: str, *, code: str, state: str, browser_token: str | None, db: Any
     ) -> ProviderIdentity:
         return ProviderIdentity(
             provider=provider,

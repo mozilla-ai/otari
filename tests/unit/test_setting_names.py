@@ -57,6 +57,7 @@ _SETTING_NAMES = frozenset(
         "enable_metrics",
         "federation_access_token_ttl_sec",
         "federation_allow_private_hosts",
+        "federation_audiences",
         "federation_issuers",
         "federation_member_rules",
         "feedback_enabled",

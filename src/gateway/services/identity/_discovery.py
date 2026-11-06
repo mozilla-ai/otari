@@ -3,9 +3,9 @@
 The issuer is a URL an organization administrator typed into a form, so it
 names a host this deployment does not control and may not trust. The fetch
 goes through the checked federation transport, with the response stream
-capped in size and the whole exchange bounded by one wall-clock deadline, so
-a hostile, slow, or oversized provider cannot exhaust memory or hang the
-caller.
+capped in size and the request bounded by this deployment's own timeout
+policy, so a hostile, slow, or oversized provider cannot exhaust memory or
+hang the caller.
 """
 
 from __future__ import annotations
@@ -17,18 +17,18 @@ from typing import Any
 
 import httpx
 from apron_auth.errors import ConfigurationError, OidcDiscoveryError
+from apron_auth.models import TimeoutPolicy
 from apron_auth.providers import oidc
 
 from gateway.exceptions.identity_exceptions import OIDCDiscoveryError
 from gateway.log_config import logger
-from gateway.services.web_retrieval_network import (
-    CheckedFederationTransport,
-    NetworkDeadline,
-    NetworkDeadlineExceeded,
-)
+from gateway.services.web_retrieval_network import CheckedFederationTransport
 
 DISCOVERY_MAX_BYTES = 256 * 1024
 DISCOVERY_TIMEOUT_SECONDS = 10.0
+# The connect limit stays at the policy's own default, which the policy refuses
+# to let exceed the request limit.
+DISCOVERY_TIMEOUTS = TimeoutPolicy(request_seconds=DISCOVERY_TIMEOUT_SECONDS)
 DISCOVERY_TTL = timedelta(hours=12)
 
 
@@ -130,10 +130,9 @@ async def discover_connection_metadata(issuer: str, *, allow_private_hosts: bool
             max_bytes=DISCOVERY_MAX_BYTES,
         )
 
-    deadline = NetworkDeadline(seconds=DISCOVERY_TIMEOUT_SECONDS)
     try:
-        metadata = await deadline.run(lambda: oidc.discover(issuer, transport_factory=transport_factory))
-    except (OidcDiscoveryError, ConfigurationError, NetworkDeadlineExceeded):
+        metadata = await oidc.discover(issuer, transport_factory=transport_factory, timeouts=DISCOVERY_TIMEOUTS)
+    except (OidcDiscoveryError, ConfigurationError):
         logger.warning("OIDC issuer discovery failed for issuer %s", issuer, exc_info=True)
         raise OIDCDiscoveryError from None
 
