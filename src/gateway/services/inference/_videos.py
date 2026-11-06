@@ -16,7 +16,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.inference_exceptions import VideoJobNotFoundError
 from gateway.log_config import logger
 from gateway.repositories.inference import VideoJobRepository
-from gateway.services.pricing import price_video
+from gateway.services.pricing import PriceFacts, price_video
 
 if TYPE_CHECKING:
     import uuid
@@ -122,8 +122,13 @@ class VideoJobService:
         workspace_id: uuid.UUID | None,
         seconds: int | None,
         counts_toward_budget: bool,
+        resolution: str | None,
+        aspect_ratio: str | None,
+        created_at: datetime,
     ) -> None:
-        """Keep the record of a job the provider accepted.
+        """Keep the record of a job the provider accepted, with what its price's rules may ask.
+
+        ``created_at`` is when the request started, the time the job is billed at.
 
         A write that fails is tried once more. One that fails again is logged
         with the job's id, so an operator can reconcile the job upstream, and
@@ -142,6 +147,9 @@ class VideoJobService:
                         workspace_id=workspace_id,
                         seconds=seconds,
                         counts_toward_budget=counts_toward_budget,
+                        resolution=resolution,
+                        aspect_ratio=aspect_ratio,
+                        created_at=created_at,
                     )
             except DATABASE_ERRORS as exc:
                 if attempt == 2:
@@ -227,7 +235,10 @@ class VideoJobService:
             record.provider, record.model, organization_id=organization_id, deployment_paid=deployment_paid
         )
         pricing = found.pricing if found is not None else None
-        charge = price_video(pricing, seconds) if seconds is not None and seconds >= 0 else None
+        facts = PriceFacts(
+            at=record.created_at, resolution=record.resolution, aspect_ratio=record.aspect_ratio, duration=seconds
+        )
+        charge = price_video(pricing, seconds, facts=facts) if seconds is not None and seconds >= 0 else None
         if seconds is not None and charge is None:
             logger.warning(
                 "Video job %s on %s:%s completed with no per-second video price; it stays unbilled until one is set",

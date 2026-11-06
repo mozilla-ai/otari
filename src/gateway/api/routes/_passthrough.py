@@ -31,7 +31,7 @@ import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Generic, Protocol, TypeVar
@@ -70,6 +70,7 @@ from gateway.api.routes._pipeline import (
     log_gateway_rejection,
     provider_error_headers,
     provider_failure_detail,
+    request_started,
     throttle_early_rejection,
 )
 from gateway.api.routes._unavailable_models import note_unavailable_model
@@ -137,7 +138,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
-from gateway.services.pricing import can_price, price_usage
+from gateway.services.pricing import NO_FACTS, PriceFacts, apply_rules, can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
@@ -360,8 +361,12 @@ async def run_passthrough(
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
+    price_facts: PriceFacts = NO_FACTS,
 ) -> PassthroughOutcome[ResultT]:
     """Run the shared pass-through scaffold around a single provider call.
+
+    ``price_facts`` is what the request says about itself that a price's rules
+    ask (an image's size and quality); the result settles at the rules it meets.
 
     Steps: resolve the billed user (honoring ``config.reject_user_mismatch``),
     rate limit, resolve the provider selector, look up pricing, reserve the
@@ -926,6 +931,7 @@ async def run_passthrough(
             units=reported.units,
             quantities=reported.quantities,
             slot=billing.slot,
+            facts=replace(price_facts, at=request_started(usage_log)),
         )
         cost = charge.cost if charge is not None else None
         if charge is not None:
@@ -1475,12 +1481,14 @@ async def run_decision(
         )
         cost: Decimal | None = None
         if pricing is not None:
-            cost, row.billing_meters, row.pricing_breakdown = price_billable_usage(
-                pricing,
+            applied = apply_rules(pricing, PriceFacts(context=outcome.input_tokens, at=request_started(row)))
+            cost, row.billing_meters, lines = price_billable_usage(
+                applied.rate,
                 billable_usage(
                     input_tokens=outcome.input_tokens, output_tokens=outcome.output_tokens, cache_tokens_included=True
                 ),
             )
+            row.pricing_breakdown = applied.explain(lines)
         elif outcome.charge is not None:
             cost = outcome.charge
         elif quote.charge is not None:

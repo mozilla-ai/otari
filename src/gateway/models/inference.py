@@ -99,6 +99,10 @@ class VideoJobRecord(Base):
     )
     # The length the request asked for, which prices the job when the provider reports none.
     seconds: Mapped[int | None] = mapped_column(Integer)
+    # The resolution and aspect ratio the request asked for, which a price's rules
+    # may name; the job is billed when it completes, after the request is gone.
+    resolution: Mapped[str | None] = mapped_column(String(64))
+    aspect_ratio: Mapped[str | None] = mapped_column(String(64))
     # Whether the job's cost folds into the owner's spend: false for a key exempt
     # from budgets, decided when the job starts, so a key revoked since cannot change it.
     counts_toward_budget: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())

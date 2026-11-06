@@ -75,6 +75,7 @@ from gateway.services.model_access import (
     organization_key_refusal,
     resolve_request_allowlist,
 )
+from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -847,6 +848,7 @@ async def retrieve_batch_results(
             deployment_paid=deployment_paid,
         )
         if pricing:
+            started = record.created_at if record is not None else None
             # Through the cost core rather than a local formula, so a batch is
             # priced by the same arithmetic as a live request. **One line at a
             # time**, because a threshold tier is a per-request cliff: charging
@@ -865,7 +867,7 @@ async def retrieve_batch_results(
                 sum(
                     (
                         calculate_token_cost(
-                            pricing,
+                            apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
                             input_tokens=line_prompt,
                             output_tokens=line_completion,
                             cache_read_tokens=line_cache_read,
