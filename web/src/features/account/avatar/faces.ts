@@ -1,6 +1,8 @@
 /**
- * The avatar set: a mirrored 5x5 pixel pattern, cut in the surface colour out
- * of a square filled with one of the eight categorical chart tones.
+ * The avatar set: a mirrored 5x5 pixel pattern in one of the eight categorical
+ * chart tones, on a light tint of that tone, with the centre column in a
+ * second tone. The second tone is fixed by the first (three slots along), so
+ * it adds colour without adding faces that differ only in a sliver.
  *
  * It is generated rather than drawn, because an avatar's job is telling people
  * apart, and a hand-drawn set repeats: with 72 faces, two people in a team of
@@ -51,35 +53,34 @@ export const FACE_COUNT = PATTERNS.length * TONES.length
 
 export interface Face {
   id: number
-  /** 1 to 8: the `--color-chart-cat-N` slot the tile is filled with. */
+  /** 1 to 8: the `--color-chart-cat-N` slot of the pattern and its tint. */
   tone: number
-  /** The pattern as an SVG path on a 7-unit box, one unit of margin around it. */
-  path: string
+  /** 1 to 8: the slot of the centre column. */
+  accent: number
+  /** The mirrored sides of the pattern, as an SVG path on a 7-unit box. */
+  sides: string
+  /** The centre column of the pattern, on the same box. */
+  centre: string
   label: string
 }
 
-/** Horizontal runs rather than one square per cell, so a face is a few commands. */
-function patternPath(bits: number): string {
-  let d = ""
+/**
+ * The pattern as two paths on a 7-unit box with one unit of margin: the sides
+ * (columns 0 and 1, mirrored onto 4 and 3) and the centre column.
+ */
+function patternPaths(bits: number): { sides: string; centre: string } {
+  let sides = ""
+  let centre = ""
   for (let y = 0; y < 5; y++) {
     const row = (bits >> (y * 3)) & 0b111
-    // Columns 0 and 1 mirror onto 4 and 3; column 2 is the centre.
-    const lit = [0, 1, 2, 1, 0].map(
-      (x) => (x === 2 ? row & 0b100 : row & (1 << x)) !== 0,
-    )
-    let x = 0
-    while (x < 5) {
-      if (!lit[x]) {
-        x++
-        continue
+    for (const x of [0, 1]) {
+      if (row & (1 << x)) {
+        sides += `M${x + 1} ${y + 1}h1v1h-1zM${5 - x} ${y + 1}h1v1h-1z`
       }
-      let end = x
-      while (end < 5 && lit[end]) end++
-      d += `M${x + 1} ${y + 1}h${end - x}v1h-${end - x}z`
-      x = end
     }
+    if (row & 0b100) centre += `M3 ${y + 1}h1v1h-1z`
   }
-  return d
+  return { sides, centre }
 }
 
 export function face(id: number): Face {
@@ -89,7 +90,8 @@ export function face(id: number): Face {
   return {
     id: safe,
     tone: tone + 1,
-    path: patternPath(PATTERNS[pattern]),
+    accent: ((tone + 3) % TONES.length) + 1,
+    ...patternPaths(PATTERNS[pattern]),
     // Patterns have no names worth reading out, so the number stands in: it
     // is stable, and it tells two faces of one colour apart.
     label: `${TONES[tone]} pattern ${pattern + 1}`,
