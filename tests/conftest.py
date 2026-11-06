@@ -210,6 +210,17 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_monty_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a config with no sandbox_url sandbox-free, though the dev group installs the monty extra.
+
+    The extra makes Monty the sandbox wherever nothing else is set, which would
+    otherwise give every test config a sandbox. A test of that default patches
+    ``monty_installed`` back.
+    """
+    monkeypatch.setattr("gateway.core.config.monty_installed", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Answer every models.dev fetch as unreachable, and serve no bundled catalog, unless the test patches one in.
 
