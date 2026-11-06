@@ -93,8 +93,11 @@ only type that calls a model, and it can only be `advisory`.
 ## Registering the hook
 
 Run `otari hook setup` from inside the repository being guarded. It requires a
-Git repository: it refuses outside one, and `git status` is where the `Stop`
-event's evidence comes from.
+Git repository: it refuses outside one, and the branch merge-base diff plus
+untracked working-tree paths are where the `Stop` event's path evidence comes
+from.
+
+The hook runs at most five judge gates per `Stop` event, highest `priority` first, and skips the rest. The CI judge job runs up to twenty (see [The CI jobs](#the-ci-jobs)). To run the same judge gates locally, set `OTARI_HOOK_MAX_JUDGES=20` in the environment the harness starts from, such as your shell profile. Each judge gate is one model call, so this raises the cost of a `Stop` event that many gates apply to. Branch changes remain in the evidence across turns, so matching judges can run again even when a later turn changes nothing.
 
 ### Claude Code
 
@@ -157,12 +160,37 @@ With that in place, an `Edit` call naming `CHANGELOG.md` is refused before it
 runs, the agent receives `message`, and `git status` afterwards reports no
 change, because the edit never happened.
 
-Name both `runs` entries for a write rule. `pre_tool_use.edit_target` refuses
-the edit tools before they write, and `stop.working_tree` catches anything a
-shell command wrote, once the turn is over; see
-[Why a write rule names both moments](#why-a-write-rule-names-both-moments).
-`otari hook setup` already registers the `Stop` hook, so nothing further is
-installed for the second entry.
+### Why a write rule names both moments
+
+The two `runs` entries above cover two different moments, and a write rule
+generally needs both.
+
+`pre_tool_use.edit_target` sees the path an `Edit`, `Write` or `NotebookEdit`
+call declares in its own arguments, and refuses the call, so the write never
+lands. It sees only tools that declare a path. A shell command declares none:
+
+```bash
+echo "## 1.2.0" >> CHANGELOG.md
+sed -i '' 's/foo/bar/' CHANGELOG.md
+python scripts/bump.py
+```
+
+None of those is visible to a `PreToolUse` path gate, and no evidence exists
+that would make them visible. Before the command runs there is only its text,
+and enumerating what an arbitrary shell line will write is not decidable. An
+agent reaches the shell often, including immediately after an `Edit` call is
+refused.
+
+`stop.working_tree` covers that. At the end of the turn the same globs are
+checked against the branch merge-base diff plus untracked working-tree paths,
+which reports the file whatever wrote it, including a committed change. It
+cannot prevent the write, so the turn is blocked over a file that has already
+changed and the change has to be reverted.
+
+`otari hook setup` registers the `Stop` hook unconditionally, so nothing further
+is installed for this; the gate itself has to name `stop.working_tree`.
+`otari guardrails validate` warns about a `path` gate that names only
+`pre_tool_use.edit_target`.
 
 ### Refusing the command instead
 
@@ -187,7 +215,11 @@ one. The matching rules and a measured table of what matches are under
 
 ### Keeping secrets out of the transcript
 
-A rule about secrets is two gates: a `path` gate that runs at
+A write the shell slips past still lands in the tree, so `stop.working_tree`
+reports it. A read lands nowhere: it adds no path to the `Stop` evidence.
+`cat .env` is refused by a `command` gate or not at all.
+
+A rule about secrets is therefore two gates: a `path` gate running at
 `pre_tool_use.read_target`, which refuses the `Read` tool, and a `command` gate
 for the shell reads (`cat .env`) the first one cannot see. A read has no
 end-of-turn moment to fall back on; see
@@ -264,9 +296,12 @@ does not match looks the same as a clean result.
      quiet      no-force-push (advisory)
      20 gate(s) do not apply here.
 
-   PreToolUse, Edit/Write: docs/public/openapi.json
-     quiet      no-hand-edited-changelog (required)
-     ...
+Stop, the finished turn: 1 changed path(s), 1 command(s); judge diff base: the branch merge base with its upstream, falling back to the default branch and then HEAD
+  quiet      openapi-changed-needs-postman (required)
+  fires      openapi-changed-needs-generator (required)
+  would run  no-leftover-conflict-markers (verifier, required)
+  skipped    no-narrative-comments (judge, when_changed does not match)
+```
 
    Stop, the finished turn: 1 changed path(s), 1 command(s)
      quiet      openapi-changed-needs-postman (required)
@@ -302,11 +337,7 @@ a contributor or an agent without the hook skips every gate.
 otari guardrails check --base origin/main
 ```
 
-That checks the change from where the branch left `origin/main` to the working
-tree, untracked files included. Without `--base` it checks the uncommitted
-change, the way a `Stop` event does. Which gate types can run against a change,
-and how the exit status is decided, is under
-[`otari guardrails check`](agent-guardrails-reference.md#otari-guardrails-check).
+The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD` for this explicit command. A `Stop` event compares the upstream and default-branch merge bases, preferring the upstream when it is ahead of the default base and differs from `HEAD`. If the default range is unavailable, it keeps the upstream range when possible, then uses `HEAD` when neither range exists. The range includes the working tree and branch commits, but commits made directly on the default branch are not detected when its merge base is `HEAD`. `otari guardrails validate --path` prints this Stop base assumption in its preview.
 
 To run it on every pull request:
 
@@ -328,10 +359,25 @@ To run it on every pull request:
    changes to that workflow and to the scripts its verifiers call: that job runs
    the pull request's own code.
 
-Otari's own repository does this in
-[`.github/workflows/otari-guardrails-check.yml`](../.github/workflows/otari-guardrails-check.yml)
-and
-[`.github/workflows/otari-guardrails-judges.yml`](../.github/workflows/otari-guardrails-judges.yml).
+A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates (or `--max-judges`) and twenty verifier gates run.
+
+`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model`, `--judge-cli` and `--max-judges` choose the judge's model, its CLI and how many judge gates run, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
+
+A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason. Stop path and judge evidence independently include committed changes from the selected Stop range.
+
+### The CI jobs
+
+Two workflows run the check on every pull request to `main`. Both take the CLI, the guardrail files and the verifier scripts from the base commit, so a pull request that edits a gate, a verifier or the CLI is checked by the version it changes, not by its own.
+
+- **Path and verifier gates**, in `.github/workflows/otari-guardrails-check.yml`. The job checks out the base commit and the pull request side by side, stages the pull request against its merge base, and runs `otari guardrails check --type path --type verifier --guardrails-from <base>` in the pull request's tree. A `required` gate that does not pass fails the job.
+- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge` with `OTARI_HOOK_MAX_JUDGES` set to 20, the ceiling, so every applicable judge gate runs. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding fails the job, so it shows in the pull request's checks, but the job is not a required check, so it does not block the merge.
+
+The judge job reads its credential from the `agent-guardrails` GitHub environment, which holds `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Without either, the judges skip with a notice. A pull request from a fork skips them with a notice too, because it is not given the credential. In both workflows, a base commit whose CLI has no `otari guardrails check` skips the job with a notice, rather than take the command from the pull request.
+
+The two workflows protect different things, and neither is a boundary against someone with write access:
+
+- The judge workflow runs on `pull_request_target`, so GitHub runs it as it is on `main`, and a pull request cannot edit the job that holds the credential. No tree from the pull request is checked out there. The pull request arrives as Git objects, and only its diff reaches the judge, so nothing in it runs next to the credential. That is also why the `agent-guardrails` environment can restrict its deployment branches to `main`.
+- The path and verifier workflow runs on `pull_request`, so it runs as the pull request has it, and holds no secret. A pull request can edit it, and a verifier runs in the pull request's tree, so whatever it calls there, such as `scripts/check_architecture.py`, is the pull request's own code. A required status check and review of the workflow and the scripts a verifier calls are what keep it honest.
 
 ## Reporting to Otari
 
@@ -486,10 +532,10 @@ window. A gate is evaluated: it either matches the evidence or it does not, and
 a `required` one that matches refuses the call or blocks the turn.
 
 A gate reads what happened rather than what was reported. Its evidence is the
-path a tool call declares, the command a tool call declares, and
-`git status --porcelain` once the turn is over. Where `otari hook` reads the
-session transcript, it reads the tool calls recorded in it, not the agent's
-account of the session.
+path a tool call declares, the command a tool call declares, and the branch
+merge-base diff plus untracked working-tree paths once the turn is over. Where
+`otari hook` reads the session transcript, it reads the tool calls recorded in
+it, not the agent's account of the session.
 
 A `PreToolUse` gate runs before the action, so a refusal leaves nothing to
 undo. CI reports a force-push after the force-push.
