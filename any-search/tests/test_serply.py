@@ -225,6 +225,7 @@ async def test_only_the_items_within_the_count_are_read() -> None:
         "http://[::1",
         "https://example.com:not-a-port/a",
         "https://example.com:99999/a",
+        "https://exa mple.com/a",
     ],
 )
 async def test_a_link_that_is_not_a_web_url_is_dropped_and_the_count_filled_after_it(link: str) -> None:

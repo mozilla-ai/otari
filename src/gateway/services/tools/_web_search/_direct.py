@@ -15,8 +15,7 @@ its own allowlist, budget and usage steps.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the SearXNG client for a ``searxng`` instance and the Tavily or Brave client
-  for an organization key on those providers.
+  the Tavily or Brave client for an organization key on those providers.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -116,6 +115,17 @@ def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolI
 
 def _requires_key(provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
+
+
+def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
+    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick, or when the one picked cannot run.
+    """
+    try:
+        return pick_direct_search_instance(config, None).name
+    except (SearchToolSelectionError, SearchToolMisconfiguredError):
+        return None
 
 
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
@@ -239,13 +249,12 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, orga
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search for a library-backed provider, on the SearXNG
-    client for a ``searxng`` instance, and on the Tavily or Brave client for an
+    The call runs on any-search, or on the Tavily or Brave client for an
     organization key on those providers. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error inside a successful answer
     included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the SearXNG, Tavily and Brave clients' own text
-    can quote the upstream body or a URL carrying the query.
+    failure's safe fields, since the Tavily and Brave clients' own text can
+    quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError
@@ -291,14 +300,12 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
 
 async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search, run_search, search_tool
+    from gateway.services.search_backend import run_keyed_search
 
-    if search.credential is not None:
-        outcome = await run_keyed_search(
-            search.credential, search.query, timeout_s=search.resolved.timeout, client=client
-        )
-    else:
-        outcome = await run_search(search_tool(search.resolved), search.query, client=client)
+    if search.credential is None:
+        # Unreachable: only an organization key on Tavily or Brave runs on the old client.
+        raise SearchToolMisconfiguredError(search.instance.name)
+    outcome = await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
     return DirectSearchResult(
         response=SearchResponse(
             search_tool=search.instance.name,

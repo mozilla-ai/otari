@@ -55,7 +55,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tools import WebSearchKeyService, _web_search_keys
 
-from .conftest import MODEL_NAME, build_test_client
+from .conftest import FAKE_SEARCH, MODEL_NAME, build_test_client
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _KEYS = f"{API_ROOT}/organizations/me/web-search-keys"
@@ -104,7 +104,10 @@ def _add_key(
 
 
 def _searched_with(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
-    """The keyword arguments the request's search backend was built with."""
+    """The keyword arguments the request's search backend was built with.
+
+    A search the libraries run adds the search it runs on, under ``search``.
+    """
     seen: dict[str, Any] = {}
 
     async def fake_loop(**kwargs: Any) -> MessageResponse:
@@ -125,9 +128,13 @@ def _searched_with(client: TestClient, headers: dict[str, str]) -> dict[str, Any
         backend.purpose_hints = lambda: []
         return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
 
+    def fake_search_backend(search: Any, **kwargs: Any) -> Any:
+        return fake_backend(search=search, **kwargs)
+
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
+        patch("gateway.services.tools._web_build.WebSearchBackend", new=fake_search_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json=_REQUEST, headers=headers)
     assert response.status_code == 200, response.text
@@ -334,8 +341,12 @@ def test_a_workspace_with_a_key_searches_with_it(
 
 
 def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
-    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
+    serve_search_on_fake()
     workspace_id = _workspace_id(client, master_key_header)
     key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
     client.patch(
@@ -346,29 +357,34 @@ def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
 
     seen = _searched_with(client, api_key_header)
 
-    assert "provider" not in seen
-    assert seen["base_url"] == _SEARCH_URL
+    assert (seen["search"].search.name, seen["search"].search.on_credential) == (FAKE_SEARCH, False)
 
 
 def test_a_workspace_with_no_key_uses_the_deployments_search_unchanged(
-    client: TestClient, api_key_header: dict[str, str]
+    client: TestClient, api_key_header: dict[str, str], serve_search_on_fake: Callable[..., None]
 ) -> None:
+    serve_search_on_fake()
+
     seen = _searched_with(client, api_key_header)
 
-    assert "provider" not in seen
-    assert seen["base_url"] == _SEARCH_URL
+    assert (seen["search"].search.name, seen["search"].search.on_credential) == (FAKE_SEARCH, False)
 
 
 def test_an_archived_key_is_not_searched_with(
-    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
+    serve_search_on_fake()
     key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
     assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
 
     archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
 
     assert archived.status_code == 200
-    assert "provider" not in _searched_with(client, api_key_header)
+    seen = _searched_with(client, api_key_header)
+    assert (seen["search"].search.name, seen["search"].search.on_credential) == (FAKE_SEARCH, False)
 
 
 # --- who may do what: built at the service, since the routes always act as the bootstrap owner

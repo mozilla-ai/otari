@@ -18,6 +18,7 @@ from gateway.api.routes import (
     batches,
     bootstrap,
     budgets,
+    calling_key,
     catalog,
     chat,
     code_execution,
@@ -231,6 +232,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # mounted on their own router.
     usage.operator_router,
     usage.key_router,
+    # The calling API key's own usage and budget, answered for that key alone.
+    calling_key.router,
     agent_telemetry.router,
     settings.router,
     rate_limits.router,

@@ -394,10 +394,11 @@ async def _group(
     )
     configured_types = {models_dev_provider_id(config.provider_instance_type(i)) for i in config.providers}
     zero_retention = await viewer_zero_data_retention(hosted_providers, org_provider_keys, organization_id)
+    slug_providers = await org_provider_keys.slug_providers(organization_id) if organization_id is not None else {}
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
     for obj in real:
-        seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
+        seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj, slug_providers)
         credential = _get_credential(
             config,
             instance,

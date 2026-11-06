@@ -138,7 +138,14 @@ _SEARCH_CASES = [
     _SearchCase(
         "the legacy URL, with the four engines",
         {"web_search_url": "http://searxng:8080"},
-        {"name": "searxng", "provider": "searxng", "runner": "old", "api_base": "http://searxng:8080"},
+        {
+            "name": "searxng",
+            "provider": "searxng",
+            "runner": "library",
+            "api_base": "http://searxng:8080",
+            "label": "otari:web_search",
+            "rate_keys": ("otari:web_search",),
+        },
         options={"engines": "duckduckgo,mojeek,qwant,wikipedia"},
     ),
     _SearchCase(
@@ -148,7 +155,9 @@ _SEARCH_CASES = [
         options={"engines": "brave,wikipedia"},
     ),
     _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
-    _SearchCase("the one instance, any-search not serving it yet", {"search_tools": {"local": _SEARXNG}}, None),
+    _SearchCase(
+        "the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local", "runner": "library"}
+    ),
     _SearchCase("several instances and no default", {"search_tools": {"exa": _EXA, "test": _FAKE}}, None),
     _SearchCase("nothing configured", {}, None),
     # The policy's credential wins over the in-loop default.
@@ -201,7 +210,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
         {"web_search_url": "http://deployment-searxng:8080", "web_search_engines": "brave"},
-        {"provider": "searxng", "runner": "old", "api_key": "", "api_base": "https://org-searxng.example"},
+        {"provider": "searxng", "runner": "library", "api_key": "", "api_base": "https://org-searxng.example"},
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
@@ -270,7 +279,7 @@ _SEARCH_CASES = [
         {
             "name": "local",
             "provider": "searxng",
-            "runner": "old",
+            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "searxng:local",
         },
@@ -285,9 +294,9 @@ _SEARCH_CASES = [
         options={"engines": "qwant"},
     ),
     _SearchCase(
-        "a SearXNG instance opts into POST over otari's default",
+        "a SearXNG instance that sends its searches by POST",
         {"search_tools": {"local": {**_SEARXNG, "options": {"method": "post"}}}},
-        {"runner": "old"},
+        {"runner": "library"},
         requested="local",
         options={"method": "post"},
     ),
@@ -396,7 +405,7 @@ def test_a_searxng_instance_needs_no_key() -> None:
     resolved = _named(
         GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
     )
-    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("old", "", "http://searxng:8080")
+    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("library", "", "http://searxng:8080")
 
 
 @pytest.mark.parametrize(
@@ -697,6 +706,20 @@ def test_an_instances_options_that_broke_the_rules_at_load_are_dropped(caplog: p
     assert "'typo'" in _warnings(caplog)
     assert "search instance 'exa'" in _warnings(caplog)
     assert "secret-value" not in _warnings(caplog)
+
+
+def test_a_workspace_cannot_choose_searxngs_engines_or_method(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+
+    resolved = _in_loop(
+        GatewayConfig(search_tools={"local": {**_SEARXNG, "options": {"engines": "wikinews"}}}),
+        workspace={"engines": "google", "method": "post", "language": "de"},
+    )
+
+    assert dict(resolved.options) == {"engines": "wikinews", "language": "de"}
+    assert "'engines'" in _warnings(caplog)
+    assert "'method'" in _warnings(caplog)
+    assert "google" not in _warnings(caplog)
 
 
 def test_an_instance_sets_an_operator_only_option() -> None:

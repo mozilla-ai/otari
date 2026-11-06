@@ -5,6 +5,7 @@ yields a search, so the request path, the tool catalog, the Playground and the
 workspace page all ask :func:`web_search_configured` and cannot disagree.
 """
 
+import any_search
 from gateway.core.settings.tools import (
     NO_SEARCH_DEFAULT,
     SynthesizedSearchInstance,
@@ -12,6 +13,7 @@ from gateway.core.settings.tools import (
     ToolSettings,
     configured_search_default,
     dangling_reference_warnings,
+    default_api_base,
     effective_search_instances,
     synthesized_search_instance,
     warn_about_instances,
@@ -22,11 +24,11 @@ from gateway.log_config import logger
 def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchInstance | None:
     """The search backend the in-loop tool uses when no credential applies.
 
-    In order: ``web_search_default_tool`` when it names a search instance whose
-    provider any-search serves, or ``none``, which turns the deployment's own off;
+    In order: ``web_search_default_tool`` when it names a search instance
+    any-search can run, or ``none``, which turns the deployment's own off;
     else the synthesized instance while the legacy settings are present; else
-    the one search instance, when there is exactly one and any-search serves its
-    provider; else nothing. A default that names no such instance is treated as
+    the one search instance, when there is exactly one and any-search can run
+    it; else nothing. A default that names no such instance is treated as
     unset. The count in the third step includes instances any-search does not
     serve yet, so an adapter that arrives later never moves the default.
     """
@@ -34,14 +36,22 @@ def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchI
     named = configured_search_default(settings)
     if named == NO_SEARCH_DEFAULT:
         return None
-    if named is not None and (instance := instances.get(named)) is not None and instance.library_backed:
+    if named is not None and (instance := instances.get(named)) is not None and _runs(settings, instance):
         return instance
     if (synthesized := synthesized_search_instance(settings)) is not None:
         return synthesized
     if len(instances) == 1:
         (only,) = instances.values()
-        return only if only.library_backed else None
+        return only if _runs(settings, only) else None
     return None
+
+
+def _runs(settings: ToolSettings, instance: ToolInstance) -> bool:
+    """Whether any-search serves the instance's provider, with an address if it needs one."""
+    if not instance.library_backed:
+        return False
+    needs_address = any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base
+    return not needs_address or bool(instance.api_base or default_api_base(settings, instance.provider))
 
 
 def web_search_configured(settings: ToolSettings) -> bool:
@@ -85,7 +95,7 @@ def warn_about_tool_instances(settings: ToolSettings) -> None:
         logger.warning(message, value)
     named = configured_search_default(settings)
     if named != NO_SEARCH_DEFAULT and len(search) > 1 and in_loop_default(settings) is None:
-        usable = sorted(name for name, instance in search.items() if instance.library_backed)
+        usable = sorted(name for name, instance in search.items() if _runs(settings, instance))
         logger.warning(
             "There are %d search instances and no usable web_search_default_tool, so the in-loop "
             "otari_web_search tool has no default to search with. %s",

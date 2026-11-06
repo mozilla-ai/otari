@@ -2284,6 +2284,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/key/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Key Budget
+         * @description What the calling key may still spend, and every cap that decides it.
+         *
+         *     Lists the budget the key's user is on and each spend ceiling on a scope the
+         *     key bills to (the key itself, its user's memberships, its workspace and its
+         *     organization), as the budget gate counts them: recorded use plus the holds of
+         *     requests in flight. A period that has ended reads as the fresh one the next
+         *     request starts. ``remaining_usd`` is the least any cap on every provider
+         *     leaves, which is what a request can still spend before a 403. Caps shared with
+         *     the rest of the workspace or organization report only what they leave.
+         */
+        get: operations["key-get_key_budget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/key/usage/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Key Usage Series
+         * @description The calling key's own requests over time, split by one dimension.
+         *
+         *     The same series as ``GET /api/v1/usage/series``, over the rows this key wrote
+         *     alone, kept in lockstep with the summary above.
+         */
+        get: operations["key-get_key_usage_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/key/usage/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Key Usage Summary
+         * @description Spend, tokens and request volume of the calling key's own requests.
+         *
+         *     The same summary as ``GET /api/v1/usage/summary``, over the rows this key
+         *     wrote alone: the same bounded window (default last 30 days), breakdowns, tag
+         *     filters and ``group_by_tag``. Tag a request with ``metadata`` and pass
+         *     ``group_by_tag`` to read what each kind of request cost.
+         */
+        get: operations["key-get_key_usage_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys": {
         parameters: {
             query?: never;
@@ -13286,6 +13362,27 @@ export interface components {
             reasoning: string;
         };
         /**
+         * KeyBudgetPublic
+         * @description What the calling key may still spend, and every cap that decides it.
+         */
+        KeyBudgetPublic: {
+            /**
+             * Budgets Enforced
+             * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
+             */
+            budgets_enforced: boolean;
+            /**
+             * Limits
+             * @description The key's user's budget first, then each spend ceiling, the most specific first
+             */
+            limits: components["schemas"]["KeyLimitPublic"][];
+            /**
+             * Remaining Usd
+             * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
+             */
+            remaining_usd: number | null;
+        };
+        /**
          * KeyInfo
          * @description Response model for key information.
          */
@@ -13347,6 +13444,59 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /**
+         * KeyLimitPublic
+         * @description One cap a request made with the calling key has to pass.
+         *
+         *     ``used_*`` counts what the budget gate counts: recorded use plus the holds of
+         *     requests still in flight. On a cap the key shares with the rest of its
+         *     workspace or organization the limit and the use are left out, and only what
+         *     is left is reported; that still moves as the others spend.
+         */
+        KeyLimitPublic: {
+            /** Limit Requests */
+            limit_requests?: number | null;
+            /** Limit Tokens */
+            limit_tokens?: number | null;
+            /**
+             * Limit Usd
+             * @description Dollars allowed per period; null when uncapped or shared
+             */
+            limit_usd: number | null;
+            /**
+             * Provider
+             * @description The provider this cap is narrowed to, or null when it caps every one
+             */
+            provider: string | null;
+            /** Remaining Requests */
+            remaining_requests?: number | null;
+            /** Remaining Tokens */
+            remaining_tokens?: number | null;
+            /**
+             * Remaining Usd
+             * @description Dollars left this period; null when dollars are uncapped
+             */
+            remaining_usd: number | null;
+            /**
+             * Resets At
+             * @description When the period ends and use starts again from zero; null for a cap that never resets
+             */
+            resets_at: string | null;
+            /**
+             * Scope
+             * @description Where the cap sits: 'user' for the budget the key's user is on, or the scope of a spend ceiling: 'api_token', 'workspace_member', 'org_member', 'workspace' or 'organization'
+             */
+            scope: string;
+            /** Used Requests */
+            used_requests?: number | null;
+            /** Used Tokens */
+            used_tokens?: number | null;
+            /**
+             * Used Usd
+             * @description Dollars spent and held this period; null when uncapped or shared
+             */
+            used_usd: number | null;
         };
         /**
          * KnownProviderSchema
@@ -14395,6 +14545,11 @@ export interface components {
             /** Provider */
             provider: string;
             /**
+             * Slug
+             * @description The name requests reach a key with a custom base URL by, as in `<slug>:<model>`. Only such a key has one, and once set it never changes. Left out, it is made from the key's name.
+             */
+            slug?: string | null;
+            /**
              * Zero Data Retention
              * @description The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.
              * @default false
@@ -14532,6 +14687,11 @@ export interface components {
              * @description How many of the offered models have their serving switch on. A key offering models and serving none refuses every request through it until one is switched on.
              */
             serving_count: number;
+            /**
+             * Slug
+             * @description What requests name this key by, as in `<slug>:<model>`, for a key with a custom base URL. Absent for a key reached as `<provider>:<model>`.
+             */
+            slug?: string | null;
             /** Updated At */
             updated_at?: string | null;
             /**
@@ -24305,6 +24465,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvitationPreviewPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "key-get_key_budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyBudgetPublic"];
+                };
+            };
+        };
+    };
+    "key-get_key_usage_series": {
+        parameters: {
+            query: {
+                /** @description Dimension to split the series by */
+                group_by: "model" | "user_id" | "api_key_id" | "source";
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
+                source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
+                counts_toward_budget?: boolean | null;
+                /** @description Time-series granularity: 'hour' or 'day' */
+                bucket?: "hour" | "day";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageGroupedSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "key-get_key_usage_summary": {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
+                source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
+                counts_toward_budget?: boolean | null;
+                /** @description Time-series granularity: 'hour' or 'day' */
+                bucket?: "hour" | "day";
+                /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
+                dimensions?: ("model" | "user" | "api_key" | "source" | "source_label" | "endpoint" | "provider" | "status_code" | "tool" | "none")[] | null;
+                /** @description A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key. */
+                group_by_tag?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageSummary"];
                 };
             };
             /** @description Validation Error */

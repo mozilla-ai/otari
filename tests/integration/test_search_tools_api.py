@@ -35,7 +35,6 @@ from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
@@ -454,7 +453,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply", "synthetic"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -476,15 +475,14 @@ def test_search_catalog_serves_the_library_metadata(
     assert (serply["max_results"], serply["query_in_url"], serply["key_in_url"]) == (10, True, False)
 
 
-def test_searxng_keeps_its_entry_without_a_schema(
-    catalog_client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     searxng = _catalog(catalog_client, headers=master_key_header)["searxng"]
     assert searxng["requires_api_key"] is False
     assert searxng["requires_api_base"] is True
     assert searxng["default_api_base"] == _INHERITED_URL
-    # Null, not empty: its options are passed unchecked, not refused.
-    assert searxng["options"] is None
+    assert searxng["tier"] == "production"
+    operator_only = {option["name"] for option in searxng["options"] if option["operator_only"]}
+    assert operator_only == {"engines", "method"}
     assert searxng["instances"] == []
 
     assert _create(catalog_client, master_key_header).status_code == 201
@@ -613,16 +611,12 @@ def test_stored_tool_is_immediately_dispatchable(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
     """The whole point of issue #601: a dashboard-added tool serves /api/v1/search."""
-    assert _create(client, master_key_header).status_code == 201
-    outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
-    mock = AsyncMock(return_value=outcome)
-    with patch("gateway.services.search_backend.run_search", mock):
-        resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
+    hits = {"hits": [{"url": "https://example.com", "title": "Example"}]}
+    assert _create(client, master_key_header, provider="fake", api_base=None, options=hits).status_code == 201
+    resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "local"
-    dispatched = mock.call_args.args[0]
-    assert dispatched.provider == "searxng"
-    assert dispatched.api_base == "http://searxng:8080"
+    assert [result["url"] for result in resp.json()["results"]] == ["https://example.com"]
 
 
 @pytest.fixture
@@ -742,8 +736,10 @@ def test_options_are_checked_against_the_providers_schema(
     )
     assert refused.status_code == 422
     assert "option 'type' has a value the provider refuses" in refused.json()["detail"]
-    # Until any-search has its SearXNG adapter, a searxng instance's options are passed as today.
-    assert _create(client, master_key_header, options={"engines": "brave", "anything": 1}).status_code == 201
+    searxng = _create(client, master_key_header, options={"engines": "brave", "anything": 1})
+    assert searxng.status_code == 422
+    assert "option 'anything' is not one the provider knows" in searxng.json()["detail"]
+    assert _create(client, master_key_header, options={"engines": "brave"}).status_code == 201
     # Each tool's shared parameters pass for every provider, and only that tool's.
     shared = _create(client, master_key_header, name="g", provider="fake", api_base=None, options={"max_results": 3})
     assert shared.status_code == 201, shared.text
@@ -1039,7 +1035,7 @@ def test_a_library_instance_is_tested_through_the_apps_web_provider_client(
     assert [str(request.url) for request in requests] == ["https://api.exa.ai/search"]
 
 
-def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
+def test_a_searxng_instance_is_tested_through_its_adapter(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     requests: list[httpx.Request] = []
@@ -1050,7 +1046,8 @@ def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
             raise httpx.ReadTimeout("slow", request=request)
         if request.url.params["q"] == "broken":
             return httpx.Response(502, text="bad gateway")
-        return httpx.Response(200, json={"results": [{"url": "https://a.example"}, {"url": "https://b.example"}]})
+        results = [{"url": f"https://{host}.example", "title": host, "content": ""} for host in ("a", "b")]
+        return httpx.Response(200, json={"results": results, "unresponsive_engines": []})
 
     _answer_provider_calls(client, answer)
     searxng = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -1061,6 +1058,8 @@ def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
         "characters": None,
     }
     assert str(requests[0].url).startswith("http://searxng:8080/search")
+    capped = {**searxng, "options": {"max_results": 1}}
+    assert _test(client, master_key_header, query="otari", **capped).json()["hits"] == 1
     assert _test(client, master_key_header, query="broken", **searxng).json()["error"] == "http_error"
     assert _test(client, master_key_header, query="slow", **searxng).json()["error"] == "timeout"
     # A port that does not parse passes the shape check, and fails the call, not the route.

@@ -11,6 +11,7 @@ import {
 } from "@/shared/api/budgets"
 
 import { unnamedBudgetLabel } from "./budgetLabel"
+import { CountLimitFields, countToInput, parseCount } from "./CountLimitFields"
 import {
   PERIOD_OPTIONS,
   periodValue,
@@ -25,6 +26,8 @@ import {
 export interface OrganizationBudgetDraft {
   name: string | null
   max_budget: number | null
+  token_limit: number | null
+  request_limit: number | null
   budget_duration_sec: number | null
   // The generated union, not `string`: see `ResetAlignment` for why restating it
   // as a string broke the build when the endpoint narrowed the field.
@@ -83,17 +86,30 @@ export function OrganizationBudgetDialog({
   const seed = {
     name: editing?.name ?? "",
     limit: limitToInput(editing?.max_budget),
+    tokens: countToInput(editing?.token_limit),
+    requests: countToInput(editing?.request_limit),
     period: periodValue(editing),
   }
   const [name, setName] = useState(seed.name)
   const [limit, setLimit] = useState(seed.limit)
+  const [tokens, setTokens] = useState(seed.tokens)
+  const [requests, setRequests] = useState(seed.requests)
   const [period, setPeriod] = useState(seed.period)
 
   const amount = parseLimit(limit)
+  const tokenLimit = parseCount(tokens)
+  const requestLimit = parseCount(requests)
   const limitInvalid = limit.trim() !== "" && amount === undefined
+  const isBlocked = limitInvalid || !tokenLimit.isValid || !requestLimit.isValid
   // The whole draft against what it was seeded with, so what "unsaved" means
   // cannot drift from what the form holds.
-  const { isDirty } = useDirtySnapshot({ name, limit, period })
+  const { isDirty } = useDirtySnapshot({
+    name,
+    limit,
+    tokens,
+    requests,
+    period,
+  })
 
   // A duration-carrying budget (one the deployment surface created) opens on
   // "No reset", and saving would clear the duration rather than keep it. Said
@@ -108,25 +124,25 @@ export function OrganizationBudgetDialog({
   // What this budget is shown as while it has no name of its own, said on the
   // field so the admin sees the label before saving rather than after. On the
   // description rather than as the placeholder, which design/forms.md reserves
-  // for an example of what to type. The token and request caps come from the
-  // budget being edited: this form does not offer them, and a label derived
-  // without them would understate what it caps.
+  // for an example of what to type.
   const selectedPeriod = PERIOD_OPTIONS.find(
     (candidate) => candidate.value === period,
   )
   const unnamedLabel = unnamedBudgetLabel({
     max_budget: amount ?? null,
-    token_limit: editing?.token_limit ?? null,
-    request_limit: editing?.request_limit ?? null,
+    token_limit: tokenLimit.value,
+    request_limit: requestLimit.value,
     reset_alignment: selectedPeriod?.alignment ?? null,
     budget_duration_sec: null,
   })
 
   const submit = () => {
-    if (limitInvalid) return
+    if (isBlocked) return
     save({
       name: name.trim() === "" ? null : name.trim(),
       max_budget: amount ?? null,
+      token_limit: tokenLimit.value,
+      request_limit: requestLimit.value,
       // Only ever one of the two is sent with a value, because a budget resets
       // on a duration or on a boundary and the database refuses both.
       budget_duration_sec: null,
@@ -139,11 +155,11 @@ export function OrganizationBudgetDialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       title={editing ? "Edit budget" : "New budget"}
-      description="A budget is an amount and the period it is spent over. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
+      description="A budget is a set of limits and the period they apply over. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
       submitLabel={editing ? "Save budget" : "Add budget"}
       onSubmit={submit}
       isPending={create.isPending || update.isPending}
-      isSubmitDisabled={limitInvalid}
+      isSubmitDisabled={isBlocked}
       isDirty={isDirty}
       error={editing ? update.error : create.error}
     >
@@ -176,6 +192,12 @@ export function OrganizationBudgetDialog({
           label: option.label,
         }))}
         shouldReserveMessage={false}
+      />
+      <CountLimitFields
+        tokens={tokens}
+        onTokensChange={setTokens}
+        requests={requests}
+        onRequestsChange={setRequests}
       />
       {editing && editing.ceiling_count > 0 ? (
         <p className="text-sm text-muted">

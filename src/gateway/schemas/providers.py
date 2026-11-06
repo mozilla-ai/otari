@@ -38,6 +38,14 @@ class OrgProviderKeyCreateRequest(SQLModel):
 
     provider: str = Field(max_length=255)
     name: str = Field(max_length=255)
+    slug: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "The name requests reach a key with a custom base URL by, as in `<slug>:<model>`. Only such a key "
+            "has one, and once set it never changes. Left out, it is made from the key's name."
+        ),
+    )
     api_key: str | None = Field(default=None)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
@@ -67,6 +75,13 @@ class OrgProviderKeyPublic(SQLModel):
     organization_id: uuid.UUID
     provider: str
     name: str
+    slug: str | None = Field(
+        default=None,
+        description=(
+            "What requests name this key by, as in `<slug>:<model>`, for a key with a custom base URL. "
+            "Absent for a key reached as `<provider>:<model>`."
+        ),
+    )
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     last4: str | None = None
@@ -122,6 +137,7 @@ class OrgProviderKeyPublic(SQLModel):
             organization_id=key.organization_id,
             provider=key.provider,
             name=key.name,
+            slug=key.slug,
             api_base=key.api_base,
             client_args=redact_secret_like_values(key.client_args),
             last4=key.last4,

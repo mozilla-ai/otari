@@ -57,7 +57,8 @@ organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
 An API key itself reaches the inference routes, `GET /api/v1/usage/requests/{request_id}`
-for its own requests, and the catalog reads that describe the deployment rather
+for its own requests, [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own
+budget and usage, and the catalog reads that describe the deployment rather
 than act on it: `GET /api/v1/models`, `/pricing`, `/tools`, `/providers/catalog`,
 `/tool-settings/guardrails/catalog`, `/tool-settings/guardrails/profiles` and
 `/search-tools/providers`. A [service key](end-users.md) also reaches the
@@ -66,7 +67,8 @@ end-user routes. The rest of the management API, including `/api/v1/usage`,
 master key or a dashboard session cookie. A request that carries an API key is
 never read as a session, so those routes answer it `401` with
 `{"detail": "Invalid master key"}`, on otari.ai too, where a tenant has no master
-key: that part is managed in the dashboard.
+key: that part is managed in the dashboard, and an application reads what its own
+key has spent and may still spend from `/api/v1/key`.
 
 ## Core inference APIs
 
@@ -310,8 +312,9 @@ billed user and is not a tag; the provider gets an
 its place. Responses forwards `metadata`, minus
 `spend_logs_metadata`, because the Responses API stores it.
 
-The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
-their `/api/v1/organizations/me/usage` counterparts) filter by tag with a
+The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, their
+`/api/v1/organizations/me/usage` counterparts, and an API key's own
+`/api/v1/key/usage/summary` and `/series`) filter by tag with a
 repeatable `tag=key:value`. Values for the same key match any of them, and
 different keys must all match. `/summary` also takes `group_by_tag=<key>` and
 returns spend by that tag's values as `by_tag`, with untagged rows under a null
@@ -377,6 +380,56 @@ looked up by its `Otari-Request-ID`:
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
+
+### A key's own budget and usage
+
+These routes answer for the API key a request authenticates with, and take no
+parameter that names a user, a key or a workspace. The master key and a dashboard
+session get `401`: neither has a key of its own.
+
+| Route | Returns |
+|---|---|
+| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. |
+| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
+| `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
+
+```json
+{
+  "budgets_enforced": true,
+  "remaining_usd": 0.19,
+  "limits": [
+    {
+      "scope": "user",
+      "provider": null,
+      "resets_at": "2026-12-01T00:00:00Z",
+      "limit_usd": 0.5,
+      "used_usd": 0.31,
+      "remaining_usd": 0.19,
+      "limit_tokens": null,
+      "used_tokens": null,
+      "remaining_tokens": null,
+      "limit_requests": null,
+      "used_requests": null,
+      "remaining_requests": null
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request the key bills to its own user has to pass all of them. A [service key](end-users.md) request that names an end user checks that end user's budget in place of the `scope: user` entry, and that budget is not in this report; the key and member ceilings still apply. |
+| `used_*` | What the budget gate counts: recorded use plus the holds of requests still in flight. A period that has ended reads as the fresh one the next request starts. |
+| `workspace` and `organization` caps | Shared with the rest of the workspace or organization, so `limit_*` and `used_*` are `null` and only `remaining_*` is reported. `remaining_*` still falls as the others spend, so a key that reads it over time can tell how fast the team is spending. |
+| `remaining_usd` (top level) | The fewest dollars any dollar cap on every provider leaves: how much the key can spend before one of those refuses a request with `403 budget_exceeded`. A token cap, a request cap or a cap narrowed to one provider (each listed in `limits`) can refuse sooner. `null` when no dollar cap on every provider applies. |
+| `budgets_enforced` | `false`, with no limits, when the key is budget-exempt or the deployment runs with `budget_strategy: disabled`; `true` otherwise, even when no cap applies. |
+
+To read what each kind of request cost, tag requests with
+[`metadata`](#request-tags) and group the summary by that tag:
+
+```
+GET /api/v1/key/usage/summary?group_by_tag=role&dimensions=none
+```
 
 ### Retrying safely
 
@@ -576,8 +629,7 @@ tool, and restricted model access runs only a tool named by its deprecated
 | `user` | string | Who the search is billed to; see below. |
 
 Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
-`false` and `{}` pass.
+400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
 
 **Response.**
 

@@ -953,8 +953,6 @@ class OrganizationGuardrailService:
         except UnsafeURLError as exc:
             raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc
         except GuardrailsNotReachableError as exc:
-            # Not the message: it can quote the service's result, which may echo
-            # the text or the arguments sent, credentials included.
             reason = type(exc.__cause__ or exc).__name__
             logger.warning("Testing organization guardrail %s failed: %s", profile, reason)
             raise OrganizationGuardrailCheckFailedError() from exc
