@@ -26,6 +26,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.api_keys import APIKey
+from gateway.models.budgets import RESERVATION_ACTIVE, Budget, BudgetReservation
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
 from gateway.models.usage import UsageLog
@@ -452,14 +454,24 @@ def test_a_hosted_upstream_the_workspace_may_not_use_is_refused_as_such_not_as_u
 def test_a_failure_of_the_gates_hosted_lookup_that_is_no_refusal_propagates(
     strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only the refusals the hosted dispatch answers for are deferred; any other error is raised, as from any read."""
+    """Only the refusals the hosted dispatch answers for are deferred; any other error is raised, its hold refunded."""
     master = {API_KEY_HEADER: "Bearer test-master-key"}
     tenant, _workspace_id = _keyless_tenant(strict_client, master, db_session_factory, slug="gus")
     _hosted_speech(strict_client, master, tenant, monkeypatch)
     headers = _api_key(strict_client, tenant)
+    # A request-capped budget on the key's user, so the reservation holds one request even at a zero estimate.
+    with db_session_factory() as db:
+        user_id = db.scalar(select(APIKey.user_id).where(APIKey.key_name == "carol key"))
+        assert user_id is not None
+        db.add(Budget(budget_id="gus-requests", max_budget=None, request_limit=10))
+        user = db.get(BillingUser, user_id)
+        assert user is not None
+        user.budget_id = "gus-requests"
+        db.commit()
     broken = AsyncMock(side_effect=RuntimeError("the lookup broke"))
 
     with (
+        held_reservations() as held,
         patch("gateway.api.routes._passthrough.serve_on_hosted_provider", new=broken),
         patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")) as provider,
         pytest.raises(RuntimeError, match="the lookup broke"),
@@ -472,6 +484,19 @@ def test_a_failure_of_the_gates_hosted_lookup_that_is_no_refusal_propagates(
 
     broken.assert_awaited_once()
     provider.assert_not_called()
+    assert held == [Decimal(0)]
+    with db_session_factory() as db:
+        user = db.get(BillingUser, user_id)
+        assert user is not None
+        assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(BudgetReservation)
+                .where(BudgetReservation.user_id == user_id, BudgetReservation.status == RESERVATION_ACTIVE)
+            )
+            == 0
+        )
 
 
 def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pricing(

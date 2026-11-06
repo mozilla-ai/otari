@@ -641,7 +641,7 @@ async def run_passthrough(
         judges that rate again, and answers for the refusals the lookup raises
         (an upstream the workspace may not use, a country not served, an
         upstream any-llm lacks), so those are left to it. Anything else, a
-        database error among them, propagates as it does from any read here.
+        database error among them, propagates once the gate has refunded the hold.
         """
         if not lookup_pricing:
             return None
@@ -794,6 +794,16 @@ async def run_passthrough(
                 # the refusal with the status it owes and the refund, where a
                 # refusal over pricing would name the wrong cause.
                 pricing_refusal_deferred = True
+            except asyncio.CancelledError:
+                await refund_reservation(db, reservation)
+                raise
+            except Exception:
+                # As on the reserve-first branch above: a failed read leaves the
+                # session needing a rollback, without which the refund's own
+                # UPDATE raises PendingRollbackError and the hold leaks.
+                await db.rollback()
+                await refund_reservation(db, reservation)
+                raise
             else:
                 if not _can_price(hosted_rate, billing):
                     raise await _refuse_unpriced(resolved, reservation, pricing)
