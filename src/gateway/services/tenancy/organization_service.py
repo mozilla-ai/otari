@@ -1050,7 +1050,9 @@ class OrganizationService:
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=updated),
         )
 
-    async def delete_active_organization_for_user(self, *, user: User) -> OrganizationMembershipContextPublic:
+    async def delete_active_organization_for_user(
+        self, *, user: User, sso_enforcement: SsoEnforcement
+    ) -> OrganizationMembershipContextPublic:
         """Delete the caller's organization, if nothing has been recorded against it, and move them out.
 
         Owners and admins only. Three refusals: the deployment's default
@@ -1097,7 +1099,9 @@ class OrganizationService:
                         moves.setdefault(elsewhere.get(pointed_id, fallback_id), []).append(pointed_id)
                 for target_id, user_ids in moves.items():
                     await self.users.move_active_organization(user_ids, target_id)
+                    await sso_enforcement.revoke_refused_sessions(organization_id=target_id, user_ids=user_ids)
                 await self.users.set_active_organization(user, destination_id)
+                await sso_enforcement.revoke_refused_sessions(organization_id=destination_id, user_ids=[user.id])
 
                 for workspace_id in workspace_ids:
                     member_ids = await self.workspaces.ids_for_workspace(workspace_id)

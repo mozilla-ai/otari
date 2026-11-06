@@ -175,6 +175,7 @@ async def update_active_organization(
 async def delete_active_organization(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Delete the caller's active organization, if it has no usage, and move the caller out of it.
 
@@ -187,7 +188,7 @@ async def delete_active_organization(
     Answers with the caller's context in the organization they are moved to,
     their oldest other one.
     """
-    return await service.delete_active_organization_for_user(user=current_identity)
+    return await service.delete_active_organization_for_user(user=current_identity, sso_enforcement=connections)
 
 
 @router.get("/me/memberships")

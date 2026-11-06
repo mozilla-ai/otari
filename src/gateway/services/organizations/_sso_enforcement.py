@@ -1,5 +1,7 @@
 """Whether some organization a person belongs to admits them only through its own connection."""
 
+import uuid
+from collections.abc import Collection
 from typing import Protocol
 
 from gateway.models.tenancy import Organization, User
@@ -18,4 +20,12 @@ class SsoEnforcement(Protocol):
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own enforcement refuses ``user`` from acting in it."""
+        ...
+
+    async def revoke_refused_sessions(self, *, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
+        """End the live session of every listed account the organization refuses.
+
+        NOTE: A caller that points an account at an organization owes this call, because nothing on
+        the read path refuses a live session.
+        """
         ...
