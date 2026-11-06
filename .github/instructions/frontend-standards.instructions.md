@@ -236,6 +236,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    card list or its own horizontal scroll below `md`. See
    [responsiveness.md](../skills/frontend-standards/responsiveness.md).
 
+   **Every modal, drawer and sheet shows a close X at every width, desktop included.** Flag
+   one that has none, one hidden at a breakpoint (`hidden max-sm:flex`), or a text "Close"
+   button in its place; a footer Cancel does not count. The exception is a frame with
+   `isDismissable={false}` whose footer action is its named way out (Skip, "I've saved this
+   key"). See [overlays.md](../../web/design/overlays.md).
+
 10. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
     query the way a user would (`getByRole`/`getByLabelText`/`getByText`, not `getByTestId`),
     render real providers, and mock only the network boundary, not the hooks. Two forms reach

@@ -56,6 +56,7 @@ Dialog: { isOpen, onOpenChange, title, description?, size = "md",
   mark?, isAnnouncement?, isScanning?, scanTone = "accent" | "danger",
   isDismissable = true, status?, footerStart?, actions?, children }
 DialogSection: { className?, children }
+DialogClose: { onPress, isDisabled? }
 ErrorBoundary: { children, resetKey? }
 ```
 

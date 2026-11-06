@@ -35,31 +35,35 @@ describe("ConfirmDialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
-  it("cancels via onOpenChange(false) and does not confirm", async () => {
-    const onConfirm = vi.fn()
-    const onOpenChange = vi.fn()
-    const user = userEvent.setup()
-    render(
-      <ConfirmDialog
-        {...base}
-        isOpen
-        onConfirm={onConfirm}
-        onOpenChange={onOpenChange}
-      />,
-    )
-    await user.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-    expect(onConfirm).not.toHaveBeenCalled()
-  })
+  it.each(["Cancel", "Close"])(
+    "%s calls onOpenChange(false) and does not confirm",
+    async (name) => {
+      const onConfirm = vi.fn()
+      const onOpenChange = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <ConfirmDialog
+          {...base}
+          isOpen
+          onConfirm={onConfirm}
+          onOpenChange={onOpenChange}
+        />,
+      )
+      await user.click(screen.getByRole("button", { name }))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+      expect(onConfirm).not.toHaveBeenCalled()
+    },
+  )
 
   it("renders a mutation error", () => {
     render(<ConfirmDialog {...base} isOpen error={new Error("boom")} />)
     expect(screen.getByRole("alertdialog")).toHaveTextContent("boom")
   })
 
-  it("disables Cancel while pending so the op can't be abandoned mid-flight", () => {
+  it("disables Cancel and Close while pending so the op can't be abandoned mid-flight", () => {
     render(<ConfirmDialog {...base} isOpen isPending />)
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Close" })).toBeDisabled()
   })
 
   it("holds the confirm back while it is disabled, leaving Cancel live", async () => {

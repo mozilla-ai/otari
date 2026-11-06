@@ -159,3 +159,11 @@ the discard. And a frame whose only dismissal is recorded on the server: the
 first-run sheet retires on Skip and nothing else, so an Escape that put it away
 for one page load would come back on the next one and read as a dismissal that
 did not take. A frame with neither reason keeps its Escape.
+
+**Every modal frame shows an X at its top right, at every width.** Escape and
+the backdrop are not a visible way out, and a touch screen has neither. All
+three dialogs draw it with `DialogClose` (exported beside `DialogSection`), and a
+drawer draws it as an `IconButton` labeled "Close", never as a text button. A
+Cancel in the footer does not replace it. The one frame without it is one that
+cannot be dismissed, whose footer already names its way out (Skip, or "I've
+saved this key"); a frame with such a button has no need of a second.

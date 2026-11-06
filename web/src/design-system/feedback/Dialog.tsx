@@ -42,6 +42,35 @@ export function DialogSection({
   )
 }
 
+/**
+ * The X at the head of every modal frame, at every width.
+ *
+ * `isIconOnly` at `sm` is what makes this a 32px square with no edge: the rule
+ * that drops a ghost's border is keyed on the control being icon-only. Lifted
+ * 4px to center on the title's own line rather than on the header block, with
+ * the 44px target bled outward so raising it moves no layout.
+ */
+export function DialogClose({
+  onPress,
+  isDisabled = false,
+}: {
+  onPress: () => void
+  isDisabled?: boolean
+}) {
+  return (
+    <Button
+      aria-label="Close"
+      isIconOnly
+      size="sm"
+      className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
+      isDisabled={isDisabled}
+      onPress={onPress}
+    >
+      <FiX aria-hidden className="text-muted size-3.5" />
+    </Button>
+  )
+}
+
 export interface DialogProps {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
@@ -199,15 +228,7 @@ export function Dialog({
               {/* Absent rather than dead when the frame cannot be dismissed: the
                   footer's action is the way out in that case. */}
               {isDismissable ? (
-                <Button
-                  aria-label="Close"
-                  isIconOnly
-                  size="sm"
-                  className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
-                  onPress={() => onOpenChange(false)}
-                >
-                  <FiX aria-hidden className="text-muted size-4" />
-                </Button>
+                <DialogClose onPress={() => onOpenChange(false)} />
               ) : null}
             </header>
             {/* `min-h-0` is what lets this scroll rather than push the footer

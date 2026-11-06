@@ -3,7 +3,7 @@ import { FiCheck } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 import { CodeBlock } from "../content/CodeBlock"
-import { Dialog, DialogSection } from "./Dialog"
+import { Dialog, DialogClose, DialogSection } from "./Dialog"
 import { InfoBanner } from "./InfoBanner"
 
 const meta = {
@@ -173,3 +173,17 @@ export const Undismissable: Story = {
 /** The two narrower steps, for reference. */
 export const Small: Story = { args: { ...Default.args, size: "sm" } }
 export const Medium: Story = { args: { ...Default.args, size: "md" } }
+
+/**
+ * The X on its own, as every modal frame draws it, and refused while the frame
+ * is busy.
+ */
+export const Close: Story = {
+  parameters: { layout: "centered" },
+  render: () => (
+    <div className="flex items-center gap-4">
+      <DialogClose onPress={() => {}} />
+      <DialogClose onPress={() => {}} isDisabled />
+    </div>
+  ),
+}

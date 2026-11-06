@@ -54,6 +54,7 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
   const field = dialog.getByRole("textbox", { name: "Feedback" })
   await expect(field).toBeFocused()
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible()
   await field.fill(MESSAGE)
   await field.press("ControlOrMeta+Enter")
   await expect(dialog.getByRole("alert")).toHaveText(

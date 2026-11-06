@@ -376,6 +376,9 @@ describe("ModelDetailPage", () => {
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
       ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
+
+    await user.click(within(drawer).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(drawer).not.toBeInTheDocument())
   })
 
   it("lets the selector in the drawer's header be copied and highlighted", async () => {

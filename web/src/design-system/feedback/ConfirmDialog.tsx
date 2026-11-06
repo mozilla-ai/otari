@@ -1,6 +1,7 @@
 import { AlertDialog, Button } from "@heroui/react"
 import type { ReactNode } from "react"
 
+import { DialogClose } from "./Dialog"
 import { ErrorBanner } from "./ErrorBanner"
 
 // A controlled confirm dialog for destructive bulk actions (delete a set of
@@ -45,7 +46,13 @@ export function ConfirmDialog({
           <AlertDialog.Container placement="center" size="md">
             <AlertDialog.Dialog>
               <AlertDialog.Header>
-                <AlertDialog.Heading>{heading}</AlertDialog.Heading>
+                <div className="flex items-start justify-between gap-4">
+                  <AlertDialog.Heading>{heading}</AlertDialog.Heading>
+                  <DialogClose
+                    isDisabled={isPending}
+                    onPress={() => onOpenChange(false)}
+                  />
+                </div>
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
                 <div className="text-sm text-muted">{body}</div>

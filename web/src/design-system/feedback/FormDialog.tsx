@@ -7,9 +7,9 @@ import {
   useRef,
   useState,
 } from "react"
-import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
+import { DialogClose } from "./Dialog"
 import { ErrorBanner } from "./ErrorBanner"
 import { useDirtyGuard } from "./useDirtyGuard"
 
@@ -228,27 +228,11 @@ export function FormDialog({
                   </p>
                 ) : null}
               </div>
-              {/* `isIconOnly` at `sm` is what makes this a 32px square with no
-                  edge: the rule that drops a ghost's border is keyed on the
-                  control being icon-only, so a `border-0` here would be a call
-                  site trying to remember something the system already knows.
-                  Lifted 4px to center on the title's own line rather than on
-                  the header block, with the 44px target bled outward so
-                  raising it moves no layout. */}
               {/* Absent rather than dead when the dialog cannot be dismissed:
                   a close control that refuses is worse than none, and the
                   footer's one action is the way out in that case. */}
               {isDismissable ? (
-                <Button
-                  aria-label="Close"
-                  isIconOnly
-                  size="sm"
-                  className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
-                  isDisabled={isPending}
-                  onPress={requestClose}
-                >
-                  <FiX aria-hidden className="text-muted size-3.5" />
-                </Button>
+                <DialogClose isDisabled={isPending} onPress={requestClose} />
               ) : null}
             </header>
             {tabs ? (
