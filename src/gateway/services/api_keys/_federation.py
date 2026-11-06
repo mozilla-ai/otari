@@ -38,7 +38,11 @@ from apron_auth.workload import WorkloadTokenVerifier
 
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.models.api_keys import APIKeyFederationRule
-from gateway.services.web_retrieval_network import CheckedFederationTransport
+from gateway.services.web_retrieval_network import (
+    MAX_FEDERATION_FETCH_BYTES,
+    BoundedFederationTransport,
+    CheckedFederationTransport,
+)
 
 MAX_TOKEN_BYTES = 16 * 1024
 # A token with longer than this left before its ``exp`` is refused: platform identity tokens last an hour, so a
@@ -111,13 +115,20 @@ def unverified_issuer(token: str) -> str | None:
 TransportFactory = Callable[[str], httpx.AsyncBaseTransport]
 
 
+def _bounded_transport_factory(factory: TransportFactory) -> TransportFactory:
+    """Wrap ``factory`` so every transport it returns also enforces the shared byte ceiling."""
+    return lambda url: BoundedFederationTransport(factory(url), max_bytes=MAX_FEDERATION_FETCH_BYTES)
+
+
 class FederatedTokenVerifier:
     """Verify identity tokens from the allow-listed issuers, one apron-auth verifier per issuer.
 
     One per app, because each verifier caches its issuer's signing keys. With ``member_issuers``, a token may also
     come from the issuer a member's rule names, verified by a verifier built on its first use; its keys are always
     fetched under the outbound checks with private hosts refused, whatever ``allow_private_hosts`` says, since a
-    member chose the URL. ``transport_factory`` replaces the outbound checks, for tests only.
+    member chose the URL. Every key set fetch is also capped at ``MAX_FEDERATION_FETCH_BYTES``, so a hostile or
+    oversized issuer cannot exhaust memory. ``transport_factory`` replaces the outbound checks beneath that cap,
+    for tests only.
 
     ``audiences`` is the set this deployment answers to and it is this verifier's own policy, so no caller passes
     one in. An empty set is refused at construction, so a deployment cannot admit a token minted for another
@@ -142,9 +153,11 @@ class FederatedTokenVerifier:
         self.allow_private_hosts = allow_private_hosts
         self.member_issuers = member_issuers
         self._clock = clock
-        self._member_factory = transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=False))
-        factory = transport_factory or (
-            lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
+        self._member_factory = _bounded_transport_factory(
+            transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=False))
+        )
+        factory = _bounded_transport_factory(
+            transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts))
         )
         self._by_issuer: dict[str, WorkloadTokenVerifier | None] = {}
         for entry in self.issuers:

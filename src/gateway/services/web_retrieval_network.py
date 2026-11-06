@@ -37,6 +37,8 @@ from gateway.services.web_retrieval_policy import (
 PINNED_TARGET_EXTENSION = "otari.validated_target"
 MAX_WEB_REDIRECTS = 5
 MAX_DECODED_BODY_BYTES = 5 * 1024 * 1024
+# A federation configuration document or key set is a few kilobytes, so this is generous.
+MAX_FEDERATION_FETCH_BYTES = 256 * 1024
 NETWORK_DEADLINE_SECONDS = 5.0
 MAX_PINNED_POOLS = 100
 _MAX_DECODE_CHUNK_BYTES = 64 * 1024
@@ -572,6 +574,78 @@ class CheckedFederationTransport(httpx.AsyncBaseTransport):
             extensions={**request.extensions, PINNED_TARGET_EXTENSION: target},
         )
         return await self._transport.handle_async_request(pinned)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+class FederationResponseTooLargeError(httpx.TransportError):
+    """A transport error, so an issuer serving an oversized response reads as one that cannot be reached."""
+
+
+class FederationResponseEncodedError(httpx.TransportError):
+    """A declared content encoding is refused, because a ceiling above a decoder bounds its output and not the wire."""
+
+
+class CappedFederationStream(httpx.AsyncByteStream):
+    """Stop iterating a federation response body once it passes the configured byte ceiling.
+
+    The ceiling bounds what is read, not what was read: a chunk that would
+    cross it is never retained, so a response that never stops streaming
+    cannot be buffered into memory first and rejected after.
+    """
+
+    def __init__(self, stream: httpx.AsyncByteStream, *, max_bytes: int) -> None:
+        self._stream = stream
+        self._max_bytes = max_bytes
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        read = 0
+        async for chunk in self._stream:
+            read += len(chunk)
+            if read > self._max_bytes:
+                raise FederationResponseTooLargeError("federation response exceeds the configured byte ceiling")
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+class BoundedFederationTransport(httpx.AsyncBaseTransport):
+    """Wrap a transport so the federation response it returns is capped in size as it streams.
+
+    The request asks for an uncompressed body and the response is refused if it declares an
+    encoding anyway, so the byte ceiling below bounds the response itself and not a decoder's
+    unbounded output: a compressed reply would otherwise grow past the ceiling after decoding
+    while the capped bytes on the wire stayed well inside it.
+    """
+
+    def __init__(self, transport: httpx.AsyncBaseTransport, *, max_bytes: int) -> None:
+        self._transport = transport
+        self._max_bytes = max_bytes
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        headers = request.headers.copy()
+        headers["accept-encoding"] = "identity"
+        uncompressed_request = httpx.Request(
+            request.method,
+            request.url,
+            headers=headers,
+            stream=request.stream,
+            extensions=request.extensions,
+        )
+        response = await self._transport.handle_async_request(uncompressed_request)
+        encoding = response.headers.get("content-encoding", "identity").strip().lower()
+        if encoding not in ("", "identity"):
+            raise FederationResponseEncodedError("federation response declares a content encoding other than identity")
+        if not isinstance(response.stream, httpx.AsyncByteStream):
+            raise httpx.TransportError("federation transport returned a synchronous stream")
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=response.headers,
+            stream=CappedFederationStream(response.stream, max_bytes=self._max_bytes),
+            extensions=response.extensions,
+        )
 
     async def aclose(self) -> None:
         await self._transport.aclose()
