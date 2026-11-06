@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 
 def _is_blank(value: Any) -> bool:
+    """Whether a dumped field holds nothing: None, an empty string, list or dict."""
     return value is None or value == "" or value == [] or value == {}
 
 

@@ -994,6 +994,7 @@ def _usage_on_empty_choice_chunk(usage: CompletionUsage) -> ChatCompletionChunk:
 
 
 def _round_end(finish: _FinishReason, usage: CompletionUsage, *, trailing: bool | str) -> list[ChatCompletionChunk]:
+    """The chunks that end one round: finish and usage together, or usage on a trailing chunk of the given shape."""
     if trailing == "empty-choice":
         return [_chunk(finish=finish), _usage_on_empty_choice_chunk(usage)]
     if trailing:
