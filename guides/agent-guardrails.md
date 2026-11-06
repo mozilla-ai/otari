@@ -49,7 +49,7 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 ```
 
 A source checkout's virtualenv carries the same command. See
-[cli/README.md](https://github.com/mozilla-ai/otari/blob/2f8456fe25df38d39ace15d3b2cf79fb5c9a9fd3/cli/README.md) for the rest of that distribution.
+[cli/README.md](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -329,9 +329,9 @@ To run it on every pull request:
    the pull request's own code.
 
 Otari's own repository does this in
-[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/2f8456fe25df38d39ace15d3b2cf79fb5c9a9fd3/.github/workflows/otari-guardrails-check.yml)
+[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/.github/workflows/otari-guardrails-check.yml)
 and
-[`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/2f8456fe25df38d39ace15d3b2cf79fb5c9a9fd3/.github/workflows/otari-guardrails-judges.yml).
+[`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/e2eebfa0243e6f184a751cc793f5c7f030baeab2/.github/workflows/otari-guardrails-judges.yml).
 
 ## Reporting to Otari
 
@@ -410,9 +410,9 @@ directory, in the same two shapes a repository uses:
 ```
 
 `otari hook` composes these with the repository's own files. Your gates apply in
-every repository where the hook runs, nobody else gets them, and a repository
-cannot turn them off. Their IDs gain a `user:` prefix; how the two sets compose,
-and what happens when one side fails to load, is under
+every repository where the hook runs, nobody else gets them, and a repository's
+guardrail files cannot turn them off. Their IDs gain a `user:` prefix; how the
+two sets compose, and what happens when one side fails to load, is under
 [Composing several files](https://docs.otari.ai/reference/agent-guardrails/agent-guardrails-reference#composing-several-files).
 
 1. Write the gates as you would in a repository. A `verifier` gate names its
@@ -428,6 +428,31 @@ and what happens when one side fails to load, is under
 
 `otari guardrails check` leaves your files out, so a CI check reads the same on
 every machine.
+
+### Turning your own gates off in one repository
+
+Your rules may not suit one repository, a client's with its own conventions for
+example. Register the hook there with `--repo-only`:
+
+```bash
+otari hook setup --repo-only
+```
+
+That writes `otari hook --harness claude-code --repo-only` into that
+repository's `.claude/settings.local.json`, so the hook enforces that
+repository's guardrail alone and leaves `~/.otari/` out there. `otari
+guardrails validate --repo-only` shows the same set, so a dry run agrees with
+the hook.
+
+Pass the flag to `setup` rather than editing the settings file: a later `setup`
+run rewrites the registered command and would drop a flag added by hand.
+
+If `~/.claude/settings.json` also registers the hook for every repository (see
+below), that registration carries no `--repo-only` of its own and still
+enforces your gates in this repository too. `setup --repo-only` warns when it
+finds one. Adding the flag there turns your own gates off in every repository
+that entry covers, so to keep them elsewhere remove that entry and register the
+hook in each repository you want it in instead.
 
 ### Running your guardrail in every repository
 
