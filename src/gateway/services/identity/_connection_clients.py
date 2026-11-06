@@ -7,9 +7,11 @@ here, the same as during discovery, goes through the checked federation transpor
 """
 
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 
+import httpx
 from apron_auth import (
     INVALID_CLIENT,
     UNAUTHORIZED_CLIENT,
@@ -30,7 +32,11 @@ from gateway.models.identity import OIDCConnection, oidc_flow_provider
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.oauth_service import DatabaseStateStore, pending_flow_provider, provider_refused_the_code
 from gateway.services.secret_box import decrypt_secret
-from gateway.services.web_retrieval_network import CheckedFederationTransport
+from gateway.services.web_retrieval_network import (
+    MAX_FEDERATION_FETCH_BYTES,
+    BoundedFederationTransport,
+    CheckedFederationTransport,
+)
 
 # Requested beyond the ``openid`` scope every preset merges in, for the display fields apron-auth's
 # generic OIDC identity handler fills from the ID token and userinfo.
@@ -48,6 +54,22 @@ _handler_cache: OrderedDict[tuple[str, datetime], IdentityHandler] = OrderedDict
 _PROBE_STATE = "connection-credential-check"
 _PROBE_CODE = "connection-credential-check"
 _CREDENTIAL_REFUSAL_CODES = frozenset({INVALID_CLIENT, UNAUTHORIZED_CLIENT})
+
+
+def _transport_factory_for(*, allow_private_hosts: bool) -> Callable[[str], httpx.AsyncBaseTransport]:
+    """The ``transport_factory`` every apron-auth call for a connection is built with.
+
+    One transport for every URL the library fetches, so the outbound checks and the byte ceiling
+    apply to the token endpoint, the signing key set and the userinfo document alike.
+    """
+
+    def factory(_url: str) -> httpx.AsyncBaseTransport:
+        return BoundedFederationTransport(
+            CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+            max_bytes=MAX_FEDERATION_FETCH_BYTES,
+        )
+
+    return factory
 
 
 class ConnectionCredentialCheck(StrEnum):
@@ -75,7 +97,7 @@ def identity_handler_for(metadata: DiscoveredProvider, *, allow_private_hosts: b
         return cached
     handler = oidc.identity_handler(
         ServerMetadata.model_validate(metadata.document),
-        transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+        transport_factory=_transport_factory_for(allow_private_hosts=allow_private_hosts),
     )
     _handler_cache[key] = handler
     if len(_handler_cache) > _HANDLER_CACHE_MAX:
@@ -129,7 +151,7 @@ def client_for(
         config,
         state_store,
         identity_handler=handler,
-        transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+        transport_factory=_transport_factory_for(allow_private_hosts=allow_private_hosts),
     )
 
 
@@ -152,9 +174,7 @@ async def check_connection_credentials(
     the token endpoint at all.
     """
     config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
-    client = OAuthClient(
-        config, transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
-    )
+    client = OAuthClient(config, transport_factory=_transport_factory_for(allow_private_hosts=allow_private_hosts))
     pending = PendingState(
         state=_PROBE_STATE,
         redirect_uri=redirect_uri,
