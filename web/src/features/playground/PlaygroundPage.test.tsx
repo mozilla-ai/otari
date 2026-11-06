@@ -620,9 +620,15 @@ describe("sending a question", () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("Try a prompt.")
-    const conversationIds = () =>
-      stream.mock.calls.map((call) =>
-        new Headers(call[1]?.headers).get("Otari-Conversation-Id"),
+    // Each request's conversation id, by the model it was sent to.
+    const conversationIds = (from: number) =>
+      Object.fromEntries(
+        stream.mock.calls
+          .slice(from)
+          .map((call) => [
+            JSON.parse(String(call[1]?.body)).model,
+            new Headers(call[1]?.headers).get("Otari-Conversation-Id"),
+          ]),
       )
     const pickB = async (model: string) => {
       await user.click(screen.getByRole("button", { name: "Model B" }))
@@ -639,15 +645,60 @@ describe("sending a question", () => {
     await pickB("claude-sonnet-4")
     await send("first")
     await waitFor(() => expect(stream).toHaveBeenCalledTimes(2))
-    const before = conversationIds()
+    const before = conversationIds(0)
 
     await pickB("gemini-2.5-pro")
     await send("second")
     await waitFor(() => expect(stream).toHaveBeenCalledTimes(4))
+    const after = conversationIds(2)
 
-    // A keeps its session; only B, whose model changed, starts a new one.
-    const after = conversationIds().slice(2)
-    expect(after.filter((id) => before.includes(id))).toHaveLength(1)
+    expect(before["gpt-4o"]).toMatch(/^playground-/)
+    expect(after["gpt-4o"]).toBe(before["gpt-4o"])
+    expect(after["gemini-2.5-pro"]).toMatch(/^playground-/)
+    expect(after["gemini-2.5-pro"]).not.toBe(before["claude-sonnet-4"])
+  })
+
+  it("stops a compared reply in flight before changing a column's model", async () => {
+    mockApi({
+      catalog: catalogResponse([
+        ...CATALOG.models,
+        catalogModelSummary({
+          id: "gemini-2.5-pro",
+          vendor: "Google",
+          selector: "gemini-2.5-pro",
+          selectors: ["gemini:gemini-2.5-pro"],
+        }),
+      ]),
+    })
+    const stream = openStream()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(
+      await screen.findByRole("button", { name: /^claude-sonnet-4/ }),
+    )
+    await user.type(screen.getByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await stream.push(delta("mid-flight"))
+    await screen.findByText("mid-flight")
+
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(
+      await screen.findByRole("button", { name: /^gemini-2.5-pro/ }),
+    )
+    // Delivered after the change: a live stream would fold it into a column.
+    await stream.push(delta("late"))
+    await stream.close()
+
+    expect(screen.queryByText(/late/)).not.toBeInTheDocument()
+    expect(
+      within(
+        screen.getByRole("region", { name: "Model B response" }),
+      ).queryByText(/mid-flight/),
+    ).not.toBeInTheDocument()
   })
 
   it("offers no prompt capture where the deployment keeps no content", async () => {
