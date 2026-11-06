@@ -10,3 +10,9 @@ require_pricing: false
 # Lets a member give their own key a federation rule, which the workload
 # identity spec does through the dashboard.
 federation_member_rules: true
+# The docs project (e2e/docs) captures the Tools pages, whose controls are all
+# disabled on a deployment with no search backend, fetcher or sandbox. `.invalid`
+# never resolves, so nothing is ever reached; no spec runs a tool.
+web_search_url: "http://search.invalid"
+web_fetch_enabled: true
+sandbox_url: "http://sandbox.invalid"

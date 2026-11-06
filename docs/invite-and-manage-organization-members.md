@@ -18,6 +18,8 @@ each person can use, so everyone sees only what their work needs.
    email goes out, the dialog shows an accept link to share with them. The
    membership becomes active once they accept it.
 
+![The Invite member dialog, with two addresses, the Admin role and one workspace chosen.](assets/screenshots/invite-member.png)
+
 ## Manage existing members
 
 On **Members & roles**, owners and admins can change a member's role, change
