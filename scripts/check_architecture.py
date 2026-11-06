@@ -1425,7 +1425,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
-        "baseline": (),
+        "baseline": ("gateway/repositories/tenancy/organization_member_repository.py",),
     },
     "gateway.models.identity.OIDCConnection": {
         "repository": "gateway/repositories/identity/oidc_connection_repository.py",

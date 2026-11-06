@@ -17524,6 +17524,83 @@
         "title": "OrganizationSsoEnforcementRequest",
         "type": "object"
       },
+      "OrganizationSsoPreflightMemberPublic": {
+        "description": "One active member who holds no sign-in link to the caller's organization's own connection.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's sign-in address, or null for an identity with none.",
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's display name, or null when none is set.",
+            "title": "Full Name"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "full_name"
+        ],
+        "title": "OrganizationSsoPreflightMemberPublic",
+        "type": "object"
+      },
+      "OrganizationSsoPreflightPublic": {
+        "description": "What requiring sign-in through the caller's organization's own connection would cost today.\n\n``affected_count`` is exact: every active member holding no sign-in link to this connection, who\nwould get a new account the first time they use it. ``affected_members`` samples those people,\nbounded in size; ``affected_members_truncated`` says whether the sample leaves any out.",
+        "properties": {
+          "affected_count": {
+            "description": "How many active members hold no sign-in link to this connection.",
+            "title": "Affected Count",
+            "type": "integer"
+          },
+          "affected_members": {
+            "description": "A sample of the affected members, for recognizing who they are.",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSsoPreflightMemberPublic"
+            },
+            "title": "Affected Members",
+            "type": "array"
+          },
+          "affected_members_truncated": {
+            "description": "Whether affected_members leaves out some of the members affected_count counts.",
+            "title": "Affected Members Truncated",
+            "type": "boolean"
+          },
+          "total_members": {
+            "description": "The organization's active membership count.",
+            "title": "Total Members",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_members",
+          "affected_count",
+          "affected_members",
+          "affected_members_truncated"
+        ],
+        "title": "OrganizationSsoPreflightPublic",
+        "type": "object"
+      },
       "OrganizationSsoPublic": {
         "description": "An organization's own OIDC connection, and what to register at the provider.",
         "properties": {
@@ -43872,6 +43949,81 @@
           }
         ],
         "summary": "Put Organization Sso Enforcement",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/links/{user_id}": {
+      "delete": {
+        "description": "Remove a member's own sign-in link at the caller's organization's connection. Owners and admins only.\n\nRefused with 404 for a member with no such link, including a user ID outside the caller's\norganization.",
+        "operationId": "organization-sso-delete_organization_sso_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Sso Link",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/preflight": {
+      "get": {
+        "description": "Report who requiring sign-in through the caller's organization's own connection would affect.\n\nOwners and admins only. Refused with 404 when the organization has not configured a connection yet.",
+        "operationId": "organization-sso-get_organization_sso_preflight",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPreflightPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Sso Preflight",
         "tags": [
           "organization-sso"
         ]

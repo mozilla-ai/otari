@@ -31,6 +31,7 @@ from gateway.repositories.tenancy.organization_domain_repository import Organiza
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.mail import Mailer
+from gateway.services.organizations import OrganizationClaimedDomains
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -67,7 +68,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         uow,
         IdentityRepositories.on(uow),
         organizations=OrganizationService(db, membership_listener=None),
-        domains=OrganizationDomainRepository(uow),
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=False,
     )
 

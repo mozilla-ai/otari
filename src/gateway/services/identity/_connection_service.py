@@ -17,10 +17,21 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDC_PROVIDER_PREFIX, OIDCConnection
+from gateway.models.identity import (
+    MAX_OIDC_ISSUER_LENGTH,
+    OIDC_PROVIDER_PREFIX,
+    OIDCConnection,
+    oidc_identity_provider,
+)
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
 from gateway.repositories.identity import IdentityRepositories
-from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
+from gateway.schemas.identity import (
+    OIDCConnectionDomain,
+    OIDCConnectionPublic,
+    OIDCConnectionRequest,
+    OrganizationSsoPreflightMemberPublic,
+    OrganizationSsoPreflightPublic,
+)
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
 from gateway.services.identity._enforcement import (
@@ -31,6 +42,10 @@ from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
 from gateway.services.tenancy import OrganizationService, sso_blocks_membership
+
+# The preflight count is exact; the member list is a sample, so a large organization's
+# response stays small enough for the dashboard to render in one page.
+_PREFLIGHT_SAMPLE_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -346,6 +361,42 @@ class OIDCConnectionService:
                 return
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
+
+    async def preflight_sso_enforcement_for_user(self, *, user: User) -> OrganizationSsoPreflightPublic:
+        """Report who the caller's organization's sign-in enforcement would affect. Owners and admins only.
+
+        An active member is affected when they hold no sign-in link to the connection: they would
+        get a new account the first time they use it, and any API key on their current account
+        would stay there rather than moving.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                raise OIDCConnectionNotFoundError
+            provider = oidc_identity_provider(connection.resolved_issuer)
+            total, affected_count = await self._organizations.members.count_active_members_by_link(
+                organization.id, provider=provider
+            )
+            sample = await self._organizations.members.list_active_members_without_link(
+                organization.id, provider=provider, limit=_PREFLIGHT_SAMPLE_LIMIT
+            )
+
+        return OrganizationSsoPreflightPublic(
+            total_members=total,
+            affected_count=affected_count,
+            affected_members=[
+                OrganizationSsoPreflightMemberPublic(
+                    user_id=member.user_id, email=member_user.email, full_name=member_user.full_name
+                )
+                for member, member_user in sample
+            ],
+            affected_members_truncated=affected_count > len(sample),
+        )
 
     async def set_sso_enforcement_for_user(
         self,

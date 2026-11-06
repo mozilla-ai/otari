@@ -20,6 +20,7 @@ from gateway.schemas.identity import (
     OIDCConnectionPublic,
     OIDCConnectionRequest,
     OrganizationSsoEnforcementRequest,
+    OrganizationSsoPreflightPublic,
     OrganizationSsoPublic,
 )
 from gateway.services.oauth_service import redirect_uri as _oauth_redirect_uri
@@ -96,6 +97,18 @@ async def delete_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     await connections.delete_for_user(user=identity)
+
+
+@router.get("/preflight")
+async def get_organization_sso_preflight(
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> OrganizationSsoPreflightPublic:
+    """Report who requiring sign-in through the caller's organization's own connection would affect.
+
+    Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
+    """
+    return await connections.preflight_sso_enforcement_for_user(user=identity)
 
 
 @router.put("/enforcement", status_code=status.HTTP_204_NO_CONTENT)
