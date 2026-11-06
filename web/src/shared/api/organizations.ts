@@ -900,10 +900,9 @@ export function useDeleteOrganizationDomain() {
 // sign-in methods. `redirect_uri` is served alongside the connection, so the
 // one read also tells an admin what to register before saving anything.
 //
-// Saving replaces the whole connection. The client secret is the one field that
-// may be left out, and only where the issuer and the client ID are both
-// unchanged: the stored secret is then kept, and any other edit is refused
-// without one, because a secret belongs to the client it was issued for.
+// There is no partial update: saving replaces the whole connection. The client
+// secret may be left out to keep the stored one, which is refused unless the
+// issuer and the client ID are both unchanged.
 
 export function useOrganizationSso(enabled = true) {
   return useQuery({
