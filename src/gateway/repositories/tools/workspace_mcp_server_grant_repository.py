@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,14 +55,6 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
             )
             .scalars()
             .all()
-        )
-
-    async def count_for_server(self, server_id: uuid.UUID) -> int:
-        """How many grants a server holds."""
-        return int(
-            (
-                await self.db.execute(select(func.count()).where(WorkspaceMcpServerGrant.server_id == server_id))
-            ).scalar_one()
         )
 
     async def get_on_server(self, server_id: uuid.UUID, grant_id: uuid.UUID) -> WorkspaceMcpServerGrant | None:
@@ -138,3 +130,13 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         not find the deleted one's grants waiting for it.
         """
         await self.db.execute(delete(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.user_id == user_id))
+
+    async def remove_for_user_on_servers(self, user_id: str, server_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of a user's grants on these servers."""
+        if not server_ids:
+            return
+        await self.db.execute(
+            delete(WorkspaceMcpServerGrant).where(
+                WorkspaceMcpServerGrant.user_id == user_id, WorkspaceMcpServerGrant.server_id.in_(list(server_ids))
+            )
+        )

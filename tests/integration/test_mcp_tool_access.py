@@ -686,6 +686,32 @@ def test_a_member_without_a_key_can_be_given_a_rule_and_an_outsider_cannot(
     assert refused.status_code == 400, refused.text
 
 
+def test_a_member_s_grants_end_when_they_leave_the_workspace(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """A grant left behind would come back unseen if the person were invited again."""
+    key = _new_key(client, master_key_header)
+    workspace = _workspace_id(test_db, key)
+    row = _store(test_db, workspace, "github", everyone=[])
+    home = test_db.get(Workspace, workspace)
+    assert home is not None
+    member = Identity(email="leaver@example.test", full_name="Leaver", active_organization_id=home.organization_id)
+    test_db.add(member)
+    test_db.commit()
+    test_db.add(WorkspaceMember(workspace_id=workspace, user_id=member.id, role="member", status="active"))
+    test_db.commit()
+    _grant(client, master_key_header, row, ["*"], users=[str(member.id)])
+
+    removed = client.delete(f"{API_ROOT}/workspaces/{workspace}/members/{member.id}", headers=master_key_header)
+
+    assert removed.status_code == 200, removed.text
+    test_db.expire_all()
+    remaining = test_db.execute(
+        select(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.user_id == str(member.id))
+    ).all()
+    assert remaining == []
+
+
 def test_a_member_named_by_another_spelling_of_their_id_is_refused(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:

@@ -246,8 +246,8 @@ workspace an install migrates into, keeps it on. Change it with
 
 The switch also covers asking a provider to dial a server itself: a Responses tool
 of `type: "mcp"`, or a Gemini tool with a non-empty `mcp_servers`
-(`mcpServers`). The master key may always name servers; a dashboard session may
-not.
+(`mcpServers`). The master key may always name servers; a key or a dashboard
+session follows the workspace's switch.
 
 #### Managing the ACL
 
@@ -271,8 +271,10 @@ A rule's key must belong to the workspace. A rule's user must own a key in it, o
 be someone the Playground admits (an active member of the workspace, or an owner
 or admin of its organization), so a manager can restrict a member's Playground
 before they hold a key; such a user is named by their identity id in lowercase. A
-deleted user is refused. A server holds at most 1000 rules, so write a rule for a
-user rather than one per key.
+deleted user is refused. A user's rules on a workspace's servers are deleted when
+they leave the workspace or its organization, so inviting them again restores
+none. A server holds at most 1000 rules, so write a rule for a user rather than
+one per key.
 
 ## Limits and safety
 

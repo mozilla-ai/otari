@@ -212,6 +212,7 @@ from gateway.services.tools import (
     DirectToolLedger,
     DirectToolService,
     DirectToolUsage,
+    McpGrantMembershipListener,
     SearchToolService,
     ToolRateInForce,
     WebSearchKeyService,
@@ -1096,7 +1097,7 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys and session shares in step with memberships.
+    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP grants in step.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
@@ -1104,6 +1105,7 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
         TraceMembershipListener(TracesRepositories.on(uow)),
+        McpGrantMembershipListener(uow),
     )
 
 

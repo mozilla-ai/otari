@@ -5,6 +5,7 @@ module and are on the architecture check's baseline until they move.
 """
 
 import uuid
+from collections.abc import Collection
 from typing import Never
 
 from sqlalchemy import select
@@ -27,6 +28,20 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             (
                 await self.db.execute(
                     select(WorkspaceMcpServer.id).where(WorkspaceMcpServer.workspace_id == workspace_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def ids_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """The ids of these workspaces' stored servers."""
+        if not workspace_ids:
+            return []
+        return list(
+            (
+                await self.db.execute(
+                    select(WorkspaceMcpServer.id).where(WorkspaceMcpServer.workspace_id.in_(list(workspace_ids)))
                 )
             )
             .scalars()
