@@ -77,16 +77,6 @@ through the provider ever fails, nobody in that organization can sign in
 until a deployment operator steps in. The deployment's master-key operator is
 never subject to any organization's enforcement.
 
-## Removing a member's link
-
-An owner or admin can remove one member's own link to the connection, which
-lets that member link afresh at their next sign-in. This removes a link only.
-It does not revoke the member's API keys, does not delete their account, and
-does not end their membership; "Remove member" is the control for that. Their
-next sign-in through the connection creates a new account, under the same
-rule as a first sign-in, and the account they signed in with before keeps its
-own API keys, budgets, and history.
-
 ## Network egress
 
 Reading a connection's provider configuration and its signing keys is an
