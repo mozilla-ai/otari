@@ -675,7 +675,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | Situation | Status | `Otari-Error-Code` |
 |---|---|---|
 | No credentials, or a key that is not valid | 401 | |
-| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool named is not configured, or the call names none and there is no tool to pick (none configured, or several with no default) nor an organization search key to stand in | 400 | |
 | The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
 | A `provider_options` key the provider does not take from a request | 400 | |
 | `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
