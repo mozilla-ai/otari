@@ -356,10 +356,34 @@ Matching is token-based, not a substring check:
   can report one that appears only inside what would have been a quoted
   argument.
 
-It sees only the literal text of one tool call, not what a script or program
-that command invokes does: `./deploy.sh` is one opaque token even if the script
-runs `git push --force`, and `bash <<'EOF'` with a forbidden command in its body
-passes. It catches mistakes by a cooperative agent and is not a sandbox.
+The token actually invoked for a segment (its own first word) is compared
+by path basename, not literal text, in both directions: `forbidden: ["npm
+install"]` catches `/usr/bin/npm install` and `./node_modules/.bin/npm
+install` as well as the bare form, and a path-qualified phrase like
+`forbidden: ["./scripts/release.sh"]` still catches a command that invokes
+that exact path. This does not follow indirection through a prefix
+command: `sudo /usr/bin/npm install` still has `sudo`, not `npm`, in that
+position, so `forbidden: ["npm install"]` does not catch it.
+
+A separator does not need whitespace around it. `cd web;npm install`,
+`npm install;`, and `(npm install)` are each split the same as the spaced
+forms, and a subshell's parentheses separate what they enclose as a command
+of its own. An `&` that belongs to a redirect (`2>&1`, `&>out`) is left
+alone, since it joins a descriptor to a target rather than ending a command.
+
+A comment is stripped before any of that, at the same word boundaries Bash
+uses, so `ls;# npm install` is a comment in full and matches nothing.
+The `)` that closes a command or process substitution does not end its word,
+so in `echo $(ls)#; npm install` the `#` is ordinary text and `npm install`
+is still checked, as Bash runs it.
+
+A heredoc body is stripped too, with its terminator line, because it is data the command reads and not a command. A commit message passed as `git commit -F - <<'MSG'` can therefore name a forbidden phrase, the same as a quoted `-m` argument can. A `<<` whose terminator line never appears does not open a body here, so the lines after it are still checked. Neither does an unquoted heredoc with a body line that ends in a backslash, because Bash joins that line to the next and its terminator is not certain. A `<<` inside arithmetic (`$((1<<2))`), a parameter expansion, a subscript or a compound array assignment is a shift, as Bash reads it, and opens no body.
+
+Two things this gate does not do, on purpose, for now:
+
+- It sees only the literal command text of one tool call. It does not, and cannot, see what a script or program that command invokes does internally: `./deploy.sh` is one opaque token to this gate even if the script itself runs `git push --force`. A heredoc piped to a shell is the same case, so `bash <<'EOF'` with a forbidden command in its body passes. This is a footgun-catcher for a cooperative agent, not a sandbox against one deliberately working around it.
+- A command it cannot tokenize as a shell command (an unbalanced quote, such as a double quote in a heredoc inside a double-quoted command substitution) falls back to a plain whitespace split. That still catches a forbidden phrase spelled as bare words, and it can report a phrase that only appears inside what would have been a quoted argument. The alternative, refusing to judge, blocks every such command a real session runs.
+
 
 ### `command_if_changed`
 
