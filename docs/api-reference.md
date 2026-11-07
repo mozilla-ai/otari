@@ -606,7 +606,9 @@ the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
 the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. The access check reads the key's `allowed_tools`, else its user's,
+and provider. Where there is no tool to pick (the deployment configures none, or
+several and no default), a call that names none still runs on the organization
+key, as the tool `web_search` on the key's provider, with a 30 second timeout. The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`. With neither set, it follows the key's model access,
 or its user's when the key has none: unrestricted model access runs every search
 tool, and restricted model access runs only a tool named by its deprecated
@@ -730,7 +732,9 @@ names no tool runs on the workspace's
 [organization fetch key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
 the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. The access check reads the key's `allowed_tools`, else its user's,
+and provider. Where there is no tool to pick (the deployment configures none, or
+several and no default), a call that names none still runs on the organization
+key, as the tool `web_search` on the key's provider, with a 30 second timeout. The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`, as a search does
 ([Model and search tool access](api-keys.md#model-and-search-tool-access)).
 

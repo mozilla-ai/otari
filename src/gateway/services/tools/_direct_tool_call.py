@@ -42,10 +42,12 @@ from gateway.models.tools import WebTool
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    organization_key_search_instance,
     pick_direct_fetch_instance,
     pick_direct_search_instance,
     resolve_direct_fetch,
     resolve_direct_search,
+    resolve_organization_key_search,
     run_direct_fetch,
     run_direct_search,
     unpriced_direct_fetch_detail,
@@ -293,12 +295,24 @@ class DirectToolService:
         """Run a search on the tool named, else the deployment's default; ``endpoint`` labels its usage row."""
         config = self._config
         client = self._web_client
+        stood_in: list[ToolInstance] = []
+
+        def stand_in(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
+            # A call that names no tool may run on the organization's key though the
+            # deployment has no search tool of its own to pick, as otari.ai has none.
+            if tool_name is not None or (instance := organization_key_search_instance(policy)) is None:
+                return None
+            stood_in.append(instance)
+            return instance
 
         def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[SearchResponse]:
             # A workspace whose organization brought its own search key searches with it on a
             # call that names no tool, so its own account pays. The tool is still what the
             # request is allowlisted, rate-limited and timed out as.
-            search = resolve_direct_search(config, tool, policy, request, named=tool_name is not None)
+            if stood_in and tool is stood_in[0]:
+                search = resolve_organization_key_search(tool, policy, request)
+            else:
+                search = resolve_direct_search(config, tool, policy, request, named=tool_name is not None)
             return DirectToolCall(
                 provider=search.resolved.provider,
                 label=search.resolved.label,
@@ -316,6 +330,7 @@ class DirectToolService:
             pick=lambda: pick_direct_search_instance(config, tool_name),
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
+            stand_in=stand_in,
         )
 
     async def fetch(
@@ -359,6 +374,7 @@ class DirectToolService:
         pick: Callable[[], ToolInstance],
         policy_tools: Sequence[WebTool],
         resolve: Callable[[ToolInstance, ResolvedWebSearchConfig | None], DirectToolCall[ResultT]],
+        stand_in: Callable[[ResolvedWebSearchConfig | None], ToolInstance | None] | None = None,
     ) -> DirectToolOutcome[ResultT]:
         """Pick, gate, hold, call, log and settle one direct tool call.
 
@@ -368,6 +384,8 @@ class DirectToolService:
         tools the workspace's policy is read for. ``resolve`` turns the instance
         and that policy into the call, or raises a domain error. ``kind`` is the
         tool's kind, which the key's tool list is checked for and the log lines name.
+        Where ``pick`` refuses, ``stand_in`` may answer an instance from the
+        workspace's policy instead, and the refusal stands when it answers none.
         """
         started_at = time.monotonic()
         request_id = caller.request_id
@@ -438,18 +456,30 @@ class DirectToolService:
         # nothing to be told about. The refusal is still logged: a request the
         # gateway turned away is dropped traffic, and it belongs in Activity and in
         # the failure count, where the operator can see it.
-        try:
-            tool = pick()
-        except TenancyError as exc:
+        async def refused_pick(exc: TenancyError) -> DirectToolCallError:
             # No tool was resolved, so there is no provider to attribute the row to
             # and the name is whatever the caller asked for.
-            raise await refused(
+            return await refused(
                 exc.message,
                 exc.status_code,
                 model=tool_name or _UNRESOLVED_TOOL,
                 provider=None,
                 answer=_refusal_detail(exc),
-            ) from exc
+            )
+
+        picked: ToolInstance | TenancyError
+        try:
+            picked = pick()
+        except TenancyError as exc:
+            if stand_in is None:
+                raise await refused_pick(exc) from exc
+            # Answered once the policy says whether something stands in.
+            picked = exc
+        unresolved_model, unresolved_provider = (
+            (tool_name or _UNRESOLVED_TOOL, None)
+            if isinstance(picked, TenancyError)
+            else (picked.name, picked.provider)
+        )
 
         # Resolved before the gates below, because the first of them is a question
         # about the workspace.
@@ -465,8 +495,8 @@ class DirectToolService:
             raise await refused(
                 exc.message,
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                model=tool.name,
-                provider=tool.provider,
+                model=unresolved_model,
+                provider=unresolved_provider,
                 workspace_id=workspace_id,
             ) from exc
         if policy is not None and not policy.enabled:
@@ -474,10 +504,16 @@ class DirectToolService:
             raise await refused(
                 refusal.message,
                 HTTPStatus.FORBIDDEN,
-                model=tool.name,
-                provider=tool.provider,
+                model=unresolved_model,
+                provider=unresolved_provider,
                 workspace_id=workspace_id,
             )
+        if isinstance(picked, TenancyError):
+            standing = stand_in(policy) if stand_in is not None else None
+            if standing is None:
+                raise await refused_pick(picked) from picked
+            picked = standing
+        tool = picked
 
         try:
             call = resolve(tool, policy)
