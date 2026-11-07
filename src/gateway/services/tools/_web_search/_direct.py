@@ -228,6 +228,11 @@ def _direct_search(
     request: SearchRequest,
     organization_key: WebSearchCredential | None,
 ) -> DirectSearch:
+    """The search ``resolved`` runs, with its count capped by the workspace's ``max_results``.
+
+    Raises :class:`DirectSearchFieldRefusedError` for ``include_raw`` or
+    ``provider_options`` on a call that does not run on any-search.
+    """
     if resolved.runner != "library" and (request.include_raw or request.provider_options):
         raise DirectSearchFieldRefusedError(resolved.provider)
     asked = SearchQuery(

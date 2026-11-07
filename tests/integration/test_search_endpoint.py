@@ -357,6 +357,35 @@ def test_web_access_turned_off_refuses_a_call_the_organizations_key_would_serve(
     assert (row["model"], row["provider"], row["status_code"]) == ("unknown", None, 403)
 
 
+def test_a_policy_that_cannot_be_read_after_a_failed_pick_is_a_503_naming_no_tool(
+    no_tools_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Whether the organization's key could serve the call is unknown, so the 503 answers rather than the 400."""
+    client = no_tools_client
+    headers = _keyed(client, master_key_header, "no-tools-unreadable")
+    client.app.dependency_overrides[get_workspace_web_search_policies] = _UnreadablePolicy  # type: ignore[attr-defined]
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 503, resp.text
+    (row,) = _search_rows(client, master_key_header, "no-tools-unreadable")
+    assert (row["model"], row["provider"], row["status_code"]) == ("unknown", None, 503)
+
+
+def test_a_misconfigured_default_answers_before_the_workspaces_policy_is_read(
+    keyless_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Only a pick that found nothing waits for the policy; a tool that cannot run is the operator's to fix."""
+    client = keyless_client
+    headers = _keyed(client, master_key_header, "misconfigured-default")
+    key = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tvly-k")
+    stub = _stub_policy(client, _policy(enabled=False, credential=key))
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Search tool 'exa' is not configured correctly."
+    assert stub.asked == []
+
+
 def test_a_key_whose_provider_cannot_search_leaves_the_no_tools_refusal(
     no_tools_client: TestClient, master_key_header: dict[str, str]
 ) -> None:

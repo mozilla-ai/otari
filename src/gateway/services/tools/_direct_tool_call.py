@@ -35,6 +35,7 @@ from gateway.exceptions.tools_exceptions import (
     DirectToolCallError,
     DirectToolFailedError,
     FundsCheckFailedError,
+    SearchToolSelectionError,
     WebSearchPolicyResolutionFailedError,
 )
 from gateway.log_config import logger
@@ -298,11 +299,9 @@ class DirectToolService:
         stood_in: list[ToolInstance] = []
 
         def stand_in(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
-            # A call that names no tool may run on the organization's key though the
-            # deployment has no search tool of its own to pick, as otari.ai has none.
-            if tool_name is not None or (instance := organization_key_search_instance(policy)) is None:
-                return None
-            stood_in.append(instance)
+            """The organization's key, standing in for a tool where an unnamed call finds none to pick."""
+            if (instance := organization_key_search_instance(policy)) is not None:
+                stood_in.append(instance)
             return instance
 
         def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[SearchResponse]:
@@ -330,7 +329,10 @@ class DirectToolService:
             pick=lambda: pick_direct_search_instance(config, tool_name),
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
-            stand_in=stand_in,
+            # A named call means a deployment tool; an unnamed one may find none to pick, as
+            # on a deployment where every organization brings its own key.
+            stand_in=stand_in if tool_name is None else None,
+            stand_in_for=(SearchToolSelectionError,),
         )
 
     async def fetch(
@@ -375,6 +377,7 @@ class DirectToolService:
         policy_tools: Sequence[WebTool],
         resolve: Callable[[ToolInstance, ResolvedWebSearchConfig | None], DirectToolCall[ResultT]],
         stand_in: Callable[[ResolvedWebSearchConfig | None], ToolInstance | None] | None = None,
+        stand_in_for: tuple[type[TenancyError], ...] = (),
     ) -> DirectToolOutcome[ResultT]:
         """Pick, gate, hold, call, log and settle one direct tool call.
 
@@ -384,8 +387,9 @@ class DirectToolService:
         tools the workspace's policy is read for. ``resolve`` turns the instance
         and that policy into the call, or raises a domain error. ``kind`` is the
         tool's kind, which the key's tool list is checked for and the log lines name.
-        Where ``pick`` refuses, ``stand_in`` may answer an instance from the
-        workspace's policy instead, and the refusal stands when it answers none.
+        Where ``pick`` refuses with one of ``stand_in_for``, ``stand_in`` may answer
+        an instance from the workspace's policy instead, and the refusal stands
+        when it answers none. Any other refusal answers before the policy is read.
         """
         started_at = time.monotonic()
         request_id = caller.request_id
@@ -457,8 +461,7 @@ class DirectToolService:
         # gateway turned away is dropped traffic, and it belongs in Activity and in
         # the failure count, where the operator can see it.
         async def refused_pick(exc: TenancyError) -> DirectToolCallError:
-            # No tool was resolved, so there is no provider to attribute the row to
-            # and the name is whatever the caller asked for.
+            """Record a refused pick, whose row names what the caller asked for and no provider."""
             return await refused(
                 exc.message,
                 exc.status_code,
@@ -471,7 +474,7 @@ class DirectToolService:
         try:
             picked = pick()
         except TenancyError as exc:
-            if stand_in is None:
+            if stand_in is None or not isinstance(exc, stand_in_for):
                 raise await refused_pick(exc) from exc
             # Answered once the policy says whether something stands in.
             picked = exc
