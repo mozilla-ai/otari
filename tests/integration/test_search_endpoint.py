@@ -285,6 +285,46 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
     assert served["cost"] == pytest.approx(0.005)
 
 
+def test_an_unnamed_call_on_a_synthetic_key_runs_through_any_search_with_no_tool_of_the_deployments(
+    no_tools_keyed_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A key on a library provider needs no tool of the deployment's either, and runs with its own key."""
+    client = no_tools_keyed_client
+    headers = _keyed(client, master_key_header, "no-tools-synthetic")
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "synthetic", "name": "ours", "api_key": "syn-org-secret"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    starred = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=master_key_header
+    )
+    assert starred.status_code == 200, starred.text
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        hits = [{"url": f"https://example.com/{n}", "title": "Synthetic", "text": "From Synthetic."} for n in range(3)]
+        return httpx.Response(200, json={"results": hits})
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "max_results": 2}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["search_tool"] == "web_search"
+    assert len(resp.json()["results"]) == 2
+    [request] = seen
+    assert (request.url.host, request.url.path) == ("api.synthetic.new", "/v2/search")
+    assert request.headers["authorization"] == "Bearer syn-org-secret"
+    (row,) = _search_rows(client, master_key_header, "no-tools-synthetic")
+    assert (row["model"], row["provider"]) == ("web_search", "synthetic")
+
+
 def test_an_unnamed_call_runs_on_the_organizations_key_when_no_tool_is_the_default(
     client: TestClient, master_key_header: dict[str, str], _secret_key: None
 ) -> None:
