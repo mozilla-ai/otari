@@ -56,7 +56,8 @@ class PriceFacts:
     ``websocket`` is false, since Otari sends nothing over one. Both are
     ``None`` where Otari cannot tell, as for an imported event, and so is
     ``generate_audio`` where a video request leaves its sound track to the
-    provider's default: a rule naming a key that is ``None`` is skipped.
+    provider's default, and ``region`` where the provider does not report the
+    region a request ran in: a rule naming a key that is ``None`` is skipped.
     """
 
     context: int | None = None
@@ -70,6 +71,7 @@ class PriceFacts:
     input_video: bool | None = False
     websocket: bool | None = False
     generate_audio: bool | None = None
+    region: str | None = None
 
     def values(self) -> dict[str, object]:
         """The value of every condition key a fact answers, ``None`` where the request gives none."""
@@ -87,8 +89,13 @@ class PriceFacts:
             "utc_days": _DAYS[at.weekday()],
             "utc_hours": at.strftime("%H:%M"),
         }
-        flags = {"input_video": self.input_video, "websocket": self.websocket, "generate_audio": self.generate_audio}
-        values.update({key: flag for key, flag in flags.items() if flag is not None})
+        unknown_when_none = {
+            "input_video": self.input_video,
+            "websocket": self.websocket,
+            "generate_audio": self.generate_audio,
+            "region": self.region,
+        }
+        values.update({key: value for key, value in unknown_when_none.items() if value is not None})
         return values
 
 

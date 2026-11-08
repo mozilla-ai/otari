@@ -1150,6 +1150,7 @@ which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
 | `context` | The request's billable input in tokens: the estimate before the call, what the provider reports after it |
 | `service_tier` | The tier the request asks for, before the call. After it, the tier the provider reports serving the call at; a response that names no tier settles at the price that names none |
 | `resolution` | An image's `size`, or a video's `resolution`, else its `size` |
+| `region` | The region a Messages request names in `inference_geo`, before the call. After it, the region the provider reports running the call in; Anthropic reports it, including for a request that names none and runs in the workspace's default. Unknown where the provider reports none, so a rule on it is skipped |
 | `quality`, `style` | An image's `quality` and `style` |
 | `aspect_ratio` | A video's `aspect_ratio` |
 | `duration` | A video's length in seconds |
@@ -1158,7 +1159,7 @@ which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
 | `generate_audio` | A video request's `generate_audio`. Unknown when the request leaves it to the provider's default, so a rule on it is skipped |
 | `websocket` | False: Otari sends nothing over a websocket. Unknown for an imported event, so a rule on it is skipped |
 
-A rule whose condition names any other key, such as `region` or `mode`, is
+A rule whose condition names any other key, such as `mode` or `thinking`, is
 skipped, as models.dev's schema says, and the base price applies. A key Otari
 answers that the request gives no value for is a condition that does not hold,
 so `{service_tier: {equals: priority}}` does not hold for a request that names

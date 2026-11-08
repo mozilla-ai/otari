@@ -56,6 +56,8 @@ def _on(when: dict[str, Any], price: float = 9) -> dict[str, Any]:
         ({"input_video": {"equals": True}}, {"input_video": True}, True),
         ({"generate_audio": {"equals": False}}, {"generate_audio": False}, True),
         ({"generate_audio": {"equals": False}}, {"generate_audio": True}, False),
+        ({"region": {"in": ["us", "eu"]}}, {"region": "US"}, True),
+        ({"not": {"region": {"equals": "global"}}}, {"region": "global"}, False),
     ],
 )
 def test_a_condition_holds_by_its_operator(when: dict[str, Any], facts: dict[str, Any], applies: bool) -> None:
@@ -69,6 +71,7 @@ def test_a_condition_holds_by_its_operator(when: dict[str, Any], facts: dict[str
         {"not": {"websocket": {"equals": True}}},
         {"generate_audio": {"equals": False}},
         {"not": {"generate_audio": {"equals": True}}},
+        {"not": {"region": {"equals": "global"}}},
     ],
 )
 def test_a_rule_on_a_flag_otari_cannot_tell_is_skipped(when: dict[str, Any]) -> None:

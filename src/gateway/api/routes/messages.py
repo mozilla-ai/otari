@@ -653,6 +653,7 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
         provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
         service_tier=_served_tier(usage),
+        inference_geo=_served_region(usage),
     )
 
 
@@ -674,6 +675,7 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 cache_write_1h_tokens=_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
                 service_tier=_served_tier(usage),
+                inference_geo=_served_region(usage),
             )
     return None
 
@@ -682,6 +684,12 @@ def _served_tier(usage: Any) -> str | None:
     """The tier Anthropic says it served the call at, which it reports in ``usage``."""
     tier = getattr(usage, "service_tier", None)
     return tier if isinstance(tier, str) else None
+
+
+def _served_region(usage: Any) -> str | None:
+    """The region Anthropic says it ran the call in, which it reports in ``usage``."""
+    region = getattr(usage, "inference_geo", None)
+    return region if isinstance(region, str) else None
 
 
 def _cache_write_1h_tokens(usage: Any) -> int:
@@ -1009,7 +1017,7 @@ async def create_message(
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
-            price_facts=PriceFacts(service_tier=request.service_tier),
+            price_facts=PriceFacts(service_tier=request.service_tier, region=request.inference_geo),
             raw_request=raw_request,
             response=response,
             db=db,

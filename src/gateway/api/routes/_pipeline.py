@@ -5054,7 +5054,14 @@ async def record_usage(
         served_tier = response.service_tier
     if served_tier is None:
         served_tier = result_tier
-    facts = replace(request_facts, service_tier=served_tier, at=request_facts.at or request_started(usage_log))
+    # Likewise the region it ran in, which only its usage reports.
+    served_region = usage_data.inference_geo if usage_data else None
+    facts = replace(
+        request_facts,
+        service_tier=served_tier,
+        region=served_region,
+        at=request_facts.at or request_started(usage_log),
+    )
     if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
         # for the row above, so a settled cost uses the same rate the admission

@@ -140,6 +140,8 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
         provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
         service_tier=service_tier_of(update) or service_tier_of(current),
+        # Anthropic reports the region on the stream's first usage, and not on its last.
+        inference_geo=update.inference_geo or current.inference_geo,
     )
 
 
