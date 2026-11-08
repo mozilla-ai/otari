@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   COLUMN_PRICING_UNIT_OPTIONS,
+  formatOfferingPrice,
   formatPricedRate,
   hasOutputRate,
   PRICING_UNIT_OPTIONS,
@@ -181,4 +182,21 @@ describe("pricingUnit", () => {
       expect(hasOutputRate(unit)).toBe(false)
   })
 
+  it("names an offering's price in a line, in its unit", () => {
+    expect(
+      formatOfferingPrice({
+        input_price_per_million: 0.5,
+        output_price_per_million: 2,
+        unit: "token",
+      }),
+    ).toBe("$0.50 in / $2.00 out")
+    expect(
+      formatOfferingPrice({
+        input_price_per_million: 40000,
+        output_price_per_million: 0,
+        unit: "image",
+      }),
+    ).toBe("$0.04 per image")
+    expect(formatOfferingPrice(null)).toBe("unpriced")
+  })
 })

@@ -45,6 +45,7 @@ const GLM: CatalogModelSummary = {
   price_sources: ["defaults", "deployment"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
