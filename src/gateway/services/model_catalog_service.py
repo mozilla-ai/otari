@@ -231,7 +231,7 @@ async def _download_from(source: ModelsDevSource) -> ModelsDevCatalog:
     catalog = source.parse(data)
     if (reason := catalog.refusal()) is not None:
         raise ModelsDevRefusedError(f"{name} refused: {reason}")
-    if catalog.issues.count or catalog.issues.unknown_units:
+    if catalog.issues.count or catalog.issues.unknown_units or catalog.issues.unknown_conditions:
         # The line carries fetched text, so the console handler must not read it as markup.
         logger.warning("%s read with %s", name, catalog.issues.describe(), extra={"markup": False})
     return catalog

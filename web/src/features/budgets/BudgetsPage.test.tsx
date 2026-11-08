@@ -346,6 +346,8 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: "team-free-tier",
       max_budget: 250,
+      token_limit: null,
+      request_limit: null,
       budget_duration_sec: 604_800,
     })
 
@@ -463,6 +465,11 @@ describe("BudgetsPage", () => {
     await user.clear(screen.getByLabelText("Assign to people (optional)"))
     await user.type(screen.getByLabelText("Assign to people (optional)"), "bob")
     await user.click(await screen.findByRole("option", { name: /bob/ }))
+    // A field edited meanwhile is saved onto the budget the first try created.
+    await user.click(
+      screen.getByRole("button", { name: "Token and request limits" }),
+    )
+    await user.type(screen.getByLabelText("Request limit"), "1")
     await user.click(screen.getByRole("button", { name: "Retry assignments" }))
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -470,6 +477,14 @@ describe("BudgetsPage", () => {
       .filter(([, init]) => (init?.method ?? "") === "PATCH")
       .map(([url]) => String(url))
     expect(patched.some((url) => url.includes("bob"))).toBe(true)
+    const budgetPatch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        (init?.method ?? "") === "PATCH" &&
+        String(url).includes(`${API_ROOT}/budgets/`),
+    )
+    expect(JSON.parse(String(budgetPatch?.[1]?.body))).toMatchObject({
+      request_limit: 1,
+    })
     // And still one budget, which is what the retry exists to protect.
     expect(
       fetchMock.mock.calls.filter(([, init]) => (init?.method ?? "") === "POST")
@@ -835,6 +850,8 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: null,
       max_budget: null,
+      token_limit: null,
+      request_limit: null,
       budget_duration_sec: null,
     })
   })
@@ -853,6 +870,36 @@ describe("BudgetsPage", () => {
       await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42")
+  })
+
+  it("edits the token and request caps a budget holds", async () => {
+    const fetchMock = mockApi({
+      budgets: [budget({ token_limit: 5000, request_limit: 10 })],
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("11111111")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    expect(await screen.findByLabelText("Token limit")).toBeVisible()
+    expect(screen.getByLabelText("Token limit")).toHaveValue("5000")
+
+    await user.clear(screen.getByLabelText("Request limit"))
+    await user.type(screen.getByLabelText("Request limit"), "1")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+      ).toBe(true),
+    )
+    const patch = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PATCH",
+    )
+    expect(JSON.parse(String(patch?.[1]?.body))).toMatchObject({
+      token_limit: 5000,
+      request_limit: 1,
+    })
   })
 
   it("marks a budget an organization owns and withholds assignment on it", async () => {

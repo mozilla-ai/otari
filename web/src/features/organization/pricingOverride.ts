@@ -35,29 +35,40 @@ export function parseRate(value: string): number | undefined {
 }
 
 /**
- * The provider instance prefixes this deployment holds the credential for.
+ * What this deployment holds the credential for: whole instance prefixes, and
+ * single `prefix:model` keys.
  *
  * Read off the catalog rather than off the provider list, which an organization
- * admin is refused (#821). Keyed on the prefix, not the whole model id, so a
- * model the catalog has not listed (a key typed by hand, one behind a
- * `?provider=` filter) is still judged by the instance it names, exactly as the
- * server judges it.
+ * admin is refused (#821). A prefix every listed model of which the deployment
+ * serves is kept whole, so a model the catalog has not listed (a key typed by
+ * hand, one behind a `?provider=` filter) is still judged by the instance it
+ * names, as the server judges a configured instance. A prefix the organization
+ * also serves on its own key is mixed, and the server judges its models one by
+ * one, so only the deployment's own keys are kept for it (#2899).
  */
-export function deploymentManagedPrefixes(
+export function deploymentManagedSelectors(
   models: readonly ModelObject[] | undefined,
 ): ReadonlySet<string> {
+  const managed = new Map<string, string[]>()
+  const mixed = new Set<string>()
+  for (const model of models ?? []) {
+    // Split on either delimiter, because the catalog lists a pricing-only model
+    // under the key it is stored as (`_get_pricing_map` in `api/routes/models.py`
+    // does not normalize), so a row predating key normalization arrives as
+    // `instance/model`.
+    const match = /^([^:/]+)[:/](.*)$/.exec(model.id)
+    if (!match) continue
+    const [, prefix, rest] = match
+    if (!model.deployment_managed) {
+      mixed.add(prefix)
+      continue
+    }
+    managed.set(prefix, [...(managed.get(prefix) ?? []), `${prefix}:${rest}`])
+  }
   return new Set(
-    (models ?? []).flatMap((model) => {
-      if (!model.deployment_managed) return []
-      // Split on either delimiter, because the catalog lists a pricing-only model
-      // under the key it is stored as (`_get_pricing_map` in `api/routes/models.py`
-      // does not normalize), so a row predating key normalization arrives as
-      // `instance/model`. Splitting on ":" alone would file that whole id as a
-      // prefix and leave the real one out of the set, which reads as "not
-      // deployment supplied" and offers a control the gateway refuses.
-      const [prefix] = model.id.split(/[:/]/, 1)
-      return prefix ? [prefix] : []
-    }),
+    [...managed].flatMap(([prefix, keys]) =>
+      mixed.has(prefix) ? keys : [prefix],
+    ),
   )
 }
 
@@ -80,17 +91,22 @@ export function deploymentManagedPrefixes(
  */
 export function managedModelReason({
   modelKey,
-  managedPrefixes,
+  managed,
   isDeploymentOperator,
 }: {
   modelKey: string
-  managedPrefixes: ReadonlySet<string>
+  /** From `deploymentManagedSelectors`. */
+  managed: ReadonlySet<string>
   isDeploymentOperator: boolean
 }): string | undefined {
   if (isDeploymentOperator) return undefined
-  const prefix = modelKey.trim().split(/[:/]/, 1)[0]
-  if (!prefix || !managedPrefixes.has(prefix)) return undefined
-  return `${prefix} is one of this deployment's own providers, so its rates are set on the catalog above. An override applies to a model your organization supplies its own provider key for.`
+  const key = modelKey.trim().replace(/^([^:/]+)\//, "$1:")
+  const prefix = key.split(":", 1)[0]
+  if (prefix && managed.has(prefix))
+    return `${prefix} is one of this deployment's own providers, so its rates are set on the catalog above. An override applies to a model your organization supplies its own provider key for.`
+  if (managed.has(key))
+    return `${key} is served on this deployment's own credential, so its rate is set on the catalog above. An override applies to a model your organization supplies its own provider key for.`
+  return undefined
 }
 
 /**

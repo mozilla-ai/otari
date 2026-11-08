@@ -31,7 +31,12 @@ first.
 4. Enter a **Key Name** that tells several keys for one provider apart, such as
    `production`, `staging` or `backup`.
 5. Paste the provider's API key.
-6. Click **Add provider key** to save it.
+6. For a compatible endpoint of your own (Synthetic, a vLLM server), enter its
+   **API base URL**. Requests then reach this key's models by its **Request
+   prefix**, such as `synthetic:hf:Qwen/Qwen3.8-27B`, rather than by the
+   provider's name; see
+   [Add a key for your own endpoint](provider-keys.md#add-a-key-for-your-own-endpoint).
+7. Click **Add provider key** to save it.
 
 ## Set a default key per provider
 

@@ -213,6 +213,7 @@ from gateway.services.tools import (
     DirectToolLedger,
     DirectToolService,
     DirectToolUsage,
+    McpGrantMembershipListener,
     SearchToolService,
     ToolRateInForce,
     WebSearchKeyService,
@@ -729,6 +730,9 @@ async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]
 
 ServiceKey = Annotated[APIKey, Depends(verify_service_key)]
 
+# The API key a request authenticates with, for a route that answers for that key alone.
+CallingKey = Annotated[APIKey, Depends(verify_api_key)]
+
 
 async def verify_master_key(
     request: Request,
@@ -1094,7 +1098,7 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys and session shares in step with memberships.
+    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP grants in step.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
@@ -1102,6 +1106,7 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
         TraceMembershipListener(TracesRepositories.on(uow)),
+        McpGrantMembershipListener(uow),
     )
 
 
@@ -1559,6 +1564,7 @@ def get_budget_service(
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 
@@ -1637,15 +1643,20 @@ def get_workspace_activation_service(
 WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
 
 
-def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServerService:
-    return WorkspaceMcpServerService(db)
+def get_workspace_mcp_server_service(
+    db: Annotated[AsyncSession, Depends(get_db)], api_keys: ApiKeyServiceDep
+) -> WorkspaceMcpServerService:
+    """Build the service on the request's session, with the keys its access lists name."""
+    return WorkspaceMcpServerService(db, api_keys)
 
 
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
 
 
-def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    return OrgProviderKeyService(db)
+def get_org_provider_key_service(
+    db: Annotated[AsyncSession, Depends(get_db)], config: Annotated[GatewayConfig, Depends(get_config)]
+) -> OrgProviderKeyService:
+    return OrgProviderKeyService(db, config)
 
 
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
@@ -1699,7 +1710,7 @@ def get_org_provider_model_service(
         uow,
         config=config,
         organizations=OrganizationService(db, membership_listener=None),
-        provider_keys=OrgProviderKeyService(db),
+        provider_keys=OrgProviderKeyService(db, config),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
@@ -2830,6 +2841,7 @@ __all__ = [
     "CallerUsageScope",
     "CallerWorkspaceQuery",
     "CallerWorkspaces",
+    "CallingKey",
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",

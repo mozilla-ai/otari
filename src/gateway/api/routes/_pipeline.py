@@ -147,6 +147,7 @@ from gateway.core.error_codes import (
 )
 from gateway.core.metered_pricing import (
     ChargeLine,
+    billable_usage_of,
     priced_per_request,
     quantize_cost,
 )
@@ -161,6 +162,7 @@ from gateway.core.usage import (
     provider_latency_ms_of,
     provider_web_searches_of,
     reasoning_tokens_of,
+    service_tier_of,
 )
 from gateway.exceptions import TenancyError
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
@@ -284,17 +286,26 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
+    McpAccess,
     key_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
     resolve_request_allowlist,
+    resolve_request_mcp_access,
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
-from gateway.services.pricing import ModelSearchRate, estimate_settles, model_search_rate, price_completion
+from gateway.services.pricing import (
+    NO_FACTS,
+    ModelSearchRate,
+    PriceFacts,
+    estimate_settles,
+    model_search_rate,
+    price_completion,
+)
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     RequestPrices,
@@ -396,6 +407,7 @@ from gateway.services.tools import (
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
+    declares_provider_mcp,
     extract_web_tools,
     native_rendering,
     read_web_declarations,
@@ -533,8 +545,8 @@ SANDBOX_UNREACHABLE_DETAIL = (
 )
 SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
 WEB_SEARCH_UNREACHABLE_DETAIL = (
-    "web_search backend unreachable. Check the search URL in the dashboard's Tools "
-    "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
+    "web_search backend unreachable. Check the deployment's web search settings, and that the search "
+    "provider is reachable."
 )
 
 
@@ -1246,6 +1258,7 @@ class RequestContext:
         plan: CompiledPlan | None = None,
         estimate_inputs: EstimateInputs | None = None,
         prices: RequestPrices | None = None,
+        price_facts: PriceFacts = NO_FACTS,
         request_group_id: str | None = None,
         organization_id: uuid.UUID | None = None,
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
@@ -1258,8 +1271,14 @@ class RequestContext:
         trace: RequestTrace | None = None,
         source_label: str | None = None,
         country_gate: CountryGate | None = None,
+        api_key: APIKey | None = None,
+        session: bool = False,
     ) -> None:
         self.config = config
+        # The key that authenticated the request; ``None`` for the master key and a session principal.
+        self.api_key = api_key
+        # Whether a dashboard session (the Playground) made the request, which MCP access binds as its user.
+        self.session = session
         # The request's trace while it is served; None where nothing records one.
         self.trace = trace
         # Sent to the client as ``Otari-Request-ID``.
@@ -1357,6 +1376,9 @@ class RequestContext:
         # hold rather than serving a pricier model against a cheaper model's
         # reservation. `None` when nothing was reserved.
         self.estimate_inputs = estimate_inputs
+        # What the request says about itself that a price's rules ask: the tier
+        # it asks for. Settlement takes the tier the provider reports instead.
+        self.price_facts = price_facts
         # The rates this request resolved, shared by admission, any top-up and
         # settlement so each model is priced once. `None` when nothing was priced.
         self.prices = prices
@@ -2221,6 +2243,7 @@ async def _bill_vision_side_call(
     tags: dict[str, str] | None = None,
     source_label: str | None = None,
     safety_identifier: str | None = None,
+    started: datetime | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -2230,6 +2253,8 @@ async def _bill_vision_side_call(
     not gated or refundable: the cost is already incurred, so a budget reject
     here would lose it, and refunding the main request must not erase it.
     No-op when no vision model is configured or its selector can't be parsed.
+    ``started`` is when the enclosing request started, the time its price's
+    clock rules are read at.
     """
     model_selector = config.vision_describe_model
     if not model_selector:
@@ -2260,6 +2285,7 @@ async def _bill_vision_side_call(
         tags=tags,
         source_label=source_label,
         safety_identifier=safety_identifier,
+        request_facts=PriceFacts(at=started),
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -2430,6 +2456,7 @@ async def _grow_reservation(
         max_output_tokens=ctx.estimate_inputs.max_output_tokens,
         default_output_tokens=ctx.estimate_inputs.default_output_tokens,
         cache_write_ttl=ctx.estimate_inputs.cache_write_ttl,
+        facts=ctx.estimate_inputs.facts,
     )
     try:
         await increase_reservation(
@@ -2437,7 +2464,8 @@ async def _grow_reservation(
             ctx.reservation,
             estimate=repriced + ctx.tool_hold,
             model=f"{instance}:{model}",
-            model_is_free=is_free_pricing(pricing),
+            # A free row whose rules price this request is held to the dollar budget.
+            model_is_free=is_free_pricing(pricing) and repriced == 0,
             strategy=ctx.config.budget_strategy,
         )
     except HTTPException as exc:
@@ -2781,8 +2809,12 @@ async def resolve_request_context(
     context: Callable[[], ContextWeights | None] | None = None,
     session_label: str | None = None,
     safety_identifier: str | None = None,
+    price_facts: PriceFacts = NO_FACTS,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
+
+    ``price_facts`` is what the request says about itself that a price's
+    rules ask, the tier it asks for; every estimate reads them.
 
     Validate the API key, resolve the billed user, check the
     rate limit, then reserve the estimated cost. The reservation is taken
@@ -2824,6 +2856,9 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
+    # One instant for every estimate, top-up and settlement, so a clock rule prices them alike.
+    if price_facts.at is None:
+        price_facts = replace(price_facts, at=datetime.now(UTC))
     api_key_id: str | None = None
     organization_id: uuid.UUID | None = None
     user_id: str | None = None
@@ -2958,6 +2993,7 @@ async def resolve_request_context(
                 max_output_tokens=estimate_max_output_tokens,
                 default_output_tokens=config.budget_estimate_default_output_tokens,
                 cache_write_ttl=estimate_cache_write_ttl,
+                facts=price_facts,
             ),
         )
         signal = routing_signal() if routing_signal is not None else RoutingSignal()
@@ -3154,6 +3190,7 @@ async def resolve_request_context(
         max_output_tokens=estimate_max_output_tokens,
         default_output_tokens=config.budget_estimate_default_output_tokens,
         cache_write_ttl=estimate_cache_write_ttl,
+        facts=price_facts,
     )
     estimate = estimate_cost(
         gate_pricing,
@@ -3161,6 +3198,7 @@ async def resolve_request_context(
         max_output_tokens=estimate_inputs.max_output_tokens,
         default_output_tokens=estimate_inputs.default_output_tokens,
         cache_write_ttl=estimate_inputs.cache_write_ttl,
+        facts=estimate_inputs.facts,
     )
     # The same two figures the estimate is priced from, summed, for the token
     # ceiling's hold. A budget with no token cap ignores it.
@@ -3212,7 +3250,8 @@ async def resolve_request_context(
                         api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
                     ),
                     organization_id=organization_id,
-                    model_is_free=is_free_pricing(gate_pricing),
+                    # A free row whose rules price this request is held to the dollar budget.
+                    model_is_free=is_free_pricing(gate_pricing) and estimate == 0,
                     reservation_ttl_sec=config.budget_reservation_ttl_sec,
                     reserved_output_tokens=estimate_inputs.get_reserved_output_tokens(gate_pricing),
                 )
@@ -3248,6 +3287,7 @@ async def resolve_request_context(
                     max_output_tokens=estimate_inputs.max_output_tokens,
                     default_output_tokens=estimate_inputs.default_output_tokens,
                     cache_write_ttl=estimate_inputs.cache_write_ttl,
+                    facts=estimate_inputs.facts,
                 )
     except HTTPException as exc:
         # A blocked or over-budget user is refused inside reserve_budget,
@@ -3426,6 +3466,7 @@ async def resolve_request_context(
                     tags=tags,
                     source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
                     safety_identifier=upstream_user,
+                    started=price_facts.at,
                 )
             # Attachments expanded the payload, so the stored inputs must
             # follow or a later fallover would reprice against the pre-
@@ -3437,6 +3478,7 @@ async def resolve_request_context(
                 max_output_tokens=estimate_inputs.max_output_tokens,
                 default_output_tokens=estimate_inputs.default_output_tokens,
                 cache_write_ttl=estimate_inputs.cache_write_ttl,
+                facts=estimate_inputs.facts,
             )
             post_estimated_tokens = estimate_tokens(
                 prompt_chars=estimate_inputs.prompt_chars,
@@ -3555,6 +3597,7 @@ async def resolve_request_context(
         plan=plan,
         estimate_inputs=estimate_inputs,
         prices=prices,
+        price_facts=price_facts,
         request_group_id=request_id if plan is not None else None,
         organization_id=organization_id,
         request_id=request_id,
@@ -3564,6 +3607,8 @@ async def resolve_request_context(
         country_gate=country_gate,
         trace=trace,
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
+        api_key=api_key,
+        session=session_principal is not None,
     )
 
 
@@ -4485,9 +4530,22 @@ async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+    provider_mcp = declares_provider_mcp(declared.tools)
     try:
+        access = (
+            await resolve_request_mcp_access(
+                ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
+            )
+            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            else McpAccess()
+        )
         return await admit_mcp_servers(
-            declared.mcp_servers, declared.mcp_server_ids, servers=servers, workspace_id=ctx.workspace_id
+            declared.mcp_servers,
+            declared.mcp_server_ids,
+            servers=servers,
+            workspace_id=ctx.workspace_id,
+            access=access,
+            provider_mcp=provider_mcp,
         )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -4749,6 +4807,22 @@ async def _unpriced_tool(ctx: RequestContext, tools: Sequence[PricedTool]) -> Pr
 # ---------------------------------------------------------------------------
 
 
+def service_tier_on(result: object) -> str | None:
+    """The service tier a provider's result or chunk names, if it names one.
+
+    A Responses stream event names it on the response it carries.
+    """
+    tier = getattr(result, "service_tier", None)
+    if tier is None:
+        tier = getattr(getattr(result, "response", None), "service_tier", None)
+    return tier if isinstance(tier, str) else None
+
+
+def request_started(row: UsageLog) -> datetime:
+    """When the request ``row`` records started: the row's stamp, less the time the request took."""
+    return row.timestamp - timedelta(milliseconds=row.latency_ms or 0)
+
+
 def _elapsed_ms(started_at: float | None) -> int | None:
     """Milliseconds elapsed since a monotonic ``started_at`` reading.
 
@@ -4888,6 +4962,8 @@ async def record_usage(
     safety_identifier: str | None = None,
     upstream_attempt: bool = True,
     incomplete: bool = False,
+    request_facts: PriceFacts = NO_FACTS,
+    result_tier: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4956,6 +5032,9 @@ async def record_usage(
             session the Sessions page shows; None when it names no session.
         safety_identifier: The end-user identifier the provider call carried
             (``RequestContext.upstream_user``); None when it carried none.
+        request_facts: What the request says about itself that a price's rules
+            ask (``RequestContext.price_facts``). The row is priced at the tier
+            the provider reports, never the one the request asked for.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -5020,6 +5099,20 @@ async def record_usage(
     # row did not finish, so it is billed on its estimated tokens alone.
     succeeded = error is None and not incomplete
     resolved: ResolvedPricing | None = None
+    # The tier the provider served at: its usage's, else its result's or a streamed chunk's, never the one asked for.
+    served_tier = service_tier_of(usage_data) if usage_data else None
+    if served_tier is None and isinstance(response, ChatCompletion):
+        served_tier = response.service_tier
+    if served_tier is None:
+        served_tier = result_tier
+    # Likewise the region it ran in, which only its usage reports.
+    served_region = usage_data.inference_geo if usage_data else None
+    facts = replace(
+        request_facts,
+        service_tier=served_tier,
+        region=served_region,
+        at=request_facts.at or request_started(usage_log),
+    )
     if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
         # for the row above, so a settled cost uses the same rate the admission
@@ -5039,7 +5132,7 @@ async def record_usage(
             )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
         if resolved is not None:
-            priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded)
+            priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded, facts=facts)
             if priced is None and usage_data and not priced_per_request(resolved.pricing):
                 _warn_unpriced_model(f"{provider}:{model}" if provider else model, unit=resolved.pricing.unit)
         elif usage_data:
@@ -5080,7 +5173,14 @@ async def record_usage(
         db,
         usage_log,
         tool_tally,
-        model_search_rate=model_search_rate(resolved.pricing, resolved.source) if resolved is not None else None,
+        model_search_rate=model_search_rate(
+            resolved.pricing,
+            resolved.source,
+            # The search is priced at the context the completion's tokens are.
+            facts=replace(facts, context=billable_usage_of(usage_data).total_input_tokens if usage_data else None),
+        )
+        if resolved is not None
+        else None,
     )
     if usage_log.cost is not None:
         usage_log.calculated_at = usage_log.timestamp
@@ -5484,6 +5584,7 @@ async def _log_failure_and_refund(
     if ctx.rate_limit_grant is not None:
         await ctx.rate_limit_grant.settle(0)
     logged = await record_usage(
+        request_facts=ctx.price_facts,
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -5577,6 +5678,17 @@ def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
     return {"native_tools": native_tools} if native_tools else {}
 
 
+def _declared_tool_names(tools: list[dict[str, Any]] | None) -> frozenset[str]:
+    """The names of the tools a request declares for its client to run, in any of the three formats."""
+    names: set[str] = set()
+    for tool in tools or []:
+        function = tool.get("function")
+        name = function.get("name") if isinstance(function, dict) else tool.get("name")
+        if isinstance(name, str):
+            names.add(name)
+    return frozenset(names)
+
+
 @dataclass(frozen=True)
 class _OpenedTools:
     """The tool backends one request opened, as the pool its tool loop drives."""
@@ -5599,7 +5711,12 @@ async def _open_tool_backends(
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
         mcp = await stack.enter_async_context(
-            MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
+            MCPClientPool(
+                tool_ctx.mcp_server_configs,
+                tally=tool_ctx.tally,
+                trace=tool_ctx.trace,
+                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
         )
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
@@ -5869,6 +5986,7 @@ def build_streaming_response(
     safety_identifier: str | None = None,
     automatic_observation: AutomaticObservation | None = None,
     prompt_chars: int | None = None,
+    price_facts: PriceFacts = NO_FACTS,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5926,6 +6044,8 @@ def build_streaming_response(
     # Usage the provider reported before the stream ended, whether or not it ended
     # cleanly. The generator hands only a completed stream's usage to a callback.
     reported_usage: CompletionUsage | None = None
+    # The tier the provider reported on any chunk, for a stream whose usage names none.
+    streamed_tier: str | None = None
     streamed_chars = 0
 
     def _on_first_chunk() -> None:
@@ -5935,8 +6055,9 @@ def build_streaming_response(
             automatic_observation.first_response()
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
-        nonlocal reported_usage, streamed_chars
+        nonlocal reported_usage, streamed_chars, streamed_tier
         streamed_chars += _streamed_text_chars(chunk)
+        streamed_tier = service_tier_on(chunk) or streamed_tier
         chunk_usage = adapter.extract_stream_usage(chunk)
         if chunk_usage:
             reported_usage = chunk_usage if reported_usage is None else merge_stream_usage(reported_usage, chunk_usage)
@@ -5948,6 +6069,8 @@ def build_streaming_response(
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(usage_data))
         logged = await record_usage(
+            request_facts=price_facts,
+            result_tier=streamed_tier,
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -5996,6 +6119,8 @@ def build_streaming_response(
             deployment_paid=deployment_paid,
         ):
             logged = await record_usage(
+                request_facts=price_facts,
+                result_tier=streamed_tier,
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -6023,6 +6148,8 @@ def build_streaming_response(
         policy = config.stream_missing_usage_policy
         if policy == "allow_free":
             logged = await record_usage(
+                request_facts=price_facts,
+                result_tier=streamed_tier,
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -6056,6 +6183,8 @@ def build_streaming_response(
         # this, and stamping one would fake a rejection that never happened.
         try:
             logged = await record_usage(
+                request_facts=price_facts,
+                result_tier=streamed_tier,
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -6117,6 +6246,8 @@ def build_streaming_response(
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(reported_usage))
         logged = await record_usage(
+            request_facts=price_facts,
+            result_tier=streamed_tier,
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -6174,6 +6305,8 @@ def build_streaming_response(
             return
         if row is not None:
             logged = await record_usage(
+                request_facts=price_facts,
+                result_tier=streamed_tier,
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -6582,6 +6715,7 @@ async def run_single_attempt_stream(
         stream=stream,
         provider=provider,
         model=model,
+        price_facts=ctx.price_facts,
         config=ctx.config,
         db=ctx.db,
         extra_headers=_container_headers(served_tools.container_lease) | _end_user_headers(ctx) | served_by,
@@ -6688,6 +6822,7 @@ async def log_exhausted_plan(
             ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
         )
     logged = await record_usage(
+        request_facts=ctx.price_facts,
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -6969,6 +7104,8 @@ async def run_non_stream(
             )
         ):
             logged = await record_usage(
+                request_facts=ctx.price_facts,
+                result_tier=service_tier_on(result),
                 db=ctx.db,
                 log_writer=ctx.log_writer,
                 api_key_id=ctx.api_key_id,

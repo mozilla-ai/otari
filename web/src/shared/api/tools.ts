@@ -4,6 +4,7 @@ import type {
   CreatedSearchTool,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
+  CreateWorkspaceMcpServerGrantsRequest,
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
   OrganizationGuardrail,
@@ -28,7 +29,10 @@ import type {
   UpdateWorkspaceWebSearchConfigRequest,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerAccess,
+  WorkspaceMcpServerAccessCheck,
   WorkspaceMcpServerHealth,
+  WorkspaceMcpServerKeyAccess,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -510,6 +514,178 @@ export function useWorkspaceMcpServers(workspaceId: string | null) {
   })
 }
 
+// One stored server, for its own page. Under the list's key, so every write that
+// refreshes the list refreshes this too.
+export function useWorkspaceMcpServer(
+  workspaceId: string | null,
+  serverId: string,
+) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "mcp-servers", serverId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServer>(
+        mcpServerPath(workspaceId as string, serverId),
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+function mcpServerPath(workspaceId: string, serverId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`
+}
+
+function mcpAccessKey(workspaceId: string, serverId: string) {
+  return [WORKSPACES, workspaceId, "mcp-servers", serverId, "access"] as const
+}
+
+// What each key reaches across the workspace's servers. A segment of its own
+// beside the server ids, so a grant write can refresh every key's view without
+// refetching the servers.
+function mcpKeyAccessRoot(workspaceId: string) {
+  return [WORKSPACES, workspaceId, "mcp-servers", "keys"] as const
+}
+
+// A server's access list: `everyone_tools` and the grants that override it per
+// key or per person. Manager-only, so a viewer's 403 is the answer, not a fault.
+export function useWorkspaceMcpServerAccess(
+  workspaceId: string | null,
+  serverId: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: mcpAccessKey(workspaceId ?? "", serverId),
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServerAccess>(
+        `${mcpServerPath(workspaceId as string, serverId)}/access`,
+      ),
+    enabled: enabled && workspaceId !== null,
+    staleTime: 30_000,
+  })
+}
+
+// Whether one key may call one tool, and which rule decides. Read on demand by
+// the page's test, so it is keyed on what was asked and never kept fresh.
+export function useWorkspaceMcpServerAccessCheck({
+  workspaceId,
+  serverId,
+  apiKeyId,
+  tool,
+}: {
+  workspaceId: string
+  serverId: string
+  apiKeyId: string
+  tool: string
+}) {
+  return useQuery({
+    queryKey: [...mcpAccessKey(workspaceId, serverId), "check", apiKeyId, tool],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServerAccessCheck>(
+        `${mcpServerPath(workspaceId, serverId)}/access/check?api_key_id=${encodeURIComponent(apiKeyId)}&tool=${encodeURIComponent(tool)}`,
+      ),
+    enabled: apiKeyId !== "" && tool !== "",
+    staleTime: 0,
+  })
+}
+
+// What one key reaches on each of the workspace's servers, for the key editor.
+export function useWorkspaceMcpKeyAccess(
+  workspaceId: string,
+  apiKeyId: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...mcpKeyAccessRoot(workspaceId), apiKeyId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServerKeyAccess[]>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/keys/${encodeURIComponent(apiKeyId)}/access`,
+      ),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+// Every grant write answers with the whole access list, so the cache is seeded
+// from it rather than refetched. A grant moves what a key reaches and what a
+// check answers, so those two are refreshed.
+function useGrantWrite<
+  Variables extends { workspaceId: string; serverId: string },
+>(request: (variables: Variables) => Promise<WorkspaceMcpServerAccess>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (access, { workspaceId, serverId }) => {
+      queryClient.setQueryData(mcpAccessKey(workspaceId, serverId), access)
+      void queryClient.invalidateQueries({
+        queryKey: [...mcpAccessKey(workspaceId, serverId), "check"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpKeyAccessRoot(workspaceId),
+      })
+    },
+  })
+}
+
+export function useAddWorkspaceMcpServerGrants() {
+  return useGrantWrite(
+    ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: CreateWorkspaceMcpServerGrantsRequest
+    }) =>
+      apiFetch<WorkspaceMcpServerAccess>(
+        `${mcpServerPath(workspaceId, serverId)}/access/grants`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+  )
+}
+
+export function useUpdateWorkspaceMcpServerGrant() {
+  return useGrantWrite(
+    ({
+      workspaceId,
+      serverId,
+      grantId,
+      tools,
+    }: {
+      workspaceId: string
+      serverId: string
+      grantId: string
+      tools: string[]
+    }) =>
+      apiFetch<WorkspaceMcpServerAccess>(
+        `${mcpServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
+        { method: "PATCH", body: JSON.stringify({ tools }) },
+      ),
+  )
+}
+
+export function useDeleteWorkspaceMcpServerGrant() {
+  return useGrantWrite(
+    ({
+      workspaceId,
+      serverId,
+      grantId,
+    }: {
+      workspaceId: string
+      serverId: string
+      grantId: string
+    }) =>
+      apiFetch<WorkspaceMcpServerAccess>(
+        `${mcpServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
+        { method: "DELETE" },
+      ),
+  )
+}
+
 export function useCreateWorkspaceMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -533,7 +709,7 @@ export function useCreateWorkspaceMcpServer() {
 }
 
 // A partial update, which is what keeps the write-only token's three states
-// expressible. See `McpServerDialog` for the rule and how the form maps onto it.
+// expressible. See `McpServerSettings` for the rule and how the form maps onto it.
 export function useUpdateWorkspaceMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -546,11 +722,17 @@ export function useUpdateWorkspaceMcpServer() {
       serverId: string
       body: UpdateWorkspaceMcpServerRequest
     }) =>
-      apiFetch<WorkspaceMcpServer>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
-        { method: "PATCH", body: JSON.stringify(body) },
-      ),
-    onSuccess: (_data, { workspaceId }) => {
+      apiFetch<WorkspaceMcpServer>(mcpServerPath(workspaceId, serverId), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (server, { workspaceId, serverId }) => {
+      queryClient.setQueryData(
+        [WORKSPACES, workspaceId, "mcp-servers", serverId],
+        server,
+      )
+      // The prefix covers the server's access list and every key's view of it,
+      // which `everyone_tools` and `enabled` both move.
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
@@ -611,13 +793,21 @@ export function useDeleteWorkspaceMcpServer() {
       workspaceId: string
       serverId: string
     }) =>
-      apiFetch<void>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: (_data, { workspaceId }) => {
+      apiFetch<void>(mcpServerPath(workspaceId, serverId), {
+        method: "DELETE",
+      }),
+    onSuccess: (_data, { workspaceId, serverId }) => {
+      // Dropped rather than refetched: the server's own page is still mounted
+      // while it navigates away, and a refetch would only earn it a 404.
+      queryClient.removeQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers", serverId],
+      })
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+        exact: true,
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpKeyAccessRoot(workspaceId),
       })
     },
   })

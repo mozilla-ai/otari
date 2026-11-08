@@ -403,6 +403,39 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("asks a key with its own endpoint for the prefix requests will name it by", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Synthetic")
+    expect(screen.queryByRole("textbox", { name: /Request prefix/ })).toBeNull()
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://api.synthetic.new/openai/v1",
+    )
+    const prefix = screen.getByRole("textbox", { name: /Request prefix/ })
+    expect(prefix).toHaveAttribute("placeholder", "synthetic")
+    await user.type(prefix, "syn")
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => {
+      const post = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
+      )
+      expect(post?.body).toMatchObject({ provider: "anthropic", slug: "syn" })
+    })
+  })
+
   it("still finds a provider by the name the gateway gives it", async () => {
     mockApi({
       catalog: [
@@ -706,6 +739,24 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("offers no default on a key named by its own prefix", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          name: "Synthetic",
+          slug: "synthetic",
+          api_base: "https://api.synthetic.new/openai/v1",
+        }),
+      ],
+    })
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(await screen.findByText("synthetic:")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Make default provider" }),
+    ).toBeNull()
+  })
+
   it("removes the organization default from the key that holds it", async () => {
     const requests = mockApi({
       keys: [orgProviderKey({ is_org_default: true })],
@@ -992,6 +1043,38 @@ describe("OrganizationProvidersPage", () => {
         "0.15",
       ),
     )
+  })
+
+  it("sets the rate of a key's model under the key's own prefix", async () => {
+    // #2899: under the provider's name the rate was refused as the deployment's,
+    // because the deployment serves that provider too.
+    const user = userEvent.setup()
+    mockApi({
+      keys: [
+        orgProviderKey({
+          id: KEY_ID,
+          name: "Synthetic",
+          slug: "synthetic",
+          api_base: "https://api.synthetic.new/openai/v1",
+        }),
+      ],
+      models: [orgProviderModel({ id: "m1", model: "hf:Qwen/Qwen3.8-27B" })],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      `/organization/provider-keys?provider=${KEY_ID}`,
+    )
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Set your rate for hf:Qwen/Qwen3.8-27B",
+      }),
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).getByRole("combobox", { name: /Model key/ }),
+    ).toHaveValue("synthetic:hf:Qwen/Qwen3.8-27B")
   })
 
   it("expands the provider named by the URL", async () => {

@@ -773,7 +773,7 @@ def test_a_responses_tool_loop_round_cut_mid_call_runs_no_tool_and_is_an_interru
 
 
 class _WebSearchBackend:
-    """The gateway's web retrieval backend, answering every search from memory."""
+    """The gateway's search backend, answering every search from memory."""
 
     def __init__(self, **_kwargs: Any) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -805,14 +805,14 @@ class _WebSearchBackend:
 def test_a_responses_tool_loop_round_that_ends_incomplete_runs_none_of_the_gateway_tools_it_asked_for(
     client: TestClient,
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """One round asks for the gateway's search and the caller's own tool, then ends in ``response.incomplete``.
 
     The search does not run, and the client is handed its own call and then the
     unfinished response, last.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
     search = ResponseFunctionToolCall(
         type="function_call", call_id="call_search", name="web_search", arguments='{"query": "otari"}'
     )
@@ -829,7 +829,7 @@ def test_a_responses_tool_loop_round_that_ends_incomplete_runs_none_of_the_gatew
     backend = _WebSearchBackend()
 
     with (
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=lambda **_kwargs: backend),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", new=lambda *_args, **_kwargs: [backend]),
         patch("gateway.services.mcp_loop_responses.aresponses", new=_scripted_aresponses(mixed_round)),
     ):
         response = _post_responses_stream(

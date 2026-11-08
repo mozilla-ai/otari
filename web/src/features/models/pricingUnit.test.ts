@@ -6,6 +6,7 @@ import {
   pricingUnitOf,
   toEnteredRate,
   toStoredRate,
+  unitRateLabel,
 } from "@/features/models/pricingUnit"
 
 describe("pricingUnit", () => {
@@ -14,15 +15,19 @@ describe("pricingUnit", () => {
     // Rounded to the micro-dollar, not left as a float artifact.
     expect(toStoredRate(0.07, "image")).toBe(70)
     expect(toStoredRate(0.25, "token")).toBe(0.25)
+    // A character rate is published per million, as a token rate is.
+    expect(toStoredRate(15, "character")).toBe(15)
   })
 
   it("shows a stored rate back in the unit it was entered in", () => {
     expect(toEnteredRate(2000, "request")).toBe(2)
     expect(toEnteredRate(0.25, "token")).toBe(0.25)
+    expect(toEnteredRate(15, "character")).toBe(15)
   })
 
   it("reads an unknown or absent unit as tokens", () => {
     expect(pricingUnitOf("request")).toBe("request")
+    expect(pricingUnitOf("character")).toBe("character")
     expect(pricingUnitOf("seconds")).toBe("token")
     expect(pricingUnitOf(undefined)).toBe("token")
   })
@@ -38,7 +43,7 @@ describe("pricingUnit", () => {
     expect(pricingUnitForEndpoint("/v1/images/generations")).toBe("image")
     expect(pricingUnitForEndpoint("/v1/images/edits")).toBe("image")
     expect(pricingUnitForEndpoint("/v1/audio/transcriptions")).toBe("request")
-    expect(pricingUnitForEndpoint("/v1/audio/speech")).toBe("request")
+    expect(pricingUnitForEndpoint("/v1/audio/speech")).toBe("character")
     expect(pricingUnitForEndpoint("/v1/moderations")).toBe("request")
     expect(pricingUnitForEndpoint("/v1/chat/completions")).toBe("token")
     expect(pricingUnitForEndpoint(undefined)).toBe("token")
@@ -48,5 +53,12 @@ describe("pricingUnit", () => {
     expect(formatPricedRate(2000, "request")).toBe("$0.002 per request")
     expect(formatPricedRate(40000, "image")).toBe("$0.04 per image")
     expect(formatPricedRate(2.5, "token")).toBe("$2.50 / 1M")
+    expect(formatPricedRate(15, "character")).toBe("$15.00 / 1M characters")
+  })
+
+  it("labels the one rate a character price carries", () => {
+    expect(unitRateLabel("character")).toBe("Price per 1M characters")
+    expect(unitRateLabel("image")).toBe("Price per 1,000 images")
+    expect(unitRateLabel("request")).toBe("Price per 1,000 requests")
   })
 })

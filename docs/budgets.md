@@ -21,8 +21,9 @@ also has to fit the organization's [balance](billing.md#budgets-are-a-different-
 1. Open **Organization** and select **Spend & budgets**.
 2. Click **Add budget**, then set an optional **Name**, the **Limit (USD)**
    (blank for no dollar limit) and how often it **Resets**: Daily, Weekly
-   (Mondays) or Monthly (the first of the month), at midnight UTC. Click
-   **Add budget**.
+   (Mondays) or Monthly (the first of the month), at midnight UTC. Under
+   **Token and request limits**, optionally cap tokens or requests per period.
+   Click **Add budget**.
 3. Click **Add ceiling**, then choose what it caps under **Capping** (the
    organization or one of its workspaces), optionally a **Provider instance** to
    cap one provider only, the **Budget** to use, and an optional **Name**. Click
@@ -95,6 +96,12 @@ it can measure before the call: image generation the images asked for at the
 `size` asked for, speech the characters of its input, moderations one request,
 and transcription nothing, because the audio's length is not read here
 ([Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit)).
+Every hold is priced at the rules of the model's price the request meets
+before the call: its estimated context, the tier it asks for, an image's size
+and a video's resolution, and the time it starts. Settlement prices the call
+at the rules it met, the tier the provider reports serving it at included, so
+a request that asks for one tier and is served at a dearer one can settle
+above its hold ([Overrides and multipliers](configuration.md#overrides-and-multipliers)).
 
 ### Per-minute limits
 

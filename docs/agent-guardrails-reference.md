@@ -171,7 +171,10 @@ differences:
 - When a gate from `~/.otari/` fails, the message shows its `user:` ID, and,
   when more than one file composes, its file, for example
   `[~/.otari/guardrails/git-safety.yml]`.
-- A repository cannot turn them off. When the combined set cannot load,
+- A repository's guardrail files cannot turn them off. Only the hook's own
+  registration can, with `otari hook setup --repo-only`, and a repository that
+  commits its `.claude/settings.json` could already have removed the hook entry
+  outright. When the combined set cannot load,
   because of a clash, a broken file, or too many files, the hook enforces the
   `~/.otari/` gates alone, and says that the repository's gates are off each
   time it reports anything. When the `~/.otari/` files are the broken ones, it
@@ -180,7 +183,9 @@ differences:
 - A repository checked out at your home directory owns `~/.otari/` itself, so
   its files are read once, as the repository's.
 - `otari guardrails validate` includes them unless given `--repo-only`, and
-  `otari guardrails check` never reads them.
+  `otari guardrails check` never reads them. `otari hook --repo-only` leaves
+  them out the same way, for a repository whose conventions differ from yours;
+  `otari hook setup --repo-only` writes that flag into the registration.
 
 ## When a gate runs: `runs`
 
@@ -367,16 +372,16 @@ in scope matches one of `require`'s phrases.
 | `require` | yes | Phrases, matched the way `command` matches them. Any one entry satisfies the gate. |
 
 ```yaml
-  - id: openapi-changed-needs-postman
+  - id: openapi-changed-needs-generator
     type: command_if_changed
     runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
-    require: ["make postman"]
+    require: ["scripts/generate_openapi.py"]
     message: >-
-      docs/public/openapi.json changed; regenerate it with
-      scripts/generate_openapi.py, then run `make postman` to keep the
-      Postman collection in sync (see AGENTS.md, "Generated Artifacts").
+      docs/public/openapi.json is generated. Run
+      `uv run python scripts/generate_openapi.py` rather than editing the
+      spec by hand (see AGENTS.md, "Generated Artifacts").
 ```
 
 - A required command that appears only inside a heredoc body does not satisfy
@@ -781,6 +786,7 @@ stderr, and 0 otherwise, with any notice in `systemMessage`.
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `--harness` | | `claude-code` | `claude-code` or `codex`: the integration sending the callback. |
+| `--repo-only` | | off | Enforce this repository's guardrail alone, leaving out your own in `~/.otari/`. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
@@ -833,6 +839,24 @@ repository has no guardrail, it offers to write a starter
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
+| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+
+Re-running `setup` rewrites the registered command in place, matching an
+existing entry by the executable's name and `hook` alone, so an entry naming
+otari on `PATH` and one naming an install path are the same registration. A
+flag added to the settings file by hand does not survive a re-run: pass
+`--repo-only` to `setup` instead.
+
+A `PreToolUse` matcher covers every command in its entry. Where an entry holds
+otari's command beside another hook's, `setup` leaves that entry's matcher
+alone and moves otari's command to an entry of its own, so narrowing the
+matcher cannot stop the other hook from seeing a tool call.
+
+On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
+registers the hook for every repository without the flag, since that entry
+still enforces the user's gates here. Adding the flag there turns those gates
+off in every repository that entry covers, so the warning names removing it and
+registering per repository as the alternative.
 
 ### `otari guardrails validate`
 

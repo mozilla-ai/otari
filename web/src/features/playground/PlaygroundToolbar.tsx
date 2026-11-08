@@ -10,6 +10,7 @@ export function PlaygroundToolbar({
   hasTranscript,
   history,
   files,
+  capture,
 }: {
   isComparing: boolean
   onToggleCompare: () => void
@@ -18,6 +19,8 @@ export function PlaygroundToolbar({
   history: ReactNode
   /** The uploaded-files control, where the deployment serves uploads. */
   files?: ReactNode
+  /** The prompt-capture switch, where the deployment can keep trace content. */
+  capture?: ReactNode
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -35,6 +38,7 @@ export function PlaygroundToolbar({
       />
       {history}
       {files}
+      {capture}
       <Button
         onPress={onNewChat}
         isDisabled={!hasTranscript}

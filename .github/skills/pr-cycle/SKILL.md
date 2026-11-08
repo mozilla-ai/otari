@@ -146,9 +146,8 @@ question to ask is whether the set matches the change, not whether the set is la
 
 ## Generated artifacts a PR can owe
 
-- A route, a schema, **or a route docstring**: run `uv run python scripts/generate_openapi.py`,
-  then `make postman`, and commit both. A single CI job runs `make openapi-check` and
-  `make postman-check`, so regenerating only the spec still fails.
+- A route, a schema, **or a route docstring**: run `uv run python scripts/generate_openapi.py`
+  and commit it. The `openapi-spec` CI job runs `make openapi-check`.
 - `web/src/client/schema.ts` and `web/src/routeTree.gen.ts` are committed and drift-checked. The
   dashboard bundle (`src/gateway/static/dashboard/`) is not committed, so a `web/src` change
   sometimes leaves a file to commit and never leaves a bundle to commit.

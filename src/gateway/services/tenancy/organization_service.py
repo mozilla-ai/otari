@@ -545,6 +545,20 @@ class OrganizationService:
         """Return the ID of the workspace a membership belongs to, or None when the membership does not exist."""
         return await self.workspaces.get_workspace_id(workspace_member_id)
 
+    async def get_membership_ids(
+        self, *, workspace_id: uuid.UUID, organization_id: uuid.UUID, user_id: uuid.UUID
+    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """The IDs of a user's membership of a workspace and of its organization, whatever their status.
+
+        Either is None when the user has no such membership.
+        """
+        workspace_member = await self.workspaces.get_by_workspace_and_user(workspace_id, user_id)
+        organization_member = await self.members.get_by_organization_and_user(organization_id, user_id)
+        return (
+            None if workspace_member is None else workspace_member.id,
+            None if organization_member is None else organization_member.id,
+        )
+
     async def get_workspace_ids_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every workspace in an organization."""
         return await self.workspace_rows.get_ids_by_organization(organization_id)

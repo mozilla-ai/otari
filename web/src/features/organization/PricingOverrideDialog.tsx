@@ -8,6 +8,7 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { isValidModelKey } from "@/features/models/modelKey"
 import {
+  PRICING_UNIT_DESCRIPTION,
   PRICING_UNIT_OPTIONS,
   type PricingUnit,
   pricingUnitOf,
@@ -23,7 +24,7 @@ import {
 } from "@/shared/api/pricing"
 
 import {
-  deploymentManagedPrefixes,
+  deploymentManagedSelectors,
   findOverlapping,
   managedModelReason,
   parseRate,
@@ -135,7 +136,7 @@ export function PricingOverrideDialog({
   // finds it already warm from the card.
   const catalog = useModels(isOpen)
   const { isOperator } = useDeploymentOperator()
-  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
+  const managed = deploymentManagedSelectors(catalog.data?.data)
   const save = (draft: PricingOverrideDraft) => {
     const onDone = { onSuccess: onSaved }
     if (editing) {
@@ -213,7 +214,7 @@ export function PricingOverrideDialog({
   // has to hold for a row saved before it existed.
   const managedReason = managedModelReason({
     modelKey: editing?.model_key ?? modelKey,
-    managedPrefixes,
+    managed,
     isDeploymentOperator: isOperator,
   })
   const periodReason = periodBlockedReason(from, to)
@@ -355,7 +356,7 @@ export function PricingOverrideDialog({
           setUnit(pricingUnitOf(value))
         }}
         options={PRICING_UNIT_OPTIONS}
-        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
+        description={PRICING_UNIT_DESCRIPTION}
       />
       {isTokens ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

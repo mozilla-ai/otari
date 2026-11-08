@@ -1109,8 +1109,77 @@ pricing:
         output: {price: 0.4, unit: second}
 ```
 
-The `overrides` and `multipliers` a block holds are stored and not yet
-applied: the base price is read.
+The `overrides` and `multipliers` a block holds apply to each request
+([Overrides and multipliers](#overrides-and-multipliers)).
+
+### Overrides and multipliers
+
+A price in a `rates` block can change with the request. An override on an
+`input`, an `output` or the `web_search` price replaces the prices it names
+when its condition holds. A multiplier beside the modalities scales the prices
+it names when its condition holds. Otari applies them in the order models.dev
+states, to every modality and to `web_search` alike:
+
+1. Each override whose condition the request meets merges over its price, in
+   order, field by field: an override that names only a cache read price keeps
+   the base cache write price, and a later override wins over an earlier one.
+2. Then each multiplier whose condition the request meets scales the prices it
+   names. A number `factor` scales every price of the block, the cache, the
+   reasoning and the `web_search` prices included. An object scales only the
+   prices on the paths it names: `{text: 2}` scales every text price, and
+   `{text: {output: 2}}` only the text output price.
+
+```yaml
+pricing:
+  openai:gpt-5:
+    rates:
+      text:
+        input:
+          price: 1.25
+          overrides:
+            - when: {context: {gt: 272000}}
+              price: 2.5
+        output: {price: 10}
+      multipliers:
+        - when: {service_tier: {equals: flex}}
+          factor: 0.5
+```
+
+A condition holds when the request's value for each key it names meets that
+key's operator: `equals`, `in`, `gt`, `gte`, `lt`, `lte` or `min_items`, and
+`all`, `any` and `not` combine conditions. `equals` and `in` compare text
+without regard to case. `gt` and the other comparisons order text as written,
+which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
+
+| Condition | Its value |
+|---|---|
+| `context` | The request's billable input in tokens: the estimate before the call, what the provider reports after it |
+| `service_tier` | The tier the request asks for, before the call. After it, the tier the provider reports serving the call at; a response that names no tier settles at the price that names none |
+| `resolution` | An image's `size`, or a video's `resolution`, else its `size` |
+| `region` | The region a Messages request names in `inference_geo`, before the call. After it, the region the provider reports running the call in; Anthropic reports it, including for a request that names none and runs in the workspace's default. Unknown where the provider reports none, so a rule on it is skipped |
+| `quality`, `style` | An image's `quality` and `style` |
+| `aspect_ratio` | A video's `aspect_ratio` |
+| `duration` | A video's length in seconds |
+| `date`, `utc_days`, `utc_hours` | When the request started, in UTC: a video job's start, a batch's creation, an imported event's own time |
+| `input_video` | Whether a video request names `reference_videos`. Unknown for an imported event or a video job started before Otari kept it, so a rule on it is skipped |
+| `generate_audio` | A video request's `generate_audio`. Unknown when the request leaves it to the provider's default, so a rule on it is skipped |
+| `websocket` | False: Otari sends nothing over a websocket. Unknown for an imported event, so a rule on it is skipped |
+
+A rule whose condition names any other key, such as `mode` or `thinking`, is
+skipped, as models.dev's schema says, and the base price applies. A key Otari
+answers that the request gives no value for is a condition that does not hold,
+so `{service_tier: {equals: priority}}` does not hold for a request that names
+no tier, and `{not: {service_tier: {equals: priority}}}` does. A models.dev
+override on context with `gt` starts above its bound. A tier given in
+`pricing_tiers` is written as an override with `gte`, so it starts at its
+`min_input_tokens`.
+
+This file and the pricing API refuse a rule whose condition names a key or an
+operator models.dev does not list, or gives an operator an operand it cannot
+take, so a typo is never a rule that silently never matches. A block read back
+from a row is shown as stored. Each charge line of a usage row names, under
+`rules`, the condition of each rule that changed the price it bills at, in the
+order they applied.
 
 ### Each endpoint in its unit
 
@@ -1141,11 +1210,12 @@ keeps no cost and the needs-pricing view lists it. A rate priced at zero
 everywhere settles such a request free, so a free moderation model is free. A
 measured unit the request cannot measure prices nothing either, such as a
 per-megapixel rate on an image whose `size` is `auto` or unset. With
-`require_pricing` on, image generation, embeddings, rerank and direct search
-refuse a rate that cannot price what they report, such as an `image` rate on
-embeddings or a `megapixel` rate on an image of no stated size, rather than
-serving it unpriced. Audio and moderations are exempt: they are served, and
-their row carries no cost. A missing cost is unknown, not free.
+`require_pricing` on, speech, image generation, embeddings, rerank and direct
+search refuse a rate that cannot price what they report, such as an `image`
+rate on embeddings, a `token` rate on speech or a `megapixel` rate on an image
+of no stated size, rather than serving it unpriced. Audio transcription and
+moderations are exempt: they are served, and their row carries no cost. A
+missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
 `tokens`, `requests` and `images`, are still read for one release, in this file
@@ -1160,7 +1230,10 @@ transcription model is priced on the tokens it reports.
 
 Image generation reserves the images asked for, at the `size` asked for,
 before dispatch, and settles on the images returned. Speech reserves the
-characters of its `input`, and moderations one request. Transcription holds
+characters of its `input` and answers with its settled cost on response
+headers, since its body is audio (see
+[Request ID and inline cost](api-reference.md#request-id-and-inline-cost)).
+Moderations reserve one request. Transcription holds
 nothing before dispatch, because the audio's length is not read here, so a
 priced transcription can exceed a budget by one request's price.
 
@@ -1360,8 +1433,80 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
+### The legacy SearXNG settings
+
+`web_search_url` and `web_search_engines` are deprecated, and a coming breaking
+release removes them. `web_search_url` is the SearXNG instance the in-loop tool
+searches when no search instance is its default and no `web_search_provider`
+with its key is set, with the engines in `web_search_engines`, else
+`duckduckgo`, `mojeek`, `qwant` and `wikipedia`. A `searxng` instance without an
+`api_base` of its own inherits `web_search_url`, and one without an `engines`
+option inherits `web_search_engines` when it is set, else searches its SearXNG
+instance's own defaults.
+
+That release converts a value stored from the dashboard when that is
+unambiguous. A stored `web_search_url` becomes a stored instance named
+`searxng`, with the stored engines, else the four above, and
+`web_search_default_tool` names it when no default is in effect. A stored
+instance that inherits a stored value gets its own copy, and a stored
+`web_search_engines` that neither a stored URL nor a stored instance uses is
+deleted. The release refuses to start:
+
+- while a value is set in the configuration file or the environment, which otari
+  cannot rewrite, even beside a stored one;
+- while an instance inherits a value it cannot copy: a stored instance one from
+  the configuration file or the environment, or an instance in the configuration
+  file a stored one;
+- when a stored `web_search_url` cannot be converted: another tool holds the
+  name `searxng` (a fetch tool, a stored tool otari cannot read, or a search tool
+  with another address or engines), or the new instance would move the unnamed
+  calls of `POST /api/v1/search` off the instance that serves them.
+
+Fix the stored values through the dashboard before upgrading: a refused start
+may already have migrated the database.
+
+Each start logs what that release does with the two settings in effect and with
+the `searxng` instances that inherit them, including deleting stored engines that
+neither a stored URL nor a stored instance uses. The warnings name settings and
+instances, never a value.
+
+Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
+unless the variable is set, even to an empty value. To move off it, declare the
+instance, with the engines `web_search_engines` names, else the four above:
+
+```yaml
+search_tools:
+  local:
+    provider: searxng
+    api_base: "http://searxng:8080"
+    options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+    price_per_call: 0   # USD; a SearXNG you run costs nothing
+web_search_default_tool: local
+```
+
+The tool is priced on its own, not under `otari:web_search`: with
+`require_pricing`, the default, a request that declares web search on a key that
+counts toward budgets gets a 402 until the tool has a price, so set
+`price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
+Each start writes `price_per_call` again, so keep the lasting rate there, or
+leave it out to keep one set through the API (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
+
+Leave `web_search_default_tool` out when the in-loop tool searches on
+`web_search_provider`, so it keeps doing so. Then turn the compose default off in
+`.env`, and remove `web_search_engines` wherever it is set:
+
+```bash
+OTARI_WEB_SEARCH_URL=
+```
+
+A variable exported in the shell that runs Docker Compose wins over `.env`, so
+unset an exported `OTARI_WEB_SEARCH_URL` there too.
+
+### The older in-loop backend
+
 The older in-loop backend still serves some requests until it is removed: a
-search on the legacy settings, or on a Tavily or Brave organization key, and a
+search on `web_search_provider`, or on a Tavily or Brave organization key, and a
 request that declares only the fetch tool. `web_fetch_default_tool` governs every
 fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
 search instance serves the request: the older backend keeps its fixed limit of 10
@@ -1490,7 +1635,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
 - `code_execution_executor`
-- `web_search_url`
+- `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
 - `web_search_provider` and `web_search_provider_api_key`
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))

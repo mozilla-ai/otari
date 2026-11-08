@@ -8,8 +8,10 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
-needs a search provider (`web_search_provider` or `web_search_url`). Fetch runs
-in the gateway.
+needs a search tool (see [Search tools](configuration.md#search-tools)), a
+workspace's [organization search key](#organization-search-keys), or a legacy
+setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -264,10 +266,11 @@ funds paid in, and so is a direct search on one of the deployment's tools.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings, or on a Tavily, Brave or
-SearXNG organization key, which the older backend still runs, is labeled
-`otari:web_search`. Searches a model's provider runs itself carry the provider's
-label, as the next section says.
+search instance. A search on the legacy settings or on a Tavily or Brave
+organization key is labeled `otari:web_search`: `web_search_url` searches on
+any-search's SearXNG adapter, and the older backend runs the rest. Searches a
+model's provider runs itself carry the provider's label, as the next section
+says.
 
 The pages a search reads to enrich its results are fetches on the fetch
 instance that read them, `builtin_fetch` included: each page that comes back is
@@ -279,8 +282,8 @@ their pages cost the instance's rate, up to one page per result. A page that
 cannot be read is neither billed nor counted. Pages read on an
 [organization fetch key](#organization-search-keys) are labeled
 `org:<provider>` and priced under `otari:web_fetch`. A search the older
-backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
-key) reads its pages on the built-in fetcher and records no fetch, until that
+backend runs (`web_search_provider` with its key, or a Tavily or Brave
+organization key) reads its pages on the built-in fetcher and records no fetch, until that
 backend is removed. With `require_pricing` on, a search whose pages would be
 read through a fetch instance with no price is refused with `402` before it
 runs, the detail naming that instance's row; a search the older backend runs
@@ -299,7 +302,9 @@ budget carry what the provider will charge. They are priced at the operator's
 the model's own rate carries, per 1,000 searches, which the catalog gives a
 model whose provider searches (Anthropic's is $10 per 1,000) and a `rates`
 block can set ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)),
-else, with `default_pricing` on, at the provider's list price. An
+else, with `default_pricing` on, at the provider's list price. The model's own
+price applies its rules, a tier multiplier included
+([Overrides and multipliers](configuration.md#overrides-and-multipliers)). An
 organization's override prices them as it prices the call's tokens, so a
 search on the organization's own provider key takes its override. With
 none of these, the searches stay on the row at no cost. Searches across the rounds
@@ -825,10 +830,15 @@ On the legacy settings, Otari reaches a licensed search API directly. Set
 `web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
 that provider's key; the key stays in the gateway process and never reaches a
 caller.
-`web_search_url` points at a backend exposing a SearXNG-compatible
-`/search?format=json` endpoint, such as the bundled SearXNG
-([try it](#try-web-search-with-the-bundled-searxng)), and a configured provider
-wins over it.
+`web_search_url`, which is deprecated (see
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)),
+points at a SearXNG instance, such as the bundled one
+([try it](#try-web-search-with-the-bundled-searxng)), which any-search's SearXNG
+adapter asks to search the engines in `web_search_engines`, else `duckduckgo`,
+`mojeek`, `qwant` and `wikipedia`; SearXNG skips a name it has no engine for,
+and when it knows none of the names it searches its own default engines, so a
+misspelled engine can send the query to engines the list leaves out. A
+configured provider wins over it.
 
 When content extraction is enabled, Otari retrieves each result through its
 bounded public-web client. It validates and pins the resolved address before
@@ -841,8 +851,9 @@ Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
 JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
 output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
-unextractable results fall back to the search provider's snippet. A provider's
-own `extracted_content` still takes precedence and is not fetched locally.
+unextractable results fall back to the search provider's snippet. Page text
+the provider already returned, such as Tavily's on the legacy settings, is used
+and not fetched again.
 
 Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The 1,500-character per-result content limit
@@ -918,8 +929,9 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists other than `searxng`, or `tavily` or
-  `brave`;
+  `GET /api/v1/search-tools/providers` lists, or `tavily` or `brave`. A
+  `searxng` key names its own instance in `api_base`, since a key never takes
+  the deployment's `web_search_url`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
   provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 
@@ -988,7 +1000,11 @@ For evaluation, the bundled SearXNG backend needs no key. Start it:
 docker compose --profile web-search up
 ```
 
-Then declare the tool on a request:
+While `OTARI_WEB_SEARCH_URL` is unset, Docker Compose points the deprecated
+`web_search_url` at it. With the variable empty, declare a `searxng` search tool
+instead, as
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)
+shows. Then declare the tool on a request:
 
 ```json
 {
@@ -1007,9 +1023,9 @@ provider for production. A runnable example lives under `demo/web-search/`.
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 
-A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
-search can share one backend. They remain distinct surfaces with separate
-pricing keys.
+A search tool named in `web_search_default_tool` serves model-initiated search
+and unnamed direct searches, so the two can share one backend. They remain
+distinct surfaces with separate pricing keys.
 
 A direct search that names no tool runs on the workspace's usable
 [organization search key](#organization-search-keys), if it has one, in place of
@@ -1077,8 +1093,27 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
   new account gets 2,500 credits for its first 30 days. A search returns at most
   10 results, and its hits carry a snippet but no page text.
+- **Synthetic** (`synthetic`) needs an API key, read from the tool's `api_key`,
+  such as `${SYNTHETIC_API_KEY}`. It reports no cost, so a search is billed at the
+  tool's own rate (its `price_per_call`, or a `search` price set on the dashboard's
+  Web search page or through the API). Synthetic's
+  [pricing](https://synthetic.new/pricing), read 2026-11-05, includes the search
+  API in every subscription (Go at $9 a month, Standard at $30, Big at $90) and
+  names no price per search; a key whose account has no subscription is
+  refused. Set the rate at what a search costs you, or 0. It
+  takes no result count and no recency filter: Otari keeps at most 10 results and,
+  for a `time_range`, drops the hits dated before it. Its hits carry page text but
+  no snippet.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
-  at the tool's rate.
+  at the tool's rate. The tool's `api_base` is the instance's root URL, and the
+  instance must list `json` under `search.formats`, or every search fails with
+  `forbidden`, SearXNG's 403. Searches use GET, SearXNG's default; `method: post`
+  sends them as form data, which keeps the query out of the instance's access
+  log. Only the operator sets `method` and `engines`, the engines to search,
+  since an engine that fails is suspended for every caller of the instance. A
+  search that leaves no usable hit while an engine failed fails with
+  `engines_unresponsive`. Hits carry SearXNG's snippet and date, and no page
+  text.
 
 ## Direct fetch
 

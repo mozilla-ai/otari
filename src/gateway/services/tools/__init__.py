@@ -10,6 +10,7 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
+``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -25,6 +26,8 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``run_connection_test`` tests an instance with one search or fetch.
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
+``warn_about_legacy_search_settings`` logs at startup what the breaking release that removes the legacy SearXNG
+settings does with each value in effect, from ``LegacySearchValues`` read before and after the stored settings.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
 ``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
@@ -98,8 +101,14 @@ from gateway.services.tools._direct_tool_call import (
     DirectToolUsage,
     WorkspaceWebPolicies,
 )
+from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
+from gateway.services.tools._mcp_admission import (
+    admit_mcp_servers,
+    declares_provider_mcp,
+    refuse_shadowed_builtin_tools,
+)
+from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -222,6 +231,8 @@ __all__ = [
     "DirectToolService",
     "DirectToolUsage",
     "WorkspaceWebPolicies",
+    "LegacySearchValues",
+    "warn_about_legacy_search_settings",
     "MAX_TOOL_ITERATIONS_CAP",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
@@ -266,7 +277,9 @@ __all__ = [
     "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
+    "McpGrantMembershipListener",
     "admit_mcp_servers",
+    "declares_provider_mcp",
     "admit_web_access",
     "apply_web_access_policy",
     "web_access_disabled_refusal",

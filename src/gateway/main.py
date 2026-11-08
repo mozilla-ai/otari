@@ -45,7 +45,11 @@ from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
     CONVERSATION_HEADER,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
     TAGS_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
 )
@@ -158,6 +162,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.services.tools import (
     SANDBOX_KEY_ENV,
+    LegacySearchValues,
     build_web_provider_client,
     load_sandbox_credentials_at_startup,
     register_builtin_fetcher,
@@ -165,6 +170,7 @@ from gateway.services.tools import (
     reset_search_tool_cache,
     run_sandbox_credential_refresher,
     run_search_tool_refresher,
+    warn_about_legacy_search_settings,
     warn_about_tool_instances,
 )
 from gateway.services.traces import RequestTraces, SpanContent, TraceWriter
@@ -947,10 +953,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_persisted_price_snapshot(session)
             # So the first request after a restart lists the stored model facts.
             await load_stored_models_dev_catalog(session)
-            # Persisted tool/guardrail overrides (service URLs + web-search
-            # knobs) win over config/env too; apply them so the running worker
-            # reflects a dashboard change made in a prior run.
-            await apply_tool_overrides_from_db(config, session)
+            # Persisted tool overrides win over config/env too, so the worker
+            # reflects a prior run's dashboard change. The legacy search values
+            # are read first, to tell a file value from a stored one.
+            legacy_search_from_file = LegacySearchValues.in_effect(config)
+            stored_tool_settings = await apply_tool_overrides_from_db(config, session)
             # Overlay dashboard-stored search tools before the checks below,
             # so a tool added through the dashboard is one the backend-URL
             # warning and the unpriced-tool warning can see. On a session of its
@@ -970,13 +977,18 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if missing_backend_url := config.search_tools_without_backend_url():
                 logger.warning(
                     "No backend URL for search tool(s): %s. POST /api/v1/search refuses them with a 400 until "
-                    "each declares an 'api_base' or a web-search URL is set (web_search_url, "
-                    "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
+                    "each declares its own 'api_base'.",
                     ", ".join(sorted(missing_backend_url)),
                 )
             # After the stored search tools and tool settings, for the same
             # reason: a default set in the dashboard counts.
             warn_about_tool_instances(config)
+            warn_about_legacy_search_settings(
+                config,
+                from_file=legacy_search_from_file,
+                stored_settings=stored_tool_settings,
+                stored_tools_loaded=stored_tools_loaded,
+            )
             # Generate + persist a master key on first run when none is set,
             # so the dashboard is reachable without hand-editing config, and
             # the management API is never left unauthenticated.
@@ -1431,6 +1443,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Otari-Region",
                 *_SDK_CORS_HEADERS,
             ],
+            # A speech response carries its cost on headers, which a browser on
+            # another origin reads only when they are exposed.
+            expose_headers=[COST_USD_HEADER, PRICING_SOURCE_HEADER, USAGE_UNIT_HEADER, USAGE_UNITS_HEADER],
         )
 
     # Tracks what the gateway is serving right now, so the activity log can show

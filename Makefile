@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check postman postman-check changelog check-migrations railway-template-check
+.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check changelog check-migrations railway-template-check
 
 help:
 	@printf "Available targets:\n"
@@ -19,8 +19,6 @@ help:
 	@printf "  typecheck-python Run mypy\n"
 	@printf "  typecheck-web Run tsc over the dashboard\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
-	@printf "  postman Regenerate the Postman collection from the OpenAPI spec\n"
-	@printf "  postman-check Verify the Postman collection is up to date\n"
 	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
 	@printf "  railway-template-check Compare deploy/railway with the live Railway template\n"
 
@@ -117,12 +115,6 @@ typecheck-web: web/node_modules/.install-stamp
 
 openapi-check:
 	uv run python scripts/generate_openapi.py --check
-
-postman:
-	uv run python scripts/generate_postman.py
-
-postman-check:
-	uv run python scripts/generate_postman.py --check
 
 # Local preview only. CHANGELOG.md is generated at release time by the
 # otari-release / otari-tag-release workflows; this target is for eyeballing

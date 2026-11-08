@@ -7,6 +7,7 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { isValidModelKey } from "@/features/models/modelKey"
 import {
+  PRICING_UNIT_DESCRIPTION,
   PRICING_UNIT_OPTIONS,
   type PricingUnit,
   pricingUnitOf,
@@ -93,7 +94,7 @@ export interface SetPriceDialogProps {
    * `collectModelKey`.
    */
   initialModelKey?: string
-  /** Offer the unit the price is per (tokens, requests, images). */
+  /** Offer the unit the price is per (tokens, requests, images, characters). */
   chooseUnit?: boolean
   /** The unit selected when the dialog opens. Only read with `chooseUnit`. */
   initialUnit?: PricingUnit
@@ -143,7 +144,7 @@ export function SetPriceDialog({
   const cacheWriteRate = parseRate(cacheWrite)
 
   const keyInvalid = collectModelKey && !isValidModelKey(modelKey)
-  // A request or image price is one rate: there is no output, and no cache.
+  // A request, image or character price is one rate: there is no output, and no cache.
   const isTokens = unit === "token"
 
   const isInvalid =
@@ -236,7 +237,7 @@ export function SetPriceDialog({
             setUnit(pricingUnitOf(value))
           }}
           options={PRICING_UNIT_OPTIONS}
-          description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
+          description={PRICING_UNIT_DESCRIPTION}
         />
       ) : null}
       {isTokens ? (

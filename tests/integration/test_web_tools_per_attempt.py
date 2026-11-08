@@ -76,6 +76,8 @@ def test_config(postgres_url: str) -> GatewayConfig:
         auto_migrate=False,
         require_pricing=False,
         model_discovery=False,
+        search_tools={"fake-search": {"provider": "fake"}},
+        web_search_default_tool="fake-search",
         routing=RoutingConfig.model_validate(
             {
                 "policies": {
@@ -108,7 +110,6 @@ def test_config(postgres_url: str) -> GatewayConfig:
 
 @pytest.fixture(autouse=True)
 def _web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
@@ -259,6 +260,16 @@ def _fake_web_backend(seen: _Seen) -> Any:
     return _build
 
 
+def _fake_web_search_backends(seen: _Seen) -> Any:
+    """What a search on an instance opens, as one fake backend that serves the search and the fetch."""
+    build = _fake_web_backend(seen)
+
+    def _build(*_args: Any, **kwargs: Any) -> list[_FakeWebBackend]:
+        return [build(**kwargs)]
+
+    return _build
+
+
 def _post_messages(
     client: TestClient,
     headers: dict[str, str],
@@ -269,10 +280,12 @@ def _post_messages(
     loop_stream_fails: bool = False,
     loop_stream_fails_after_round: bool = False,
     run_loop_for: str | None = None,
+    real_search_backends: bool = False,
 ) -> tuple[Any, _Seen]:
     """POST ``body`` to Messages with the providers, loops and backends faked.
 
     ``run_loop_for`` runs the real tool loop, whose model asks for that tool once.
+    ``real_search_backends`` opens the real search and fetch backends of a search on an instance.
     """
     seen = _Seen()
 
@@ -326,6 +339,10 @@ def _post_messages(
         stack.enter_context(
             patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen))
         )
+        if not real_search_backends:
+            stack.enter_context(
+                patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen))
+            )
         stack.enter_context(patch("gateway.api.routes._pipeline.SandboxBackend", new=_fake_sandbox(seen)))
         for loop in loops:
             stack.enter_context(loop)
@@ -606,7 +623,7 @@ def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
 class _McpPool:
     """An MCP pool whose one server exposes a tool no built-in is named."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
         return None
 
     async def __aenter__(self) -> _McpPool:
@@ -738,7 +755,7 @@ def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_
 class _ShadowingMcpPool:
     """An MCP pool whose one server exposes a tool named ``web_search``."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
         return None
 
     async def __aenter__(self) -> _ShadowingMcpPool:
@@ -803,20 +820,21 @@ def test_caps_are_shared_by_attempts_that_run_different_tools(
 
 
 def test_attempts_searching_on_an_instance_share_one_call_allowance(
-    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+    client: TestClient, api_key_header: dict[str, str]
 ) -> None:
     """Each attempt opens its own search and fetch backends, all on the request's one ``web_search_max_calls``.
 
     A request locks in to its attempt once it has answered or reported a call, so a
     search never runs on two attempts in a row; what holds the cap is that they share it.
     """
-    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
-    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
-    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
     headers = {**api_key_header, WEB_SEARCH_HEADER: "otari", WEB_FETCH_HEADER: "otari"}
 
     response, seen = _post_messages(
-        client, headers, _messages_body("claude-then-vertex", _SEARCH, _FETCH), loop_fails=True
+        client,
+        headers,
+        _messages_body("claude-then-vertex", _SEARCH, _FETCH),
+        loop_fails=True,
+        real_search_backends=True,
     )
 
     assert response.status_code == 200, response.text
@@ -889,6 +907,7 @@ def _post_responses(
         patch("gateway.api.routes.responses.aresponses", new=fake_aresponses),
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
         patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen)),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen)),
     ):
         response = client.post(f"{API_ROOT}/responses", json=body, headers=headers)
     return response, seen

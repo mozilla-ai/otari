@@ -19,8 +19,9 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+import unicodedata
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from time import monotonic
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -284,6 +285,26 @@ def _walk(schema: dict[str, Any]) -> tuple[int, int, bool]:
 # --------------------------------------------------------------------------- #
 
 
+def reads_as_pattern(name: str) -> bool:
+    """Whether a tool name could mean something other than itself once picked, so it is never offered as a choice.
+
+    A server's tool names are untrusted. One named ``*``, ``search*`` or `` @read`` that a manager ticks would be
+    stored, trimmed, as a wildcard or a preset reaching tools the server never named; one with a comma is split by
+    the dashboard's allow-list field into other names, or into none, which exposes every tool; an empty one reads as
+    no choice at all. Any whitespace or control character is refused outright rather than only at the edges, since
+    Python and JavaScript disagree on what trimming removes (U+0085, for one). The dashboard applies the same rule
+    (``isLiteralToolName``), and MCP's tool-name charset has none of these, so such a tool is left out of discovery
+    and of the checked catalog rather than offered.
+    """
+    return (
+        not name
+        or "*" in name
+        or "," in name
+        or name.startswith("@")
+        or any(char.isspace() or unicodedata.category(char)[0] in "CZ" for char in name)
+    )
+
+
 def screen_tool(tool: MCPTool) -> str | None:
     """Return the warning code that omits ``tool``, or ``None`` to admit it.
 
@@ -293,7 +314,7 @@ def screen_tool(tool: MCPTool) -> str | None:
     safely return or execute, or a schema that would make it fetch another
     schema over the network to be understood at all.
     """
-    if not tool.name or len(tool.name) > TOOL_NAME_MAX_LENGTH:
+    if not tool.name or len(tool.name) > TOOL_NAME_MAX_LENGTH or reads_as_pattern(tool.name):
         return WARN_NAME_UNSUPPORTED
     if _oversized(tool.description, TOOL_DESCRIPTION_MAX_BYTES):
         return WARN_DESCRIPTION_TOO_LARGE
@@ -510,19 +531,25 @@ class DiscoveredCatalog:
     warnings: list[tuple[str, str]]
 
 
-async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
-    """List the live tools a stored server's allowlist admits.
+async def discover_stored_tools(
+    server: ResolvedMcpServer, admits: Callable[[str], bool] | None = None
+) -> DiscoveredCatalog:
+    """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
     One bounded session, one paginated ``tools/list``, per-tool screening, and
-    a ceiling on the whole serialized answer. Every failure is ``not_started``:
-    discovery runs no tool.
+    a ceiling on the whole serialized answer. The caller's filter runs before
+    the screening and the ceilings on what is returned, so a server offering
+    more tools than a response may carry still answers a caller allowed a few
+    of them; the limits on pages, bytes read and descriptors examined still
+    bound the listing itself. Every failure is ``not_started``: discovery runs
+    no tool.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
     try:
         async with DISCOVERY_GATE.slot():
-            return await _run_in_owner_task(_discover_once(server))
+            return await _run_in_owner_task(_discover_once(server, admits))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except McpExecutionError:
@@ -540,7 +567,7 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
         raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
-async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
+async def _discover_once(server: ResolvedMcpServer, admits: Callable[[str], bool] | None) -> DiscoveredCatalog:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server))
@@ -548,6 +575,8 @@ async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
             listed = await collect_tools(session, allowed_tools=server.allowed_tools)
         except McpDiscoveryRefused:
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
+        if admits is not None:
+            listed = [tool for tool in listed if admits(tool.name)]
 
         tools: list[MCPTool] = []
         warnings: list[tuple[str, str]] = []
@@ -666,12 +695,14 @@ class ServerCheck:
 
     ``tool_names`` lists the server's whole live catalog, whatever the stored
     allowlist admits, and is empty on a failure. ``http_status`` is set when
-    the server refused with one.
+    the server refused with one. ``read_only_hinted`` are the tools the server
+    annotates ``readOnlyHint``, a suggestion for a manager and never a label.
     """
 
     tool_names: list[str]
     failure: CheckFailure | None = None
     http_status: int | None = None
+    read_only_hinted: list[str] = field(default_factory=list)
 
 
 class _UnusableAnswer(Exception):
@@ -807,8 +838,13 @@ async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server, screen_answers=True))
-        listed = await collect_tools(session, allowed_tools=None)
-        return ServerCheck(tool_names=[tool.name for tool in listed])
+        listed = [tool for tool in await collect_tools(session, allowed_tools=None) if not reads_as_pattern(tool.name)]
+        return ServerCheck(
+            tool_names=[tool.name for tool in listed],
+            read_only_hinted=[
+                tool.name for tool in listed if tool.annotations is not None and tool.annotations.read_only_hint is True
+            ],
+        )
     finally:
         await _close_bounded(stack)
 

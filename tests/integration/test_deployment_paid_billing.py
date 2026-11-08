@@ -54,7 +54,7 @@ from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BilledModel, ToolUse
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 
-from .conftest import build_test_client
+from .conftest import FAKE_SEARCH, build_test_client, price_fake_search
 
 MODULE = "probe_deployment_paid"
 PROBE_BOOTSTRAP = """
@@ -187,6 +187,15 @@ def billed_search(
     options = {"hits": [{"url": "https://otari.example"}], "cost": 0.007}
     tools = {"fake-search": {"provider": "fake", "options": options}}
     yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools)
+
+
+@pytest.fixture
+def billed_in_loop_search(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, with the in-loop search on a search tool on the deployment's account that its own row prices."""
+    tools = {FAKE_SEARCH: {"provider": "fake", "options": {"hits": [{"url": "https://otari.example"}]}}}
+    yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools, web_search_extract=False)
 
 
 def _billed(
@@ -667,19 +676,12 @@ def _search_round(model: str) -> ChatCompletion:
 
 
 def _chat_with_search(client: TestClient, key: dict[str, Any], model: str) -> tuple[Any, AsyncMock]:
-    """A completion whose model searches once on the deployment's backend, then answers."""
+    """A completion whose model searches once on the deployment's search tool, then answers."""
     bare = model.split(":", 1)[1]
     answer = _completion(bare)
     answer.usage = USAGE.model_copy()
     provider = AsyncMock(side_effect=[_search_round(bare), answer])
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=provider),
-        patch(
-            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
-            new=AsyncMock(return_value="search results for otari"),
-        ),
-        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=provider):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -693,11 +695,11 @@ def _chat_with_search(client: TestClient, key: dict[str, Any], model: str) -> tu
 
 
 def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_another_key(
-    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+    billed_in_loop_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
-    client, probe = billed
+    client, probe = billed_in_loop_search
     _price(client, "anthropic:claude-opus-4")
-    _price(client, "otari:web_search")
+    price_fake_search(client, MASTER, per_million=1000.0)
     key = _key(client)
 
     response, provider = _chat_with_search(client, key, "anthropic:claude-opus-4")
@@ -715,11 +717,11 @@ def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_anothe
 
 
 def test_a_search_on_the_deployments_account_is_refused_without_funds_before_the_model_is_called(
-    billed: tuple[TestClient, ModuleType],
+    billed_in_loop_search: tuple[TestClient, ModuleType],
 ) -> None:
-    client, probe = billed
+    client, probe = billed_in_loop_search
     _price(client, "anthropic:claude-opus-4")
-    _price(client, "otari:web_search")
+    price_fake_search(client, MASTER, per_million=1000.0)
     key = _key(client)
     probe.FUNDS["available"] = Decimal("0")
 
@@ -735,11 +737,11 @@ def test_a_search_on_the_deployments_account_is_refused_without_funds_before_the
 
 
 def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
-    billed: tuple[TestClient, ModuleType],
+    billed_in_loop_search: tuple[TestClient, ModuleType],
 ) -> None:
-    client, probe = billed
+    client, probe = billed_in_loop_search
     _price(client, "openai:gpt-4o")
-    _price(client, "otari:web_search")
+    price_fake_search(client, MASTER, per_million=1000.0)
     key = _key(client)
 
     response, provider = _chat_with_search(client, key, "openai:gpt-4o")
@@ -820,10 +822,12 @@ def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
     assert any("deployment-paid search" in message and "RuntimeError" in message for message in errors), errors
 
 
-def test_a_tool_admission_that_does_not_commit_is_not_served(billed: tuple[TestClient, ModuleType]) -> None:
-    client, probe = billed
+def test_a_tool_admission_that_does_not_commit_is_not_served(
+    billed_in_loop_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_in_loop_search
     _price(client, "anthropic:claude-opus-4")
-    _price(client, "otari:web_search")
+    price_fake_search(client, MASTER, per_million=1000.0)
     key = _key(client)
 
     with patch("gateway.api.routes._pipeline.release_session", new=AsyncMock(return_value=False)):

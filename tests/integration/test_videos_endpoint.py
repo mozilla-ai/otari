@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED
+from gateway.models.inference import VideoJobRecord
 from gateway.models.usage import UsageLog
 from gateway.services.inference import VideoJobService
 
@@ -285,6 +287,23 @@ def test_the_estimate_for_the_length_asked_for_is_what_the_budget_gates(
     assert accepted.status_code == 200, accepted.text
 
 
+@pytest.mark.parametrize("field", ["size", "resolution", "aspect_ratio"])
+def test_a_value_longer_than_its_record_holds_is_refused_before_the_provider_is_called(
+    client: TestClient, master_key_header: dict[str, str], field: str
+) -> None:
+    _per_second(client, master_key_header)
+    headers = _user_key(client, master_key_header)
+
+    with patch("gateway.api.routes.videos.avideo_generation", new=AsyncMock(return_value=_job())) as started:
+        response = client.post(
+            f"{API_ROOT}/videos", json={"model": _MODEL, "prompt": "a cat", field: "x" * 65}, headers=headers
+        )
+
+    assert response.status_code == 422, response.text
+    started.assert_not_awaited()
+    assert _spend(client, master_key_header) == (0.0, 0.0)
+
+
 def test_a_provider_failure_refunds_the_reservation(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
@@ -366,6 +385,110 @@ def test_a_completed_job_is_billed_once_for_the_seconds_the_provider_reports(
     assert _spend(client, master_key_header) == (0.6, 0.0)
     listed = client.get(f"{API_ROOT}/videos", headers=headers).json()["data"]
     assert [(job["id"], job["seconds"], job["billed"]) for job in listed] == [("video_abc", 4, True)]
+
+
+def test_a_completed_job_is_billed_at_the_price_its_resolution_meets(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    full_hd = {"resolution": {"equals": "1080p"}}
+    _price(
+        client,
+        master_key_header,
+        {"video": {"output": {"price": 0.1, "unit": "second", "overrides": [{"when": full_hd, "price": 0.3}]}}},
+    )
+    headers = _user_key(client, master_key_header)
+    assert _start(client, headers, seconds=4, resolution="1080p").status_code == 200
+    done = _job(status="completed", seconds=6, outputs=[VideoOutput(url="https://cdn.example/v.mp4")])
+
+    assert _read(client, headers, done).status_code == 200
+
+    (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
+    assert row.cost == Decimal("1.8")
+    assert row.pricing_breakdown == [
+        {"meter": "seconds", "units": 6, "unit": "second", "unit_rate": 0.3, "cost": 1.8, "rules": [full_hd]}
+    ]
+    assert _spend(client, master_key_header) == (1.8, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("body", "when"),
+    [
+        ({"reference_videos": ["https://cdn.example/in.mp4"]}, {"input_video": {"equals": True}}),
+        ({"generate_audio": False}, {"generate_audio": {"equals": False}}),
+    ],
+)
+def test_a_completed_job_is_billed_at_the_price_its_inputs_and_sound_track_meet(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    body: dict[str, Any],
+    when: dict[str, Any],
+) -> None:
+    _price(
+        client,
+        master_key_header,
+        {"video": {"output": {"price": 0.1, "unit": "second", "overrides": [{"when": when, "price": 0.3}]}}},
+    )
+    headers = _user_key(client, master_key_header)
+    assert _start(client, headers, seconds=4, **body).status_code == 200
+    done = _job(status="completed", seconds=6, outputs=[VideoOutput(url="https://cdn.example/v.mp4")])
+
+    assert _read(client, headers, done).status_code == 200
+
+    (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
+    assert row.cost == Decimal("1.8")
+    assert [line["rules"] for line in row.pricing_breakdown or []] == [[when]]
+
+
+def test_a_job_that_leaves_its_sound_track_to_the_provider_meets_no_rule_on_it(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    silent = {"generate_audio": {"equals": False}}
+    with_sound = {"generate_audio": {"equals": True}}
+    _price(
+        client,
+        master_key_header,
+        {
+            "video": {
+                "output": {
+                    "price": 0.1,
+                    "unit": "second",
+                    "overrides": [{"when": silent, "price": 0.2}, {"when": with_sound, "price": 0.4}],
+                }
+            }
+        },
+    )
+    headers = _user_key(client, master_key_header)
+    assert _start(client, headers, seconds=4).status_code == 200
+    done = _job(status="completed", seconds=6, outputs=[VideoOutput(url="https://cdn.example/v.mp4")])
+
+    assert _read(client, headers, done).status_code == 200
+
+    (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
+    assert row.cost == Decimal("0.6")
+
+
+def test_a_job_is_recorded_at_the_time_its_request_started(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    _per_second(client, master_key_header)
+    headers = _user_key(client, master_key_header)
+    called: list[datetime] = []
+
+    async def _render(*_args: Any, **_kwargs: Any) -> VideoJob:
+        called.append(datetime.now(UTC))
+        return _job(status="completed", seconds=2, outputs=[VideoOutput(url="https://cdn.example/v.mp4")])
+
+    with (
+        patch("gateway.api.routes.videos.avideo_generation", new=AsyncMock(side_effect=_render)),
+        patch("gateway.api.routes.videos.AnyLLM.get_provider_class", return_value=_ServesVideo),
+    ):
+        response = client.post(f"{API_ROOT}/videos", json={"model": _MODEL, "prompt": "a cat"}, headers=headers)
+
+    assert response.status_code == 200, response.text
+    with db_session_factory() as db:
+        record = db.execute(select(VideoJobRecord)).scalar_one()
+    assert record.created_at <= called[0]
 
 
 def test_a_completed_job_the_provider_gives_no_length_for_is_billed_for_the_length_asked(

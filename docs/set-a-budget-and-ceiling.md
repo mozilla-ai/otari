@@ -15,7 +15,9 @@ nothing: a **spend ceiling** applies it to the organization or a workspace.
 3. Set an optional **Name**, the **Limit (USD)** (blank for no dollar limit),
    and how often it **Resets**: daily, weekly (on Mondays) or monthly (on the
    first of the month), at midnight UTC.
-4. Click **Add budget**.
+4. Optionally, open **Token and request limits** to also cap the tokens or the
+   number of requests per period. Blank caps nothing.
+5. Click **Add budget**.
 
 ## Apply a spend ceiling
 

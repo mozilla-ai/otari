@@ -80,6 +80,28 @@ def test_rates_leave_no_cache_rate_to_inherit(client: TestClient, master_key_hea
         ({"rates": {"text": {"input": {"price": 3, "unit": "tokens"}}}}, "unit"),
         ({"rates": {}}, "price nothing"),
         ({"rates": {"text": {"input": {"price": -1}}}}, "greater than or equal to 0"),
+        (
+            {"rates": {"text": {"input": {"price": 1, "overrides": [{"when": {"moon": {"equals": 1}}, "price": 2}]}}}},
+            "when.moon is not a condition models.dev lists",
+        ),
+        (
+            {
+                "rates": {
+                    "text": {"input": {"price": 1}},
+                    "multipliers": [{"when": {"service_tier": {"equals": "flex", "in": ["flex"]}}, "factor": 2}],
+                }
+            },
+            "when.service_tier is not one operator and its operand",
+        ),
+        (
+            {
+                "rates": {
+                    "text": {"input": {"price": 1}},
+                    "multipliers": [{"when": {"not": {"context": {"over": 5}}}, "factor": 2}],
+                }
+            },
+            "uses over, which is not an operator models.dev lists",
+        ),
     ],
 )
 def test_a_block_the_api_cannot_take_is_refused(

@@ -89,6 +89,14 @@ FALLBACK_HEADER = "Otari-Fallback"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # The same duration split into the gateway's own time and the provider's (W3C Server Timing).
 SERVER_TIMING_HEADER = "Server-Timing"
+# Response headers carrying the settled cost of a response whose body cannot
+# (speech returns audio bytes): what the request cost and which rate priced it,
+# the ``cost_usd`` and ``pricing_source`` a usage object carries, and the meter
+# it was billed on with the quantity billed. See docs/api-reference.md#request-id-and-inline-cost.
+COST_USD_HEADER = "Otari-Cost-USD"
+PRICING_SOURCE_HEADER = "Otari-Pricing-Source"
+USAGE_UNIT_HEADER = "Otari-Usage-Unit"
+USAGE_UNITS_HEADER = "Otari-Usage-Units"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"

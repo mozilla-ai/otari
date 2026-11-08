@@ -51,6 +51,7 @@ from gateway.services.inference._messages_responses_bridge import (
     usage_unreported,
     with_responses_instance,
 )
+from gateway.services.inference._passthrough_responses import speech_cost_headers
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
     IMAGES_BILLING,
@@ -176,6 +177,7 @@ __all__ = [
     "image_usage",
     "moderation_usage",
     "speech_billing",
+    "speech_cost_headers",
     "speech_usage",
     "rerank_usage",
     "resolve_decision_provider",
