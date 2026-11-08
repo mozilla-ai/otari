@@ -269,6 +269,10 @@ export type CatalogCapabilities = Schemas["CatalogCapabilities"]
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">
+// Every price of a row as a models.dev cost block, as a write sends it. A read
+// gives it untyped (`ModelPricingInfo.rates`), because the gateway writes the
+// block back as it was given.
+export type RatesDocument = Schemas["RatesDocument-Input"]
 // Per-organization rate overrides, which sit above the deployment price list
 // above. Same DTO names as otari.ai's own endpoint, so the two clients stay
 // recognizable side by side.
