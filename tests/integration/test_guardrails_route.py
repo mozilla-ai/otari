@@ -19,8 +19,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
-from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
+from any_llm.types.messages import MessageResponse, MessageStartEvent, MessageStopEvent, MessageUsage, TextBlock
+from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
+from openai.types.responses import ResponseCompletedEvent
 
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import API_ROOT
@@ -141,32 +143,81 @@ def test_monitor_mode_forwards_and_annotates(
     assert "prompt-injection" in resp.headers[GUARDRAILS_RESULT_HEADER]
 
 
-def test_a_streamed_answer_carries_the_guardrail_verdict(
-    client: TestClient,
-    api_key_header: dict[str, str],
-) -> None:
-    """Otari#2991: a streamed answer is a ``StreamingResponse`` the route builds itself,
-    so the verdict written on the injected ``Response`` has to be carried onto it."""
-    verdict = GuardrailVerdict(
-        results=[GuardrailResult(profile="prompt-injection", mode="monitor", valid=True, explanation=None, score=0.0)]
-    )
+def _streamed(route: str) -> Any:
+    """A provider call that opens a minimal stream in the route's own event shape."""
 
-    async def _acompletion(**_kwargs: Any) -> Any:
-        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
-            yield ChatCompletionChunk(
-                id="chunk-1",
-                object="chat.completion.chunk",
-                created=0,
-                model="claude-3-5-sonnet-20241022",
-                choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="ok"), finish_reason="stop")],
+    def _events() -> list[Any]:
+        if route == "chat":
+            return [
+                ChatCompletionChunk(
+                    id="chunk-1",
+                    object="chat.completion.chunk",
+                    created=0,
+                    model="claude-3-5-sonnet-20241022",
+                    choices=[
+                        ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="ok"), finish_reason="stop")
+                    ],
+                )
+            ]
+        if route == "messages":
+            return [
+                MessageStartEvent(type="message_start", message=_text_message_response("")),
+                MessageStopEvent(type="message_stop"),
+            ]
+        return [
+            ResponseCompletedEvent(
+                type="response.completed",
+                sequence_number=0,
+                response=Response(
+                    id="resp_1",
+                    created_at=0.0,
+                    model="gpt-4o-mini",
+                    object="response",
+                    status="completed",
+                    output=[],
+                    parallel_tool_calls=False,
+                    tool_choice="auto",
+                    tools=[],
+                ),
             )
+        ]
+
+    async def _open(**_kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[Any]:
+            for event in _events():
+                yield event
 
         return _stream()
 
-    path, target, body = _ROUTES["chat"]
+    return _open
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+@pytest.mark.parametrize("valid", [True, False])
+def test_a_streamed_answer_carries_the_guardrail_verdict(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    route: str,
+    valid: bool,
+) -> None:
+    """Otari#2991: a streamed answer is a ``StreamingResponse`` the route builds itself,
+    so the verdict written on the injected ``Response`` has to be carried onto it,
+    passing or flagged, on every completion route."""
+    verdict = GuardrailVerdict(
+        results=[
+            GuardrailResult(
+                profile="prompt-injection",
+                mode="monitor",
+                valid=valid,
+                explanation=None if valid else "injection",
+                score=0.0 if valid else 0.9,
+            )
+        ]
+    )
+    path, target, body = _ROUTES[route]
     with (
         patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
-        patch(target, side_effect=_acompletion),
+        patch(target, side_effect=_streamed(route)),
     ):
         resp = client.post(
             path,
@@ -177,7 +228,23 @@ def test_a_streamed_answer_carries_the_guardrail_verdict(
 
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])[0]["profile"] == "prompt-injection"
+    [entry] = json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])
+    assert entry["profile"] == "prompt-injection"
+    assert entry["valid"] is valid
+
+
+def test_a_streamed_answer_without_guardrails_has_no_verdict_header(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """No guardrail ran, so a streamed answer carries no ``Otari-Guardrails`` at all."""
+    path, target, body = _ROUTES["chat"]
+    with patch(target, side_effect=_streamed("chat")):
+        resp = client.post(path, json={**body, "stream": True}, headers=api_key_header)
+        resp.read()
+
+    assert resp.status_code == 200, resp.text
+    assert GUARDRAILS_RESULT_HEADER not in resp.headers
 
 
 def test_a_monitor_check_with_no_service_says_why_it_has_no_verdict(
