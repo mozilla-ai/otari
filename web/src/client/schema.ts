@@ -9806,7 +9806,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's, at the comparison context where one was asked for.
+             * @description The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -9829,6 +9829,11 @@ export interface components {
              * @description Which price lists the priced offerings came from, distinct and sorted.
              */
             price_sources: ("organization" | "deployment" | "defaults")[];
+            /**
+             * Price Unit
+             * @description What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
             /** Provider Count */
             provider_count: number;
             /**
@@ -9916,7 +9921,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's, at the comparison context where one was asked for.
+             * @description The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -9937,6 +9942,11 @@ export interface components {
              * @description Which price lists the priced offerings came from, distinct and sorted.
              */
             price_sources: ("organization" | "deployment" | "defaults")[];
+            /**
+             * Price Unit
+             * @description What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
             /** Provider Count */
             provider_count: number;
             /**
@@ -23044,7 +23054,7 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
-                /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
+                /** @description Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match. */
                 max_input?: number | null;
                 pricing?: "all" | "custom" | "default" | "priced" | "unpriced";
                 source?: "all" | "discovered" | "custom";

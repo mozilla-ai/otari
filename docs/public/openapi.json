@@ -3719,7 +3719,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "description": "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -3772,6 +3772,28 @@
             },
             "title": "Price Sources",
             "type": "array"
+          },
+          "price_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.",
+            "title": "Price Unit"
           },
           "provider_count": {
             "title": "Provider Count",
@@ -3995,7 +4017,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "description": "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -4041,6 +4063,28 @@
             },
             "title": "Price Sources",
             "type": "array"
+          },
+          "price_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.",
+            "title": "Price Unit"
           },
           "provider_count": {
             "title": "Provider Count",
@@ -32692,7 +32736,7 @@
             }
           },
           {
-            "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+            "description": "Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match.",
             "in": "query",
             "name": "max_input",
             "required": false,
@@ -32706,7 +32750,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+              "description": "Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match.",
               "title": "Max Input"
             }
           },
