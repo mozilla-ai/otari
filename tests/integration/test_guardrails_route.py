@@ -243,18 +243,20 @@ def test_a_streamed_answer_carries_the_guardrail_verdict(
     assert entry["valid"] is valid
 
 
+@pytest.mark.parametrize("route", list(_ROUTES))
 def test_a_streamed_answer_without_guardrails_has_no_verdict_header(
     client: TestClient,
     api_key_header: dict[str, str],
+    route: str,
 ) -> None:
     """No guardrail ran, so a streamed answer carries no ``Otari-Guardrails`` at all."""
-    path, target, body = _ROUTES["chat"]
-    with patch(target, side_effect=_streamed("chat")):
+    path, target, body = _ROUTES[route]
+    with patch(target, side_effect=_streamed(route)):
         resp = client.post(path, json={**body, "stream": True}, headers=api_key_header)
         resp.read()
 
     assert resp.status_code == 200, resp.text
-    assert _STREAM_END["chat"] in resp.text, resp.text
+    assert _STREAM_END[route] in resp.text, resp.text
     assert GUARDRAILS_RESULT_HEADER not in resp.headers
 
 
