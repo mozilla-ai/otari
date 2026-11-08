@@ -6,6 +6,8 @@ import type {
   CatalogVendorFacet,
 } from "@/client"
 import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
+import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
+import { formatRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import type { DashboardSearch } from "@/shared/helpers/search"
 import type { UrlState } from "@/shared/helpers/urlState"
@@ -493,6 +495,64 @@ export function catalogRequest(
     direction,
     include_facets: true,
   }
+}
+
+type PricedSummary = Pick<
+  CatalogModelSummary,
+  | "price_unit"
+  | "min_input_price_per_million"
+  | "min_output_price_per_million"
+  | "offering_count"
+  | "unpriced_count"
+>
+
+/**
+ * A model's cheapest prices as its card names them, each in the unit it bills.
+ * A token price keeps its two directions; a price in any other unit is one
+ * number. A model whose offerings bill in different units has no cheapest
+ * price, and says so rather than show a number in the wrong unit.
+ */
+export function listedPrices(model: PricedSummary): string[] {
+  const input = model.min_input_price_per_million
+  if (model.price_unit == null || input == null) {
+    return [
+      model.unpriced_count < model.offering_count
+        ? "priced in several units"
+        : "unpriced",
+    ]
+  }
+  const output = model.min_output_price_per_million
+  if (model.price_unit === "token") {
+    return [
+      `${formatRate(input)}/M input tokens`,
+      ...(output == null ? [] : [`${formatRate(output)}/M output tokens`]),
+    ]
+  }
+  return [formatPricedRate(input, pricingUnitOf(model.price_unit))]
+}
+
+/**
+ * One cell of the table's price columns, in the unit the price bills: a dash
+ * where the model has no such price, and the output side of a price in any
+ * unit but tokens, which has none.
+ */
+export function listedRate(
+  model: PricedSummary,
+  side: "input" | "output",
+): string {
+  if (model.price_unit == null) {
+    return side === "input" && model.unpriced_count < model.offering_count
+      ? "several units"
+      : "—"
+  }
+  if (side === "output" && model.price_unit !== "token") return "—"
+  const value =
+    side === "input"
+      ? model.min_input_price_per_million
+      : model.min_output_price_per_million
+  return value == null
+    ? "—"
+    : `from ${formatPricedRate(value, pricingUnitOf(model.price_unit))}`
 }
 
 export function priceSourceLabel(

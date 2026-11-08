@@ -7,7 +7,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useEffect, useEffectEvent, useState } from "react"
+import { Fragment, useEffect, useEffectEvent, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
@@ -36,6 +36,8 @@ import {
   catalogRequest,
   catalogUrlChanges,
   EMPTY_FILTERS,
+  listedPrices,
+  listedRate,
   MODALITIES,
   MODALITY_LABELS,
   MODEL_TYPE_LABELS,
@@ -61,7 +63,6 @@ import {
 import {
   formatContext,
   formatNumber,
-  formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import type { DashboardSearch } from "@/shared/helpers/search"
@@ -110,10 +111,6 @@ function SearchInput({
       className={`w-full min-w-0 ${INPUT_CLASS}`}
     />
   )
-}
-
-function fromRate(value: number | null | undefined): string {
-  return value == null ? "—" : `from ${formatRate(value)}`
 }
 
 /** A group in the rail: a heading that folds its choices away. */
@@ -474,20 +471,12 @@ function ModelCard({
             <span>{formatContext(model.context_window)} context</span>
           </>
         ) : null}
-        <Sep />
-        <span className="tabular-nums">
-          {model.min_input_price_per_million == null
-            ? "unpriced"
-            : `${formatRate(model.min_input_price_per_million)}/M input tokens`}
-        </span>
-        {model.min_output_price_per_million != null ? (
-          <>
+        {listedPrices(model).map((price) => (
+          <Fragment key={price}>
             <Sep />
-            <span className="tabular-nums">
-              {formatRate(model.min_output_price_per_million)}/M output tokens
-            </span>
-          </>
-        ) : null}
+            <span className="tabular-nums">{price}</span>
+          </Fragment>
+        ))}
       </p>
     </>
   )
@@ -573,24 +562,20 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
   },
   {
     id: "input",
-    header: "Input / 1M",
+    header: "Input",
     align: "end",
     allowsSorting: true,
     cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_input_price_per_million)}
-      </span>
+      <span className="text-mono-caption">{listedRate(row, "input")}</span>
     ),
   },
   {
     id: "output",
-    header: "Output / 1M",
+    header: "Output",
     align: "end",
     allowsSorting: true,
     cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_output_price_per_million)}
-      </span>
+      <span className="text-mono-caption">{listedRate(row, "output")}</span>
     ),
   },
 ]

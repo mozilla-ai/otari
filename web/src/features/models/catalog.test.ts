@@ -13,6 +13,8 @@ import {
   credentialLabel,
   EMPTY_CATALOG_LIST,
   EMPTY_FILTERS,
+  listedPrices,
+  listedRate,
   makerKeyOf,
   modelTypeOptions,
   priceSourceLabel,
@@ -80,6 +82,7 @@ const GLM = model({
     "nebius:zai-org/GLM-5.3",
   ],
   price_sources: ["defaults", "deployment"],
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 })
@@ -320,5 +323,60 @@ describe("priceSourceLabel", () => {
     expect(priceSourceLabel("deployment")).toBe("custom")
     expect(priceSourceLabel("defaults")).toBe("default")
     expect(priceSourceLabel(null)).toBe("not priced")
+  })
+})
+
+describe("the listed price", () => {
+  const priced = {
+    offering_count: 2,
+    unpriced_count: 0,
+    min_input_price_per_million: 0.5,
+    min_output_price_per_million: 2,
+  }
+
+  it("names a token price per million of each direction", () => {
+    const tokens = { ...priced, price_unit: "token" as const }
+    expect(listedPrices(tokens)).toEqual([
+      "$0.50/M input tokens",
+      "$2.00/M output tokens",
+    ])
+    expect(listedRate(tokens, "input")).toBe("from $0.50 / 1M")
+    expect(listedRate(tokens, "output")).toBe("from $2.00 / 1M")
+  })
+
+  it("names a price in another unit once, in that unit", () => {
+    const images = {
+      ...priced,
+      price_unit: "image" as const,
+      min_input_price_per_million: 40_000,
+      min_output_price_per_million: 0,
+    }
+    expect(listedPrices(images)).toEqual(["$0.04 per image"])
+    expect(listedRate(images, "input")).toBe("from $0.04 per image")
+    expect(listedRate(images, "output")).toBe("—")
+  })
+
+  it("shows no number for offerings priced in different units", () => {
+    const mixed = {
+      ...priced,
+      price_unit: null,
+      min_input_price_per_million: null,
+      min_output_price_per_million: null,
+    }
+    expect(listedPrices(mixed)).toEqual(["priced in several units"])
+    expect(listedRate(mixed, "input")).toBe("several units")
+    expect(listedRate(mixed, "output")).toBe("—")
+  })
+
+  it("says a model nobody priced is unpriced", () => {
+    const unpriced = {
+      ...priced,
+      unpriced_count: 2,
+      price_unit: null,
+      min_input_price_per_million: null,
+      min_output_price_per_million: null,
+    }
+    expect(listedPrices(unpriced)).toEqual(["unpriced"])
+    expect(listedRate(unpriced, "input")).toBe("—")
   })
 })

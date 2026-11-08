@@ -137,6 +137,22 @@ export function hasOutputRate(unit: PricingUnit): boolean {
   return unit === "minute"
 }
 
+/**
+ * Whether a price is for media the model makes: an image, or a second of video
+ * on a video model. Stored in the input column, as the row's one price, it
+ * bills the output side. A second on any other kind of model is audio.
+ */
+export function pricesMadeMedia(
+  unit: PricingUnit,
+  type: string | null | undefined,
+): boolean {
+  return (
+    unit === "image" ||
+    unit === "megapixel" ||
+    (unit === "second" && type === "video")
+  )
+}
+
 /** The label of the output rate a unit with one carries. */
 export function unitOutputRateLabel(unit: PricingUnit): string {
   return unit === "minute" ? "Audio out, per minute" : "Output"
@@ -162,6 +178,28 @@ export function formatPricedRate(stored: number, unit: PricingUnit): string {
   if (unit === "web_search")
     return `${formatRate(stored / 1_000)} / 1K searches`
   return `${formatUnitRate(stored / 1_000_000)} per ${EACH[unit] ?? "request"}`
+}
+
+/**
+ * An offering's price in a line: "$0.50 in / $2.00 out" per million tokens,
+ * or the one price of any other unit ("$0.04 per image"); "unpriced" where it
+ * has none.
+ */
+export function formatOfferingPrice(
+  pricing:
+    | {
+        input_price_per_million: number
+        output_price_per_million: number
+        unit?: string | null
+      }
+    | null
+    | undefined,
+): string {
+  if (pricing == null) return "unpriced"
+  const unit = pricingUnitOf(pricing.unit)
+  if (unit !== "token")
+    return formatPricedRate(pricing.input_price_per_million, unit)
+  return `${formatRate(pricing.input_price_per_million)} in / ${formatRate(pricing.output_price_per_million)} out`
 }
 
 /**

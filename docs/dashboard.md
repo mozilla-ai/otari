@@ -135,7 +135,12 @@ What a page shows can depend on who is signed in, not only on the deployment:
 Models is the catalog grouped by model: one card per model, with a rail of
 filters beside it, and a page per model with its facts and every offering
 compared in a table, each with its own limits and the price your organization
-is charged. Each row shows the provider's own model ID under the provider, which
+is charged. Every price is shown in the unit it bills, such as "$0.50 / 1M"
+for tokens or "$0.04 per image", and under the side it bills, as on the
+Providers page: an image price, or a video model's per-second price, is under
+Output, and a minute of audio has a rate on each side. A card shows the cheapest price where all of
+the model's offerings bill in one unit, and "priced in several units" where
+they do not. Each row shows the provider's own model ID under the provider, which
 tells apart two offerings on one provider, such as Bedrock's regional inference
 profiles. "Use this model" opens a drawer beside the table with the request to
 copy, sent to the gateway's pick or to a provider pinned by its selector. The

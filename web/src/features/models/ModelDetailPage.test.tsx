@@ -59,6 +59,7 @@ const GLM: CatalogModelSummary = {
   price_sources: ["defaults", "deployment"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
@@ -82,6 +83,7 @@ const KIMI: CatalogModelSummary = {
   price_sources: ["defaults"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.6,
   min_output_price_per_million: 2.4,
 }
@@ -156,14 +158,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function mockApi(
-  options: { catalog?: CatalogResponse; context?: OrganizationContext } = {},
+  options: {
+    catalog?: CatalogResponse
+    context?: OrganizationContext
+    detail?: CatalogModelDetail
+  } = {},
 ) {
   const catalog = options.catalog ?? CATALOG
   const context = options.context ?? organizationContext()
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
-      return jsonResponse(GLM_DETAIL)
+      return jsonResponse(options.detail ?? GLM_DETAIL)
     }
     if (url.includes(`${API_ROOT}/catalog/models/`)) {
       return jsonResponse({ detail: "Model 'nope' not found" }, 404)
@@ -225,7 +231,7 @@ describe("ModelDetailPage", () => {
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).
     expect(
-      within(rows[0] as HTMLElement).getByText("$0.075"),
+      within(rows[0] as HTMLElement).getByText("$0.075 / 1M"),
     ).toBeInTheDocument()
     expect(
       within(rows[0] as HTMLElement).getByText("DEFAULT"),
@@ -287,6 +293,65 @@ describe("ModelDetailPage", () => {
         expect(row.querySelector("svg")).not.toBeNull()
       }
     })
+  })
+
+  it("shows a price for media the model makes under Output, as the provider tables do", async () => {
+    const [nebius] = GLM_DETAIL.offerings
+    const offering = (
+      unit: NonNullable<CatalogOffering["pricing"]>["unit"],
+      input: number,
+      output: number,
+    ) => ({
+      ...(nebius as CatalogOffering),
+      pricing: {
+        ...(nebius as CatalogOffering).pricing!,
+        unit,
+        input_price_per_million: input,
+        output_price_per_million: output,
+        rates: {},
+      },
+    })
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        type: "image",
+        offerings: [offering("image", 40000, 0)],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const row = await screen.findByRole("row", { name: /Nebius/ })
+    const [input, output] = within(row).getAllByRole("gridcell")
+    expect(input).toHaveTextContent("—")
+    expect(output).toHaveTextContent("$0.04 per image")
+  })
+
+  it("shows a minute of audio's two rates on their own sides", async () => {
+    const [nebius] = GLM_DETAIL.offerings
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        type: "transcription",
+        offerings: [
+          {
+            ...(nebius as CatalogOffering),
+            pricing: {
+              ...(nebius as CatalogOffering).pricing!,
+              unit: "minute",
+              input_price_per_million: 6000,
+              output_price_per_million: 15000,
+              rates: {},
+            },
+          },
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const row = await screen.findByRole("row", { name: /Nebius/ })
+    const [input, output] = within(row).getAllByRole("gridcell")
+    expect(input).toHaveTextContent("$0.006 per minute")
+    expect(output).toHaveTextContent("$0.015 per minute")
   })
 
   it("says which offerings are declared zero data retention", async () => {
