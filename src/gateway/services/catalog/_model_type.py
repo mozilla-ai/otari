@@ -122,6 +122,17 @@ def offering_model_type(
     return entry.type if entry is not None else None
 
 
+def offered_model_types(
+    models_dev: ModelsDevCatalog | None, provider_type: str, models: Iterable[str]
+) -> dict[str, ModelType | None]:
+    """The kind of each model one provider offers, by name, as models.dev gives it, ``None`` where it gives none."""
+    kinds: dict[str, ModelType | None] = {}
+    for model in models:
+        entry = metadata_entry(models_dev, provider_type, model)
+        kinds[model] = entry.type if entry is not None else None
+    return kinds
+
+
 def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selector: str) -> ModelType | None:
     """The kind of the ``provider:model`` ``selector``: its listing's word for it, then models.dev's."""
     instance, separator, model_id = selector.partition(":")

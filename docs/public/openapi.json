@@ -10547,7 +10547,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -10646,6 +10646,30 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
           },
           "unit": {
             "anyOf": [
@@ -10772,7 +10796,7 @@
         "type": "object"
       },
       "HostedModelsPublic": {
-        "description": "A page of one hosted provider's offered models, and how many there are in total.",
+        "description": "A page of one hosted provider's offered models, and how many there are in total.\n\n``count`` is the total of the kind asked for, and ``type_counts`` how many\nof each kind the provider offers, ``unknown`` for a model of no known kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -10784,6 +10808,13 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Type Counts",
+            "type": "object"
           }
         },
         "required": [
@@ -14551,7 +14582,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one. ``type``\nis the kind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -14648,6 +14679,30 @@
             ],
             "title": "Pricing Id"
           },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
           "unit": {
             "default": "token",
             "enum": [
@@ -14701,7 +14756,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelsPublic": {
-        "description": "One page of a key's offered models, and how many there are in total.",
+        "description": "One page of a key's offered models, and how many there are in total.\n\n``count`` is the total of the kind asked for, and ``type_counts`` how many\nof each kind the key offers, ``unknown`` for a model of no known kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -14713,6 +14768,13 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Type Counts",
+            "type": "object"
           }
         },
         "required": [
@@ -35496,6 +35558,41 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "Only models of this kind; `unknown` for those no source names a kind for",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "embedding",
+                    "image",
+                    "speech",
+                    "transcription",
+                    "rerank",
+                    "moderation",
+                    "video",
+                    "decision",
+                    "realtime",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "const": "unknown",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models of this kind; `unknown` for those no source names a kind for",
+              "title": "Type"
+            }
           }
         ],
         "responses": {
@@ -42036,6 +42133,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only models of this kind; `unknown` for those no source names a kind for",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "embedding",
+                    "image",
+                    "speech",
+                    "transcription",
+                    "rerank",
+                    "moderation",
+                    "video",
+                    "decision",
+                    "realtime",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "const": "unknown",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models of this kind; `unknown` for those no source names a kind for",
+              "title": "Type"
             }
           }
         ],

@@ -38,3 +38,9 @@ def models_dev_model_type(value: str | None) -> ModelType | None:
     if value is None:
         return None
     return _MODELS_DEV_TYPES.get(value, "other")
+
+
+# A model a provider offers, filed by kind: its ``ModelType``, or ``unknown``
+# when neither the provider's listing nor models.dev says what it is.
+UNKNOWN_MODEL_TYPE: Literal["unknown"] = "unknown"
+OfferedModelType = ModelType | Literal["unknown"]

@@ -56,6 +56,7 @@ from gateway.schemas.providers import (
     HostedProviderTestRequest,
     HostedProviderUpdateRequest,
 )
+from gateway.types.model_type import OfferedModelType
 
 router = APIRouter(
     prefix="/hosted-providers",
@@ -216,9 +217,13 @@ async def list_hosted_models(
     provider: str,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+    model_type: Annotated[
+        OfferedModelType | None,
+        Query(alias="type", description="Only models of this kind; `unknown` for those no source names a kind for"),
+    ] = None,
 ) -> HostedModelsPublic:
     """List the models offered on one provider, with the price each currently serves at."""
-    return await service.list_models(provider, skip=skip, limit=limit)
+    return await service.list_models(provider, skip=skip, limit=limit, model_type=model_type)
 
 
 @router.post("/{provider}/models", status_code=status.HTTP_201_CREATED)
