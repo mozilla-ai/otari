@@ -36,7 +36,7 @@ from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
-from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail
+from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail, user_subject
 from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
@@ -797,7 +797,7 @@ async def reserve_budget(
     if user.blocked:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' is blocked",
+            detail=f"{user_subject(user_id, external_id=user.external_id)} is blocked",
             headers=error_codes.error_headers(error_codes.USER_BLOCKED),
         )
 
@@ -1032,7 +1032,10 @@ async def reserve_budget(
         )
         raise _budget_exceeded(
             refusal_detail(
-                f"User '{user_id}'",
+                user_subject(
+                    user_id,
+                    external_id=refused_on.external_id if refused_on is not None else user.external_id,
+                ),
                 blocked,
                 new_request=new_request,
                 reserved_output_tokens=reserved_output_tokens,
