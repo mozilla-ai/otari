@@ -171,15 +171,36 @@ sends no `Otari-*` executor header.
 
 ## Entering a rate
 
-A rate is per million tokens, per request, or per image, and the rate form asks
-which. A request or image rate is entered per 1,000, the way providers publish
-one: $2 per 1,000 searches for a rerank model is entered as 2 and stored as 2000
-per million, which is how every rate travels on the wire. The model lists name
-such a rate by its unit, for example "$0.002 per request". The same choice is on
-the Requests view's "Price this model", offered on a served request that carried no cost
-(a failed attempt billed nothing, so its error is the guide instead), which
-opens per request for a rerank, audio or moderation request and per image for
-an image generation or edit. What each unit bills is in
+A rate is per million tokens or in another unit, and the rate form asks which:
+tokens, requests, images, megapixels, characters, minutes of audio, seconds of
+video, or web searches. Each rate is entered the way providers publish it. A
+token or character rate is per 1,000,000, a request, image or search rate per
+1,000, and a megapixel, minute or second rate per one. $2 per 1,000 requests for
+a rerank model is entered as 2 and stored as 2000 per million, which is how
+every per-million field travels on the wire. A `rates` block is different: it
+carries each price per one of its unit, as published, so $0.06 per second is
+0.06. A minute of audio has two rates, for the audio a model hears and the
+audio it speaks, and so does a stored override that prices a second of audio;
+every other unit but tokens has one. A second of video is sent as a `rates`
+block that prices video output, because a per-second rate in the per-million
+fields prices audio input. Editing a stored per-second price moves the price
+the form shows, which is the first one the gateway reads (text, image, audio,
+then video), and keeps the block's other prices and its rules. An override that
+prices a second of both audio and video therefore shows its audio rates, and
+its video price, which video jobs are billed at, is changed through the API. An
+edit in the same unit keeps the override's context tiers, which the form does
+not show. The
+hosted model form stores the per-million fields only, so it does not offer
+seconds of video, and it does not reprice a model priced per second. The model
+lists name a rate by its unit, for example "$0.002 per request" or "$0.06 per
+second".
+
+The same choice is on the Requests view's "Price this model", offered on a
+served request that carried no cost (a failed attempt billed nothing, so its
+error is the guide instead). It opens in the unit the request's endpoint bills:
+per request for a rerank, transcription or moderation request, per character
+for speech, per image for an image generation or edit, and per second for a
+video. What each unit bills is in
 [Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 
 ## Playground
