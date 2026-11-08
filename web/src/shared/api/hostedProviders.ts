@@ -133,12 +133,14 @@ export function useHostedModels(
   provider: string,
   page: number,
   pageSize: number,
+  /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
+  type = "",
 ) {
   return useQuery({
-    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize],
+    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize, type],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>

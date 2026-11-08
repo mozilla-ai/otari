@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderModel } from "@/client"
+import type { KindFilter } from "@/features/models/offeredKinds"
 import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
@@ -23,6 +24,15 @@ interface MockOpts {
   /** What a refresh answers, which is where a provider's own refusal arrives. */
   refresh?: Record<string, unknown>
   listFails?: boolean
+}
+
+function typeCounts(models: OrgProviderModel[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const model of models) {
+    const kind = model.type ?? "unknown"
+    counts[kind] = (counts[kind] ?? 0) + 1
+  }
+  return counts
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -45,9 +55,18 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse({ provider: "openai", models: ["gpt-4o-mini"] })
     }
     if (url.includes("/models") && method === "GET") {
+      // The kind asked for, as the gateway filters it; every kind is counted.
+      const kind = new URL(url, "http://otari.test").searchParams.get("type")
+      const shown = kind
+        ? models.filter((model) => (model.type ?? "unknown") === kind)
+        : models
       return opts.listFails
         ? jsonResponse({ detail: "Tenancy is unavailable" }, 500)
-        : jsonResponse({ count: models.length, data: models })
+        : jsonResponse({
+            count: shown.length,
+            data: shown,
+            type_counts: typeCounts(models),
+          })
     }
     // Every write answers with a row the panel re-reads through the invalidated
     // list, so one is enough for all of them.
@@ -66,6 +85,8 @@ function renderPanel(
     pageSize?: number
     onPageChange?: (page: number) => void
     onPageSizeChange?: (size: number) => void
+    kind?: KindFilter
+    onKindChange?: (kind: KindFilter) => void
   } = {},
 ) {
   const client = new QueryClient({
@@ -81,6 +102,8 @@ function renderPanel(
         pageSize={pager.pageSize ?? 25}
         onPageChange={pager.onPageChange ?? vi.fn()}
         onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
+        kind={pager.kind ?? ""}
+        onKindChange={pager.onKindChange ?? vi.fn()}
       />
     </QueryClientProvider>,
   )
@@ -177,8 +200,123 @@ describe("ProviderModelsPanel", () => {
     const table = await screen.findByRole("grid", {
       name: "Models on Production",
     })
-    expect(within(table).getByText("$0.002 per request")).toBeInTheDocument()
+    expect(
+      within(table).getByText(/Request: \$0\.002\/request/).parentElement,
+    ).toHaveTextContent("$0.002")
     expect(within(table).queryByText("$2,000.00")).toBeNull()
+  })
+
+  it("offers one tab per kind of model, each with its count", async () => {
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({
+          id: "v",
+          model: "sora-2",
+          type: "video",
+          unit: "second",
+          input_price_per_million: 100_000,
+          output_price_per_million: null,
+        }),
+        orgProviderModel({ id: "u", model: "mystery", type: null }),
+      ],
+    })
+    const onKindChange = vi.fn()
+    await renderPanel(true, vi.fn(), { onKindChange })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(screen.getByRole("button", { name: "All 3" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    for (const name of ["Text 1", "Video 1", "Unknown 1"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      )
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: "Video 1" }))
+    expect(onKindChange).toHaveBeenCalledWith("video")
+  })
+
+  it("asks the gateway for the kind shown", async () => {
+    const requests = mockApi()
+    await renderPanel(true, vi.fn(), { kind: "video" })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(requests.some((request) => request.url.includes("type=video"))).toBe(
+      true,
+    )
+  })
+
+  it("keeps one set of price columns and puts a video price under Output", async () => {
+    // Every tab has the same columns. A token price is bare, per million
+    // tokens; a video price is billed on what the model makes, so it sits
+    // under Output and names its unit when hovered.
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({
+          id: "v",
+          model: "sora-2",
+          type: "video",
+          unit: "second",
+          input_price_per_million: 100_000,
+          output_price_per_million: null,
+        }),
+      ],
+    })
+    await renderPanel(true, vi.fn())
+
+    const table = await screen.findByRole("grid", {
+      name: "Models on Production",
+    })
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+    expect(headers).toEqual(
+      expect.arrayContaining(["Input", "Output", "Cache read", "Cache write"]),
+    )
+    expect(within(table).getByText("$2.50")).toBeInTheDocument()
+    expect(within(table).getByText("$10.00")).toBeInTheDocument()
+
+    const video = within(table).getByText(/Video output: \$0\.10\/second/)
+    expect(video.parentElement).toHaveTextContent("$0.10")
+    const cells = within(
+      within(table).getByRole("row", { name: /sora-2/ }),
+    ).getAllByRole("gridcell")
+    const output = cells.find((cell) => cell.contains(video))
+    // The model's name is the row header, so Input is the first cell.
+    expect(cells.indexOf(output as HTMLElement)).toBe(1)
+  })
+
+  it("lists only the kind its tab names", async () => {
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({ id: "v", model: "sora-2", type: "video" }),
+      ],
+    })
+    await renderPanel(true, vi.fn(), { kind: "video" })
+
+    const table = await screen.findByRole("grid", {
+      name: "Models on Production",
+    })
+    expect(
+      await within(table).findByRole("row", { name: /sora-2/ }),
+    ).toBeInTheDocument()
+    expect(within(table).queryByRole("row", { name: /gpt-4o/ })).toBeNull()
+  })
+
+  it("shows an empty table, not an empty catalog, under a kind with no models left", async () => {
+    mockApi({ models: [] })
+    await renderPanel(true, vi.fn(), { kind: "image" })
+
+    expect(
+      await screen.findByRole("button", { name: "Image 0" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
   })
 
   it("withholds a model with its serving switch", async () => {

@@ -65,6 +65,7 @@ function hostedModel(overrides: Partial<HostedModel> = {}): HostedModel {
     id: "m1",
     provider: "openai",
     model: "gpt-4o",
+    type: "chat",
     input_price_per_million: 2.5,
     output_price_per_million: 10,
     cache_read_price_per_million: null,
@@ -263,7 +264,20 @@ function mockApi(
     }
     if (url.includes("/models")) {
       if (method === "PATCH") return jsonResponse({ ...models[0], ...body })
-      return jsonResponse({ data: models, count: models.length })
+      const typeCounts: Record<string, number> = {}
+      for (const model of models) {
+        const kind = model.type ?? "unknown"
+        typeCounts[kind] = (typeCounts[kind] ?? 0) + 1
+      }
+      const kind = new URL(url, "http://x").searchParams.get("type")
+      const shown = kind
+        ? models.filter((model) => (model.type ?? "unknown") === kind)
+        : models
+      return jsonResponse({
+        data: shown,
+        count: shown.length,
+        type_counts: typeCounts,
+      })
     }
     if (url.includes(hosted)) {
       if (method === "GET") {
@@ -937,6 +951,45 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "DELETE")[0].url).toContain(
       "/hosted-providers/openai",
     )
+  })
+
+  it("shows one kind of model at a time, naming a price's unit", async () => {
+    const requests = mockApi({
+      models: [
+        hostedModel(),
+        hostedModel({
+          id: "m2",
+          model: "gpt-image-1",
+          type: "image",
+          unit: "image",
+          input_price_per_million: 40_000,
+          output_price_per_million: null,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    await within(panel).findByText("gpt-image-1")
+    await user.click(within(panel).getByRole("button", { name: "Image 1" }))
+
+    await waitFor(() => expect(within(panel).queryByText("gpt-4o")).toBeNull())
+    expect(
+      within(panel).getByText(/Image output: \$0\.04\/image/).parentElement,
+    ).toHaveTextContent("$0.04")
+    expect(
+      requests.some(
+        (request) =>
+          request.url.includes("/hosted-providers/openai/models?") &&
+          request.url.includes("type=image"),
+      ),
+    ).toBe(true)
   })
 
   it("opens a provider's models with their price source and a serving switch", async () => {

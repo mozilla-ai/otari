@@ -735,6 +735,7 @@ export function orgProviderModel(
     id: "77777777-7777-7777-7777-777777777777",
     org_provider_key_id: "66666666-6666-6666-6666-666666666666",
     model: "gpt-4o",
+    type: "chat",
     input_price_per_million: 2.5,
     output_price_per_million: 10,
     cache_read_price_per_million: null,
