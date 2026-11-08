@@ -16628,8 +16628,6 @@
           }
         },
         "required": [
-          "input_price_per_million",
-          "output_price_per_million",
           "model_key"
         ],
         "title": "OrganizationModelPricingCreate",
@@ -16854,8 +16852,6 @@
           }
         },
         "required": [
-          "input_price_per_million",
-          "output_price_per_million",
           "effective_from"
         ],
         "title": "OrganizationModelPricingUpdate",

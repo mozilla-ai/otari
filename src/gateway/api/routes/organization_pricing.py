@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +32,7 @@ from gateway.api.deps import CurrentIdentity, RequestSessionModelProviderPortDep
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.settings.pricing import rates_shorthand
+from gateway.core.settings.pricing import rates_shorthand, token_prices_not_required
 from gateway.models.money import as_float
 from gateway.models.pricing import MODEL_KIND, OrganizationModelPricing, PricingKind, rates_of
 
@@ -83,6 +83,8 @@ _EFFECTIVE_TO_DESCRIPTION = (
 
 class OrganizationModelPricingRates(BaseModel):
     """The rates and period shared by the create and update bodies."""
+
+    model_config = ConfigDict(json_schema_extra=token_prices_not_required)
 
     input_price_per_million: float = Field(
         ge=0, description="Price per 1M of the rate's unit: input tokens, requests, images or characters"
