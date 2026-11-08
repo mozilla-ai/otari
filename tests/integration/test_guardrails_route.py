@@ -13,10 +13,12 @@ service. The service contract itself is covered in
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 
@@ -137,6 +139,45 @@ def test_monitor_mode_forwards_and_annotates(
     provider.assert_awaited_once()
     assert GUARDRAILS_RESULT_HEADER in resp.headers
     assert "prompt-injection" in resp.headers[GUARDRAILS_RESULT_HEADER]
+
+
+def test_a_streamed_answer_carries_the_guardrail_verdict(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Otari#2991: a streamed answer is a ``StreamingResponse`` the route builds itself,
+    so the verdict written on the injected ``Response`` has to be carried onto it."""
+    verdict = GuardrailVerdict(
+        results=[GuardrailResult(profile="prompt-injection", mode="monitor", valid=True, explanation=None, score=0.0)]
+    )
+
+    async def _acompletion(**_kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk(
+                id="chunk-1",
+                object="chat.completion.chunk",
+                created=0,
+                model="claude-3-5-sonnet-20241022",
+                choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="ok"), finish_reason="stop")],
+            )
+
+        return _stream()
+
+    path, target, body = _ROUTES["chat"]
+    with (
+        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch(target, side_effect=_acompletion),
+    ):
+        resp = client.post(
+            path,
+            json={**body, "stream": True, "guardrails": [{"profile": "prompt-injection", "mode": "monitor"}]},
+            headers=api_key_header,
+        )
+        resp.read()
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])[0]["profile"] == "prompt-injection"
 
 
 def test_a_monitor_check_with_no_service_says_why_it_has_no_verdict(
