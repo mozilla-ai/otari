@@ -52,18 +52,21 @@ icon) on the key.
 
 Every workspace follows the organization's default key for each provider unless
 you choose otherwise. Open **Organization**, then **Workspaces**, open the
-workspace from the list, and select its **Providers** tab. Each key there has:
+workspace from the list, and select its **Providers** tab. A provider with
+several keys is one row: click it to show its keys. Each key has:
 
 - A switch: turn it off to keep the workspace off this key.
 - **Models**: limit which of the provider's models the workspace may use with
   this key.
 - **Always use this key**, in the key's **More** menu: pin the workspace to
-  this key, even after the organization's default changes.
+  this key, even after the organization's default changes. The menu offers it
+  only where the organization has more than one key for the provider and the
+  key is switched on.
 
 A key you leave as it is follows the organization. To undo a pin, choose **Stop
 always using this key** in the same menu. The workspace then uses the
-organization's default key, or its oldest key when it has no default or the
-workspace turned the default off; see
+organization's default key, or, when there is no default or the workspace
+turned it off, the oldest key the workspace has not turned off; see
 [Organization provider keys](hosted-providers.md#organization-provider-keys).
 
 ![A workspace's Providers tab, with the production and backup OpenAI keys each switched on.](assets/screenshots/manage-provider-keys-workspace.png)
