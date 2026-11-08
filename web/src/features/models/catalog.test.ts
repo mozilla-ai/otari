@@ -14,6 +14,7 @@ import {
   EMPTY_CATALOG_LIST,
   EMPTY_FILTERS,
   makerKeyOf,
+  modelTypeOptions,
   priceSourceLabel,
   providerOptions,
   vendorOptions,
@@ -97,6 +98,7 @@ describe("catalogRequest", () => {
           query: "  moonshot  ",
           providers: ["nebius", "fireworks"],
           vendors: [""],
+          types: ["video", "image"],
           inputModalities: ["text", "image"],
           outputModalities: ["audio"],
           capabilities: ["reasoning", "tool_call"],
@@ -116,6 +118,7 @@ describe("catalogRequest", () => {
       search: "moonshot",
       provider: ["fireworks", "nebius"],
       vendor: [""],
+      type: ["image", "video"],
       input_modality: ["image", "text"],
       output_modality: ["audio"],
       capability: ["reasoning", "tool_call"],
@@ -173,6 +176,7 @@ describe("the list's URL", () => {
         outputModalities: ["text"],
         providers: ["fireworks", "nebius"],
         vendors: ["", "Z.ai"],
+        types: ["chat", "embedding"],
         capabilities: ["reasoning"],
         minContext: 128_000,
         maxInput: 3,
@@ -202,6 +206,13 @@ describe("the list's URL", () => {
     expect(catalogUrlChanges(from, to, { q: "glm" })).toEqual({
       capability: ["reasoning"],
     })
+  })
+
+  it("drops a kind the API does not know, so it never reaches the query", () => {
+    const list = catalogListFromUrl(
+      readQuery(new URLSearchParams("type=image&type=hologram")),
+    )
+    expect(list.filters.types).toEqual(["image"])
   })
 
   it("adds and removes only this change's values in a repeated param", () => {
@@ -265,6 +276,14 @@ describe("options", () => {
     ])
   })
 
+  it("names each kind the catalog holds, in the order the API gives", () => {
+    expect(modelTypeOptions(["chat", "image", "transcription"])).toEqual([
+      { value: "chat", label: "Chat" },
+      { value: "image", label: "Image generation" },
+      { value: "transcription", label: "Transcription" },
+    ])
+  })
+
   it("lists every provider instance once", () => {
     expect(
       providerOptions(["fireworks", "nebius"]).map((o) => o.value),
@@ -279,10 +298,11 @@ describe("options", () => {
         query: "glm",
         outputModalities: ["text"],
         providers: ["nebius", "fireworks"],
+        types: ["video"],
         minContext: 32_000,
         pricing: "custom",
       }),
-    ).toBe(5)
+    ).toBe(6)
   })
 })
 
