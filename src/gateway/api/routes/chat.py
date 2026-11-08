@@ -316,6 +316,7 @@ class _ChatAdapter:
             cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
             service_tier=chunk.service_tier,
+            inference_geo=chunk.usage.inference_geo,
         )
         return GatewayUsage(**fields)
 

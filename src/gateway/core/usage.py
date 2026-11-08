@@ -116,6 +116,7 @@ class GatewayUsage(CompletionUsage):
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             reasoning_tokens=reasoning_tokens,
             service_tier=service_tier if service_tier is not None else service_tier_of(usage),
+            inference_geo=usage.inference_geo,
         )
         return cls(**fields)
 
