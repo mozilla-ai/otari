@@ -140,7 +140,11 @@ for tokens or "$0.04 per image", and under the side it bills, as on the
 Providers page: an image price, or a video model's per-second price, is under
 Output, and a minute of audio has a rate on each side. A card shows the cheapest price where all of
 the model's offerings bill in one unit, and "priced in several units" where
-they do not. Each row shows the provider's own model ID under the provider, which
+they do not. Under the table, **Price rules** lists, for each offering whose
+price has them, its overrides and multipliers in words, such as "×0.5 on every
+price when service tier is flex". The table shows the base prices. The rules
+are read-only here; set them with `rates` on the pricing API or in the config
+file ([Overrides and multipliers](configuration.md#overrides-and-multipliers)). Each row shows the provider's own model ID under the provider, which
 tells apart two offerings on one provider, such as Bedrock's regional inference
 profiles. "Use this model" opens a drawer beside the table with the request to
 copy, sent to the gateway's pick or to a provider pinned by its selector. The

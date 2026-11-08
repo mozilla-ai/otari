@@ -21,6 +21,7 @@ import {
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
+import { OfferingPriceRules } from "@/features/models/OfferingPriceRules"
 import {
   formatPricedRate,
   hasOutputRate,
@@ -650,6 +651,7 @@ export function ModelDetailView({
             </p>
           ) : null}
         </section>
+        <OfferingPriceRules offerings={model.offerings} />
       </div>
       {publicView ? null : (
         <UseModelDrawer
