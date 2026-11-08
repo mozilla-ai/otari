@@ -12949,7 +12949,8 @@ export interface components {
          *     ``enabled`` is the serving switch; a model offered without a discoverable
          *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
          *     while it waits for a rate, ``operator`` when an operator switched it off,
-         *     ``unavailable`` when its provider refused to serve it.
+         *     ``unavailable`` when its provider refused to serve it. ``type`` is the
+         *     kind of model, from models.dev, and None when it does not know.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -12980,6 +12981,8 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Provider */
             provider: string;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /** Unit */
             unit?: string | null;
             /** Updated At */
@@ -13016,12 +13019,19 @@ export interface components {
         /**
          * HostedModelsPublic
          * @description A page of one hosted provider's offered models, and how many there are in total.
+         *
+         *     ``count`` is the total of the kind asked for, and ``type_counts`` how many
+         *     of each kind the provider offers, ``unknown`` for a model of no known kind.
          */
         HostedModelsPublic: {
             /** Count */
             count: number;
             /** Data */
             data: components["schemas"]["HostedModelPublic"][];
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * HostedModelsRefreshPublic
@@ -14775,7 +14785,8 @@ export interface components {
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
          *     ``unit`` says what the rates are per, as on a pricing row: token, request
-         *     or image, so a per-request rate is not read as a per-token one.
+         *     or image, so a per-request rate is not read as a per-token one. ``type``
+         *     is the kind of model, from models.dev, and None when it does not know.
          */
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
@@ -14809,6 +14820,8 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Pricing Id */
             pricing_id?: string | null;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /**
              * Unit
              * @default token
@@ -14834,12 +14847,19 @@ export interface components {
         /**
          * OrgProviderKeyModelsPublic
          * @description One page of a key's offered models, and how many there are in total.
+         *
+         *     ``count`` is the total of the kind asked for, and ``type_counts`` how many
+         *     of each kind the key offers, ``unknown`` for a model of no known kind.
          */
         OrgProviderKeyModelsPublic: {
             /** Count */
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyModelPublic"][];
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * OrgProviderKeyPublic
@@ -24548,6 +24568,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only models of this kind; `unknown` for those no source names a kind for */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
             };
             header?: never;
             path: {
@@ -28120,6 +28142,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Only models of this kind; `unknown` for those no source names a kind for */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
             };
             header?: never;
             path: {

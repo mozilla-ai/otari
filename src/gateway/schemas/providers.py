@@ -25,6 +25,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
 
@@ -236,12 +237,14 @@ class OrgProviderKeyModelPublic(SQLModel):
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
     ``unit`` says what the rates are per, as on a pricing row: token, request
-    or image, so a per-request rate is not read as a per-token one.
+    or image, so a per-request rate is not read as a per-token one. ``type``
+    is the kind of model, from models.dev, and None when it does not know.
     """
 
     id: uuid.UUID
     org_provider_key_id: uuid.UUID
     model: str
+    type: ModelType | None = None
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
@@ -255,10 +258,15 @@ class OrgProviderKeyModelPublic(SQLModel):
 
 
 class OrgProviderKeyModelsPublic(SQLModel):
-    """One page of a key's offered models, and how many there are in total."""
+    """One page of a key's offered models, and how many there are in total.
+
+    ``count`` is the total of the kind asked for, and ``type_counts`` how many
+    of each kind the key offers, ``unknown`` for a model of no known kind.
+    """
 
     data: list[OrgProviderKeyModelPublic]
     count: int
+    type_counts: dict[OfferedModelType, int] = Field(default_factory=dict)
 
 
 class OrgProviderModelsRefreshPublic(SQLModel):
@@ -787,12 +795,14 @@ class HostedModelPublic(SQLModel):
     ``enabled`` is the serving switch; a model offered without a discoverable
     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
     while it waits for a rate, ``operator`` when an operator switched it off,
-    ``unavailable`` when its provider refused to serve it.
+    ``unavailable`` when its provider refused to serve it. ``type`` is the
+    kind of model, from models.dev, and None when it does not know.
     """
 
     id: uuid.UUID
     provider: str
     model: str
+    type: ModelType | None = None
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
@@ -805,12 +815,15 @@ class HostedModelPublic(SQLModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: HostedProviderModel, *, rates: HostedModelRates | None) -> HostedModelPublic:
+    def from_row(
+        cls, row: HostedProviderModel, *, rates: HostedModelRates | None, model_type: ModelType | None = None
+    ) -> HostedModelPublic:
         """Read one offered row for the API, with whatever currently prices it."""
         return cls(
             id=row.id,
             provider=row.provider,
             model=row.model,
+            type=model_type,
             input_price_per_million=rates.input_price_per_million if rates else None,
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
@@ -825,10 +838,15 @@ class HostedModelPublic(SQLModel):
 
 
 class HostedModelsPublic(SQLModel):
-    """A page of one hosted provider's offered models, and how many there are in total."""
+    """A page of one hosted provider's offered models, and how many there are in total.
+
+    ``count`` is the total of the kind asked for, and ``type_counts`` how many
+    of each kind the provider offers, ``unknown`` for a model of no known kind.
+    """
 
     data: list[HostedModelPublic]
     count: int
+    type_counts: dict[OfferedModelType, int] = Field(default_factory=dict)
 
 
 class HostedModelsRefreshPublic(SQLModel):

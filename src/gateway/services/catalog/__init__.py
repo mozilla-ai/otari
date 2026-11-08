@@ -9,6 +9,7 @@ from gateway.services.catalog._model_type import (
     model_type,
     not_chat_detail,
     not_embedding_detail,
+    offered_model_types,
     offering_model_type,
 )
 from gateway.services.catalog._query import common_price_unit, query_catalog
@@ -57,6 +58,7 @@ __all__ = [
     "model_type",
     "not_chat_detail",
     "not_embedding_detail",
+    "offered_model_types",
     "offering_model_type",
     "offering_input_rate",
     "organization_offerings",
