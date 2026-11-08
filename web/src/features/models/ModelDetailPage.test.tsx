@@ -295,6 +295,44 @@ describe("ModelDetailPage", () => {
     })
   })
 
+  it("names the rules a price carries, under the offerings, and nothing when none does", async () => {
+    const [nebius, ...rest] = GLM_DETAIL.offerings
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [
+          {
+            ...(nebius as CatalogOffering),
+            pricing: {
+              ...(nebius as CatalogOffering).pricing!,
+              rates: {
+                text: { input: { price: 0.5 }, output: { price: 2 } },
+                multipliers: [
+                  { when: { service_tier: { equals: "flex" } }, factor: 0.5 },
+                ],
+              },
+            },
+          },
+          ...rest,
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const rules = await screen.findByRole("list", {
+      name: "Price rules of nebius:zai-org/GLM-5.3",
+    })
+    expect(
+      screen.getByRole("heading", { name: "Price rules" }),
+    ).toBeInTheDocument()
+    expect(rules).toHaveTextContent(
+      "×0.5 on every price when service tier is flex",
+    )
+    expect(
+      screen.queryByRole("list", { name: /Price rules of fireworks/ }),
+    ).toBeNull()
+  })
+
   it("shows a price for media the model makes under Output, as the provider tables do", async () => {
     const [nebius] = GLM_DETAIL.offerings
     const offering = (
@@ -352,6 +390,14 @@ describe("ModelDetailPage", () => {
     const [input, output] = within(row).getAllByRole("gridcell")
     expect(input).toHaveTextContent("$0.006 per minute")
     expect(output).toHaveTextContent("$0.015 per minute")
+  })
+
+  it("draws no rules section where no price has a rule", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(screen.queryByRole("heading", { name: "Price rules" })).toBeNull()
   })
 
   it("says which offerings are declared zero data retention", async () => {
