@@ -24,6 +24,7 @@ from gateway.core.settings.pricing import (
     PRICE_UNIT_DESCRIPTION,
     price_per_request_shorthand,
     rates_shorthand,
+    token_prices_not_required,
 )
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -112,19 +113,10 @@ def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozens
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
-def _token_prices_not_required(schema: dict[str, Any]) -> None:
-    # The before-validator fills both from price_per_request; a body with neither is still refused.
-    schema["required"] = [
-        name
-        for name in schema.get("required", [])
-        if name not in ("input_price_per_million", "output_price_per_million")
-    ]
-
-
 class SetPricingRequest(PricedKind):
     """Create a versioned per-model price, with optional cache and context tiers."""
 
-    model_config = ConfigDict(json_schema_extra=_token_prices_not_required)
+    model_config = ConfigDict(json_schema_extra=token_prices_not_required)
 
     model_key: str = Field(
         description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"

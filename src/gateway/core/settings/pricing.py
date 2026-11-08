@@ -111,6 +111,18 @@ _RATES_REPLACES = (
 )
 
 
+def token_prices_not_required(schema: dict[str, Any]) -> None:
+    """Publish a body's two per-million rates as optional: ``rates`` or ``price_per_request`` can fill them.
+
+    The before-validators fill both, so a body with none of the three is still refused.
+    """
+    schema["required"] = [
+        name
+        for name in schema.get("required", [])
+        if name not in ("input_price_per_million", "output_price_per_million")
+    ]
+
+
 def rates_shorthand(data: Any) -> Any:
     """Read the per-million fields out of ``rates``, refusing a mix of the two.
 

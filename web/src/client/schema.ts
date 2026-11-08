@@ -15781,7 +15781,7 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
@@ -15796,7 +15796,7 @@ export interface components {
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate per request or per image
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -15914,12 +15914,12 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate per request or per image
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
