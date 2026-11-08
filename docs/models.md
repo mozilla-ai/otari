@@ -375,6 +375,13 @@ reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
 
+An offering's `pricing` gives the per-million rates and their `unit`, and
+`pricing.rates` gives the whole price as a models.dev cost block: each
+modality's input and output price in its own unit, the web search price, and
+the overrides and multipliers that change a price when a condition holds (see
+[Overrides and multipliers](configuration.md#overrides-and-multipliers)).
+`GET /api/v1/models` carries the same field.
+
 Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
 snapshot, which can lag that catalog, so a difference between the two means a

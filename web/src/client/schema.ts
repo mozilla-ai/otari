@@ -14435,6 +14435,8 @@ export interface components {
             pricing_tiers?: (components["schemas"]["PricingTier"] | {
                 [key: string]: number;
             })[];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, web_search, and the overrides and multipliers that change a price when a condition holds. The fields above are its text view. Null where the stored block cannot be read. */
+            rates?: components["schemas"]["RatesDocument-Output"] | null;
             /**
              * Unit
              * @default token
