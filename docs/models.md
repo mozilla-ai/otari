@@ -350,6 +350,11 @@ folds it by model the same way, so `nebius:zai-org/GLM-5.3` and
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
 the size that matters rather than at their base rate.
+A model's minimum compares only prices in one unit. `price_unit` names it
+(`token`, `image`, `second`, and so on), and the minimum is per million of it.
+Where one offering bills per token and another per image, no number compares
+the two, so `price_unit` and both minimums are null; the model's offerings
+still carry their own prices.
 `GET /api/v1/catalog/models/{id}` lists every offering of one model the caller may
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
@@ -430,8 +435,10 @@ unknown kind. A model's `type` is the kind most of its offerings give (see
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
 `zero_data_retention`, and `released_within_days`. Release windows end today in
-UTC and exclude unknown and future dates. A price ceiling excludes models with
-no known input rate. `zero_data_retention=true` keeps the models at least one
+UTC and exclude unknown and future dates. `max_input` is a price per million
+tokens, so it excludes models with no known input rate and models priced in
+another unit. `pricing=priced` keeps every model with a priced offering,
+whatever its unit. `zero_data_retention=true` keeps the models at least one
 offering declared zero data retention serves.
 
 Each offering carries `zero_data_retention`, and each model lists the providers
@@ -444,7 +451,9 @@ sets the parameter.
 
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;
-names and catalog ids break ties so pages have a stable order.
+names and catalog ids break ties so pages have a stable order. A price sort
+compares a price only with prices in its unit: models priced per token come
+first, then each other unit's models in turn.
 
 Request `include_facets=true` to receive the provider, vendor and type choices from
 the complete authorized catalog, whatever the filters match, so a filter that

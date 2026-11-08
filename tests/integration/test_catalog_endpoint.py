@@ -546,6 +546,34 @@ def test_prices_compare_at_the_tier_a_request_size_settles_at(
     assert priced.get(f"{API_ROOT}/catalog/models?at_context=0", headers=master_header).status_code == 422
 
 
+def test_the_cheapest_price_compares_offerings_in_one_unit_only(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    def glm() -> Any:
+        listed = _get(priced, f"{API_ROOT}/catalog/models", headers=master_header)["models"]
+        return next(m for m in listed if m["id"] == "z-ai/glm-5.3")
+
+    token_priced = glm()
+    assert token_priced["price_unit"] == "token"
+    assert token_priced["min_input_price_per_million"] == 0.5
+
+    # Fireworks now bills $0.04 an image: no number compares it with Nebius' token price.
+    response = priced.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": _FIREWORKS_GLM, "rates": {"image": {"output": {"price": 0.04, "unit": "image"}}}},
+        headers=master_header,
+    )
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    mixed = glm()
+    assert mixed["price_unit"] is None
+    assert mixed["min_input_price_per_million"] is None
+    assert mixed["min_output_price_per_million"] is None
+    assert mixed["unpriced_count"] == 0
+    priced_only = _get(priced, f"{API_ROOT}/catalog/models?pricing=priced", headers=master_header)["models"]
+    assert "z-ai/glm-5.3" in {m["id"] for m in priced_only}
+
+
 def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
