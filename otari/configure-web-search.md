@@ -33,6 +33,8 @@ web access the deployment blocks.
    the provider options; see
    [Per-workspace web-access policy](https://docs.otari.ai/reference/gateway/tools#per-workspace-web-access-policy).
 
+![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/configure-web-search.png)
+
 The policy these steps set is described in
 [Per-workspace web-access policy](https://docs.otari.ai/reference/gateway/tools#per-workspace-web-access-policy), the
 keys in [Organization search keys](https://docs.otari.ai/reference/gateway/tools#organization-search-keys), and who

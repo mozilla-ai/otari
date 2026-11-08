@@ -31,8 +31,8 @@ A request no rung serves is refused with `424` and the code
 Where an organization holds several keys for one provider, a workspace uses
 the key it set to "Always use this key", otherwise the organization's default
 for the provider (the star on the Providers page; clicking a filled star
-removes it), otherwise the organization's oldest key. A key a workspace set to
-"Never use this key" is passed over at every step. A key with its own API base
+removes it), otherwise the organization's oldest key. A key a workspace turned
+off is passed over at every step. A key with its own API base
 URL is not one of the provider's keys here: requests name it by its own prefix
 (see [Add a key for your own endpoint](https://docs.otari.ai/learn/provider-keys#add-a-key-for-your-own-endpoint)),
 so it serves every workspace that has not turned it off.

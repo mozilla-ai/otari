@@ -22,6 +22,8 @@ Only organization owners and admins can add, change or remove guardrails.
    the remaining fields, which depend on the guardrail you chose.
 5. Click **Configure guardrail** to save it.
 
+![The New guardrail dialog, with a check and a guardrail chosen and a name filled in.](assets/screenshots/manage-guardrails-configure.png)
+
 ## Mandate a guardrail
 
 A configured guardrail runs on nothing until you mandate it.
@@ -30,12 +32,14 @@ A configured guardrail runs on nothing until you mandate it.
 2. Choose the guardrail you configured, or your own guardrail service.
 3. Choose the **Mode**: block the requests it flags, or monitor them without
    blocking.
-4. Choose what happens **If it can't run**: refuse the request or serve it
+4. Choose what happens **If unreachable**: refuse the request or serve it
    unchecked. Only a blocking guardrail can refuse; a monitoring one always
    serves.
 5. Choose where it runs: every workspace, including new ones, or chosen
    workspaces.
 6. Click **Mandate a guardrail** to save it.
+
+![The Mandated guardrail dialog, with a guardrail profile and endpoint, its mode and where it runs.](assets/screenshots/manage-guardrails-mandate.png)
 
 From then on, the guardrail runs on every request from those workspaces.
 
