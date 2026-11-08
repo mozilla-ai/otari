@@ -438,7 +438,9 @@ and `limit` select a page. `count` is the number of matching models before pagin
 Repeat `provider`, `vendor` or `type` to match any selected value. An empty `vendor`
 selects models whose vendor is unknown, and `type` never matches a model of
 unknown kind. A model's `type` is the kind most of its offerings give (see
-`type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
+`type` above); a tie goes to the vendor's own provider. The Models page's
+**Model kind** filter sets `type`, from the kinds in `facets.types`, and each
+model on the page names its kind. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
 `zero_data_retention`, and `released_within_days`. Release windows end today in

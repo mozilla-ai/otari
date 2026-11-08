@@ -38,7 +38,9 @@ import {
   EMPTY_FILTERS,
   MODALITIES,
   MODALITY_LABELS,
+  MODEL_TYPE_LABELS,
   makerKeyOf,
+  modelTypeOptions,
   PRICE_OPTIONS,
   PRICING_OPTIONS,
   providerOptions,
@@ -211,8 +213,28 @@ function FilterRail({
   const vendorsMarked = anyMakerMark(
     vendors.flatMap((option) => (option.markKey ? [option.markKey] : [])),
   )
+  const types = modelTypeOptions(facets?.types ?? [])
   return (
     <div className="flex flex-col">
+      {types.length > 0 ? (
+        <FilterGroup
+          label="Model kind"
+          count={filters.types.length}
+          defaultOpen
+        >
+          {types.map((option) => (
+            <Checkbox
+              key={option.value}
+              isSelected={filters.types.includes(option.value)}
+              onChange={(isOn) =>
+                set("types", toggle(filters.types, option.value, isOn))
+              }
+            >
+              {option.label}
+            </Checkbox>
+          ))}
+        </FilterGroup>
+      ) : null}
       <FilterGroup
         label="Input modalities"
         count={filters.inputModalities.length}
@@ -434,6 +456,12 @@ function ModelCard({
           ) : null}
           by {model.vendor ?? "unknown vendor"}
         </span>
+        {model.type ? (
+          <>
+            <Sep />
+            <span>{MODEL_TYPE_LABELS[model.type]}</span>
+          </>
+        ) : null}
         {model.release_date ? (
           <>
             <Sep />
@@ -510,6 +538,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
             )}
             <span>
               {row.vendor ?? "Unknown vendor"} ·{" "}
+              {row.type ? `${MODEL_TYPE_LABELS[row.type]} · ` : ""}
               {row.provider_count === 1
                 ? "1 provider"
                 : `${row.provider_count} providers`}

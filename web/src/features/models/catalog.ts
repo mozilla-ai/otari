@@ -80,6 +80,30 @@ export const CAPABILITY_FILTERS: {
   },
 ]
 
+export type ModelType = NonNullable<CatalogModelSummary["type"]>
+
+/** What each kind of model is called in the rail and on a row. */
+export const MODEL_TYPE_LABELS: Readonly<Record<ModelType, string>> = {
+  chat: "Chat",
+  embedding: "Embeddings",
+  image: "Image generation",
+  speech: "Speech",
+  transcription: "Transcription",
+  rerank: "Rerank",
+  moderation: "Moderation",
+  video: "Video",
+  decision: "Decision",
+  realtime: "Realtime",
+  other: "Other",
+}
+
+const MODEL_TYPES = Object.keys(MODEL_TYPE_LABELS)
+
+/** The server's kind choices, named for display. */
+export function modelTypeOptions(types: readonly ModelType[]) {
+  return types.map((type) => ({ value: type, label: MODEL_TYPE_LABELS[type] }))
+}
+
 /** The modalities the rail offers, in the order they are listed. */
 export const MODALITIES = ["text", "image", "pdf", "audio", "video"]
 
@@ -132,6 +156,8 @@ export interface CatalogFilters {
   /** Provider instances; empty for any. The Providers page links here with one. */
   providers: string[]
   vendors: string[]
+  /** Kinds of model (`ModelType`); empty for any, and a model of any one picked matches. */
+  types: string[]
   /** Values of `CAPABILITY_FILTERS`; every one picked must hold. */
   capabilities: string[]
   minContext: number
@@ -151,6 +177,7 @@ export const EMPTY_FILTERS: CatalogFilters = {
   outputModalities: [],
   providers: [],
   vendors: [],
+  types: [],
   capabilities: [],
   minContext: 0,
   maxInput: 0,
@@ -167,6 +194,7 @@ export function activeFilterCount(filters: CatalogFilters): number {
     filters.outputModalities.length +
     filters.providers.length +
     filters.vendors.length +
+    filters.types.length +
     filters.capabilities.length +
     (filters.minContext > 0 ? 1 : 0) +
     (filters.maxInput > 0 ? 1 : 0) +
@@ -261,6 +289,7 @@ export const CATALOG_URL_DEFAULTS = {
   output: "",
   provider: "",
   vendor: "",
+  type: "",
   capability: "",
   context: "0",
   max_input: "0",
@@ -308,6 +337,7 @@ export function catalogListFromUrl(
       vendors: url
         .getAll("vendor")
         .map((value) => (value === UNKNOWN_VENDOR_PARAM ? "" : value)),
+      types: url.getAll("type").filter(known(MODEL_TYPES)),
       capabilities: url
         .getAll("capability")
         .filter(known(CAPABILITY_FILTERS.map((filter) => filter.value))),
@@ -373,6 +403,7 @@ export function catalogListToUrl(
     output: filters.outputModalities,
     provider: filters.providers,
     vendor: filters.vendors.map((value) => value || UNKNOWN_VENDOR_PARAM),
+    type: filters.types,
     capability: filters.capabilities,
     context: filters.minContext,
     max_input: filters.maxInput,
@@ -446,6 +477,7 @@ export function catalogRequest(
     search: filters.query.trim().slice(0, SEARCH_MAX_LENGTH) || undefined,
     provider: [...filters.providers].sort(),
     vendor: [...filters.vendors].sort(),
+    type: [...filters.types].sort() as CatalogQueryParams["type"],
     input_modality: [...filters.inputModalities].sort(),
     output_modality: [...filters.outputModalities].sort(),
     capability: [

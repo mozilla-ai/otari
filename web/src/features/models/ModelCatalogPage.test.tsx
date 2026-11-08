@@ -202,7 +202,8 @@ function mockApi(
         models = [GLM]
       if (
         params.get("search") === "moonshot" ||
-        params.get("output_modality") === "image"
+        params.get("output_modality") === "image" ||
+        params.get("type") === "image"
       )
         models = [KIMI]
       return jsonResponse({
@@ -529,7 +530,7 @@ describe("ModelCatalogPage", () => {
     renderPage(
       <ModelCatalogPage />,
       "/models?q=glm&input=image&output=text&provider=fireworks&vendor=Z.ai" +
-        "&capability=reasoning&context=128000&max_input=3&pricing=priced" +
+        "&type=video&capability=reasoning&context=128000&max_input=3&pricing=priced" +
         "&source=discovered&released=365&sort=name&page=1&size=50",
     )
 
@@ -542,6 +543,7 @@ describe("ModelCatalogPage", () => {
     expect(request.getAll("output_modality")).toEqual(["text"])
     expect(request.getAll("provider")).toEqual(["fireworks"])
     expect(request.getAll("vendor")).toEqual(["Z.ai"])
+    expect(request.getAll("type")).toEqual(["video"])
     expect(request.getAll("capability")).toEqual(["reasoning"])
     expect(request.get("min_context")).toBe("128000")
     expect(request.get("max_input")).toBe("3")
@@ -710,6 +712,32 @@ describe("ModelCatalogPage", () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Clear" }))
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+  })
+
+  it("narrows by the kind of model, and names each row's kind", async () => {
+    mockApi({
+      catalog: {
+        ...CATALOG,
+        models: [
+          { ...GLM, type: "chat" },
+          { ...KIMI, type: "image" },
+        ],
+        facets: { ...CATALOG.facets!, types: ["chat", "image"] },
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(within(list).getByText("Chat")).toBeInTheDocument()
+    // The kind group is open from the start: it is the first question asked of a catalog.
+    await user.click(screen.getByRole("checkbox", { name: "Image generation" }))
+
+    await waitFor(() => expect(within(list).queryByText(/GLM-5.3/)).toBeNull())
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /^Model kind\s*1$/ }),
+    ).toBeInTheDocument()
   })
 
   it("narrows to models a zero data retention provider offers, and marks them", async () => {
