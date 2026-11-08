@@ -574,6 +574,29 @@ def test_the_cheapest_price_compares_offerings_in_one_unit_only(
     assert "z-ai/glm-5.3" in {m["id"] for m in priced_only}
 
 
+def test_each_offering_carries_its_whole_price(priced: TestClient, master_header: dict[str, str]) -> None:
+    rates = {
+        "text": {
+            "input": {"price": 0.7, "overrides": [{"when": {"context": {"gt": 100_000}}, "price": 1.4}]},
+            "output": {"price": 2.5},
+        },
+        "image": {"output": {"price": 0.04, "unit": "image"}},
+        "multipliers": [{"when": {"service_tier": {"equals": "flex"}}, "factor": 0.5}],
+    }
+    response = priced.post(
+        f"{API_ROOT}/pricing", json={"model_key": _FIREWORKS_GLM, "rates": rates}, headers=master_header
+    )
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    body = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
+    by_selector = {offering["selector"]: offering for offering in body["offerings"]}
+    assert by_selector[_FIREWORKS_GLM]["pricing"]["rates"] == rates
+    # A row written as columns reads back as the block they make.
+    assert by_selector[_NEBIUS_GLM]["pricing"]["rates"] == {
+        "text": {"input": {"price": 0.5, "unit": "token"}, "output": {"price": 2, "unit": "token"}}
+    }
+
+
 def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:

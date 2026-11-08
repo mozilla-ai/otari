@@ -24,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceSource
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceRow, PriceSource, rates_of
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
@@ -70,6 +70,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
 )
 from gateway.types.models_dev import ModelsDevCatalog
+from gateway.types.price_rates import RatesDocument, stored_rates
 from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
@@ -112,10 +113,24 @@ class ModelPricingInfo(BaseModel):
     # catalog never lists one, but the field travels with the price so a caller
     # reading one model is told too.
     unit: PriceUnit = "token"
+    rates: RatesDocument | None = Field(
+        default=None,
+        description=(
+            "Every price of the row as a models.dev cost block: each modality's input and output price with its "
+            "unit, web_search, and the overrides and multipliers that change a price when a condition holds. "
+            "The fields above are its text view. Null where the stored block cannot be read."
+        ),
+    )
 
 
-def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
+def pricing_info(pricing: PriceRow) -> ModelPricingInfo:
     """The wire shape of one stored, default, or override price row."""
+    try:
+        rates: RatesDocument | None = stored_rates(rates_of(pricing))
+    except ValueError:
+        # One unreadable block costs its own detail, not the listing it is on.
+        logger.warning("The rates of %s cannot be read for the catalog", pricing.model_key)
+        rates = None
     return ModelPricingInfo(
         input_price_per_million=float(pricing.input_price_per_million),
         output_price_per_million=float(pricing.output_price_per_million),
@@ -125,6 +140,7 @@ def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
         # A transient row (a default, an override) is built without the column
         # default that an insert would apply, so it reads back None here.
         unit=pricing.unit or "token",
+        rates=rates,
     )
 
 
