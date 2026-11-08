@@ -11,13 +11,15 @@ organization, is in [Organizations and workspaces](workspaces.md).
 
 ## Create a workspace
 
-1. Click **Organization** in the bottom-left corner. It opens on **Workspaces**.
+1. Click **Organization** in the bottom-left corner, then **Workspaces**.
 2. Click **Create workspace**.
-3. Give it a name and, optionally, a description, and create it.
+3. Give it a name and, optionally, a description, and click **Create workspace**.
+
+![The New workspace dialog, with a name and a description filled in.](assets/screenshots/manage-workspaces-create.png)
 
 A new workspace uses every provider key the organization has. To choose which
-key it uses for a provider, click **Edit** (the pencil icon) on the workspace;
-see [Control which keys a workspace uses](manage-provider-keys.md#control-which-keys-a-workspace-uses).
+key it uses for a provider, open the workspace from the list and select its
+**Providers** tab; see [Control which keys a workspace uses](manage-provider-keys.md#control-which-keys-a-workspace-uses).
 
 ## Find your way around a workspace
 
@@ -45,6 +47,8 @@ environment without filtering.
 
 1. Open **Organization**, then **Workspaces**.
 2. Find the workspace, click **Delete** (the bin icon), and confirm.
+
+![The Workspaces page, listing the organization's workspaces with a Delete action on each.](assets/screenshots/manage-workspaces-list.png)
 
 A workspace that still holds API keys, aliases, routing policies or usage cannot
 be deleted. Keys, aliases and policies can be removed first, but the usage of

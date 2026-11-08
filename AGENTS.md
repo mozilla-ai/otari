@@ -122,6 +122,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
+- The screenshots under `docs/assets/screenshots/` are generated **and committed**, by the
+  Playwright `docs` project, and taken again at the release tag before the site publishes. Run
+  `pnpm --dir web run docs:screenshots` when a change moves a documented page; [web/AGENTS.md](web/AGENTS.md)
+  says how a page gets one.
 - The dashboard has three more, and [web/AGENTS.md](web/AGENTS.md) owns them: its API client
   (`web/src/client/schema.ts`) and route tree (`web/src/routeTree.gen.ts`) are generated **and
   committed**, each with a CI drift check, while the bundle (`src/gateway/static/dashboard/`)

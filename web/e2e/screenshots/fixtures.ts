@@ -103,7 +103,7 @@ function volatileRegions(page: Page): Locator[] {
  * let an observer callback and the React commit it causes land before the
  * shutter.
  */
-async function waitForStable(page: Page): Promise<void> {
+export async function waitForStable(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {})
   await page.evaluate(async () => {
     window.scrollTo(0, 0)

@@ -20,6 +20,8 @@ base URL to send it to, and the form each SDK expects, are in
 4. Click **Create key**, then copy the key. It is shown once, so store it
    before you close the dialog.
 
+![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
+
 ## Cap a key's spend
 
 An organization owner or admin, or a deployment operator, can give a key a
