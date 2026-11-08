@@ -63,6 +63,8 @@ PROVIDER_ERROR = "provider_error"
 # Sent only in a stream's error event: the provider's stream ended before it
 # finished, by closing without its final event or cutting the connection.
 PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
+# An input guardrail in ``block`` mode flagged the request.
+GUARDRAIL_VIOLATION = "guardrail_violation"
 # Creating or first claiming an account needs the terms of service the deployment publishes.
 TERMS_NOT_ACCEPTED = "terms_not_accepted"
 

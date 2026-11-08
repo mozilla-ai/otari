@@ -17,7 +17,7 @@ from gateway.api.request_id import set_request_id
 from gateway.core.config import CONVERSATION_HEADER, END_USER_BUDGET_HEADER, ROUTER_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
-from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
+from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, GUARDRAIL_VIOLATION, error_headers
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
@@ -268,7 +268,7 @@ async def apply_input_guardrails(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "message": "Request blocked by guardrail policy.",
-                "code": "guardrail_violation",
+                "code": GUARDRAIL_VIOLATION,
                 "guardrails": [
                     {
                         "profile": r.profile,
@@ -279,6 +279,7 @@ async def apply_input_guardrails(
                     if r.mode == "block"
                 ],
             },
+            headers=error_headers(GUARDRAIL_VIOLATION),
         )
 
     if verdict.results:

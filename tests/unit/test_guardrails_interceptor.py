@@ -92,6 +92,8 @@ async def test_apply_guardrails_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     detail = cast(dict[str, Any], exc.value.detail)
     assert detail["code"] == "guardrail_violation"
     assert detail["guardrails"][0]["profile"] == "prompt-injection"
+    # Mapped the documented way, like every other refusal a caller acts on.
+    assert exc.value.headers == {"Otari-Error-Code": "guardrail_violation"}
 
 
 @pytest.mark.asyncio
