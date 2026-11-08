@@ -2998,6 +2998,10 @@ main {
   height: 3.625rem;
   padding-block: 0;
 }
+/* A header holds its title on one line, and its column grows to fit it. */
+.otari-offered-models-table .table__column {
+  white-space: nowrap;
+}
 .otari-offered-models-table .table__column[data-key="model"] {
   min-width: 16rem;
 }

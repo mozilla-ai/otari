@@ -230,6 +230,20 @@ rows at all, and that is not the same as offering none: it means the key is
 unnarrowed and reaches whatever its provider serves. Offering none, which is
 every model switched off, serves nothing.
 
+The Providers page lists a key's models one kind at a time: tabs above the
+table name each kind the key offers (Text, Image, Video, Embeddings and so on)
+with how many models it has, and **All** shows every kind. The kind comes from
+models.dev, and a model it does not know is under **Unknown**. The columns are
+the same on every tab. A token price is per million tokens. A price in another
+unit is shown under the side it bills, so an image price, or a video model's
+per-second price, is under **Output**, and hovering it names what it prices and
+its unit ("Video output, $0.045/second"). A per-second price on any other kind
+of model is audio, shown on the side it is stored on. On a phone, which cannot
+hover, the unit is shown beside the amount. The list endpoint,
+`GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
+kind as `type` (`unknown` included), returns each model's `type`, and counts
+every kind in `type_counts` whichever one it returns.
+
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
 pricing data has not caught up with cannot be billed at nothing. With
