@@ -143,10 +143,15 @@ def test_monitor_mode_forwards_and_annotates(
     assert "prompt-injection" in resp.headers[GUARDRAILS_RESULT_HEADER]
 
 
+# What each route's stream ends with once every event has been relayed.
+_STREAM_END = {"chat": "data: [DONE]", "messages": "message_stop", "responses": "response.completed"}
+
+
 def _streamed(route: str) -> Any:
     """A provider call that opens a minimal stream in the route's own event shape."""
 
     def _events() -> list[Any]:
+        """The smallest complete stream for this route: one text chunk, or start and stop."""
         if route == "chat":
             return [
                 ChatCompletionChunk(
@@ -183,6 +188,8 @@ def _streamed(route: str) -> Any:
         ]
 
     async def _open(**_kwargs: Any) -> Any:
+        """Stand in for the provider call: return the stream rather than a completion."""
+
         async def _stream() -> AsyncIterator[Any]:
             for event in _events():
                 yield event
@@ -228,6 +235,9 @@ def test_a_streamed_answer_carries_the_guardrail_verdict(
 
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
+    # The stream ran to its own end, so the header is not riding on a relay error.
+    assert _STREAM_END[route] in resp.text, resp.text
+    assert '"error"' not in resp.text, resp.text
     [entry] = json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])
     assert entry["profile"] == "prompt-injection"
     assert entry["valid"] is valid
@@ -244,6 +254,7 @@ def test_a_streamed_answer_without_guardrails_has_no_verdict_header(
         resp.read()
 
     assert resp.status_code == 200, resp.text
+    assert _STREAM_END["chat"] in resp.text, resp.text
     assert GUARDRAILS_RESULT_HEADER not in resp.headers
 
 
