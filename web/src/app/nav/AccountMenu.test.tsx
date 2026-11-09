@@ -279,8 +279,8 @@ describe("AccountMenu", () => {
   })
 
   // Every identified person has an avatar from the first paint: the one
-  // their user id gives them until they pick another. No initials.
-  it("draws the person's avatar rather than their initials", async () => {
+  // their user id gives them until they pick another.
+  it("draws the person's avatar", async () => {
     mockCaller({
       user_id: "77777777-7777-7777-7777-777777777777",
       email: null,

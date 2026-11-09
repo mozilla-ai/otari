@@ -89,7 +89,7 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // showed before the first paint anyway. A caller with no organization, whom
 // the context answers with a 404, is named from the profile read instead.
 //
-// The mark beside the name is the person's avatar, not their initials: see
+// The mark beside the name is the person's avatar: see
 // `overlayAccountBadge`.
 function sessionIdentity(caller: OrganizationContext["caller"]): {
   name: string

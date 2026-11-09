@@ -58,7 +58,7 @@ const TILE_RATIO = 0.7
 // The window, in cells: half-sizes that leave exactly the shapes above inside
 // when the lattice rests on a cell. The settled outer faces sit at about 0.88
 // of it and the next ring out at about 1.0, so faces shrink and lighten
-// towards `EDGE` and anything drifting past fades out before the next ring.
+// toward `EDGE` and anything drifting past fades out before the next ring.
 const WINDOW_COLS = 4.6
 const COMPACT_WINDOW_COLS = 3.4
 const WINDOW_ROWS = 2.6
@@ -75,7 +75,7 @@ const LENS_REACH_CELLS = 0.7
 // velocity: a flick of 1000px/s travels about four faces before it settles.
 const PROJECTION = 0.2
 const DRAG_SLOP = 6
-// Pointer samples older than this do not count towards the release velocity,
+// Pointer samples older than this do not count toward the release velocity,
 // so a drag that stopped before letting go lands where it is.
 const VELOCITY_WINDOW_MS = 80
 
