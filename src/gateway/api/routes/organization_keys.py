@@ -73,6 +73,7 @@ from gateway.api.routes.keys import (
     _load_key_in_organization,
     _organization_service_key,
 )
+from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -84,6 +85,7 @@ from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
+from gateway.schemas.budgets import EndUserPublic
 from gateway.services.api_keys import (
     DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
@@ -564,6 +566,42 @@ async def delete_own_key(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("delete own key", exc) from None
+
+
+@router.get("/{key_id}/end-users")
+async def list_own_key_end_users(
+    key_id: str,
+    response: Response,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+    budgets: BudgetServiceDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    budget_id: Annotated[str | None, Query(description="Only end users on this budget.")] = None,
+    blocked: Annotated[bool | None, Query(description="Only end users that are, or are not, blocked.")] = None,
+    external_id: Annotated[
+        str | None, Query(description="Only the end user the service names with this `user` value: zero or one.")
+    ] = None,
+    include_total: Annotated[
+        bool, Query(description="Also count every matching end user, in the Otari-Total-Count response header.")
+    ] = False,
+) -> list[EndUserPublic]:
+    """List the end users of one of the caller's service keys, oldest first.
+
+    The caller's own key, or for an owner or admin one of the organization's service keys; any other answers 404.
+    A read, so a viewer may list the end users of a key billed to them. A deleted end user is not listed.
+    """
+    organization = await organizations.get_active_organization_for_user(identity)
+    key = await _load_member_key(db, organizations, identity, organization, key_id)
+    if include_total:
+        total = await budgets.count_end_users(
+            api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked
+        )
+        response.headers[TOTAL_COUNT_HEADER] = str(total)
+    return await budgets.list_end_users(
+        api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+    )
 
 
 async def _federation_rule_key(

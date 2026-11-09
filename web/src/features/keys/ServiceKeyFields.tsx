@@ -2,6 +2,7 @@ import type { ApiKey } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
 import {
   budgetLabeler,
@@ -16,30 +17,53 @@ import { useBudgets, useOrganizationBudgets } from "@/shared/api/budgets"
 export type ServiceKeyScope = "deployment" | "organization"
 
 /** Mirrors the gateway's `DEFAULT_ORGANIZATION_MAX_END_USERS`. */
-const ORGANIZATION_MAX_END_USERS = "10,000"
+const ORGANIZATION_MAX_END_USERS = "10000"
 
 /**
  * What the form holds about a service key: whether the key is one, the budgets
- * its requests may start an end user on, and which of those applies when a
- * request names none (`""` for none, so an end user then starts uncapped).
+ * its requests may start an end user on, which of those applies when a
+ * request names none (`""` for none, so an end user then starts uncapped), and
+ * the most end users it may have as typed (`""` for no cap, which only an
+ * operator's key may have).
  */
 export type ServiceKeyChoice = {
   isServiceKey: boolean
   budgetIds: string[]
   defaultBudgetId: string
+  maxEndUsers: string
 }
 
 export const NO_SERVICE_KEY: ServiceKeyChoice = {
   isServiceKey: false,
   budgetIds: [],
   defaultBudgetId: "",
+  maxEndUsers: "",
 }
 
 export const serviceKeyChoice = (apiKey: ApiKey): ServiceKeyChoice => ({
   isServiceKey: apiKey.is_service_key,
   budgetIds: apiKey.end_user_budget_ids,
   defaultBudgetId: apiKey.end_user_budget_id ?? "",
+  maxEndUsers:
+    apiKey.max_end_users === null ? "" : String(apiKey.max_end_users),
 })
+
+/**
+ * Why the typed cap cannot be saved, or undefined when it can. An
+ * organization's service key always has a cap, so only an operator's may be
+ * left empty.
+ */
+export function maxEndUsersError(
+  choice: ServiceKeyChoice,
+  scope: ServiceKeyScope,
+): string | undefined {
+  if (!choice.isServiceKey) return undefined
+  const typed = choice.maxEndUsers.trim()
+  if (typed === "") {
+    return scope === "organization" ? "Required" : undefined
+  }
+  return /^\d+$/.test(typed) ? undefined : "A whole number, 0 or more"
+}
 
 /**
  * The key fields a choice writes. A key that is not a service key sends only the
@@ -51,19 +75,27 @@ export const serviceKeyBody = (choice: ServiceKeyChoice) =>
         is_service_key: true,
         end_user_budget_ids: choice.budgetIds,
         end_user_budget_id: choice.defaultBudgetId || null,
+        max_end_users:
+          choice.maxEndUsers.trim() === ""
+            ? null
+            : Number(choice.maxEndUsers.trim()),
       }
     : { is_service_key: false }
 
 /**
  * Whether a form holding this choice may be saved: a service key's budgets have
- * to have loaded, or a failed load would read as a deployment with none.
+ * to have loaded, or a failed load would read as a deployment with none, and
+ * its cap has to be one the scope accepts.
  */
 export function useServiceKeyReady(
   choice: ServiceKeyChoice,
   scope: ServiceKeyScope,
 ): boolean {
   const budgets = useEndUserBudgets(scope, choice.isServiceKey)
-  return !choice.isServiceKey || budgets.data !== undefined
+  return (
+    !choice.isServiceKey ||
+    (budgets.data !== undefined && !maxEndUsersError(choice, scope))
+  )
 }
 
 const NO_BUDGETS: readonly LabelableBudget[] = []
@@ -77,7 +109,7 @@ const NO_DEFAULT_BUDGET_LABEL = "None: uncapped unless a request names one"
  * deployment's list also carries tenants' budgets, which an operator's key
  * may not use, so those are left out.
  */
-function useEndUserBudgets(scope: ServiceKeyScope, enabled: boolean) {
+export function useEndUserBudgets(scope: ServiceKeyScope, enabled: boolean) {
   const deployment = useBudgets(enabled && scope === "deployment")
   const organization = useOrganizationBudgets(
     enabled && scope === "organization",
@@ -135,7 +167,19 @@ export function ServiceKeyFields({
       <div className="flex flex-col gap-0.5">
         <Checkbox
           isSelected={value.isServiceKey}
-          onChange={(isServiceKey) => onChange({ ...value, isServiceKey })}
+          onChange={(isServiceKey) =>
+            onChange({
+              ...value,
+              isServiceKey,
+              // An organization's key starts at the gateway's default cap.
+              maxEndUsers:
+                isServiceKey &&
+                scope === "organization" &&
+                value.maxEndUsers === ""
+                  ? ORGANIZATION_MAX_END_USERS
+                  : value.maxEndUsers,
+            })
+          }
           isDisabled={isLocked}
           hasTouchTarget
         >
@@ -149,8 +193,8 @@ export function ServiceKeyFields({
         {scope === "organization" ? (
           <p className="text-caption">
             It belongs to the organization rather than to you: every owner and
-            admin manages it, it may have up to {ORGANIZATION_MAX_END_USERS} end
-            users, and it cannot be turned into a plain key or back later.
+            admin manages it, and it cannot be turned into a plain key or back
+            later.
           </p>
         ) : null}
       </div>
@@ -217,6 +261,16 @@ export function ServiceKeyFields({
                 label: labelOf(budgetId),
               })),
             ]}
+          />
+          <Field
+            label="Max end users"
+            value={value.maxEndUsers}
+            onChange={(maxEndUsers) => onChange({ ...value, maxEndUsers })}
+            inputMode="numeric"
+            isRequired={scope === "organization"}
+            placeholder={scope === "deployment" ? "No cap" : undefined}
+            isInvalid={maxEndUsersError(value, scope) !== undefined}
+            errorMessage={maxEndUsersError(value, scope)}
           />
         </>
       ) : null}

@@ -83,6 +83,7 @@ import {
 } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
+import { EndUsersDialog } from "./EndUsersDialog"
 import { ExpiryFields } from "./ExpiryFields"
 import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
@@ -1336,6 +1337,7 @@ export function KeysPage() {
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [federating, setFederating] = useState<ApiKey>()
+  const [listingEndUsers, setListingEndUsers] = useState<ApiKey>()
   const organizationContext = useOrganizationContext().data
   const role = organizationContext?.role
   // A viewer of this workspace reads their keys and changes none: the server
@@ -1421,6 +1423,9 @@ export function KeysPage() {
         onDelete={() => setPendingDelete(apiKey)}
         onWorkloadIdentity={
           canFederate ? () => setFederating(apiKey) : undefined
+        }
+        onEndUsers={
+          apiKey.is_service_key ? () => setListingEndUsers(apiKey) : undefined
         }
         isReadOnly={isReadOnly}
         isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
@@ -1700,6 +1705,18 @@ export function KeysPage() {
         <FederationRulesDialog
           apiKey={federating}
           onClose={() => setFederating(undefined)}
+        />
+      ) : null}
+
+      {listingEndUsers ? (
+        <EndUsersDialog
+          apiKey={listingEndUsers}
+          // An organization's service key reaches only its owners and admins,
+          // who read its budgets; a member's operator-made key shows ids.
+          canReadBudgets={
+            isDeploymentWide || listingEndUsers.is_organization_service_key
+          }
+          onClose={() => setListingEndUsers(undefined)}
         />
       ) : null}
 

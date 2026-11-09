@@ -1241,3 +1241,34 @@ def test_deleting_its_budget_is_refused_while_a_key_defaults_to_it(client: TestC
     assert code == status.HTTP_200_OK, body
     code, listed = _request(client, world, "alpha_owner", "GET", _PREFIX)
     assert [row["end_user_budget_ids"] for row in listed if row["id"] == key["id"]] == [[default]]
+
+
+def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=master_key_header,
+    )
+    budget_id = _org_budget(client, world, request_limit=5)
+    key = _service_key(client, world, budget_id)
+    for user in ("alice", "bob"):
+        assert _chat(client, key["key"], user).status_code == status.HTTP_200_OK
+
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+    try:
+        response = client.get(f"{_PREFIX}/{key['id']}/end-users", params={"include_total": "true", "limit": 1})
+    finally:
+        client.cookies.clear()
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.headers["Otari-Total-Count"] == "2"
+    assert [row["external_id"] for row in response.json()] == ["alice"]
+
+    code, one = _request(client, world, "alpha_operator", "GET", f"{_PREFIX}/{key['id']}/end-users?external_id=bob")
+    assert code == status.HTTP_200_OK, one
+    assert [(row["external_id"], row["budget_id"]) for row in one] == [("bob", budget_id)]
+
+    for who in ("alpha_member", "beta_owner"):
+        code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-users")
+        assert code == status.HTTP_404_NOT_FOUND, (who, body)
