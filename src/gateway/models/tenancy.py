@@ -1016,16 +1016,19 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     request_mcp_servers_allowed: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
 
 
+# ``WorkspaceMemberRepository.add`` matches this name on a refused insert to
+# tell a vanished workspace (404) from a duplicate membership (409), so it is
+# declared rather than left to PostgreSQL to generate.
+WORKSPACE_MEMBER_WORKSPACE_FK = "fk_workspace_member_workspace_id"
+
+
 class WorkspaceMemberBase(SQLModel):
-    # Declared as explicit columns because ``Field(foreign_key=...)`` cannot name
-    # a constraint, and ``WorkspaceMemberRepository.add`` matches the workspace
-    # foreign key's name to tell a vanished workspace from a duplicate
-    # membership. Naming it here keeps the schema the single source of the name.
+    # Explicit columns because ``Field(foreign_key=...)`` cannot name a constraint.
     workspace_id: uuid.UUID = Field(
         sa_column=Column(
             "workspace_id",
             Uuid(),
-            ForeignKey("workspace.id", name="fk_workspace_member_workspace_id", ondelete="CASCADE"),
+            ForeignKey("workspace.id", name=WORKSPACE_MEMBER_WORKSPACE_FK, ondelete="CASCADE"),
             nullable=False,
             index=True,
         )
