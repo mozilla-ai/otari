@@ -152,7 +152,7 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import InvitationMailLimit, UserAccess
+from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
@@ -1703,7 +1703,7 @@ def get_oidc_connection_service(
         uow,
         IdentityRepositories.on(uow),
         organizations=organizations,
-        domains=OrganizationDomainRepository(uow),
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=config.oidc_allow_private_hosts,
     )
 

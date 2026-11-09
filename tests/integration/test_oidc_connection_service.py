@@ -32,6 +32,7 @@ from gateway.repositories.tenancy.organization_domain_repository import Organiza
 from gateway.schemas.identity import OIDCConnectionRequest
 from gateway.services.identity import OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
+from gateway.services.organizations import OrganizationClaimedDomains
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -99,7 +100,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         uow,
         IdentityRepositories.on(uow),
         organizations=OrganizationService(db, membership_listener=None),
-        domains=OrganizationDomainRepository(uow),
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=False,
     )
 
@@ -559,15 +560,11 @@ async def test_test_for_user_stores_nothing_for_an_issuer_the_row_no_longer_name
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
     # Read as values rather than held as a row, because the concurrent commit below expires one.
-    connection_id = (
-        await async_db.execute(
-            select(col(OIDCConnection.id)).where(col(OIDCConnection.organization_id) == organization.id)
-        )
+    connection_id: uuid.UUID = (
+        await async_db.execute(select(OIDCConnection.id).where(col(OIDCConnection.organization_id) == organization.id))
     ).scalar_one()
     before = (
-        await async_db.execute(
-            select(col(OIDCConnection.discovery_document)).where(col(OIDCConnection.id) == connection_id)
-        )
+        await async_db.execute(select(OIDCConnection.discovery_document).where(col(OIDCConnection.id) == connection_id))
     ).scalar_one()
 
     async def _discover_then_rename(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
@@ -581,7 +578,7 @@ async def test_test_for_user_stores_nothing_for_an_issuer_the_row_no_longer_name
 
     after = (
         await async_db.execute(
-            select(col(OIDCConnection.issuer), col(OIDCConnection.discovery_document)).where(
+            select(OIDCConnection.issuer, OIDCConnection.discovery_document).where(
                 col(OIDCConnection.id) == connection_id
             )
         )
