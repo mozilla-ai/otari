@@ -205,7 +205,7 @@ async def list_caller_organization_memberships(
     organizations: this is what an organization switcher renders, and one row
     carries ``is_active_organization`` so it can mark the current one. Not to be
     confused with ``GET /me/members``, which is the active organization's
-    roster. An organization whose own SSO enforcement refuses the caller is left off.
+    memberships. An organization whose own SSO enforcement refuses the caller is left off.
     """
 
     async def blocked(organization: Organization) -> bool:
