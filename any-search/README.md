@@ -42,9 +42,13 @@ that carries none is filled in.
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
-`UnsupportedParameterError` rather than being dropped. `SHARED_PARAMETERS` lists the shared
-parameters, so a host can tell them from native options, and `shared_parameter_problems` says which
-values `search` refuses, so a host can check them before the call.
+`UnsupportedParameterError` rather than being dropped. Two adapters check a value before the
+request: SearXNG's `method` and Perplexity's `search_type` raise `UnsupportedValueError`, a
+`ValueError` too, whose message names the allowed values. Any other value is the provider's to
+refuse, which comes back as a `ProviderError`, as the `fake` provider's does.
+`SHARED_PARAMETERS` lists the shared parameters, so a host can tell them from native options, and
+`shared_parameter_problems` says which values `search` refuses, so a host can check them before the
+call.
 
 ## What comes back
 
@@ -62,9 +66,17 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
 query or the key travels in the URL, the provider's `tier` (`production` or `test`), its
-`max_results`, and its native options as `OptionSpec`s (`name`, `type`, `enum`, `default`,
-`description` and `operator_only`, for an option only a deployment's operator should set; the
-library accepts it from anyone, and enforcing that is the host's job).
+`max_results`, whether it `reports_cost`, and its native options as `OptionSpec`s (`name`,
+`type`, `enum`, `default`, `description`, `operator_only`, for an option only a deployment's
+operator should set, and `cost_tier`, for the option whose values are the provider's cost tiers;
+the library accepts both from anyone, and acting on them is the host's job).
+
+A provider's cost tiers are the values of one option for which its pricing lists a price per call
+of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
+`default` is the tier the provider uses when the option is not sent. The metadata records no
+amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
+that bills searches at a price per call for a provider that does not report its cost can let only
+whoever set that price choose the tier.
 
 ## Logging
 
@@ -211,6 +223,41 @@ request (`timestamp` with `date=1`), so neither is required: the date is read fr
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
+## Perplexity
+
+`perplexity` calls Perplexity's [Search API](https://docs.perplexity.ai/api-reference/search-post),
+`POST /search`, with the key read from `PERPLEXITY_API_KEY` and the base URL from
+`PERPLEXITY_BASE_URL` when not passed, as Perplexity's SDK reads them. The key travels as a
+Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Perplexity |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""` |
+| `text` | `snippet`: the passages Perplexity takes from the page, cut to `max_tokens_per_page`; none when it is empty |
+| `published` | `date`, an ISO 8601 date, when Perplexity sends one; a date without a zone is UTC |
+
+`max_results` is sent as Perplexity's `max_results`, at most 20; without it Perplexity returns 10.
+`time_range` becomes `search_recency_filter`, and wins over that option when both are passed.
+Native options, under Perplexity's own names: `search_type` (`web` or `fast`, the cost tier),
+`search_recency_filter` (`hour` to `year`), `search_domain_filter`, `country`,
+`search_language_filter`, `max_tokens_per_page`, `max_tokens`, and the date filters
+`search_after_date_filter`, `search_before_date_filter`, `last_updated_after_filter` and
+`last_updated_before_filter`, as `MM/DD/YYYY`. Perplexity refuses a recency filter, `time_range`
+included, together with `search_after_date_filter` or `search_before_date_filter`. Its `people`
+search type is not offered: Perplexity runs it, so the adapter refuses any `search_type` but `web`
+and `fast` with `UnsupportedValueError`. An option passed as `None` is left out of the request, as if not
+passed, so `search_type=None` searches at Perplexity's default, `web`. Perplexity reports no cost.
+
+Perplexity signals every failure with an HTTP status and an `error` object. Any status from 400
+raises `ProviderError`, tagged with `error.type` (`invalid_api_key`, `invalid_request`,
+`invalid_country_code`), else `http_error`; the message never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url`, `title` or `snippet`, or with one of them not a string, or with a `date` that is
+neither a string nor null, or that does not parse, raises `ProviderError` with the tag
+`unexpected_response`. Fields the adapter does not read, `last_updated` among them, are ignored.
+
 ## SearXNG
 
 `searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,
@@ -326,6 +373,7 @@ network or a monkeypatch:
 | `in_body_error` | Answer with no hits and this tag as `SearchResult.error`. |
 | `leak_query` | Raise a `RuntimeError` whose message carries the query, as a careless adapter might, so a host can prove it never passes exception text on. |
 | `account` | Echoed in `raw`. Operator-only, so a host can exercise that rule. |
+| `depth` | `basic` or `advanced`, echoed in `raw`. A cost tier, so a host can exercise its rule for cost tiers. |
 
 `raw` echoes the request, the query left out, so a test can see what reached the provider.
 

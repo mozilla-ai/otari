@@ -3462,6 +3462,29 @@ export interface paths {
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
     };
+    "/api/v1/organizations/me/keys/{key_id}/end-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Key End Users
+         * @description List the end users of one of the caller's service keys, oldest first.
+         *
+         *     The caller's own key, or for an owner or admin one of the organization's service keys; any other answers 404.
+         *     A read, so a viewer may list the end users of a key billed to them. A deleted end user is not listed.
+         */
+        get: operations["organization-keys-list_own_key_end_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
         parameters: {
             query?: never;
@@ -18003,6 +18026,12 @@ export interface components {
          */
         SearchProviderOptionSchema: {
             /**
+             * Cost Tier
+             * @description True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.
+             * @default false
+             */
+            cost_tier: boolean;
+            /**
              * Default
              * @description The value the provider uses when the option is not set.
              */
@@ -18021,7 +18050,7 @@ export interface components {
             name: string;
             /**
              * Operator Only
-             * @description True when only an instance or a credential may set it, never a workspace or a request.
+             * @description True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.
              * @default false
              */
             operator_only: boolean;
@@ -18100,6 +18129,12 @@ export interface components {
              * @description Fetch: true when the provider runs a page's JavaScript before reading it.
              */
             renders_javascript?: boolean | null;
+            /**
+             * Reports Cost
+             * @description True when the provider's answer says what each call cost, which is then what the call is billed.
+             * @default false
+             */
+            reports_cost: boolean;
             /**
              * Reports Final Url
              * @description Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.
@@ -27194,6 +27229,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-list_own_key_end_users": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Only end users on this budget. */
+                budget_id?: string | null;
+                /** @description Only end users that are, or are not, blocked. */
+                blocked?: boolean | null;
+                /** @description Only the end user the service names with this `user` value: zero or one. */
+                external_id?: string | null;
+                /** @description Also count every matching end user, in the Otari-Total-Count response header. */
+                include_total?: boolean;
+            };
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"][];
                 };
             };
             /** @description Validation Error */

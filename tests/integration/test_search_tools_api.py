@@ -453,7 +453,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply", "synthetic"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "perplexity", "searxng", "serply", "synthetic"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -462,6 +462,7 @@ def test_search_catalog_serves_the_library_metadata(
     assert exa["max_results"] == metadata.max_results
     assert exa["query_in_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
+    assert exa["reports_cost"] is True
     assert exa["instances"] == ["from-file"]
     # Fetch's own fields stay null on a search entry, and no environment key is reported.
     assert exa["max_urls_per_call"] is None
@@ -473,6 +474,21 @@ def test_search_catalog_serves_the_library_metadata(
     # Serply's query is in the URL and its key in a header.
     serply = catalog["serply"]
     assert (serply["max_results"], serply["query_in_url"], serply["key_in_url"]) == (10, True, False)
+
+
+def test_a_cost_tier_the_provider_reports_no_cost_for_is_set_only_by_a_tools_configuration(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    perplexity = _catalog(catalog_client, headers=master_key_header)["perplexity"]
+    assert perplexity["reports_cost"] is False
+    (tier,) = [option for option in perplexity["options"] if option["cost_tier"]]
+    assert (tier["name"], tier["enum"], tier["default"], tier["operator_only"]) == (
+        "search_type",
+        ["web", "fast"],
+        "web",
+        True,
+    )
+    assert not any(option["operator_only"] for option in perplexity["options"] if not option["cost_tier"])
 
 
 def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -946,6 +962,26 @@ def test_a_stored_instance_is_tested_by_name(client: TestClient, master_key_head
     _create(client, master_key_header, name="fake-search", provider="fake", api_base=None, options={"error": "timeout"})
     resp = client.post(f"{API_ROOT}/search-tools/fake-search/test", json={"query": "q"}, headers=master_key_header)
     assert resp.json() == {"ok": False, "error": "timeout", "hits": None, "characters": None}
+
+
+@pytest.fixture
+def refused_tier_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A client whose config-file search tool sets a cost tier value the ``fake`` provider refuses."""
+    file_tool = {"provider": "fake", "options": {"depth": "Basic"}}
+    yield from build_test_client(test_config.model_copy(update={"search_tools": {"from-file": file_tool}}))
+
+
+def test_a_tool_whose_cost_tier_the_provider_refuses_is_refused_a_test(
+    refused_tier_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    resp = refused_tier_client.post(
+        f"{API_ROOT}/search-tools/from-file/test", json={"query": "q"}, headers=master_key_header
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Search tool 'from-file' does not run: fake does not take the value of its option 'depth', "
+        "which sets the price of each call."
+    )
 
 
 @pytest.mark.parametrize("trusted", [False, True])

@@ -79,6 +79,7 @@ from gateway.models.tools import (
     WebToolCredential,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 from gateway.services.tools._web_search._default import in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
@@ -314,16 +315,26 @@ def builtin_fetch_resolved() -> ResolvedFetch:
 
 
 def served_fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
-    """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing."""
+    """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing.
+
+    Any-fetch runs an instance when it serves the provider and the provider takes the value of its cost tier.
+    """
     served = set(any_fetch.AnyFetch.get_supported_providers())
     instances: dict[str, ToolInstance] = {}
     for name, instance in effective_fetch_instances(config).items():
-        if instance.provider in served:
-            instances[name] = instance
-        else:
+        if instance.provider not in served:
             _warn_once(
                 "Fetch instance '%s' is left out: any-fetch does not serve its provider %s", name, instance.provider
             )
+        elif (tier := refused_cost_tier(instance)) is not None:
+            _warn_once(
+                "Fetch instance '%s' is left out: %s does not take the value of its option '%s'",
+                name,
+                instance.provider,
+                tier,
+            )
+        else:
+            instances[name] = instance
     return instances
 
 
@@ -336,6 +347,9 @@ def _search_on_instance(
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
     """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
+    if refused_cost_tier(instance) is not None:
+        # Before the options are layered, which would drop the tier with a warning for a call that does not run.
+        raise SearchToolMisconfiguredError(instance.name)
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
@@ -602,7 +616,7 @@ def _layered(
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
     if not checked:
         return {**instance_options, **credential_options, **workspace, **request}
-    operator_only = _operator_only(kind, provider)
+    operator_only = configuration_only_options(_metadata(kind, provider))
     if refused := _tenant_problems(kind, provider, request, operator_only):
         key, problem = next(iter(refused.items()))
         raise WebSearchOptionRefusedError(key, problem)
@@ -625,13 +639,28 @@ def _layered(
     }
 
 
-def _operator_only(kind: ToolKind, provider: str) -> frozenset[str]:
-    metadata = (
+def _metadata(kind: ToolKind, provider: str) -> any_search.ProviderMetadata | any_fetch.ProviderMetadata:
+    return (
         any_search.AnySearch.get_provider_metadata(provider)
         if kind == "search"
         else any_fetch.AnyFetch.get_provider_metadata(provider)
     )
-    return frozenset(option.name for option in metadata.options if option.operator_only)
+
+
+def configuration_only_options(metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata) -> frozenset[str]:
+    """The provider's options that only a tool's configuration sets, never a workspace or a request.
+
+    They are the options its library marks operator-only, and its cost tier
+    when the provider does not report what a call cost: the tool is priced for
+    the tier its configuration picks, so a request that picked another would
+    be billed at the wrong price. A cost tier stays open where the provider
+    reports the cost, since that cost is what the call is billed.
+    """
+    return frozenset(
+        option.name
+        for option in metadata.options
+        if option.operator_only or (option.cost_tier and not metadata.reports_cost)
+    )
 
 
 def _tenant_problems(

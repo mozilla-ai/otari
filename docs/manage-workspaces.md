@@ -5,54 +5,43 @@ icon: desk
 
 # Manage workspaces
 
-A workspace holds the API keys, routing policies, tools and usage of one team,
-application or environment. What workspaces are, and how they fit in an
-organization, is in [Organizations and workspaces](workspaces.md).
+For background on what workspaces are and how they fit into the organization, see [Organizations and workspaces](workspaces.md).
 
 ## Create a workspace
 
-1. Click **Organization** in the bottom-left corner, then **Workspaces**.
+1. From the main dashboard, click **Organization** in the bottom-left corner, then **Workspaces**.
 2. Click **Create workspace**.
-3. Give it a name and, optionally, a description, and click **Create workspace**.
+3. Give it a name, an optional description, and create it.
 
 ![The New workspace dialog, with a name and a description filled in.](assets/screenshots/manage-workspaces-create.png)
 
-A new workspace uses every provider key the organization has. To choose which
-key it uses for a provider, open the workspace from the list and select its
-**Providers** tab; see [Control which keys a workspace uses](manage-provider-keys.md#control-which-keys-a-workspace-uses).
+Workspaces inherit all provider keys available at the organization level. If a provider has multiple keys, you can choose which one a specific workspace should use, and which of its models the workspace can call.
 
-## Find your way around a workspace
+To select which provider keys a workspace can use, open the workspace from the list and select its **Providers** tab; see [Control workspace access](manage-provider-keys.md#control-workspace-access).
 
-Select the workspace in the top-left corner. Its menu has:
+## Manage a workspace
 
-- **Overview**: its requests, spend and sessions.
-- **Models**: the models its requests can use.
-- **Routing**, then **Policies**: its [routing policies](create-a-multi-provider-routing.md).
-- **Guardrails**: the guardrails that run on its requests.
-- **Tools**: its [web search](configure-web-search.md), [code execution](configure-code-execution.md) and [MCP servers](add-an-mcp-server.md).
-- **API keys** and **Members**: who and what can call it.
+From the main dashboard, select the workspace in the top-left corner. Its menu has **Overview**, **Models**, **Routing**, **Guardrails**, **Tools**, **API keys** and **Members**.
 
-The organization's own settings are under **Organization**: **Usage**,
-**Workspaces**, **Members & roles**, **Spend & budgets**, **Providers**,
-**Guardrails** and **Org settings**.
+Click **Organization** at the bottom of the menu, then use the sidebar to move between different areas:
+
+* **Usage**: for analytics and request history.
+* **Members & roles**: to invite members and manage their workspace-specific access.
+* **Spend & budgets**: to define how much can be spent and over what period. To enforce the budget, you need to create a **spend ceiling** that applies it to an organization or workspace.
+* **Providers**: to manage provider-key access. All workspaces within the organization can use the credentials for connecting to model providers, but you can also choose which provider keys a workspace can use (see **Create a workspace**, above).
+* **Guardrails**: to check the content users send to a model. Each guardrail can be applied to specific workspaces and configured to either block requests that meet its conditions or record them for monitoring without blocking them.
 
 ## Organize workspaces by environment
 
-A common pattern is one workspace per environment (`production`, `staging`,
-`development`) or per application. Each gets its own API keys and its own
-budget, so a runaway test cannot spend production's money, and usage reads per
-environment without filtering.
+For naming conventions and team patterns, see [How teams use workspaces](workspaces.md#how-teams-use-workspaces).
 
 ## Delete a workspace
 
-1. Open **Organization**, then **Workspaces**.
-2. Find the workspace, click **Delete** (the bin icon), and confirm.
+1. From the main dashboard, click **Organization** in the bottom-left corner, then **Workspaces**.
+2. Find the workspace you want to delete, click **Delete** (the bin icon), and confirm the deletion.
 
 ![The Workspaces page, listing the organization's workspaces with a Delete action on each.](assets/screenshots/manage-workspaces-list.png)
 
-A workspace that still holds API keys, aliases, routing policies or usage cannot
-be deleted. Keys, aliases and policies can be removed first, but the usage of
-requests the gateway served is kept for good, so a workspace that has served
-requests stays; only imported usage can be deleted. The organization's last
-workspace cannot be deleted either. Move every application that still uses the
-workspace before you delete it.
+A workspace that still holds API keys, aliases, routing policies, or usage cannot be deleted, and neither can the organization's last workspace; see [Constraints worth knowing](workspaces.md#constraints-worth-knowing).
+
+Move any apps that still use this workspace before you delete it.

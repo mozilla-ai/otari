@@ -99,7 +99,12 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, country_not_supported
+from gateway.api.routes._helpers import (
+    GUARDRAILS_RESULT_HEADER,
+    apply_input_guardrails,
+    country_gate_for,
+    country_not_supported,
+)
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -1404,6 +1409,16 @@ class RequestContext:
         self.end_user_budget_id = end_user_budget_id
 
 
+def _guardrail_headers(response: Response | None) -> dict[str, str]:
+    """``Otari-Guardrails`` as the input guardrails wrote it on the route's injected ``Response``.
+
+    A streamed answer is a ``StreamingResponse`` the route builds itself, which does not
+    take headers from the injected one, so the verdict has to be carried across by hand.
+    """
+    value = response.headers.get(GUARDRAILS_RESULT_HEADER) if response is not None else None
+    return {GUARDRAILS_RESULT_HEADER: value} if value else {}
+
+
 def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
     """``Otari-End-User-Budget`` for a request that billed an end user on a budget."""
     return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
@@ -1750,12 +1765,7 @@ async def _admit_or_refuse(
             ctx.request_id,
             describe_port_error(exc),
         )
-        # Whatever the adapter wrote before failing is discarded, and a
-        # session its error left unusable is made usable for the refund.
-        try:
-            await ctx.db.rollback()
-        except DATABASE_ERRORS as rollback_error:
-            logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
+        await _discard_failed_funding_check(ctx.db)
         raise await _funding_unavailable(ctx, resolved, adapter=adapter) from exc
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it.
@@ -1767,6 +1777,14 @@ async def _admit_or_refuse(
         )
         raise await _funding_unavailable(ctx, resolved, adapter=adapter)
     ctx.deployment_charge = charge
+
+
+async def _discard_failed_funding_check(db: AsyncSession) -> None:
+    """Roll back what a failed funding check wrote, so the session is usable for the refund."""
+    try:
+        await db.rollback()
+    except DATABASE_ERRORS as rollback_error:
+        logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
 
 
 async def _funding_unavailable(
@@ -1976,12 +1994,7 @@ def _hosted_candidate(
                 ctx.request_id,
                 describe_port_error(exc),
             )
-            try:
-                await ctx.db.rollback()
-            except DATABASE_ERRORS as rollback_error:
-                logger.warning(
-                    "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
-                )
+            await _discard_failed_funding_check(ctx.db)
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
             ) from exc
@@ -4372,10 +4385,7 @@ async def _admit_tool_funding(
             ctx.request_id,
             describe_port_error(exc),
         )
-        try:
-            await ctx.db.rollback()
-        except DATABASE_ERRORS as rollback_error:
-            logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
+        await _discard_failed_funding_check(ctx.db)
         await _refuse_tool_funding(
             ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
         )
@@ -6581,6 +6591,7 @@ async def run_single_attempt_stream(
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
+    response: Response | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -6737,7 +6748,12 @@ async def run_single_attempt_stream(
         price_facts=ctx.price_facts,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(served_tools.container_lease) | _end_user_headers(ctx) | served_by,
+        extra_headers=(
+            _container_headers(served_tools.container_lease)
+            | _end_user_headers(ctx)
+            | _guardrail_headers(response)
+            | served_by
+        ),
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,

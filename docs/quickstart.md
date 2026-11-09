@@ -5,51 +5,46 @@ icon: bolt
 
 # Quickstart
 
-In this quickstart you send your first request through [otari.ai](https://otari.ai):
-you create an API key in your default workspace, pick a model, send one request,
-and see it on the workspace's Overview. It takes about five minutes, and all you
-need is an otari.ai account.
+This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears on the workspace's Overview.
 
-To run Otari on your own machine instead, follow the
-[Self-hosted quickstart](self-hosted-quickstart.md).
+**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](manage-provider-keys.md).
 
-## 1. Open your workspace
+To run Otari on your own machine instead, follow the [Self-hosted quickstart](self-hosted-quickstart.md).
 
-Log in to [otari.ai](https://otari.ai) and open your default workspace from the
-top-left corner. This quickstart uses its **API keys**, **Models** and **Overview**
-pages.
+## 1. Open a workspace
 
-## 2. Create an API key
+Use your default workspace for the first request.
 
-1. Open the **API keys** page and click **Create key**.
-2. Give the key a name. It can use every model your workspace can, unless you
-   limit it under **Advanced**.
-3. Click **Create key**, then copy the key, which starts with `otk_`. It is
-   shown only once.
+1. Log in to [otari.ai](https://otari.ai).
+2. Open your default workspace in the top-left corner.
+3. You will use the **API keys**, Models, and **Overview** pages in this guide.
+
+## 2. Generate an API token
+
+Generate the credential your app will actually send to otari.ai. This token starts with `otk_`.
+
+1. Open the **API keys** page.
+2. Click **Create key**.
+3. Give the key a name and, if needed, set an expiration date. By default, the key inherits your existing model access, but you can limit it to specific models. To customize model access, click **Advanced** and select the models you want the key to use.
+4. Click **Create key**, then copy the token right away. It is only shown once.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
-Keep the key in your shell for the next steps:
+**Keep it secret**. Treat the token like a password. Keep it in your shell or secret store, not in source control:
 
 ```bash
 export OTARI_API_KEY=otk_...
 ```
 
-Treat it like a password: keep it in your shell or a secret store, never in
-source control.
+## 3. Send your first request
 
-## 3. Pick a model
+Pick a model your workspace can use.
 
-Open the **Models** page, find a model with the filters (modality, provider,
-vendor, capabilities), open it, and click **Use this model**. In the panel that
-opens, copy the model selector with the copy button beside it. This
-quickstart uses `deepseek/deepseek-v4-pro-0813`.
+1. Open the Models page.
+2. Choose a model using the available filters, including modality, provider, vendor, capabilities, and more, to quickly find the option that best fits your needs.
+3. After selecting a model, click **Use this model**, and copy the model selector from the panel that opens.
 
-## 4. Send a request
-
-otari.ai's API lives under `https://api.otari.ai/api`, or
-`https://eu.api.otari.ai/api` for an account in the European Union. Send a chat
-completion to it:
+otari.ai exposes an OpenAI-compatible endpoint at `https://api.otari.ai/api/v1`, or `https://eu.api.otari.ai/api/v1` for an account in the European Union. The fastest first check is one cURL request that you can copy. The examples use `deepseek/deepseek-v4-pro-0813`; replace it with the selector you copied.
 
 ```bash
 curl https://api.otari.ai/api/v1/chat/completions \
@@ -61,13 +56,7 @@ curl https://api.otari.ai/api/v1/chat/completions \
   }'
 ```
 
-The answer is an OpenAI-style chat completion, with the model's reply in
-`choices[0].message.content`.
-
-## 5. Call it from your code
-
-Any OpenAI SDK works with Otari: point its base URL at the API plus `/v1`. With
-Python, after `pip install openai`:
+Any OpenAI SDK works too. With Python, after `pip install openai`:
 
 ```python
 import os
@@ -82,22 +71,23 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-It prints the model's reply.
+## 4. Confirm it worked
 
-## 6. See it on the Overview
-
-Open the **Overview** and its **Requests** tab: your request is listed with its
-model, its tokens and its cost.
+1. Open the **Overview** and its **Requests** tab.
+2. Look for the request you just sent.
+3. If it does not appear, double-check the provider key and workspace token first.
 
 ![The Overview's Requests tab, listing requests with their user, model, tokens, cost and status.](assets/screenshots/quickstart-requests.png)
 
-You now have a key your applications can call otari.ai with, and every request
-they send is recorded against your workspace.
+**Success**: Once the request appears on the Overview as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
 
-## Next steps
+## What's next?
 
-- [Base URL](api-reference.md#base-url): the base URL each SDK and region takes.
-- [Use with Claude Code](use-with-claude-code.md): point Claude Code at otari.ai.
-- [Access control](access-control.md): workspaces, members, keys and budgets.
-- [Routing policies](routing.md): fall back to another model when one fails.
-- [Inference Guardrails](guardrails.md): check requests and responses.
+You've sent your first LLM request! Now you can:
+
+- [Manage workspaces](manage-workspaces.md)
+- [Manage provider keys](manage-provider-keys.md)
+- [Set a budget and ceiling](set-a-budget-and-ceiling.md)
+- [Create a multi-provider routing](create-a-multi-provider-routing.md)
+- [Manage guardrails](manage-guardrails.md)
+- [Use with Claude Code](use-with-claude-code.md)

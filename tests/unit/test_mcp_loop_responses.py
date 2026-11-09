@@ -30,6 +30,7 @@ from openai.types.responses import (
     ResponseTextDeltaEvent,
     ResponseUsage,
 )
+from openai.types.responses.response import IncompleteDetails
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.core.config import GatewayConfig
@@ -451,6 +452,63 @@ async def test_loop_foreign_function_call_returns_to_caller_without_execution(
     assert pool.calls == []
     types = [getattr(item, "type", None) for item in out.output]
     assert "function_call" in types
+
+
+@pytest.mark.asyncio
+async def test_loop_runs_no_gateway_call_from_a_round_cut_off_by_the_token_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A round that ran out of tokens mid-call returns as it ended, without running or returning the call."""
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        out = _response(status="incomplete", output=[_function_call("c", "fetch_url", '{"u": "ht')])
+        out.incomplete_details = IncompleteDetails(reason="max_output_tokens")
+        return out
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=3,
+    )
+    assert out.status == "incomplete"
+    assert out.output == []
+    assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_loop_runs_no_gateway_call_from_a_cut_off_round_beside_a_foreign_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cut-off mixed batch runs none of the gateway's calls and returns only the caller's."""
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        out = _response(
+            status="incomplete",
+            output=[
+                _function_call("foreign_id", "user_tool", "{}"),
+                _function_call("owned_id", "fetch_url", '{"u": "ht'),
+            ],
+        )
+        out.incomplete_details = IncompleteDetails(reason="max_output_tokens")
+        return out
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await responses_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "input_data": "go",
+            "tools": [{"type": "function", "name": "user_tool", "parameters": {}}],
+        },
+        pool=cast(Any, pool),
+        max_iterations=3,
+    )
+    assert pool.calls == []
+    assert [getattr(item, "call_id", None) for item in out.output] == ["foreign_id"]
 
 
 @pytest.mark.asyncio

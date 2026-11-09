@@ -21339,6 +21339,12 @@
       "SearchProviderOptionSchema": {
         "description": "One native option a provider accepts, under the provider's own name.",
         "properties": {
+          "cost_tier": {
+            "default": false,
+            "description": "True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.",
+            "title": "Cost Tier",
+            "type": "boolean"
+          },
           "default": {
             "description": "The value the provider uses when the option is not set.",
             "title": "Default"
@@ -21369,7 +21375,7 @@
           },
           "operator_only": {
             "default": false,
-            "description": "True when only an instance or a credential may set it, never a workspace or a request.",
+            "description": "True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.",
             "title": "Operator Only",
             "type": "boolean"
           },
@@ -21531,6 +21537,12 @@
             ],
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
+          },
+          "reports_cost": {
+            "default": false,
+            "description": "True when the provider's answer says what each call cost, which is then what the call is billed.",
+            "title": "Reports Cost",
+            "type": "boolean"
           },
           "reports_final_url": {
             "anyOf": [
@@ -40504,6 +40516,150 @@
           }
         ],
         "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/end-users": {
+      "get": {
+        "description": "List the end users of one of the caller's service keys, oldest first.\n\nThe caller's own key, or for an owner or admin one of the organization's service keys; any other answers 404.\nA read, so a viewer may list the end users of a key billed to them. A deleted end user is not listed.",
+        "operationId": "organization-keys-list_own_key_end_users",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only end users on this budget.",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users on this budget.",
+              "title": "Budget Id"
+            }
+          },
+          {
+            "description": "Only end users that are, or are not, blocked.",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users that are, or are not, blocked.",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserPublic"
+                  },
+                  "title": "Response Organization-Keys-List Own Key End Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Key End Users",
         "tags": [
           "organization-keys"
         ]

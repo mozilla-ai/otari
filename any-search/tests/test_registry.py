@@ -14,6 +14,7 @@ def test_supported_providers() -> None:
         "exa",
         "fake",
         "mojeek",
+        "perplexity",
         "searxng",
         "serply",
         "synthetic",
@@ -28,7 +29,7 @@ def test_provider_class_and_metadata() -> None:
 @pytest.mark.parametrize("lookup", ["create", "get_provider_class", "get_provider_metadata"])
 def test_an_unknown_provider_is_refused_with_the_supported_ones(lookup: str) -> None:
     with pytest.raises(
-        UnsupportedProviderError, match="supported: deepseek, exa, fake, mojeek, searxng, serply, synthetic"
+        UnsupportedProviderError, match="supported: deepseek, exa, fake, mojeek, perplexity, searxng, serply, synthetic"
     ):
         getattr(AnySearch, lookup)("nope")
 

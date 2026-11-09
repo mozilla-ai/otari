@@ -7,3 +7,7 @@
 # Approve a package here only when its build produces something the app needs.
 allowBuilds:
   esbuild: true
+
+# minimatch 10.2.6 is below the fixed 11.0.1. Leave the 5.x copy alone.
+overrides:
+  "minimatch@>=7 <11.0.1": 11.0.1

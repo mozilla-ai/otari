@@ -58,6 +58,7 @@ const CATALOG: SearchProviderInfo[] = [
     kind: "search",
     requires_api_key: true,
     requires_api_base: false,
+    reports_cost: false,
     tier: "production",
     options: [
       {
@@ -67,12 +68,14 @@ const CATALOG: SearchProviderInfo[] = [
         default: "auto",
         description: "How Exa searches.",
         operator_only: false,
+        cost_tier: false,
       },
       {
         name: "internal",
         type: "string",
         description: "Only an instance or a key sets this.",
         operator_only: true,
+        cost_tier: false,
       },
     ],
   },

@@ -14,11 +14,13 @@ from gateway.core.settings.tools import (
     configured_search_default,
     dangling_reference_warnings,
     default_api_base,
+    effective_fetch_instances,
     effective_search_instances,
     synthesized_search_instance,
     warn_about_instances,
 )
 from gateway.log_config import logger
+from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 
 
 def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchInstance | None:
@@ -47,8 +49,8 @@ def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchI
 
 
 def _runs(settings: ToolSettings, instance: ToolInstance) -> bool:
-    """Whether any-search serves the instance's provider, with an address if it needs one."""
-    if not instance.library_backed:
+    """Whether any-search serves the instance's provider, with an address if it needs one and a cost tier it takes."""
+    if not instance.library_backed or refused_cost_tier(instance) is not None:
         return False
     needs_address = any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base
     return not needs_address or bool(instance.api_base or default_api_base(settings, instance.provider))
@@ -91,6 +93,16 @@ def warn_about_tool_instances(settings: ToolSettings) -> None:
     """
     search = effective_search_instances(settings)
     warn_about_instances(settings, search, settings.fetch_tools)
+    for instance in [*search.values(), *effective_fetch_instances(settings).values()]:
+        if (tier := refused_cost_tier(instance)) is not None:
+            logger.warning(
+                "%s_tools.%s does not run: %s does not take the value of its option '%s', which sets the price "
+                "of each call. Fix the value.",
+                instance.kind,
+                instance.name,
+                instance.provider,
+                tier,
+            )
     for value, message in dangling_reference_warnings(settings).values():
         logger.warning(message, value)
     named = configured_search_default(settings)
@@ -102,6 +114,6 @@ def warn_about_tool_instances(settings: ToolSettings) -> None:
             len(search),
             f"Set web_search_default_tool to one of {', '.join(usable)}, or to 'none' to keep in-loop search off."
             if usable
-            else "None of them is on a provider the in-loop tool can use yet; set web_search_default_tool to "
-            "'none' to say in-loop search stays off.",
+            else "None of them can run, as the warnings above say; set web_search_default_tool to 'none' to say "
+            "in-loop search stays off.",
         )

@@ -1,9 +1,9 @@
 # Use with LangGraph
 
 LangGraph calls models through LangChain's chat models, so `ChatOtari` from
-`langchain-otari` is all it takes (see [Use with LangChain](use-with-langchain.md)):
-every model call in every node of your graph then gets Otari's budgets, usage
-tracking, fallback routing and guardrails.
+`langchain-otari` ([Use with LangChain](use-with-langchain.md)) is all it takes.
+Every model call in every node then gets Otari's budgets, usage tracking,
+fallback routing and guardrails.
 
 ## Quick start
 
@@ -13,16 +13,16 @@ Install LangGraph and the package:
 pip install langgraph langchain-otari
 ```
 
-Create an API key on the **API keys** page of the [otari.ai](https://otari.ai)
+Create a key on the **API keys** page of the [otari.ai](https://otari.ai)
 dashboard and export it:
 
 ```bash
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-On otari.ai that key is all the configuration there is (your organization needs
-credit or provider keys of its own there, or requests answer 402). For a gateway
-you run yourself, use a key it issued and also export its API root:
+On otari.ai, the key is all you need, as long as your organization has credit or
+its own provider keys (otherwise requests answer `402`). For a gateway you run,
+use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -66,8 +66,8 @@ print(result["messages"][-1].content)
 
 ## Streaming tokens
 
-`stream_mode="messages"` streams the model's tokens out of the graph as Otari
-streams them in:
+`stream_mode="messages"` streams the model's tokens out of the graph as they
+arrive:
 
 ```python
 from langchain_otari import ChatOtari
@@ -95,11 +95,10 @@ print()
 
 ## Different models per node
 
-Each node can use its own model through the same gateway, for example a cheap
-model to route and a stronger one to answer. Otari tracks the spend of both under
-the same key. Give each node's `ChatOtari(model=...)` its own name, written as
-Otari spells it (`provider:model`, or a routing policy or alias name); see
-[Model format](models.md#model-format) and
+Each node can use its own model, such as a cheap one to route and a stronger
+one to answer, and Otari tracks both under the same key. Give each node's
+`ChatOtari(model=...)` its own model name (`provider:model`, or a routing policy
+or alias name); see [Model format](models.md#model-format) and
 [Routing-policy model names](models.md#routing-policy-model-names).
 
 ## See also

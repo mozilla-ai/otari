@@ -627,7 +627,8 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
 ) -> None:
     """If the model emits tool_use blocks but stops with a non-``tool_use`` reason
     (e.g. ``end_turn`` because ``max_tokens`` was hit mid-tool-call), the loop
-    must exit rather than try to execute them.
+    must exit rather than try to execute them, and must not hand the caller a
+    call to a tool it never declared.
     """
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -642,7 +643,42 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
         max_iterations=5,
     )
     assert out.stop_reason == "end_turn"
+    assert out.content == []
     assert pool.calls == []  # never executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal", "end_turn"])
+async def test_loop_runs_no_gateway_call_from_a_cut_off_round_beside_a_foreign_call(
+    monkeypatch: pytest.MonkeyPatch, stop_reason: str
+) -> None:
+    """A mixed batch that stopped for any reason but ``tool_use`` runs no gateway call and returns the caller's."""
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _message_response(
+            stop_reason=stop_reason,
+            content=[
+                _tool_use("foreign_id", "user_tool", {}),
+                _tool_use("owned_id", "fetch_url", {}),
+            ],
+        )
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "max_tokens": 100,
+            "tools": [{"name": "user_tool", "input_schema": {"type": "object"}}],
+        },
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+    assert out.stop_reason == stop_reason
+    assert pool.calls == []
+    assert [getattr(b, "id", None) for b in out.content] == ["foreign_id"]
 
 
 # ---------- on_first_response (lock-in callback) ----------

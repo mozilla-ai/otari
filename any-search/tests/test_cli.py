@@ -54,6 +54,16 @@ def test_a_provider_bug_exits_1_without_the_query(capsys: pytest.CaptureFixture[
     assert "sentinel-query" not in captured.err
 
 
+def test_a_value_an_option_does_not_take_exits_1_naming_the_allowed_ones(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    assert main(["perplexity", "sentinel-query", "-o", "search_type=people"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "error: perplexity takes search_type web or fast"
+    assert "sentinel-query" not in captured.err
+
+
 def test_an_unknown_option_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["fake", "q", "-o", "color=red"]) == 1
     assert "'color'" in capsys.readouterr().err
@@ -120,6 +130,14 @@ def test_describe_marks_operator_only_options_and_the_test_tier(capsys: pytest.C
     assert "For tests:" in out
     assert "  account (string, operator only)" in out
     assert "Operator only: a host lets only its operator set it" in out
+
+
+def test_describe_marks_a_cost_tier_and_whether_the_cost_is_reported(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("fake", capsys)
+    assert "Cost: not reported" in out
+    assert '  depth (string, cost tier), default "basic"' in out
+    assert "Cost tier: the provider bills a call at a price of its own for each value." in out
+    assert "Cost: reported with each search" in _describe("exa", capsys)
 
 
 def test_describe_says_when_the_key_and_the_query_travel_in_the_url(capsys: pytest.CaptureFixture[str]) -> None:

@@ -47,7 +47,12 @@ def _source(required: bool, env: str | None, default: str | None) -> str:
 
 
 def _describe_option(option: OptionSpec) -> list[str]:
-    kind = f"{option.type}, operator only" if option.operator_only else option.type
+    marks: list[str] = [option.type]
+    if option.operator_only:
+        marks.append("operator only")
+    if option.cost_tier:
+        marks.append("cost tier")
+    kind = ", ".join(marks)
     head = f"  {option.name} ({kind})"
     if option.default is not None:
         head += f", default {json.dumps(option.default)}"
@@ -64,6 +69,7 @@ def _describe(metadata: ProviderMetadata) -> str:
         f"{metadata.name}: {metadata.doc_url}",
         f"API key: {_source(metadata.requires_api_key, metadata.env_key, None)}",
         f"API base: {_source(metadata.requires_api_base, metadata.env_api_base, metadata.default_api_base)}",
+        f"Cost: {'reported with each fetch' if metadata.reports_cost else 'not reported'}",
         f"Pages: at most {metadata.max_urls_per_call} per call",
         f"Formats: {', '.join(metadata.formats)}",
         f"Renders JavaScript: {'yes' if metadata.renders_javascript else 'no'}",
@@ -80,6 +86,8 @@ def _describe(metadata: ProviderMetadata) -> str:
         lines += _describe_option(option)
     if any(option.operator_only for option in metadata.options):
         lines += ["", "Operator only: a host lets only its operator set it, never a tenant or a request."]
+    if any(option.cost_tier for option in metadata.options):
+        lines += ["", "Cost tier: the provider bills a call at a price of its own for each value."]
     return "\n".join(lines)
 
 

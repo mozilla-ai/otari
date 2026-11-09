@@ -23,15 +23,18 @@ containers on their own:
 docker compose --profile guardrails up -d anyguardrails encoderfile
 ```
 
-The service then listens on `http://localhost:8183`, with one profile,
-`prompt-injection`. The default `encoderfile` image is the arm64 build; on an
-x86 host, set `OTARI_ENCODERFILE_IMAGE` to the `.x86_64-linux-gnu` tag, as
-`demo/guardrails/start.sh` does. `OTARI_ANYGUARDRAILS_IMAGE` overrides the
-service image, so check that it names an image you have if the pull is refused.
+The service listens on `http://localhost:8183`, with one profile,
+`prompt-injection`.
+
+- The default `encoderfile` image is the arm64 build. On an x86 host, set
+  `OTARI_ENCODERFILE_IMAGE` to the `.x86_64-linux-gnu` tag, as
+  `demo/guardrails/start.sh` does.
+- `OTARI_ANYGUARDRAILS_IMAGE` overrides the service image; if the pull is
+  refused, check that it names an image you have.
 
 Start the gateway with `OTARI_GUARDRAILS_URL=http://localhost:8183`. Stop the
-guardrails containers with `docker compose stop anyguardrails encoderfile`; a
-`docker compose --profile guardrails down` would remove the gateway too.
+guardrails containers with `docker compose stop anyguardrails encoderfile`
+(`docker compose --profile guardrails down` would remove the gateway too).
 
 Check the service directly with:
 
@@ -47,10 +50,7 @@ A full end-to-end demo is in `demo/guardrails/`.
 
 ## When a definition fails to build on import
 
-Otari depends on the SDK of every guardrail the
-[catalog](guardrails-reference.md#the-guardrail-catalog) lists, so a missing
-vendor SDK happens only on an install that left them out, such as a plain
-`pip install` that skipped `any-guardrail`'s extras. A definition then saves and
-fails to build, with an `ImportError` naming the extra to install. It is the one
-build failure whose message is logged in full, because it is the one an
-operator can fix.
+A definition can save and then fail to build when an install left out a
+vendor SDK the [catalog](guardrails-reference.md#the-guardrail-catalog) needs,
+such as a plain `pip install` that skipped `any-guardrail`'s extras. The log
+shows the full `ImportError`, naming the extra to install.

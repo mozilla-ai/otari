@@ -633,6 +633,7 @@ async def create_response(
             model=model,
             display_model=resolved.alias,
             base_request_fields=base_request_fields,
+            response=response,
         )
 
     # ------------------------------------------------------------------

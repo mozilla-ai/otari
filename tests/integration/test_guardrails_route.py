@@ -13,12 +13,16 @@ service. The service contract itself is covered in
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+from any_llm.types.messages import MessageResponse, MessageStartEvent, MessageStopEvent, MessageUsage, TextBlock
+from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
+from openai.types.responses import ResponseCompletedEvent
 
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import API_ROOT
@@ -137,6 +141,123 @@ def test_monitor_mode_forwards_and_annotates(
     provider.assert_awaited_once()
     assert GUARDRAILS_RESULT_HEADER in resp.headers
     assert "prompt-injection" in resp.headers[GUARDRAILS_RESULT_HEADER]
+
+
+# What each route's stream ends with once every event has been relayed.
+_STREAM_END = {"chat": "data: [DONE]", "messages": "message_stop", "responses": "response.completed"}
+
+
+def _streamed(route: str) -> Any:
+    """A provider call that opens a minimal stream in the route's own event shape."""
+
+    def _events() -> list[Any]:
+        """The smallest complete stream for this route: one text chunk, or start and stop."""
+        if route == "chat":
+            return [
+                ChatCompletionChunk(
+                    id="chunk-1",
+                    object="chat.completion.chunk",
+                    created=0,
+                    model="claude-3-5-sonnet-20241022",
+                    choices=[
+                        ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="ok"), finish_reason="stop")
+                    ],
+                )
+            ]
+        if route == "messages":
+            return [
+                MessageStartEvent(type="message_start", message=_text_message_response("")),
+                MessageStopEvent(type="message_stop"),
+            ]
+        return [
+            ResponseCompletedEvent(
+                type="response.completed",
+                sequence_number=0,
+                response=Response(
+                    id="resp_1",
+                    created_at=0.0,
+                    model="gpt-4o-mini",
+                    object="response",
+                    status="completed",
+                    output=[],
+                    parallel_tool_calls=False,
+                    tool_choice="auto",
+                    tools=[],
+                ),
+            )
+        ]
+
+    async def _open(**_kwargs: Any) -> Any:
+        """Stand in for the provider call: return the stream rather than a completion."""
+
+        async def _stream() -> AsyncIterator[Any]:
+            for event in _events():
+                yield event
+
+        return _stream()
+
+    return _open
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+@pytest.mark.parametrize("valid", [True, False])
+def test_a_streamed_answer_carries_the_guardrail_verdict(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    route: str,
+    valid: bool,
+) -> None:
+    """Otari#2991: a streamed answer is a ``StreamingResponse`` the route builds itself,
+    so the verdict written on the injected ``Response`` has to be carried onto it,
+    passing or flagged, on every completion route."""
+    verdict = GuardrailVerdict(
+        results=[
+            GuardrailResult(
+                profile="prompt-injection",
+                mode="monitor",
+                valid=valid,
+                explanation=None if valid else "injection",
+                score=0.0 if valid else 0.9,
+            )
+        ]
+    )
+    path, target, body = _ROUTES[route]
+    with (
+        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch(target, side_effect=_streamed(route)),
+    ):
+        resp = client.post(
+            path,
+            json={**body, "stream": True, "guardrails": [{"profile": "prompt-injection", "mode": "monitor"}]},
+            headers=api_key_header,
+        )
+        resp.read()
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    # The stream ran to its own end, so the header is not riding on a relay error.
+    assert _STREAM_END[route] in resp.text, resp.text
+    assert '"error"' not in resp.text, resp.text
+    [entry] = json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])
+    assert entry["profile"] == "prompt-injection"
+    assert entry["valid"] is valid
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+def test_a_streamed_answer_without_guardrails_has_no_verdict_header(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    route: str,
+) -> None:
+    """No guardrail ran, so a streamed answer carries no ``Otari-Guardrails`` at all."""
+    path, target, body = _ROUTES[route]
+    with patch(target, side_effect=_streamed(route)):
+        resp = client.post(path, json={**body, "stream": True}, headers=api_key_header)
+        resp.read()
+
+    assert resp.status_code == 200, resp.text
+    assert _STREAM_END[route] in resp.text, resp.text
+    assert GUARDRAILS_RESULT_HEADER not in resp.headers
 
 
 def test_a_monitor_check_with_no_service_says_why_it_has_no_verdict(

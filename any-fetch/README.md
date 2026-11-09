@@ -63,9 +63,12 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 `tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, whether it
 `reports_final_url` (when false, `final_url` is the URL as asked, because the provider follows
 redirects without saying where they led, so a caller cannot check a redirect it followed), the
-`formats` it returns text in, and its native options as `OptionSpec`s (`name`, `type`, `enum`,
-`default`, `description` and `operator_only`, for an option only a deployment's operator should
-set; the library accepts it from anyone, and enforcing that is the host's job).
+`formats` it returns text in, whether it `reports_cost`, and its native options as `OptionSpec`s
+(`name`, `type`, `enum`, `default`, `description`, `operator_only`, for an option only a
+deployment's operator should set, and `cost_tier`, for the option whose values are the provider's
+cost tiers, each billed at a price per call of its own; the library accepts both from anyone, and
+acting on them is the host's job). A cost tier option's `enum` lists the tiers and its `default` is
+the one the provider uses when the option is not sent; the metadata records no amount.
 
 ## The builtin provider
 
@@ -224,6 +227,7 @@ network or a monkeypatch:
 | `in_body_error` | Answer with no text and this tag as `FetchedPage.error`. |
 | `leak_url` | Raise a `RuntimeError` whose message carries the URL, as a careless adapter might, so a host can prove it never passes exception text on. |
 | `account` | Echoed in `raw`. Operator-only, so a host can exercise that rule. |
+| `depth` | `basic` or `advanced`, echoed in `raw`. A cost tier, so a host can exercise its rule for cost tiers. |
 
 `raw` echoes the request, the URL left out, so a test can see what reached the provider.
 

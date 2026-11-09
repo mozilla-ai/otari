@@ -9,6 +9,7 @@ import {
   FiRefreshCw,
   FiTrash2,
   FiUserCheck,
+  FiUsers,
 } from "react-icons/fi"
 import type { ApiKey } from "@/client"
 import { TOOLTIP_OPEN_DELAY_MS } from "@/design-system/overlays/Tooltip"
@@ -28,6 +29,7 @@ export function KeyActionsMenu({
   onRegenerate,
   onDelete,
   onWorkloadIdentity,
+  onEndUsers,
   isReadOnly = false,
   isEnableLocked = false,
 }: {
@@ -54,13 +56,27 @@ export function KeyActionsMenu({
   onDelete: () => void
   /** Absent where the deployment lets no one manage this key's federation rules. */
   onWorkloadIdentity?: () => void
-  /** A viewer's popover: the key's details, and no actions. */
+  /** Absent unless the key is a service key. A read, so a viewer has it too. */
+  onEndUsers?: () => void
+  /** A viewer's popover: the key's details, and no writes. */
   isReadOnly?: boolean
   /** Switched off by an operator, so its owner may not switch it back on. */
   isEnableLocked?: boolean
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const name = apiKey.key_name ?? "(unnamed)"
+  const endUsersAction = onEndUsers
+    ? [
+        {
+          id: "end-users",
+          label: "End users…",
+          hint: undefined,
+          icon: FiUsers,
+          isDisabled: false,
+          run: onEndUsers,
+        },
+      ]
+    : []
   const allActions = [
     {
       id: "toggle",
@@ -82,6 +98,7 @@ export function KeyActionsMenu({
       isDisabled: false,
       run: onEdit,
     },
+    ...endUsersAction,
     ...(onWorkloadIdentity
       ? [
           {
@@ -111,7 +128,7 @@ export function KeyActionsMenu({
       run: onDelete,
     },
   ]
-  const actions = isReadOnly ? [] : allActions
+  const actions = isReadOnly ? endUsersAction : allActions
   const triggerLabel = `${isReadOnly ? "Details" : "Actions"} for ${name}`
   return (
     <Dropdown>

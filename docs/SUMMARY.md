@@ -103,6 +103,7 @@
 
 * [Models](models.md)
 * [Routing policies](routing.md)
+* [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
