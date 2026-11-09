@@ -6799,8 +6799,11 @@ export interface paths {
          *     key sees any. Returns 404 until the request has settled (its rows are written
          *     by a background writer, so a lookup made the instant a stream closes can
          *     precede them), and for an id that is unknown or belongs to another key, with
-         *     no way to tell those apart. A stream that ended before the provider reported
-         *     usage, and ran no gateway tools, writes no row, so its id stays 404.
+         *     no way to tell those apart. A stream that failed, including one the provider
+         *     cut, always writes an error row. A stream the client abandoned before the
+         *     provider reported usage, with no gateway tool work, writes a row only under
+         *     the ``estimate`` policy, billed on an estimate; otherwise it writes none, so
+         *     its id stays 404.
          */
         get: operations["usage-get_request_settlement"];
         put?: never;
@@ -19665,6 +19668,8 @@ export interface components {
             status: string;
             /** Status Code */
             status_code: number | null;
+            /** Stream Cut By */
+            stream_cut_by?: ("provider" | "client") | null;
             /** Tags */
             tags?: {
                 [key: string]: string;

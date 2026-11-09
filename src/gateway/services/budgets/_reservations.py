@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core import error_codes
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import estimate_metered_cost, priced_per_request
+from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.budgets import (
@@ -442,6 +443,11 @@ def estimate_output_tokens(streamed_chars: int) -> int:
     return (max(streamed_chars, 0) + 3) // 4
 
 
+def estimate_prompt_tokens(prompt_chars: int) -> int:
+    """Tokens for a request of ``prompt_chars``, the prompt half of :func:`estimate_tokens`."""
+    return estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
+
+
 def estimate_abandoned_stream_usage(
     *, policy: str, prompt_chars: int | None, streamed_chars: int
 ) -> CompletionUsage | None:
@@ -451,10 +457,47 @@ def estimate_abandoned_stream_usage(
     """
     if policy != "estimate" or prompt_chars is None:
         return None
-    prompt_tokens = estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
+    prompt_tokens = estimate_prompt_tokens(prompt_chars)
     output_tokens = estimate_output_tokens(streamed_chars)
     return CompletionUsage(
         prompt_tokens=prompt_tokens, completion_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens
+    )
+
+
+def _reports_prompt(usage: CompletionUsage) -> bool:
+    """Whether ``usage`` counts the prompt, including one cache reads or writes served in full."""
+    return bool(usage.prompt_tokens or cache_read_tokens_of(usage) or cache_write_tokens_of(usage))
+
+
+def topped_up_partial_usage(
+    *,
+    prompt_chars: int | None,
+    streamed_chars: int,
+    reported_usage: CompletionUsage,
+    usage_is_final: bool,
+) -> CompletionUsage | None:
+    """``reported_usage`` raised to what a stream that stopped short evidently used, or None when it stands.
+
+    A report the provider marked final always stands. Otherwise the completion tokens are raised to an
+    estimate of the text streamed to the client, never projected to a full completion, and a prompt the
+    report does not count (no input, cache read or cache write tokens) is estimated from the request.
+    Anthropic reports its input in ``message_start``, so its prompt is kept as reported.
+    """
+    if usage_is_final:
+        return None
+    reported_output = reported_usage.completion_tokens or 0
+    completion_tokens = max(reported_output, estimate_output_tokens(streamed_chars))
+    prompt_tokens = reported_usage.prompt_tokens or 0
+    if not _reports_prompt(reported_usage) and prompt_chars is not None:
+        prompt_tokens = estimate_prompt_tokens(prompt_chars)
+    if completion_tokens == reported_output and prompt_tokens == (reported_usage.prompt_tokens or 0):
+        return None
+    return reported_usage.model_copy(
+        update={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
     )
 
 
@@ -473,9 +516,14 @@ def settle_abandoned_stream(
     prompt_chars: int | None,
     streamed_chars: int,
     reported_usage: CompletionUsage | None,
+    usage_is_final: bool,
     has_tool_work: bool,
 ) -> AbandonedStreamRow | None:
-    """The row an abandoned stream owes, or None when there is nothing to bill."""
+    """The row an abandoned stream owes, or None when there is nothing to bill.
+
+    Under the ``estimate`` policy, usage the provider reported only in part (an Anthropic stream's input) is
+    topped up as :func:`settle_cut_stream` tops up a provider cut, so leaving early never costs less.
+    """
     estimated = (
         None
         if reported_usage is not None
@@ -483,10 +531,53 @@ def settle_abandoned_stream(
     )
     if not (has_tool_work or reported_usage is not None or estimated is not None):
         return None
+    if reported_usage is not None and policy == "estimate":
+        reported_usage = (
+            topped_up_partial_usage(
+                prompt_chars=prompt_chars,
+                streamed_chars=streamed_chars,
+                reported_usage=reported_usage,
+                usage_is_final=usage_is_final,
+            )
+            or reported_usage
+        )
     return AbandonedStreamRow(
         usage=reported_usage or estimated,
         incomplete=estimated is not None,
         error=None if estimated is not None else "client disconnected before the stream completed",
+    )
+
+
+def settle_cut_stream(
+    *,
+    policy: str,
+    prompt_chars: int | None,
+    streamed_chars: int,
+    reported_usage: CompletionUsage | None,
+    usage_is_final: bool,
+) -> CompletionUsage | None:
+    """The usage a stream the provider cut owes, or None when the row keeps what the provider reported.
+
+    Only the ``estimate`` policy bills one. The output is estimated from the text streamed to the client,
+    never projected to a full completion, and is billed even when the request's size is unknown (a tool
+    loop's), with the prompt then left at zero. Usage the provider reported is topped up by
+    :func:`topped_up_partial_usage`.
+    """
+    if policy != "estimate":
+        return None
+    if reported_usage is not None:
+        return topped_up_partial_usage(
+            prompt_chars=prompt_chars,
+            streamed_chars=streamed_chars,
+            reported_usage=reported_usage,
+            usage_is_final=usage_is_final,
+        )
+    prompt_tokens = estimate_prompt_tokens(prompt_chars) if prompt_chars is not None else 0
+    output_tokens = estimate_output_tokens(streamed_chars)
+    if not (prompt_tokens or output_tokens):
+        return None
+    return CompletionUsage(
+        prompt_tokens=prompt_tokens, completion_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens
     )
 
 
