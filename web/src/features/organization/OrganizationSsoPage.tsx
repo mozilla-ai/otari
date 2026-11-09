@@ -4,7 +4,6 @@ import type {
   OidcConnection,
   OidcConnectionDomain,
   OidcConnectionRequest,
-  OrganizationMember,
   OrganizationSsoEnforcement,
   OrganizationSsoPreflight,
 } from "@/client"
@@ -25,7 +24,6 @@ import { Section } from "@/design-system/layout/Section"
 import {
   useDeleteOrganizationSso,
   useOrganizationContext,
-  useOrganizationMembers,
   useOrganizationSso,
   useOrganizationSsoPreflight,
   useSaveOrganizationSso,
@@ -323,15 +321,13 @@ function strandedKeysExplanation(): string {
   return "Their API keys stay on the old account and cannot be moved, so they should issue new keys on the new account and revoke the old ones."
 }
 
-function preflightSummary(preflight: OrganizationSsoPreflight): string {
-  if (preflight.affected_count === 0) {
-    return `All ${preflight.total_members} active members already sign in through this connection.`
+function affectedHeadline(preflight: OrganizationSsoPreflight): string {
+  const { affected_count: affected, total_members: total } = preflight
+  if (affected === 0) {
+    return `All ${total} members already sign in this way, so nobody loses access.`
   }
-  return (
-    `${preflight.total_members} members, ${preflight.affected_count} of whom sign in some other way. ` +
-    `Those ${preflight.affected_count} will get a new account the first time they use your provider. ` +
-    strandedKeysExplanation()
-  )
+  const people = affected === 1 ? "1 of" : `${affected} of`
+  return `${people} ${total} members do not, and will be locked out until they sign in through it.`
 }
 
 function PreflightPanel() {
@@ -342,9 +338,12 @@ function PreflightPanel() {
       <ErrorBanner error={preflight.error} />
       {data ? (
         <>
-          <p className="text-muted">{preflightSummary(data)}</p>
+          <p className="text-muted">{affectedHeadline(data)}</p>
           {data.affected_count > 0 ? (
             <ul className="flex flex-col gap-1">
+              <li className="text-caption text-subtle">
+                Affected members, who each get a new, empty account:
+              </li>
               {data.affected_members.map((member) => (
                 <li key={member.user_id} className="text-caption">
                   {displayName(member)}
@@ -360,6 +359,11 @@ function PreflightPanel() {
               ) : null}
             </ul>
           ) : null}
+          {data.affected_count > 0 ? (
+            <p className="text-caption text-subtle">
+              {strandedKeysExplanation()}
+            </p>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -368,14 +372,14 @@ function PreflightPanel() {
 
 function EnforcementSection({
   enforcement,
-  owners,
   onSaved,
 }: {
   enforcement: OrganizationSsoEnforcement
-  owners: readonly OrganizationMember[]
   onSaved: () => void
 }) {
   const set = useSetOrganizationSsoEnforcement()
+  const preflight = useOrganizationSsoPreflight()
+  const candidates = preflight.data?.break_glass_candidates ?? []
   const [required, setRequired] = useState(enforcement.required)
   const [breakGlassUserId, setBreakGlassUserId] = useState(
     enforcement.break_glass_user_id ?? "",
@@ -384,7 +388,9 @@ function EnforcementSection({
     enforcement.break_glass_waived,
   )
 
-  const chosenOwner = owners.find((owner) => owner.user_id === breakGlassUserId)
+  const chosenOwner = candidates.find(
+    (owner) => owner.user_id === breakGlassUserId,
+  )
 
   const submit = () => {
     set.mutate(
@@ -405,9 +411,9 @@ function EnforcementSection({
       <div className="flex flex-col gap-1">
         <h2 className="text-title">Require sign-in</h2>
         <p className="text-caption">
-          Only members who have signed in through this connection can act in
-          this organization once this is on. Live sessions of the rest end
-          immediately.
+          Requires everyone to reach this organization through your provider.
+          Anyone who has not signed in that way is signed out now and refused
+          until they do.
         </p>
       </div>
       <PreflightPanel />
@@ -417,13 +423,13 @@ function EnforcementSection({
       {required ? (
         <div className="flex flex-col gap-3">
           <Select
-            label="Owner who keeps a non-SSO route"
+            label="Owner who can still sign in if your provider breaks"
             value={breakGlassWaived ? "" : breakGlassUserId}
             onChange={(value) => {
               setBreakGlassUserId(value)
               setBreakGlassWaived(false)
             }}
-            options={owners.map((owner) => ({
+            options={candidates.map((owner) => ({
               value: owner.user_id ?? "",
               label: displayName(owner),
             }))}
@@ -475,9 +481,6 @@ export function OrganizationSsoPage() {
   const [enforcementSavedCount, setEnforcementSavedCount] = useState(0)
 
   const connection = sso.data?.connection ?? null
-  const members = useOrganizationMembers(canEdit && connection !== null)
-  const activeMembers = members.data?.filter((m) => m.status === "active") ?? []
-  const activeOwners = activeMembers.filter((m) => m.role === "owner")
 
   const openForm = () => {
     setFormOpenCount((count) => count + 1)
@@ -553,7 +556,6 @@ export function OrganizationSsoPage() {
               <EnforcementSection
                 key={enforcementSavedCount}
                 enforcement={sso.data.enforcement}
-                owners={activeOwners}
                 onSaved={() => setEnforcementSavedCount((count) => count + 1)}
               />
             </>

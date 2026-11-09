@@ -789,6 +789,7 @@ export function organizationSsoPreflight(
     affected_count: 0,
     affected_members: [],
     affected_members_truncated: false,
+    break_glass_candidates: [],
     ...overrides,
   }
 }

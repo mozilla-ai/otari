@@ -16484,6 +16484,10 @@ export interface components {
          *     ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
          *     would get a new account the first time they use it. ``affected_members`` samples those people,
          *     bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+         *
+         *     ``break_glass_candidates`` is who may be named as the exception, so naming one of them is never
+         *     refused. It leaves out the deployment's own operator, who is never subject to enforcement and so
+         *     needs no exception.
          */
         OrganizationSsoPreflightPublic: {
             /**
@@ -16501,6 +16505,11 @@ export interface components {
              * @description Whether affected_members leaves out some of the members affected_count counts.
              */
             affected_members_truncated: boolean;
+            /**
+             * Break Glass Candidates
+             * @description The owners who may be named to keep a route in that does not depend on this connection. An owner this connection provisioned is not among them, because exempting an account that cannot sign in without the connection keeps no route open.
+             */
+            break_glass_candidates: components["schemas"]["OrganizationSsoPreflightMemberPublic"][];
             /**
              * Total Members
              * @description The organization's active membership count.

@@ -23,6 +23,7 @@ from gateway.services.tenancy.organization_service import (
     InvitationClaimSettings,
     OrganizationService,
     sso_blocks_membership,
+    sso_exempt_operator,
 )
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
@@ -58,6 +59,7 @@ __all__ = [
     "report_new_account",
     "report_sign_in",
     "sso_blocks_membership",
+    "sso_exempt_operator",
     "unverified_identity_is_claimable",
     "update_full_name",
 ]

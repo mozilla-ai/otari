@@ -16,7 +16,6 @@ import {
   oidcConnection,
   oidcConnectionDomain,
   organizationContext,
-  organizationMember,
   organizationSso,
   organizationSsoPreflight,
   organizationSsoPreflightMember,
@@ -365,7 +364,7 @@ describe("OrganizationSsoPage", () => {
     renderPage(<OrganizationSsoPage />)
 
     expect(
-      await screen.findByText(/3 members, 2 of whom sign in some other way/),
+      await screen.findByText(/2 of 3 members do not, and will be locked out/),
     ).toBeInTheDocument()
     expect(screen.getByText("Alex Doe")).toBeInTheDocument()
     expect(screen.getByText(/and 1 other$/)).toBeInTheDocument()
@@ -397,14 +396,14 @@ describe("OrganizationSsoPage", () => {
   it("names the owner who keeps a non-SSO route", async () => {
     mockApi({
       sso: organizationSso({ connection: oidcConnection() }),
-      members: [
-        organizationMember({
-          user_id: "22222222-bbbb-bbbb-bbbb-222222222222",
-          full_name: "Jane Owner",
-          role: "owner",
-          status: "active",
-        }),
-      ],
+      preflight: organizationSsoPreflight({
+        break_glass_candidates: [
+          organizationSsoPreflightMember({
+            user_id: "22222222-bbbb-bbbb-bbbb-222222222222",
+            full_name: "Jane Owner",
+          }),
+        ],
+      }),
     })
     const user = userEvent.setup()
     renderPage(<OrganizationSsoPage />)
@@ -415,7 +414,9 @@ describe("OrganizationSsoPage", () => {
       }),
     )
     await user.click(
-      screen.getByRole("button", { name: /Owner who keeps a non-SSO route/ }),
+      screen.getByRole("button", {
+        name: /Owner who can still sign in if your provider breaks/,
+      }),
     )
     await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
 
@@ -533,14 +534,14 @@ describe("OrganizationSsoPage", () => {
   it("shows its own refusal when the named account is not an owner", async () => {
     mockApi({
       sso: organizationSso({ connection: oidcConnection() }),
-      members: [
-        organizationMember({
-          user_id: "33333333-cccc-cccc-cccc-333333333333",
-          full_name: "Jane Owner",
-          role: "owner",
-          status: "active",
-        }),
-      ],
+      preflight: organizationSsoPreflight({
+        break_glass_candidates: [
+          organizationSsoPreflightMember({
+            user_id: "33333333-cccc-cccc-cccc-333333333333",
+            full_name: "Jane Owner",
+          }),
+        ],
+      }),
       enforcement: () =>
         jsonResponse(
           {
@@ -559,7 +560,9 @@ describe("OrganizationSsoPage", () => {
       }),
     )
     await user.click(
-      screen.getByRole("button", { name: /Owner who keeps a non-SSO route/ }),
+      screen.getByRole("button", {
+        name: /Owner who can still sign in if your provider breaks/,
+      }),
     )
     await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
     await user.click(screen.getByRole("button", { name: "Save enforcement" }))

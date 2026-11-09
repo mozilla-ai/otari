@@ -2597,6 +2597,15 @@ class OrganizationService:
         )
 
 
+def sso_exempt_operator(user: User) -> bool:
+    """Whether this is the deployment's own master-key operator, whom no organization's rules reach.
+
+    Told apart by holding neither an address nor a provider: an account an organization's own
+    connection provisioned holds no address either, but always names the provider that vouched it.
+    """
+    return user.email is None and user.oauth_provider is None
+
+
 def sso_blocks_membership(*, organization: Organization, user: User, is_linked: bool) -> bool:
     """Whether this organization's SSO enforcement refuses this person from acting in it.
 
@@ -2608,7 +2617,7 @@ def sso_blocks_membership(*, organization: Organization, user: User, is_linked: 
     """
     if not organization.sso_required:
         return False
-    if user.email is None and user.oauth_provider is None:
+    if sso_exempt_operator(user):
         return False
     if organization.sso_break_glass_user_id == user.id:
         return False
@@ -2621,4 +2630,5 @@ __all__ = [
     "OrganizationService",
     "SignupRegistration",
     "sso_blocks_membership",
+    "sso_exempt_operator",
 ]

@@ -45,7 +45,7 @@ from gateway.services.identity._enforcement import (
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
-from gateway.services.tenancy import OrganizationService, sso_blocks_membership
+from gateway.services.tenancy import OrganizationService, sso_blocks_membership, sso_exempt_operator
 
 # The preflight count is exact; the member list is a sample, so a large organization's
 # response stays bounded.
@@ -406,9 +406,11 @@ class OIDCConnectionService:
             sample = await self._organizations.members.list_active_members_without_link(
                 organization.id, provider=provider, limit=_PREFLIGHT_SAMPLE_LIMIT
             )
+            candidates = await self._break_glass_candidates(organization, provider)
 
         return OrganizationSsoPreflightPublic(
             total_members=total,
+            break_glass_candidates=candidates,
             affected_count=affected_count,
             affected_members=[
                 OrganizationSsoPreflightMemberPublic(
@@ -418,6 +420,33 @@ class OIDCConnectionService:
             ],
             affected_members_truncated=affected_count > len(sample),
         )
+
+    async def _break_glass_candidates(
+        self, organization: Organization, provider: str
+    ) -> list[OrganizationSsoPreflightMemberPublic]:
+        """The owners who may be named to keep a route in that this connection does not provide.
+
+        Leaves out the deployment's own operator, who enforcement never refuses and so needs no
+        exception, and any owner whose only way in is the connection itself.
+        """
+        candidates = []
+        for member, account in await self._organizations.members.get_active_by_organization_with_users(organization.id):
+            if member.role != "owner" or sso_exempt_operator(account):
+                continue
+            if not await has_route_without(
+                account,
+                provider=provider,
+                passkey_rp_id=self._passkey_rp_id,
+                links=self._links,
+                passkeys=self._passkeys,
+            ):
+                continue
+            candidates.append(
+                OrganizationSsoPreflightMemberPublic(
+                    user_id=account.id, email=account.email, full_name=account.full_name
+                )
+            )
+        return candidates
 
     async def set_sso_enforcement_for_user(
         self,

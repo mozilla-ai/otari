@@ -17601,7 +17601,7 @@
         "type": "object"
       },
       "OrganizationSsoPreflightPublic": {
-        "description": "What requiring sign-in through the caller's organization's own connection would cost today.\n\n``affected_count`` is exact: every active member holding no sign-in link to this connection, who\nwould get a new account the first time they use it. ``affected_members`` samples those people,\nbounded in size; ``affected_members_truncated`` says whether the sample leaves any out.",
+        "description": "What requiring sign-in through the caller's organization's own connection would cost today.\n\n``affected_count`` is exact: every active member holding no sign-in link to this connection, who\nwould get a new account the first time they use it. ``affected_members`` samples those people,\nbounded in size; ``affected_members_truncated`` says whether the sample leaves any out.\n\n``break_glass_candidates`` is who may be named as the exception, so naming one of them is never\nrefused. It leaves out the deployment's own operator, who is never subject to enforcement and so\nneeds no exception.",
         "properties": {
           "affected_count": {
             "description": "How many active members hold no sign-in link to this connection.",
@@ -17621,6 +17621,14 @@
             "title": "Affected Members Truncated",
             "type": "boolean"
           },
+          "break_glass_candidates": {
+            "description": "The owners who may be named to keep a route in that does not depend on this connection. An owner this connection provisioned is not among them, because exempting an account that cannot sign in without the connection keeps no route open.",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSsoPreflightMemberPublic"
+            },
+            "title": "Break Glass Candidates",
+            "type": "array"
+          },
           "total_members": {
             "description": "The organization's active membership count.",
             "title": "Total Members",
@@ -17629,6 +17637,7 @@
         },
         "required": [
           "total_members",
+          "break_glass_candidates",
           "affected_count",
           "affected_members",
           "affected_members_truncated"
