@@ -2,6 +2,7 @@ import { Card } from "@heroui/react"
 
 import type { OrganizationMember } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { MemberAvatar } from "@/features/account/avatar/MemberAvatar"
 import { MembershipStatusChip } from "@/features/organization/MembershipStatusChip"
 import {
   memberLabel,
@@ -33,11 +34,14 @@ export function OrganizationRosterCard({
       header: "Member",
       isRowHeader: true,
       cell: (member) => (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-body">{memberLabel(member)}</span>
-          {member.email && member.full_name ? (
-            <span className="text-caption">{member.email}</span>
-          ) : null}
+        <div className="flex items-center gap-3">
+          <MemberAvatar userId={member.user_id} />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-body">{memberLabel(member)}</span>
+            {member.email && member.full_name ? (
+              <span className="text-caption">{member.email}</span>
+            ) : null}
+          </div>
         </div>
       ),
     },
