@@ -78,8 +78,9 @@ export function FeedbackDialog({
   const composeRef = useRef<HTMLFormElement>(null)
   // The compose's height when the thanks replaced it, which the thanks keep so
   // the frame does not shrink under the reader: the consent line wraps to one,
-  // two or three lines with the address it names. Only on the floating frame:
-  // the sheet is the viewport's height, which a rotation changes.
+  // two or three lines with the address it names. Only on the floating frame,
+  // and never past its `max-height` (`.otari-form-dialog`), which a resize
+  // shrinks: the sheet is the viewport's height, which a rotation changes.
   const [heldHeight, setHeldHeight] = useState<number | null>(null)
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
@@ -200,7 +201,7 @@ export function FeedbackDialog({
                       } as CSSProperties)
                     : undefined
                 }
-                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>=640px)_and_(height>=640px)]:min-h-(--feedback-held-height)"
+                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>=640px)_and_(height>=640px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}

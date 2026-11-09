@@ -330,7 +330,7 @@ describe("FeedbackDialog", () => {
     // A pixel floor on the sheet would outlast a rotation to a shorter viewport.
     expect(thanks?.style.minHeight).toBe("")
     expect(thanks).toHaveClass(
-      "[@media(width>=640px)_and_(height>=640px)]:min-h-(--feedback-held-height)",
+      "[@media(width>=640px)_and_(height>=640px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]",
     )
   })
 

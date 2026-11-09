@@ -6,9 +6,10 @@ build that operates the intake itself binds an adapter that delivers in this
 process, where the sender is an account it already knows.
 
 An adapter raises :class:`gateway.exceptions.feedback_exceptions.FeedbackDeliveryError`
-when it could not confirm delivery. The route answers 413 (too large), 422 (the
-message refused, or the address to reply to when one was attached) and 429
-(with ``retry_after``) as such, and any other status as 503.
+when it could not confirm delivery. The route answers 413 (too large), 422 and
+429 (with ``retry_after``) as such, and any other status as 503. A 422 refuses
+the address to reply to when one was attached, and the message otherwise, so an
+adapter that refuses the message itself while an address is attached raises 503.
 """
 
 import uuid
