@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from otari_agent.claude_code_import import parse_since, scan_transcripts
+from otari_agent.claude_code_paths import claude_transcripts_dir
 
 # Mirrors gateway.core.config.API_ROOT. A literal rather than an import: this
 # command talks to a gateway over HTTP that may be a different build.
@@ -38,7 +39,7 @@ def import_group() -> None:
 @click.option(
     "--projects-dir",
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path.home() / ".claude" / "projects",
+    default=claude_transcripts_dir,
     show_default=True,
     help="Where Claude Code keeps its transcripts.",
 )

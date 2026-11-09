@@ -504,6 +504,165 @@ describe("toTrace", () => {
       "gate.evidence": "pytest -x",
       "gate.detail": "ok",
     })
+    expect(byId.get("req-1")?.noInput).toBeUndefined()
+    expect(byId.get("tool-1")?.noInput).toBeUndefined()
+  })
+
+  it("says why a span has no input, and links how to keep it where it could be kept", () => {
+    const tool = (
+      span_id: string,
+      tool_name: string,
+      origin: "gateway" | "otlp" = "otlp",
+    ) =>
+      traceSpan({
+        span_id,
+        parent_span_id: "req-1",
+        kind: "tool",
+        tool_name,
+        origin,
+        // Claude Code names its tool spans' operation "tool".
+        operation: origin === "otlp" ? "tool" : "execute_tool",
+      })
+    const base = traceDetail()
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        turns: [{ ...base.turns[0], step_ids: ["prompt-1", "req-1"] }],
+        spans: [
+          traceSpan({
+            span_id: "prompt-1",
+            operation: "interaction",
+            origin: "otlp",
+            opens_turn: true,
+          }),
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({ span_id: "llm-1", parent_span_id: "req-1", kind: "llm" }),
+          tool("bash-1", "Bash"),
+          tool("read-1", "Read"),
+          tool("fetch-1", "WebFetch"),
+          // Read off a request the gateway routed, which keeps its arguments.
+          tool("routed-1", "Bash", "gateway"),
+          // Another exporter's tool, which Otari keeps nothing of.
+          traceSpan({
+            span_id: "other-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            origin: "otlp",
+            operation: "execute_tool",
+          }),
+          tool("proto-1", "constructor"),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "bash-1",
+            kind: "guardrail",
+            origin: "otlp",
+            attributes: {
+              "otari.gate.id": "no-push",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+          traceSpan({
+            span_id: "mcp-1",
+            parent_span_id: "req-1",
+            kind: "mcp_connect",
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    const docs =
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about"
+
+    expect(byId.get("prompt-1")?.explain?.sentence).toBe(
+      "A turn the agent took.",
+    )
+    expect(byId.get("prompt-1")?.noInput).toEqual({
+      sentence: "Its prompt is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("bash-1")?.noInput).toEqual({
+      sentence: "Its command is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("read-1")?.noInput).toEqual({
+      sentence: "Its file path is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("gate-1")?.noInput).toEqual({
+      sentence: "What the gate checked is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("req-1")?.noInput).toEqual({
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    })
+    expect(byId.get("llm-1")?.noInput).toEqual({
+      sentence: "Otari never keeps what a model call sent or got back.",
+    })
+    expect(byId.get("fetch-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this tool.",
+    })
+    expect(byId.get("routed-1")?.noInput).toEqual({
+      sentence: "Its arguments are not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("other-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this tool.",
+    })
+    expect(byId.get("proto-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this tool.",
+    })
+    expect(byId.get("mcp-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this kind of span.",
+    })
+  })
+
+  it("links how to keep a routed request's prompt and its tool calls' arguments", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    const docs =
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about"
+
+    expect(byId.get("req-1")?.noInput).toEqual({
+      sentence: "Its prompt is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("call-toolu_1")?.noInput).toEqual({
+      sentence: "Its arguments are not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("req-2")?.noInput).toEqual({
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    })
+    expect(byId.get("llm-2")?.noInput).toEqual({
+      sentence: "Otari never keeps what a model call sent or got back.",
+    })
+  })
+
+  it("keeps the prompt hint on a call that took its turn-opening request's row", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", opens_turn: true }),
+          traceSpan({ span_id: "llm-1", parent_span_id: "req-1", kind: "llm" }),
+          traceSpan({ span_id: "req-2" }),
+          traceSpan({ span_id: "llm-2", parent_span_id: "req-2", kind: "llm" }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.has("req-1")).toBe(false)
+    expect(byId.get("llm-1")?.noInput).toEqual({
+      sentence: "Its prompt is not shown.",
+      docsHref:
+        "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    })
+    expect(byId.has("req-2")).toBe(false)
+    expect(byId.get("llm-2")?.noInput).toEqual({
+      sentence: "Otari never keeps what a model call sent or got back.",
+    })
   })
 
   it("shows what a tool returned as its output, apart from its input", () => {
@@ -581,6 +740,10 @@ describe("toTrace", () => {
     expect(byId.get("gate-1")?.gate?.evidence).toBe("CHANGELOG.md")
     expect(byId.get("gate-2")?.gate?.evidence).toBe("CHANGELOG.md")
     expect(byId.get("gate-3")?.gate?.evidence).toBeNull()
+    expect(byId.get("gate-2")?.noInput).toBeUndefined()
+    expect(byId.get("gate-3")?.noInput?.sentence).toBe(
+      "What the gate checked is not shown.",
+    )
   })
 
   it("says what a permission decision, a run and a model call were", () => {
@@ -801,6 +964,9 @@ describe("toTrace", () => {
       level: "ERROR",
       startMs: 60_000,
     })
+    expect(byId.get("turn-0")?.noInput?.sentence).toBe(
+      "A turn keeps nothing of its own. Its steps are under it.",
+    )
     expect(byId.get("req-1")?.parentObservationId).toBe("turn-0")
     expect(byId.get("req-2")?.parentObservationId).toBe("turn-1")
     expect(byId.get("llm-2")?.parentObservationId).toBe("req-2")

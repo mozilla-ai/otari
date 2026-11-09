@@ -1,7 +1,8 @@
 import type { TraceSpan } from "@/client"
+import { docsSourceHref } from "@/shared/helpers/docs"
 
 import { formatDuration } from "./format"
-import type { GuardrailVerdict } from "./gateway"
+import { type GuardrailVerdict, gateVerdict } from "./gateway"
 import { clip, clipPath } from "./traceModel"
 
 // What a span means, in a sentence and a few facts, for the panel a picked span
@@ -23,6 +24,69 @@ export interface McpServerLink {
 }
 
 export type Fact = [term: string, value: string, link?: McpServerLink]
+
+// Why a span shows no input. The dashboard cannot tell a deployment that keeps
+// no content from an agent that sent none or a reader not allowed to see it, so
+// a span that can hold content says it is not shown, and links the docs on all three.
+export interface NoInput {
+  sentence: string
+  docsHref?: string
+}
+
+export const KEEPING_CONTENT = docsSourceHref(
+  "traces.md",
+  "keeping-what-a-span-was-about",
+)
+
+// The tools Claude Code reports a command or a file path for. Otari keeps
+// Claude Code's full_command and file_path; these are the tools that send them.
+const TOOL_KEEPS: Record<string, string> = {
+  Bash: "command",
+  Read: "file path",
+  Edit: "file path",
+  Write: "file path",
+}
+
+// A step that opens a turn can keep its prompt, routed or exported. A routed
+// request can keep each tool call's arguments; a tool Claude Code exported only
+// a command or file path, and an exported gate what it checked.
+function notShown(span: TraceSpan): string | undefined {
+  if (span.kind === "step" && span.opens_turn) return "Its prompt is not shown."
+  if (span.origin === "gateway")
+    return span.kind === "tool" ? "Its arguments are not shown." : undefined
+  const tool = span.tool_name ?? ""
+  // Claude Code names its tool spans' operation "tool"; other exporters' tools keep nothing.
+  if (
+    span.kind === "tool" &&
+    span.operation === "tool" &&
+    Object.hasOwn(TOOL_KEEPS, tool)
+  )
+    return `Its ${TOOL_KEEPS[tool]} is not shown.`
+  if (gateVerdict(span)) return "What the gate checked is not shown."
+  return undefined
+}
+
+export const TURN_NO_INPUT: NoInput = {
+  sentence: "A turn keeps nothing of its own. Its steps are under it.",
+}
+
+export const GATES_NO_INPUT: NoInput = { sentence: "Its gates are under it." }
+
+export function noInput(span: TraceSpan): NoInput {
+  const sentence = notShown(span)
+  if (sentence) return { sentence, docsHref: KEEPING_CONTENT }
+  if (span.kind === "llm")
+    return {
+      sentence: "Otari never keeps what a model call sent or got back.",
+    }
+  if (span.kind === "step")
+    return {
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    }
+  if (span.kind === "tool")
+    return { sentence: "Otari keeps no content for this tool." }
+  return { sentence: "Otari keeps no content for this kind of span." }
+}
 
 const DECIDED_BY: Record<string, string> = {
   config: "a permission rule in your settings",
@@ -204,7 +268,7 @@ function prompt(span: TraceSpan): Explanation {
   return {
     sentence: span.content.prompt
       ? "The prompt that started this turn."
-      : "A turn the agent took. Its prompt is not kept here.",
+      : "A turn the agent took.",
     facts: facts(["Took", took(span)]),
   }
 }

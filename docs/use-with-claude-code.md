@@ -348,7 +348,8 @@ idempotency, and pricing behavior.
 
 The exporter above carries sessions that run after it is configured. Everything
 Claude Code did before that is already on disk, one JSONL transcript per session
-under `~/.claude/projects`. `otari import claude-code` reads those transcripts and
+under `~/.claude/projects`, or under the directory `CLAUDE_CONFIG_DIR` names
+where you set that variable. `otari import claude-code` reads those transcripts and
 posts them to the same import endpoint, so it has the same limit: it works on a
 gateway you run, with a budget-exempt key or the master key, and not on otari.ai
 today. The command installs on its own, without the server:

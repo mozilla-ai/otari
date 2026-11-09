@@ -224,6 +224,182 @@ describe("SessionsPage", () => {
     expect(within(peek).getAllByText("gpt-5").length).toBeGreaterThan(0)
   })
 
+  it("says why a span has no input, and links how to keep it where it could be kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // Exported by Claude Code, so its command could have been kept.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, origin: "otlp" as const, operation: "tool" }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a model call sent or got back.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("link", { name: /How to keep it/ }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(
+      within(peek).getByRole("button", { name: /Request \(req-1\)/ }),
+    )
+
+    expect(
+      within(peek).getByText("Its prompt is not shown."),
+    ).toBeInTheDocument()
+    expect(within(peek).queryByText("No input or output")).toBeNull()
+  })
+
+  it("says why an explained span has no input, beside why it was blocked", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? {
+                ...span,
+                origin: "otlp" as const,
+                operation: "tool",
+                outcome: "blocked" as const,
+              }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a model call sent or got back.",
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Blocked before it ran."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("says why a tool shows no input beside the output it kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // A routed call whose output was kept and whose arguments were not.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { "tool.output": "3 files changed" } }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=call-toolu_1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("Output")).toBeInTheDocument()
+    expect(within(peek).getAllByText(/3 files changed/).length).toBeGreaterThan(
+      0,
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(within(peek).getByRole("button", { name: /\(call-too\)/ }))
+
+    expect(
+      within(peek).getByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+  })
+
+  it("says what a gate checked is not shown, and links how to keep it", async () => {
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(/What the gate checked is not shown\./),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    )
+  })
+
   it("reads an opened session in the workspace its list entry names", async () => {
     const { calls } = mockApi({
       traces: [traceSummary()],

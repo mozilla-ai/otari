@@ -18,7 +18,10 @@ import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
   status: number
-  /** The refusal's `Otari-Error-Code`, or `""` where it carries none. */
+  /**
+   * The refusal's stable error code, read from the body's `code` (the gateway
+   * sends the same value as `Otari-Error-Code`), or `""` where it carries none.
+   */
   code: string
 
   constructor(
@@ -151,6 +154,12 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return (await readRefusal(response)).message
 }
 
+// The error a failed response throws, with the refusal's message and code.
+async function refusalError(response: Response): Promise<ApiError> {
+  const refusal = await readRefusal(response)
+  return new ApiError(response.status, refusal.message, refusal.code)
+}
+
 // The credentials POST /v1/auth/session accepts. Exactly one form per request:
 // the gateway refuses a body carrying both. Which one a deployment currently
 // takes is published in the bootstrap's `sign_in_methods`, so the sign-in screen
@@ -234,10 +243,10 @@ export async function createSession(
     if (refusal.detail !== null) {
       return { isOk: false, message: refusal.detail, status: response.status }
     }
-    throw new ApiError(response.status, refusal.message)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return { isOk: true }
 }
@@ -391,7 +400,7 @@ async function publicGet(path: string): Promise<{
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return {
     isOk: true,
@@ -439,8 +448,7 @@ async function publicPost(
     }
   }
   if (!response.ok) {
-    const refusal = await readRefusal(response)
-    throw new ApiError(response.status, refusal.message, refusal.code)
+    throw await refusalError(response)
   }
   return {
     isOk: true,
@@ -571,7 +579,7 @@ export async function siteFetch<T>(path: string): Promise<T> {
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return readJson<T>(response, TIMEOUT_MESSAGE)
 }
@@ -623,11 +631,11 @@ export async function apiFetch<T>(
   // the panel reports, the way every other 4xx does.
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
 
   if (response.status === 204) {
@@ -682,10 +690,10 @@ export async function apiStream(
 
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   if (response.body === null) {
     throw new ApiError(0, "The gateway returned no response body.")

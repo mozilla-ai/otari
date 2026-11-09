@@ -326,9 +326,10 @@ class PolicyGuardrail(BaseModel):
     on_unavailable: Literal["block", "monitor"] = Field(
         default="block",
         description=(
-            "What to do when the guardrails service cannot be reached. 'block' (the default) fails "
-            "closed, which means a guardrails outage rejects every request through this policy, ahead "
-            "of the fallback chain. 'monitor' serves the request and records that the check was skipped."
+            "What to do when the guardrails service cannot be reached or gives no verdict. 'block' (the "
+            "default) fails closed, which means a guardrails outage rejects every request through this "
+            "policy, ahead of the fallback chain. 'monitor' serves the request and records that the check "
+            "was skipped."
         ),
     )
     url: str | None = Field(

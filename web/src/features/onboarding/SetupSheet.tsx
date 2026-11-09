@@ -30,8 +30,8 @@ import {
  *
  * **A sheet rather than a panel on the page**, which is what the platform's
  * flow was and what this replaces. Nothing else on a dashboard with no traffic
- * in it is worth reading, so the guide is allowed to be the screen; it offers a
- * way out in the footer and never comes back once taken.
+ * in it is worth reading, so the guide is allowed to be the screen, offered
+ * once per workspace.
  *
  * **Divided rather than stacked.** Each part is a `DialogSection`, so the key,
  * the example and the wait are separated by hairlines that run the width of the
@@ -53,14 +53,16 @@ export function SetupSheet({
   isChecking,
   checkFailed,
   keyError,
+  isCreatingKey,
   skipError,
   isSkipping,
+  onCreateKey,
   onCheckNow,
   onSkip,
-  onDismiss,
+  onLeave,
 }: {
   workspaceName?: string
-  /** The issued key's plaintext, or undefined while it is being minted. */
+  /** The issued key's plaintext, or undefined until one is created. */
   apiKey?: string
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
   keyPrefix?: string
@@ -74,12 +76,15 @@ export function SetupSheet({
   isChecking: boolean
   checkFailed: boolean
   keyError: unknown
+  isCreatingKey: boolean
   skipError: unknown
   isSkipping: boolean
+  /** Mints the key. Nothing is minted until somebody asks, so leaving first leaves no key behind. */
+  onCreateKey: () => void
   onCheckNow: () => void
   onSkip: () => void
-  /** Closes the sheet without retiring the guide, so it is offered again. */
-  onDismiss: () => void
+  /** Retires the guide on the way to a page a guidance link names. */
+  onLeave: () => void
 }) {
   const [tab, setTab] = useState<SetupSnippetId>(DEFAULT_SETUP_TAB)
   // One reveal for the whole sheet: the key field and the example built around
@@ -115,7 +120,7 @@ export function SetupSheet({
       isOpen
       // Empty, because this sheet is not dismissable: `Dialog` gates the
       // callback on that, so a handler here would be a dismissal path that
-      // cannot run. `onDismiss` reaches it from the guidance links instead.
+      // cannot run. `onLeave` reaches it from the guidance links instead.
       onOpenChange={() => {}}
       size="lg"
       isAnnouncement
@@ -140,7 +145,7 @@ export function SetupSheet({
           checkFailed={checkFailed}
           onCheckNow={onCheckNow}
           onOpenTab={setTab}
-          onLeave={onDismiss}
+          onLeave={onLeave}
         />
       }
       footerStart={
@@ -167,14 +172,15 @@ export function SetupSheet({
           // here conceals, so an empty one would show the same run of bullets a
           // real key does and invite a copy that yields nothing. The field
           // arrives with the key it is for.
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col items-start gap-2">
             <span className="text-emphasis">Your API key</span>
-            <p
-              aria-live="polite"
-              className="border-border bg-surface-alt text-mono-caption text-subtle border px-3 py-2"
+            <Button
+              variant="primary"
+              isPending={isCreatingKey}
+              onPress={onCreateKey}
             >
-              Creating your API key…
-            </p>
+              Create API key
+            </Button>
           </div>
         ) : (
           <CopyField
@@ -187,8 +193,7 @@ export function SetupSheet({
         )}
         <p className="text-caption text-subtle">
           Shown once. Reveal it to read it, or copy it without. Set it as{" "}
-          <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment; reopening this
-          guide issues a new key in its place.
+          <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
         </p>
       </DialogSection>
 
@@ -225,7 +230,7 @@ export function SetupSheet({
             the{" "}
             <Link
               to="/models"
-              onClick={onDismiss}
+              onClick={onLeave}
               className="text-link hover:text-link-hover font-medium"
             >
               Models

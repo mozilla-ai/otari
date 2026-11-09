@@ -13,9 +13,11 @@ import httpx
 import httpx2
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
+from any_llm.exceptions import AnyLLMError
 from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.retry_after import bounded_retry_after
 from gateway.services.provider_kwargs import missing_credential
 from gateway.services.tools import WebToolFailure
@@ -529,6 +531,24 @@ def is_upstream_stream_interrupted(exc: BaseException) -> bool:
             ),
         )
         for link in _causal_chain(exc)
+    )
+
+
+def is_provider_cut(exc: BaseException) -> bool:
+    """Whether a stream failed because the provider ended it, not because of a fault of the gateway's own.
+
+    A dropped or incomplete stream, a mid-stream timeout, and a failure the provider reports with an HTTP
+    status or through any-llm. An error that is none of these (a bug while formatting a chunk, a guardrail, a database
+    failure) is the gateway's own. So is a bare ``TimeoutError`` or a database error: a provider's timeout reaches
+    here wrapped by its HTTP client or SDK, while those two are what the gateway's own ``asyncio.timeout`` and its
+    connection pool raise, and the shape checks below would otherwise read them as the provider's.
+    """
+    if any(isinstance(link, DATABASE_ERRORS) for link in upstream_exception_chain(exc)):
+        return False
+    return (
+        is_upstream_stream_interrupted(exc)
+        or upstream_exception_shape(exc) != (None, None)
+        or any(isinstance(link, AnyLLMError) for link in upstream_exception_chain(exc))
     )
 
 

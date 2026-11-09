@@ -21,6 +21,8 @@ in the dashboard; how a request uses the servers is described in [MCP](mcp.md).
    use the server, or **Deny** to let none use it until you add rules for them.
 9. Click **Add MCP server**.
 
+![The New MCP server dialog, with a name, URL, token, purpose hint and allowed tools filled in.](assets/screenshots/add-an-mcp-server.png)
+
 With **Allow**, every key in the workspace can use the server's allowed tools
 from then on. To limit it to some keys or users, or to read-only tools, see
 [Control access to an MCP server](control-access-to-an-mcp-server.md).

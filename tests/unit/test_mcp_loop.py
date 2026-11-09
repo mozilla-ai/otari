@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 
 import pytest
 from any_llm.types.completion import (
+    CacheCreationTokenDetails,
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
@@ -17,6 +18,7 @@ from any_llm.types.completion import (
     ChoiceDelta,
     ChoiceDeltaToolCall,
     ChunkChoice,
+    CompletionTokensDetails,
     CompletionUsage,
     Function,
     PromptTokensDetails,
@@ -25,6 +27,7 @@ from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 
+from gateway.core.usage import cache_write_1h_tokens_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.inference import EmptyCompletionError
@@ -992,14 +995,19 @@ def _round_end(finish: _FinishReason, usage: CompletionUsage, *, trailing: bool)
 async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.MonkeyPatch, trailing: bool) -> None:
     """Each round reports its own usage, but the client sees one report for the loop:
     the last chunk, carrying the sum across rounds, so a multi-round tool call is not
-    billed for the last round alone (otari#1772). OpenAI and any-llm's Anthropic
-    adapter report usage on a trailing chunk with no choices; some providers put it
-    on the finish chunk itself."""
+    billed for the last round alone (otari#1772), cache writes included. OpenAI and
+    any-llm's Anthropic adapter report usage on a trailing chunk with no choices;
+    some providers put it on the finish chunk itself."""
     round_one = CompletionUsage(
         prompt_tokens=100,
         completion_tokens=20,
         total_tokens=120,
-        prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
+        prompt_tokens_details=PromptTokensDetails(
+            cached_tokens=30,
+            cache_write_tokens=40,
+            cache_creation_token_details=CacheCreationTokenDetails(ephemeral_1h_input_tokens=40),
+        ),
+        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12),
     )
     round_two = CompletionUsage(prompt_tokens=140, completion_tokens=5, total_tokens=145)
     iter_streams = iter(
@@ -1039,6 +1047,9 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
     assert usages[0].total_tokens == 265
     assert usages[0].prompt_tokens_details is not None
     assert usages[0].prompt_tokens_details.cached_tokens == 30
+    assert usages[0].prompt_tokens_details.cache_write_tokens == 40
+    assert cache_write_1h_tokens_of(usages[0]) == 40
+    assert reasoning_tokens_of(usages[0]) == 12
 
 
 @pytest.mark.asyncio
