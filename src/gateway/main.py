@@ -1007,6 +1007,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # exists yet).
             await load_org_provider_keys_at_startup(session)
             await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
+            # Handed back first, so startup holds one pooled connection at a time.
+            await release_session(session)
             async with create_unit_of_work() as pricing_uow:
                 await initialize_pricing_from_config(config, session, build_deployment_pricing_service(pricing_uow))
             # Only with the stored tools applied, since the writer reads the
