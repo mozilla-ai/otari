@@ -804,6 +804,26 @@ async def test_undated_config_rates_block_change_no_column_holds_adds_a_version(
     assert [version.rates["audio"]["input"]["price"] for version in versions] == [Decimal(100), Decimal(120)]
 
 
+@pytest.mark.asyncio
+async def test_dated_config_pricing_is_not_skipped_for_an_undated_sibling(async_db: AsyncSession) -> None:
+    """A dated entry is written at its date even when an undated key for the same model holds its rates."""
+    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db, _pricing(async_db))
+    undated = _undated_pricing_config(30.0).pricing["openai:gpt-4"]
+    config = _undated_pricing_config(30.0).model_copy(
+        update={
+            "pricing": {
+                "openai:gpt-4": undated,
+                "openai/gpt-4": undated.model_copy(update={"effective_at": datetime(2025, 1, 1, tzinfo=UTC)}),
+            }
+        }
+    )
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert datetime(2025, 1, 1, tzinfo=UTC) in [version.effective_at for version in versions]
+
+
 def test_undated_config_pricing_boots_on_a_one_connection_pool(postgres_url: str, test_db: Session) -> None:
     """Startup reads the version in force without waiting on the connection it already holds."""
     config = _undated_pricing_config(30.0).model_copy(
