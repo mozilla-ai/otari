@@ -277,7 +277,10 @@ It is checked on every request, so any of these cuts it off at once: deleting
 the rule, deactivating or expiring the key, removing an operator rule's issuer
 from `federation_issuers`, or turning `federation_member_rules` off for a
 member's rule. Removing an audience from `federation_audiences` refuses the next
-exchange; an access token already issued lasts out its time to live.
+exchange for a token that carries no other audience on the list, because step 4
+asks only that one of them is on it, and a rule naming the removed audience is a
+separate check against the token's own `aud` values. An access token already
+issued lasts out its time to live.
 
 The token is stateless: Otari signs it with a key derived from
 `OTARI_SECRET_KEY` and stores nothing. Every replica sharing that secret
