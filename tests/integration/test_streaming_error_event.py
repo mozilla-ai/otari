@@ -326,7 +326,7 @@ class _FakeStreamEvent:
         self.type = event_type
         self.response = None
 
-    def model_dump_json(self, *, exclude_none: bool = False) -> str:
+    def model_dump_json(self, *, exclude_none: bool = False, by_alias: bool = False) -> str:
         return json.dumps({"type": self.type})
 
 
