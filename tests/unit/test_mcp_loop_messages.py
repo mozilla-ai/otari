@@ -2583,3 +2583,14 @@ async def test_stream_adds_hidden_rounds_searches_to_the_final_delta(monkeypatch
     final_delta = next(event for event in events if event.type == "message_delta")
     assert final_delta.usage.server_tool_use is not None
     assert final_delta.usage.server_tool_use.web_search_requests == 3
+
+
+@pytest.mark.parametrize(("invalid_input", "error_code"), [(True, "invalid_tool_input"), (False, "unavailable")])
+def test_a_run_with_no_result_names_why_in_its_error_code(invalid_input: bool, error_code: str) -> None:
+    """A call refused for having no code is a bad input, not an unreachable sandbox (#2954)."""
+    from gateway.services.tools._code_execution_messages import _execution_blocks
+
+    _, result_block = _execution_blocks(CodeExecution(code="", result=None, invalid_input=invalid_input))
+
+    assert result_block.content.type == "code_execution_tool_result_error"
+    assert result_block.content.error_code == error_code

@@ -38,7 +38,10 @@ def _execution_blocks(execution: CodeExecution) -> list[Any]:
     tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
     content: CodeExecutionResultBlock | CodeExecutionToolResultError
     if execution.result is None:
-        content = CodeExecutionToolResultError(type="code_execution_tool_result_error", error_code="unavailable")
+        content = CodeExecutionToolResultError(
+            type="code_execution_tool_result_error",
+            error_code="invalid_tool_input" if execution.invalid_input else "unavailable",
+        )
     else:
         result = execution.result.content
         content = CodeExecutionResultBlock(
