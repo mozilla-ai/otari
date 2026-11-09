@@ -417,6 +417,7 @@ GET /api/v1/organizations/me/usage/series                       # dashboard-only
 GET /api/v1/organizations/me/routing-policies                   # dashboard-only
 POST /api/v1/organizations/me/routing-policies                  # dashboard-only
 DELETE /api/v1/organizations/me/routing-policies/{name}         # dashboard-only
+POST /api/v1/organizations/me/routing-policies/explain          # dashboard-only
 GET /api/v1/organizations/me/aliases                            # dashboard-only
 POST /api/v1/organizations/me/aliases                           # dashboard-only
 DELETE /api/v1/organizations/me/aliases/{name}                  # dashboard-only

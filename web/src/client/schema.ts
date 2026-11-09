@@ -4236,6 +4236,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/routing-policies/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explain Organization Routing Policy
+         * @description Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.
+         *
+         *     The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
+         *     who may see the workspace, which is who may already read its policies here.
+         *     ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
+         *     A draft ``spec`` must only target models the organization reaches, as saving
+         *     it would, so a draft cannot probe what an unsaved policy would resolve to.
+         */
+        post: operations["routing-explain_organization_routing_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/routing-policies/{name}": {
         parameters: {
             query?: never;
@@ -28597,6 +28623,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-explain_organization_routing_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExplainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplainResponse"];
                 };
             };
             /** @description Validation Error */
