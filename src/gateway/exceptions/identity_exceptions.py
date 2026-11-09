@@ -496,6 +496,22 @@ class SsoBreakGlassRequiredError(TenancyValidationError):
         )
 
 
+class SsoNotAddressableError(TenancyValidationError):
+    """This deployment has no address an organization's own provider may send a browser back to.
+
+    Signing in through a provider needs a callback it can reach, which has to be an https address
+    or a loopback one. A deployment that has not been told its own public address cannot offer it.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Company sign-in needs this deployment's public address to be set to an https address. "
+            "Set it to the address people actually visit, then restart."
+        )
+
+
 class SsoBreakGlassRouteRequiredError(TenancyValidationError):
     """The owner named to keep a non-SSO route has no way in that the connection does not provide.
 
@@ -748,6 +764,7 @@ __all__ = [
     "SignInBlockedError",
     "SsoBreakGlassRequiredError",
     "SsoBreakGlassRouteRequiredError",
+    "SsoNotAddressableError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",

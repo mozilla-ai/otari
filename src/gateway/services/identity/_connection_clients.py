@@ -17,8 +17,10 @@ from apron_auth import (
     ServerMetadata,
     StoredStateClient,
 )
+from apron_auth.errors import ConfigurationError
 from apron_auth.providers import oidc
 
+from gateway.exceptions.identity_exceptions import SsoNotAddressableError
 from gateway.models.identity import OIDCConnection, oidc_flow_provider
 from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services.identity._discovery import DiscoveredProvider
@@ -113,7 +115,12 @@ def client_for(
     request, which only a stored state admits. The configuration and the identity handler both come
     from ``metadata``, so the handler can never answer for a config naming another issuer.
     """
-    config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
+    try:
+        config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
+    except ConfigurationError as error:
+        # The library holds the rule, RFC 8252, so its refusal is translated here rather than
+        # restated: a deployment with no https address of its own cannot be signed in to.
+        raise SsoNotAddressableError from error
     handler = identity_handler_for(metadata, allow_private_hosts=allow_private_hosts)
     state_store = DatabaseStateStore(pending, oidc_flow_provider(connection.id))
     return StoredStateClient(

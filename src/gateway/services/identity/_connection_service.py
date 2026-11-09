@@ -326,7 +326,12 @@ class OIDCConnectionService:
     async def start_sign_in(
         self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
     ) -> BrowserBoundAuthorization:
-        """Mint an authorization URL for ``connection``'s own provider, and stage the pending state."""
+        """Mint an authorization URL for ``connection``'s own provider, and stage the pending state.
+
+        Raises:
+            SsoNotAddressableError: This deployment has no address a provider may send a browser
+                back to.
+        """
         async with self._uow:
             client = client_for(
                 connection,
@@ -340,7 +345,12 @@ class OIDCConnectionService:
     async def client_for_sign_in(
         self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
     ) -> StoredStateClient:
-        """Build the apron-auth client ``connection``'s own provider signs in through."""
+        """Build the client ``connection``'s own provider signs in through.
+
+        Raises:
+            SsoNotAddressableError: This deployment has no address a provider may send a browser
+                back to.
+        """
         async with self._uow:
             return client_for(
                 connection,

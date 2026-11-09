@@ -204,6 +204,22 @@ def test_authorize_for_an_unknown_slug_and_a_slug_with_no_connection_answer_alik
     assert unknown.json() == no_connection.json()
 
 
+def test_authorize_refuses_rather_than_fails_when_this_deployment_has_no_https_address(
+    client: TestClient, db_session: Session, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A provider cannot send a browser back to an address that is not https, so refuse rather than fail.
+
+    The detail is the generic one every 5xx carries here, because this describes the deployment
+    rather than the request; the operator reads the reason in the log.
+    """
+    organization = _acme(db_session)
+    monkeypatch.setattr(test_config, "public_base_url", "http://otari.example.com")
+
+    response = client.get(f"{API_ROOT}/auth/sso/{organization.slug}/authorize")
+
+    assert response.status_code == 503, response.text
+
+
 def test_authorize_hands_back_a_consent_url_and_sets_the_flow_cookie(client: TestClient, db_session: Session) -> None:
     organization = _acme(db_session)
 
