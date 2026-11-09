@@ -66,17 +66,18 @@ export function useCatalog(
  * a request and the answers race.
  *
  * `workspaceId` narrows the matches to what a request billed to that workspace
- * may call; empty is the caller's whole reach.
+ * may call; empty is the caller's whole reach, and `null` holds the read until
+ * the workspace is known (`useNarrowingWorkspace`).
  */
 export function useCatalogSearch(
   search: string,
   limit: number,
   enabled = true,
-  workspaceId = "",
+  workspaceId: string | null = "",
 ) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, "search", search, limit, workspaceId],
+    queryKey: [CATALOG, "search", search, limit, workspaceId ?? ""],
     meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<CatalogResponse>(
@@ -85,8 +86,8 @@ export function useCatalogSearch(
     staleTime: 60_000,
     // Never across workspaces, for the reason `useCatalog` gives.
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[4] === workspaceId ? previous : undefined,
-    enabled,
+      previousQuery?.queryKey[4] === (workspaceId ?? "") ? previous : undefined,
+    enabled: enabled && workspaceId !== null,
   })
 }
 

@@ -321,6 +321,36 @@ def test_requiring_zero_data_retention_lists_no_model_on_an_undeclared_organizat
     assert declared == (True, True)
 
 
+def test_requiring_zero_data_retention_lists_a_model_the_workspaces_own_declared_key_serves(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The key the workspace calls on decides, not whether every key of the organization is declared."""
+    _price(client, master_key_header, "anthropic:claude-sonnet")
+    _org_key(client, master_key_header)
+    declared = _ok(
+        client.post(
+            f"{API_ROOT}/organizations/me/provider-keys",
+            json={"provider": "anthropic", "name": "declared", "api_key": "sk-org-zdr-9012", "zero_data_retention": True},
+            headers=master_key_header,
+        )
+    )
+    workspace_id, headers = _workspace_and_key(client, master_key_header)
+    _ok(
+        client.patch(
+            f"{API_ROOT}/workspaces/{workspace_id}/provider-keys/{declared['id']}",
+            json={"is_default": True},
+            headers=master_key_header,
+        )
+    )
+    _require_zero_data_retention(client, master_key_header, workspace_id)
+
+    grouped = _ok(client.get(f"{API_ROOT}/catalog/models", headers=headers))["models"]
+    _, served = _chat(client, headers, "anthropic:claude-sonnet")
+
+    assert any("anthropic:claude-sonnet" in model["selectors"] for model in grouped)
+    assert served.get("api_key") == "sk-org-zdr-9012"
+
+
 def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_header: dict[str, str]) -> None:
     workspace_id, _ = _workspace_and_key(client, master_key_header)
 

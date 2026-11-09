@@ -34,7 +34,7 @@ export type ModelSource = "discovery" | "catalog"
 export function useModelCatalog(
   value: string,
   source: ModelSource = "discovery",
-  workspaceId = "",
+  workspaceId: string | null = "",
 ) {
   const isDiscovery = source === "discovery"
   const discoverable = useDiscoverableModels(isDiscovery)
@@ -227,8 +227,11 @@ export function ModelComboBox({
   hintPlacement?: "field" | "detached"
   /** Id of the detached hint, so it is still announced with this input. */
   describedBy?: string
-  /** Narrows the catalog to what this workspace may call; unset is the caller's whole reach. */
-  workspaceId?: string
+  /**
+   * Narrows the catalog to what this workspace may call; unset is the
+   * caller's whole reach, and `null` holds it until the workspace is known.
+   */
+  workspaceId?: string | null
 }) {
   const { visible, isSourceEmpty, emptyMessage, hint } = useModelCatalog(
     value,

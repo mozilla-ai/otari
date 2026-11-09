@@ -42,6 +42,7 @@ import type {
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   NO_RETRY,
@@ -643,6 +644,7 @@ function invalidateOrgProviderKeys(
   if (catalog) {
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
   }
 }
 
@@ -659,6 +661,7 @@ function invalidateOrgProviderModels(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 // The organization's own upstream provider credentials (#670), which every

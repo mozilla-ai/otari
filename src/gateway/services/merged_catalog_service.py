@@ -764,8 +764,6 @@ class MergedCatalog:
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
     alias_targets: set[str] = field(default_factory=set)
     """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
-    requires_zero_data_retention: bool = False
-    """The workspace this was built for refuses every offering not declared zero data retention."""
 
 
 async def build_merged_catalog(
@@ -1034,8 +1032,7 @@ async def build_merged_catalog(
         }
     # A workspace requiring zero data retention is refused every model on an
     # undeclared provider, so none is listed, whichever reader built this.
-    requires_zero_data_retention = workspace_requires_zero_data_retention(narrowing_workspace)
-    if narrowing_workspace is not None and requires_zero_data_retention:
+    if narrowing_workspace is not None and workspace_requires_zero_data_retention(narrowing_workspace):
         merged = {
             mid: obj
             for mid, obj in merged.items()
@@ -1055,7 +1052,6 @@ async def build_merged_catalog(
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
         alias_targets=targets,
-        requires_zero_data_retention=requires_zero_data_retention,
     )
 
 
@@ -1156,15 +1152,6 @@ class ZeroDataRetention:
         if served_on == "organization":
             return instance in self.organization
         return False
-
-
-def withholds_offering(merged: MergedCatalog, *, zero_data_retention: bool) -> bool:
-    """Whether an offering is left out of ``merged``'s grouped view for the workspace it was built for.
-
-    A workspace requiring zero data retention is shown no offering that is not
-    declared it, since dispatch refuses every one of them.
-    """
-    return merged.requires_zero_data_retention and not zero_data_retention
 
 
 async def viewer_zero_data_retention(
