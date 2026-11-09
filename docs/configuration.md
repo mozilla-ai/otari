@@ -1750,9 +1750,10 @@ Someone whose account has an email sees, under the message, that by sending
 they agree the team can reply to that address about this message only. The
 gateway sends the signed-in account's own email with the message, never an
 address from the request, and only when it is the address the form showed: a
-page left open while another tab signed in as someone else is refused and asked
-to reload. An account without an email, or with one the team could not reply
-to, is shown no such line and its message goes alone. No screenshot, page URL,
+page that showed an address, left open while another tab signed in as someone
+else, is refused and asked to reload. An account without an email, or with one
+the team could not reply to, is shown no such line and its message goes without
+an address to reply to. No screenshot, page URL,
 deployment identifier, or usage history is attached. Opening the form, typing,
 and canceling make no outbound request.
 
