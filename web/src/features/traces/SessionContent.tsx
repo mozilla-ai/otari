@@ -126,9 +126,12 @@ export function SessionContent({
  */
 function Band({ children }: { children: ReactNode }) {
   return (
-    <div className="flex max-h-[40%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border px-4 py-3">
+    <section
+      aria-label="About this session's content"
+      className="flex max-h-[40%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border px-4 py-3"
+    >
       {children}
-    </div>
+    </section>
   )
 }
 

@@ -162,8 +162,10 @@ describe("SessionsPage", () => {
     // whatever has something to say. Wrapped by the peek instead, it is drawn
     // for every session whether the notice renders anything or not.
     expect(
-      peek.querySelectorAll(".border-b.border-border.px-4.py-3"),
-    ).toHaveLength(0)
+      within(peek).queryByRole("region", {
+        name: "About this session's content",
+      }),
+    ).toBeNull()
   })
 
   it("keeps the session's privacy notice out of the pane a phone hides", async () => {
@@ -187,7 +189,11 @@ describe("SessionsPage", () => {
     // nor the controls in it may sit inside that pane.
     expect(control.closest(".hidden")).toBeNull()
     // Capped and scrolled, so a long share list cannot take the panes' height.
-    expect(control.closest(".overflow-y-auto")).not.toBeNull()
+    expect(
+      within(peek).getByRole("region", {
+        name: "About this session's content",
+      }),
+    ).toHaveClass("overflow-y-auto")
   })
 
   it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
