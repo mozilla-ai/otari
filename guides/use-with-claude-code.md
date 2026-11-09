@@ -203,7 +203,7 @@ key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
 travels in a header. The plugin is active
 from then on, in that session and every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/14f01295dced6cd7598841e9ed853111d453f097/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/3efc9473f5e6cf1fb584e97bf937131573a8e646/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 Once it is installed, each spawn leaves a dim line in the transcript naming the
