@@ -281,6 +281,7 @@ async def execute_code(
             api_key_id=api_key_id,
             user_id=user_id,
             request_id=request_id,
+            tools=frozenset({_PRICING_KEY}),
         )
     except InsufficientFundsError as exc:
         raise await refused_after_reservation(

@@ -2748,7 +2748,13 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
             await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
 
         async def admit_funding(
-            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+            self,
+            *,
+            organization_id: uuid.UUID | None,
+            api_key_id: str | None,
+            user_id: str,
+            request_id: str,
+            tool: str,
         ) -> object | None:
             try:
                 return await admit_deployment_paid(
@@ -2759,6 +2765,7 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                     api_key_id=api_key_id,
                     user_id=user_id,
                     request_id=request_id,
+                    tools=frozenset({tool}),
                 )
             except InsufficientFundsError:
                 raise

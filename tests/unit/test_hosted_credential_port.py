@@ -801,7 +801,12 @@ class RecordingBilling:
         self.calls.append(("apply_due_credit", organization_id))
 
     async def require_funds_on_deposit(
-        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
     ) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
         self.billed.append(billed)

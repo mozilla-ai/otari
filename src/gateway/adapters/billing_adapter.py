@@ -28,7 +28,12 @@ class NullBillingAdapter(BillingPort):
         return None
 
     async def require_funds_on_deposit(
-        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
     ) -> None:
         # Returns rather than raises: nothing is owed here, so no request is
         # ever refused for want of funds.

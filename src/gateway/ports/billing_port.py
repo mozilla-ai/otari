@@ -95,7 +95,12 @@ class BillingPort(Protocol):
         ...
 
     async def require_funds_on_deposit(
-        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
     ) -> None:
         """Refuse unless the organization has funds paid in that can pay for ``billed``.
 
@@ -106,7 +111,10 @@ class BillingPort(Protocol):
         :meth:`hold` is what settles between them.
 
         ``billed`` is the model the call is served on, or ``None`` for a call
-        that is not a model's, such as a gateway tool. ``actor_user_id`` is the
+        that is not a model's, such as a gateway tool. ``tools`` names, by
+        pricing key, the gateway-run tools a tool's call may run, so funds that
+        pay for some tools and not others can be judged per tool; it is empty
+        for a model's call. ``actor_user_id`` is the
         user :meth:`charge` will attribute the call to, so funds that pay for
         one member alone are judged for the member they would pay for.
 

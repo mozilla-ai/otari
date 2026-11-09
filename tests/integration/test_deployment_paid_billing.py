@@ -67,6 +67,7 @@ from gateway.ports.model_provider_port import HostedCredential, ModelProviderPor
 GATES = []  # Every gate call, landed or not.
 BILLED = []  # The model each gate and charge was told it pays for.
 TOOLS = []  # The gateway-run tool calls each charge was told it pays for.
+GATE_TOOLS = []  # The gateway-run tools each gate was told a call may run.
 LEDGER = []  # What landed: a session's entries move here when it commits.
 PENDING = {}  # Entries written on a session, by its id, until it commits, rolls back or closes.
 SESSIONS = []
@@ -96,9 +97,10 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         GATES.append(("apply_due_credit", str(organization_id)))
 
-    async def require_funds_on_deposit(self, *, organization_id, billed, actor_user_id):
+    async def require_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
         GATES.append(("require_funds_on_deposit", str(organization_id)))
         BILLED.append(("gate", billed))
+        GATE_TOOLS.append(tools)
         if "funds" in FAULTS:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
@@ -707,6 +709,7 @@ def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_anothe
     assert response.status_code == status.HTTP_200_OK, response.text
     assert {call.kwargs["api_key"] for call in provider.call_args_list} == {"sk-ant"}
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert probe.GATE_TOOLS == [frozenset({"otari:web_search"})]
     # The search alone: the model ran on the gateway's own key, which the organization's funds do not pay for.
     assert [(entry[0], entry[2]) for entry in probe.LEDGER] == [("charge", SEARCH_COST)]
     assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=SEARCH_COST)}]

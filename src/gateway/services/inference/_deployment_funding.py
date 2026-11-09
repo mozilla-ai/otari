@@ -159,6 +159,7 @@ async def admit_deployment_paid(
     api_key_id: str | None,
     user_id: str | None,
     request_id: str | None,
+    tools: frozenset[str] = frozenset(),
 ) -> DeploymentCharge | None:
     """Admit a request on its credential, returning what settlement charges it through.
 
@@ -166,7 +167,8 @@ async def admit_deployment_paid(
     other request is admitted with nothing to charge (``None``). A gated one is
     granted any credit its organization is owed, then refused with nothing paid in
     that can pay for ``billed``, the model it is served on (``None`` for a gateway
-    tool's call). A model's call also learns its organization's concurrency limit.
+    tool's call, which names the tools it may run, by pricing key, in ``tools``).
+    A model's call also learns its organization's concurrency limit.
 
     Raises:
         InsufficientFundsError: If the organization has no funds paid in.
@@ -176,7 +178,9 @@ async def admit_deployment_paid(
         return None
     actor_user_id = _actor_user_id(user_id)
     await billing.apply_due_credit(organization_id=organization_id)
-    await billing.require_funds_on_deposit(organization_id=organization_id, billed=billed, actor_user_id=actor_user_id)
+    await billing.require_funds_on_deposit(
+        organization_id=organization_id, billed=billed, tools=tools, actor_user_id=actor_user_id
+    )
     limit = (
         await billing.concurrency_limit(organization_id=organization_id, billed=billed, actor_user_id=actor_user_id)
         if billed

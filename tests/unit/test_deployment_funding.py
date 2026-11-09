@@ -36,9 +36,14 @@ class _Billing:
         self.calls.append(("apply_due_credit", organization_id))
 
     async def require_funds_on_deposit(
-        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
     ) -> None:
-        self.calls.append(("require_funds_on_deposit", organization_id, billed, actor_user_id))
+        self.calls.append(("require_funds_on_deposit", organization_id, billed, tools, actor_user_id))
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
 
@@ -83,7 +88,7 @@ async def test_admission_grants_credit_then_checks_funds() -> None:
     charge = await _admit(billing)
     assert billing.calls == [
         ("apply_due_credit", ORGANIZATION_ID),
-        ("require_funds_on_deposit", ORGANIZATION_ID, BILLED, IDENTITY_ID),
+        ("require_funds_on_deposit", ORGANIZATION_ID, BILLED, frozenset(), IDENTITY_ID),
         ("concurrency_limit", ORGANIZATION_ID, BILLED, IDENTITY_ID),
     ]
     assert (charge.organization_id, charge.api_key_id, charge.actor_user_id, charge.request_id, charge.billed) == (
@@ -240,8 +245,9 @@ async def test_a_failed_charge_is_rolled_back_and_logged_without_its_text(
 
 
 @pytest.mark.asyncio
-async def test_a_gateway_tools_admission_bills_no_model() -> None:
+async def test_a_gateway_tools_admission_bills_no_model_and_names_its_tools() -> None:
     billing = _Billing()
+    tools = frozenset({"otari:web_search", "otari:web_fetch"})
     charge = await admit_deployment_paid(
         cast(BillingPort, billing),
         deployment_paid=True,
@@ -250,6 +256,7 @@ async def test_a_gateway_tools_admission_bills_no_model() -> None:
         api_key_id="key-1",
         user_id=None,
         request_id="req-1",
+        tools=tools,
     )
     assert charge is not None
     assert charge.billed is None
@@ -257,7 +264,7 @@ async def test_a_gateway_tools_admission_bills_no_model() -> None:
     assert charge.concurrency_limit is None
     assert all(call[0] != "concurrency_limit" for call in billing.calls)
     await charge.charge(Decimal("0.01"), tools=NO_TOOLS, description="otari_web_search")
-    assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None, None)
+    assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None, tools, None)
     assert billing.calls[-1][1]["billed"] is None
 
 

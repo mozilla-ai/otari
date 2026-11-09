@@ -215,9 +215,18 @@ class DirectToolLedger(Protocol):
         ...
 
     async def admit_funding(
-        self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+        self,
+        *,
+        organization_id: uuid.UUID | None,
+        api_key_id: str | None,
+        user_id: str,
+        request_id: str,
+        tool: str,
     ) -> object | None:
-        """Admit a call the deployment's account runs on the organization's funds, returning what settles it."""
+        """Admit a call of ``tool`` (its pricing key) the deployment's account runs on the organization's funds.
+
+        Returns what settles it.
+        """
         ...
 
     async def settle_funding(
@@ -589,7 +598,11 @@ class DirectToolService:
         if call.deployment_paid:
             try:
                 funding = await self._ledger.admit_funding(
-                    organization_id=organization_id, api_key_id=api_key_id, user_id=user_id, request_id=request_id
+                    organization_id=organization_id,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    request_id=request_id,
+                    tool=call.pricing_key,
                 )
             except InsufficientFundsError as exc:
                 raise await refused_after_hold(

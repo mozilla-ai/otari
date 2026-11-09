@@ -4378,6 +4378,7 @@ async def _admit_tool_funding(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             request_id=ctx.request_id,
+            tools=frozenset(gateway_tool_pricing_key(tool.name) for tool in paid),
         )
     except InsufficientFundsError as exc:
         logger.info(
