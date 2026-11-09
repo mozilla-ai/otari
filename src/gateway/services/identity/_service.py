@@ -214,11 +214,24 @@ class IdentityService:
 
         """
 
+        # Resolved once: whether the deployment admits this caller does not vary by organization.
+        is_operator = await self._organizations.is_deployment_operator(account)
+
         async def sso_enforcement_blocks(organization: Organization) -> bool:
+            membership = await self._organizations.members.get_active_by_organization_and_user(
+                organization.id, account.id
+            )
+            if membership is None:
+                return False
             linked = await has_link_to_organization(
                 organization, account.id, connections=self._connections, links=self._links
             )
-            return sso_blocks_membership(organization=organization, user=account, is_linked=linked)
+            return sso_blocks_membership(
+                organization=organization,
+                membership=membership,
+                is_linked=linked,
+                is_deployment_operator=is_operator,
+            )
 
         async with self._uow:
             # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.

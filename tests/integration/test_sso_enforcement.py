@@ -32,6 +32,7 @@ from gateway.models.tenancy import (
     DashboardSession,
     InviteOrganizationMemberRequest,
     Organization,
+    OrganizationMember,
     User,
     WebAuthnCredential,
 )
@@ -204,6 +205,13 @@ async def _live_session_count(db: AsyncSession, user_id: uuid.UUID) -> int:
 # =============================================================================
 
 
+async def _membership_of(db: AsyncSession, organization: Organization, user: User) -> OrganizationMember:
+    """The active membership the enforcement rule is asked about."""
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(organization.id, user.id)
+    assert membership is not None
+    return membership
+
+
 async def test_enforcement_blocks_a_member_with_no_link_for_this_connection(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
@@ -214,7 +222,15 @@ async def test_enforcement_blocks_a_member_with_no_link_for_this_connection(asyn
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is True
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, member),
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is True
+    )
 
 
 async def test_enforcement_does_not_block_the_break_glass_owner(async_db: AsyncSession) -> None:
@@ -227,7 +243,15 @@ async def test_enforcement_does_not_block_the_break_glass_owner(async_db: AsyncS
     async_db.add(organization)
     await async_db.flush()
 
-    assert sso_blocks_membership(organization=organization, user=owner, is_linked=False) is False
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, owner),
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is False
+    )
 
 
 async def test_enforcement_does_not_block_the_master_key_operator(async_db: AsyncSession) -> None:
@@ -242,8 +266,74 @@ async def test_enforcement_does_not_block_the_master_key_operator(async_db: Asyn
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=operator, is_linked=False) is False
-    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is True
+    # The operator fact comes from the deployment, not from the shape of the account: an operator
+    # who has set a password holds an address like anybody else.
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, operator),
+            is_linked=False,
+            is_deployment_operator=True,
+        )
+        is False
+    )
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, member),
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is True
+    )
+
+
+async def test_enforcement_blocks_a_demoted_break_glass_owner(async_db: AsyncSession) -> None:
+    """The stored id outlives the role, so the exception has to follow the role rather than the id."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = owner.id
+    async_db.add(organization)
+    await async_db.flush()
+    membership = await _membership_of(async_db, organization, owner)
+    membership.role = "member"
+    async_db.add(membership)
+    await async_db.flush()
+
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=membership,
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is True
+    )
+
+
+async def test_enforcement_blocks_an_address_less_account_that_holds_no_authority(
+    async_db: AsyncSession,
+) -> None:
+    """An account with no address is not an operator: only the deployment says who is."""
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    await async_db.flush()
+    nameless = await create_member(async_db, organization, role="member", full_name="No Address")
+
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, nameless),
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is True
+    )
 
 
 async def test_enforcement_does_not_block_a_member_linked_to_this_connection(async_db: AsyncSession) -> None:
@@ -256,7 +346,15 @@ async def test_enforcement_does_not_block_a_member_linked_to_this_connection(asy
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=member, is_linked=True) is False
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, member),
+            is_linked=True,
+            is_deployment_operator=False,
+        )
+        is False
+    )
 
 
 async def test_enforcement_blocks_nobody_while_turned_off(async_db: AsyncSession) -> None:
@@ -265,7 +363,15 @@ async def test_enforcement_blocks_nobody_while_turned_off(async_db: AsyncSession
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is False
+    assert (
+        sso_blocks_membership(
+            organization=organization,
+            membership=await _membership_of(async_db, organization, member),
+            is_linked=False,
+            is_deployment_operator=False,
+        )
+        is False
+    )
 
 
 # =============================================================================
@@ -720,11 +826,20 @@ async def test_a_member_linked_through_the_connection_reaches_the_enforcing_orga
 
 
 async def test_the_deployment_operator_reaches_an_enforcing_organization(async_db: AsyncSession) -> None:
+    """Held by the deployment's own authority, not by the account lacking an address.
+
+    An operator who has claimed the deployment holds an address and a password like anybody else, so
+    the exemption has to follow the authority rather than the shape of the row.
+    """
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
     organization.sso_break_glass_waived = True
     async_db.add(organization)
-    operator = await create_member(async_db, organization, role="member", full_name="The Operator")
+    operator = await _member_with_email(
+        async_db, organization, role="member", email="operator@acme.example", full_name="The Operator"
+    )
+    operator.is_superuser = True
+    async_db.add(operator)
     await async_db.commit()
 
     signed_in = await _identity_service(async_db).sign_in(operator)

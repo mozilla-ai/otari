@@ -25,7 +25,7 @@ from gateway.models.identity import (
     OIDCConnection,
     oidc_identity_provider,
 )
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
+from gateway.models.tenancy import DOMAIN_PROOF_TTL, OWNER_ROLE, Organization, OrganizationMember, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.schemas.identity import (
     OIDCConnectionDomain,
@@ -45,7 +45,7 @@ from gateway.services.identity._enforcement import (
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
-from gateway.services.tenancy import OrganizationService, sso_blocks_membership, sso_exempt_operator
+from gateway.services.tenancy import OrganizationService, sso_blocks_membership, sso_would_block_membership
 
 # The preflight count is exact; the member list is a sample, so a large organization's
 # response stays bounded.
@@ -386,9 +386,14 @@ class OIDCConnectionService:
     async def preflight_sso_enforcement_for_user(self, *, user: User) -> OrganizationSsoPreflightPublic:
         """Report who the caller's organization's sign-in enforcement would affect. Owners and admins only.
 
-        An active member is affected when they hold no sign-in link to the connection: they would
-        get a new account the first time they use it, and any API key on their current account
+        An active member is affected when enforcement would refuse them: they would get a new
+        account the first time they use the connection, and any API key on their current account
         would stay there rather than moving.
+
+        NOTE: Counted by the same rule that revokes sessions and admits a break-glass owner, so what
+        this reports and what a save then does cannot describe different people. Holding no link is
+        not that rule: it also catches the deployment's operator and the named exception, neither of
+        whom loses anything.
 
         Raises:
             OIDCConnectionNotFoundError: The organization has not configured a connection yet.
@@ -400,14 +405,12 @@ class OIDCConnectionService:
             if connection is None:
                 raise OIDCConnectionNotFoundError
             provider = oidc_identity_provider(connection.resolved_issuer)
-            total, affected_count = await self._organizations.members.count_active_members_by_link(
-                organization.id, provider=provider
-            )
-            sample = await self._organizations.members.list_active_members_without_link(
-                organization.id, provider=provider, limit=_PREFLIGHT_SAMPLE_LIMIT
-            )
+            total = await self._organizations.members.count_active(organization.id)
+            refused = await self.members_enforcement_would_refuse(organization, connection)
+            sample = refused[:_PREFLIGHT_SAMPLE_LIMIT]
             candidates = await self._break_glass_candidates(organization, provider)
 
+        affected_count = len(refused)
         return OrganizationSsoPreflightPublic(
             total_members=total,
             break_glass_candidates=candidates,
@@ -429,9 +432,11 @@ class OIDCConnectionService:
         Leaves out the deployment's own operator, who enforcement never refuses and so needs no
         exception, and any owner whose only way in is the connection itself.
         """
+        memberships = await self._organizations.members.get_active_by_organization_with_users(organization.id)
+        operator_ids = await self._organizations.deployment_operator_ids([account for _, account in memberships])
         candidates = []
-        for member, account in await self._organizations.members.get_active_by_organization_with_users(organization.id):
-            if member.role != "owner" or sso_exempt_operator(account):
+        for member, account in memberships:
+            if member.role != OWNER_ROLE or account.id in operator_ids:
                 continue
             if not await has_route_without(
                 account,
@@ -542,24 +547,44 @@ class OIDCConnectionService:
         if owner is None or owner.role != "owner":
             raise SsoBreakGlassRequiredError
 
+    async def members_enforcement_would_refuse(
+        self, organization: Organization, connection: OIDCConnection
+    ) -> list[tuple[OrganizationMember, User]]:
+        """Every active membership this organization's enforcement would refuse, with its account.
+
+        The one place the rule is applied to a whole organization, so what a preflight reports and
+        what a save then revokes cannot describe different people. Answers the rule without the
+        switch, because a preflight has to report who would lose access before it is on; a caller
+        acting on the answer applies the switch itself.
+
+        Reads in bulk: one query for the links and one for the deployment's own authority, rather
+        than either per member.
+        """
+        memberships = await self._organizations.members.get_active_by_organization_with_users(organization.id)
+        if not memberships:
+            return []
+        provider = oidc_identity_provider(connection.resolved_issuer)
+        accounts = [account for _, account in memberships]
+        linked_ids = await self._links.linked_user_ids(provider=provider, user_ids=[a.id for a in accounts])
+        operator_ids = await self._organizations.deployment_operator_ids(accounts)
+        return [
+            (membership, account)
+            for membership, account in memberships
+            if sso_would_block_membership(
+                organization=organization,
+                membership=membership,
+                is_linked=account.id in linked_ids,
+                is_deployment_operator=account.id in operator_ids,
+            )
+        ]
+
     async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
         """End the live session of every active member this organization's enforcement now refuses."""
-        provider = oidc_identity_provider(connection.resolved_issuer)
-        roster = await self._organizations.members.get_active_by_organization_with_users(organization.id)
-        linked_ids = await self._links.linked_user_ids(
-            provider=provider, user_ids=[identity.id for _, identity in roster]
-        )
-        blocked_ids = {
-            identity.id
-            for _, identity in roster
-            if sso_blocks_membership(
-                organization=organization,
-                user=identity,
-                is_linked=identity.id in linked_ids,
-            )
-        }
-        if blocked_ids:
-            await self._sessions.delete_for_users(blocked_ids)
+        if not organization.sso_required:
+            return
+        refused = await self.members_enforcement_would_refuse(organization, connection)
+        if refused:
+            await self._sessions.delete_for_users({account.id for _, account in refused})
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it.
@@ -570,10 +595,19 @@ class OIDCConnectionService:
         if not organization.sso_required:
             return False
         async with self._uow:
+            membership = await self._organizations.members.get_active_by_organization_and_user(organization.id, user.id)
+            if membership is None:
+                return False
             linked = await has_link_to_organization(
                 organization, user.id, connections=self._connections, links=self._links
             )
-        return sso_blocks_membership(organization=organization, user=user, is_linked=linked)
+            is_operator = await self._organizations.is_deployment_operator(user)
+        return sso_blocks_membership(
+            organization=organization,
+            membership=membership,
+            is_linked=linked,
+            is_deployment_operator=is_operator,
+        )
 
     async def refuses_every_membership(self, *, user: User) -> bool:
         """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""

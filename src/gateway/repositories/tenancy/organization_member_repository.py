@@ -4,14 +4,13 @@ import uuid
 from collections.abc import Collection, Iterable
 from typing import Any
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
-from gateway.models.identity import OAuthIdentityLink
 from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
@@ -283,6 +282,18 @@ class OrganizationMemberRepository(
         await self.db.refresh(member)
         return member
 
+    async def count_active(self, organization_id: uuid.UUID) -> int:
+        """Count an organization's active memberships."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrganizationMember)
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return result.scalar_one()
+
     async def count_active_owners(self, organization_id: uuid.UUID) -> int:
         """Count an organization's active owners.
 
@@ -365,7 +376,7 @@ class OrganizationMemberRepository(
     ) -> list[tuple[OrganizationMember, User]]:
         """Return every active member of an organization, joined to its identity.
 
-        Unpaginated, for a sweep over the whole roster rather than a page to render.
+        Unpaginated, for a sweep over every active membership rather than a page to render.
         """
         result = await self.db.execute(
             select(OrganizationMember, User)
@@ -374,54 +385,6 @@ class OrganizationMemberRepository(
                 col(OrganizationMember.organization_id) == organization_id,
                 col(OrganizationMember.status) == "active",
             )
-        )
-        return [(member, user) for member, user in result.all()]
-
-    async def count_active_members_by_link(self, organization_id: uuid.UUID, *, provider: str) -> tuple[int, int]:
-        """Count this organization's active memberships, and how many hold no link at ``provider``."""
-        unmatched = case((col(OAuthIdentityLink.user_id).is_(None), 1), else_=0)
-        result = await self.db.execute(
-            select(func.count(), func.coalesce(func.sum(unmatched), 0))
-            .select_from(OrganizationMember)
-            .outerjoin(
-                OAuthIdentityLink,
-                and_(
-                    col(OAuthIdentityLink.user_id) == col(OrganizationMember.user_id),
-                    col(OAuthIdentityLink.provider) == provider,
-                ),
-            )
-            .where(
-                col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.status) == "active",
-            )
-        )
-        total, unlinked = result.one()
-        return total, unlinked
-
-    async def list_active_members_without_link(
-        self, organization_id: uuid.UUID, *, provider: str, limit: int
-    ) -> list[tuple[OrganizationMember, User]]:
-        """Return up to ``limit`` of this organization's active members holding no link at ``provider``.
-
-        Joined to each member's identity, ordered alphabetically.
-        """
-        result = await self.db.execute(
-            select(OrganizationMember, User)
-            .join(User, col(OrganizationMember.user_id) == col(User.id))
-            .outerjoin(
-                OAuthIdentityLink,
-                and_(
-                    col(OAuthIdentityLink.user_id) == col(OrganizationMember.user_id),
-                    col(OAuthIdentityLink.provider) == provider,
-                ),
-            )
-            .where(
-                col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.status) == "active",
-                col(OAuthIdentityLink.user_id).is_(None),
-            )
-            .order_by(user_alphabetical_order(), col(OrganizationMember.id))
-            .limit(limit)
         )
         return [(member, user) for member, user in result.all()]
 

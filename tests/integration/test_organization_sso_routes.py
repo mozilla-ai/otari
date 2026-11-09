@@ -721,6 +721,34 @@ def test_the_count_excludes_a_member_already_linked_to_this_connection(
     assert body["affected_members_truncated"] is False
 
 
+def test_the_count_excludes_the_named_break_glass_owner(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """The named exception keeps acting, so counting them as losing access overstates the cost."""
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-exempt")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-exempt.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-exempt.test")
+        organization.sso_break_glass_user_id = owner_id
+        session.add(organization)
+        session.add(_connection(organization.id))
+        _member(session, organization_id=organization.id, email="unlinked@acme-preflight-exempt.test")
+        session.commit()
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    body = response.json()
+    assert body["total_members"] == 2
+    assert body["affected_count"] == 1
+    assert [entry["email"] for entry in body["affected_members"]] == ["unlinked@acme-preflight-exempt.test"]
+
+
 def test_the_count_excludes_a_suspended_member(client: TestClient, db_session_factory: Callable[[], Session]) -> None:
     """A suspended member is not an active membership, so the denominator must not move for one."""
     session = db_session_factory()

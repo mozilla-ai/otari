@@ -66,12 +66,19 @@ async def sso_enforcement_refuses_every_membership(
     memberships = await organizations.members.get_by_user(user.id, active_only=True)
     if not memberships:
         return False
+    # Resolved once: whether the deployment admits this caller does not vary by organization.
+    is_operator = await organizations.is_deployment_operator(user)
     for membership in memberships:
         organization = await organizations.organizations.get(membership.organization_id)
         if organization is None or not organization.sso_required:
             return False
         linked = await has_link_to_organization(organization, user.id, connections=connections, links=links)
-        if not sso_blocks_membership(organization=organization, user=user, is_linked=linked):
+        if not sso_blocks_membership(
+            organization=organization,
+            membership=membership,
+            is_linked=linked,
+            is_deployment_operator=is_operator,
+        ):
             return False
     return True
 

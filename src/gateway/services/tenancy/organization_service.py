@@ -15,7 +15,7 @@ import re
 import secrets
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -53,7 +53,9 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
+    ACTIVE_MEMBERSHIP_STATUS,
     MANAGEMENT_ROLES,
+    OWNER_ROLE,
     AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -387,6 +389,21 @@ class OrganizationService:
         """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
         bootstrap = await load_bootstrap_identity(self.db)
         return None if bootstrap is None else bootstrap.id
+
+    async def is_deployment_operator(self, user: User) -> bool:
+        """Whether the deployment's own administration admits this caller across every organization.
+
+        Delegated rather than re-derived, so this and the gate on the deployment-wide routers cannot
+        come to disagree about who holds that authority.
+        """
+        return await DeploymentUserService(self.db).has_administration_access(user)
+
+    async def deployment_operator_ids(self, users: Iterable[User]) -> set[uuid.UUID]:
+        """Which of ``users`` the deployment admits across every organization, in one lookup.
+
+        The plural form, for deciding over several accounts without a lookup each.
+        """
+        return await DeploymentUserService(self.db).administration_access_ids(users)
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, or a live membership where the pointer is stale.
@@ -1919,7 +1936,12 @@ class OrganizationService:
         if password is not None:
             if not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-            if sso_blocks_membership(organization=organization, user=invitee, is_linked=False):
+            if sso_blocks_membership(
+                organization=organization,
+                membership=membership,
+                is_linked=False,
+                is_deployment_operator=await self.is_deployment_operator(invitee),
+            ):
                 raise InvitationPasswordNotAcceptedError("sign in through this organization's own connection")
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
@@ -2617,29 +2639,52 @@ class OrganizationService:
         )
 
 
-def sso_exempt_operator(user: User) -> bool:
-    """Whether this is the deployment's own master-key operator, whom no organization's rules reach.
+def sso_blocks_membership(
+    *,
+    organization: Organization,
+    membership: OrganizationMember,
+    is_linked: bool,
+    is_deployment_operator: bool,
+) -> bool:
+    """Whether this organization's SSO enforcement refuses this membership's holder from acting in it.
 
-    Told apart by holding neither an address nor a provider: an account an organization's own
-    connection provisioned holds no address either, but always names the provider that vouched it.
+    ``is_linked`` is whether the person holds a sign-in link to this organization's own connection.
+    ``is_deployment_operator`` is who may act across the deployment.
+
+    NOTE: Callers must resolve both facts rather than infer them.
+    An operator who has set a password holds an address like anybody else, so the absence of one
+    identifies nobody.
+
+    NOTE: The break-glass exception holds only while its account is still an active owner, because
+    the stored id outlives the role.
     """
-    return user.email is None and user.oauth_provider is None
+    return organization.sso_required and sso_would_block_membership(
+        organization=organization,
+        membership=membership,
+        is_linked=is_linked,
+        is_deployment_operator=is_deployment_operator,
+    )
 
 
-def sso_blocks_membership(*, organization: Organization, user: User, is_linked: bool) -> bool:
-    """Whether this organization's SSO enforcement refuses this person from acting in it.
+def sso_would_block_membership(
+    *,
+    organization: Organization,
+    membership: OrganizationMember,
+    is_linked: bool,
+    is_deployment_operator: bool,
+) -> bool:
+    """Whether this organization's SSO enforcement would refuse this membership's holder, were it required.
 
-    ``is_linked`` is whether the person already holds a sign-in link to this organization's own
-    connection.
-
-    NOTE: Never true for the deployment's own master-key operator or for the organization's
-    chosen break-glass exception.
+    The rule without the switch, which is what a preflight reports: it has to say who would lose
+    access before enforcement is on, and the same rule then decides who does.
     """
-    if not organization.sso_required:
+    if is_deployment_operator:
         return False
-    if sso_exempt_operator(user):
-        return False
-    if organization.sso_break_glass_user_id == user.id:
+    if (
+        organization.sso_break_glass_user_id == membership.user_id
+        and membership.role == OWNER_ROLE
+        and membership.status == ACTIVE_MEMBERSHIP_STATUS
+    ):
         return False
     return not is_linked
 
@@ -2651,5 +2696,5 @@ __all__ = [
     "SignupRegistration",
     "SignInDestination",
     "sso_blocks_membership",
-    "sso_exempt_operator",
+    "sso_would_block_membership",
 ]
