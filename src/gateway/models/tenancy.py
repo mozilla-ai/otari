@@ -111,6 +111,10 @@ MAX_BULK_INVITATIONS = 100
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
 MANAGEMENT_ROLES = frozenset({"owner", "admin"})
+# The role that owns an organization, as distinct from managing it.
+OWNER_ROLE = "owner"
+# The status a membership holds while it grants anything.
+ACTIVE_MEMBERSHIP_STATUS = "active"
 
 
 def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
