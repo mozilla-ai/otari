@@ -368,7 +368,9 @@ describe("OrganizationSsoPage", () => {
         /2 of 3 members lose access until they sign in with your provider/,
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText("Alex Doe")).toBeInTheDocument()
+    expect(
+      screen.getByText("Alex Doe (member@acme.example)"),
+    ).toBeInTheDocument()
     expect(screen.getByText(/and 1 other$/)).toBeInTheDocument()
     expect(
       screen.getByRole("checkbox", {
@@ -420,10 +422,16 @@ describe("OrganizationSsoPage", () => {
         name: /Owner who can still sign in if your provider breaks/,
       }),
     )
-    await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
+    await user.click(
+      await screen.findByRole("option", {
+        name: /Jane Owner \(member@acme\.example\)/,
+      }),
+    )
 
     expect(
-      await screen.findByText(/Jane Owner can sign in without your provider/),
+      await screen.findByText(
+        /Jane Owner .* can sign in without your provider/,
+      ),
     ).toBeInTheDocument()
   })
 
@@ -504,6 +512,36 @@ describe("OrganizationSsoPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("says what a save did, because the form looks unchanged otherwise", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflight: organizationSsoPreflight({
+        break_glass_candidates: [
+          organizationSsoPreflightMember({
+            user_id: "22222222-bbbb-bbbb-bbbb-222222222222",
+            full_name: "Jane Owner",
+          }),
+        ],
+      }),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "This organization keeps no non-SSO route",
+      }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    expect(await screen.findByText(/^Saved\./)).toBeInTheDocument()
+  })
+
   it("shows its own refusal when neither an owner nor a waiver is named", async () => {
     mockApi({
       sso: organizationSso({ connection: oidcConnection() }),
@@ -566,7 +604,11 @@ describe("OrganizationSsoPage", () => {
         name: /Owner who can still sign in if your provider breaks/,
       }),
     )
-    await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
+    await user.click(
+      await screen.findByRole("option", {
+        name: /Jane Owner \(member@acme\.example\)/,
+      }),
+    )
     await user.click(screen.getByRole("button", { name: "Save enforcement" }))
 
     expect(

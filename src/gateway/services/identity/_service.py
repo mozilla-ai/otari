@@ -22,6 +22,7 @@ from gateway.exceptions.identity_exceptions import (
     PasswordLinkUnavailableError,
     SignInBlockedError,
     SsoIdentityNotAdmittedError,
+    SsoSignInRequiredError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -222,9 +223,15 @@ class IdentityService:
         async with self._uow:
             # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.
             await self._blocked_emails.lock_shared()
-            active_organization_id = await self._organizations.active_organization_id_for_sign_in(
-                account, blocked=sso_enforcement_blocks
-            )
+            destination = await self._organizations.sign_in_destination(account, blocked=sso_enforcement_blocks)
+            if destination.refused_everywhere:
+                logger.info(
+                    "Refused a sign-in to account %s, which every organization it belongs to admits "
+                    "only through that organization's own connection",
+                    account.id,
+                )
+                raise SsoSignInRequiredError
+            active_organization_id = destination.organization_id
             now = datetime.now(UTC)
             # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
             # write lock when it reads the blocklist.

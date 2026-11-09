@@ -692,6 +692,19 @@ class SignInBlockedError(TenancyForbiddenError):
         super().__init__("This email address is blocked on this deployment. Contact its operator.")
 
 
+class SsoSignInRequiredError(TenancyForbiddenError):
+    """A sign-in by an account every one of whose organizations admits it only through their own connection.
+
+    Raised only once the account has proven who it is, so it may say what is wrong and what to do
+    instead. Names no issuer: which provider an organization uses is not this refusal's to disclose.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Your organization requires sign-in through its own provider. Use the company sign-in option instead."
+        )
+
+
 class BlockedEmailError(TenancyValidationError):
     """An address the deployment's operator has blocked, given to a surface that would add or invite it."""
 
@@ -765,6 +778,7 @@ __all__ = [
     "SsoBreakGlassRequiredError",
     "SsoBreakGlassRouteRequiredError",
     "SsoNotAddressableError",
+    "SsoSignInRequiredError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",

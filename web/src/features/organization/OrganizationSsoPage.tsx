@@ -309,10 +309,26 @@ function ConnectionSummary({
   )
 }
 
+/** What a saved enforcement change now means, said back so a save is visibly a save. */
+function savedEnforcementSummary(
+  enforcement: OrganizationSsoEnforcement,
+): string {
+  if (!enforcement.required) {
+    return "Saved. Members can sign in by any method this deployment offers."
+  }
+  if (enforcement.break_glass_user_id !== null) {
+    return "Saved. Everyone signs in through your provider, except the owner you named."
+  }
+  return "Saved. Everyone signs in through your provider, with no exception."
+}
+
 function displayName(member: {
   full_name?: string | null
   email?: string | null
 }): string {
+  if (member.full_name && member.email) {
+    return `${member.full_name} (${member.email})`
+  }
   return member.full_name ?? member.email ?? "Unnamed member"
 }
 
@@ -567,6 +583,13 @@ export function OrganizationSsoPage() {
                 enforcement={sso.data.enforcement}
                 onSaved={() => setEnforcementSavedCount((count) => count + 1)}
               />
+              {/* The confirmation sits outside the section because saving remounts it, which
+                  would clear a mutation's own success state before anyone read it. */}
+              {enforcementSavedCount > 0 ? (
+                <p className="text-caption text-success">
+                  {savedEnforcementSummary(sso.data.enforcement)}
+                </p>
+              ) : null}
             </>
           ) : null}
         </>

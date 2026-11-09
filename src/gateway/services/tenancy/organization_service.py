@@ -342,6 +342,18 @@ def _blocks_for(user: User, enforcement: SsoEnforcement) -> Callable[[Organizati
     return blocks
 
 
+@dataclass(frozen=True)
+class SignInDestination:
+    """The organization a fresh session acts in, and why it may act in none.
+
+    ``refused_everywhere`` is true only where the account holds a live membership and every one of
+    them refused it, which is a refusal to report rather than a dashboard to open.
+    """
+
+    organization_id: uuid.UUID | None
+    refused_everywhere: bool
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -435,15 +447,23 @@ class OrganizationService:
             await self.users.set_active_organization(user, None)
         return None
 
-    async def active_organization_id_for_sign_in(
+    async def sign_in_destination(
         self, user: User, *, blocked: Callable[[Organization], Awaitable[bool]]
-    ) -> uuid.UUID | None:
-        """The organization a fresh session acts in, or ``None`` where ``blocked`` admits no live membership.
+    ) -> SignInDestination:
+        """Where a fresh session acts, and whether every membership refused it.
 
         Stages the repaired pointer for the caller to commit with the session.
+
+        NOTE: An absent organization has two causes a caller has to tell apart, which is why this
+        does not answer with an id alone. An account that belongs to nowhere is refused nothing and
+        signs in; an account every one of whose organizations refused it has nowhere to act and is
+        better told so than signed in to an empty dashboard.
         """
+        memberships = await self.members.get_active_by_user_with_organizations(user.id)
         organization = await self._live_active_organization(user, repair=True, blocked=blocked)
-        return organization.id if organization is not None else None
+        if organization is not None:
+            return SignInDestination(organization_id=organization.id, refused_everywhere=False)
+        return SignInDestination(organization_id=None, refused_everywhere=bool(memberships))
 
     async def _require_active_membership(self, user: User, organization: Organization) -> OrganizationMember:
         membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
@@ -2629,6 +2649,7 @@ __all__ = [
     "InvitationClaimSettings",
     "OrganizationService",
     "SignupRegistration",
+    "SignInDestination",
     "sso_blocks_membership",
     "sso_exempt_operator",
 ]

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -23,6 +24,7 @@ from gateway.exceptions.identity_exceptions import (
     PasswordLinkUnavailableError,
     SsoBreakGlassRequiredError,
     SsoBreakGlassRouteRequiredError,
+    SsoSignInRequiredError,
 )
 from gateway.exceptions.organizations_exceptions import InvitationPasswordNotAcceptedError, NotAuthorizedError
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, OIDCConnection, oidc_identity_provider
@@ -604,7 +606,10 @@ async def test_repairing_the_pointer_moves_a_refused_member_off_that_organizatio
     assert repaired.active_organization_id == other.id
 
 
-async def test_a_password_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
+async def test_a_password_sign_in_is_refused_where_every_organization_requires_the_connection(
+    async_db: AsyncSession,
+) -> None:
+    """Refused rather than signed in to nowhere: a session that reaches no organization grants nothing."""
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
     organization.sso_break_glass_waived = True
@@ -614,15 +619,16 @@ async def test_a_password_sign_in_reaches_no_enforcing_organization(async_db: As
     )
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(member)
+    with pytest.raises(SsoSignInRequiredError) as refusal:
+        await _identity_service(async_db).sign_in(member)
 
-    assert signed_in.active_organization_id is None
-    assert signed_in.session_token
+    reason = str(refusal.value)
+    assert "its own provider" in reason
+    assert "acme" not in reason
 
 
-async def test_a_sign_in_that_reaches_nowhere_clears_the_stored_pointer(async_db: AsyncSession) -> None:
-    """Asserted against the row, not the response: a response saying ``None`` over a row still naming the
-    organization is what let every later request resolve scope to it."""
+async def test_a_refused_sign_in_leaves_no_session_behind(async_db: AsyncSession) -> None:
+    """Asserted against the table, because a refusal that still seated a session would grant the access it refused."""
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
     organization.sso_break_glass_waived = True
@@ -631,47 +637,56 @@ async def test_a_sign_in_that_reaches_nowhere_clears_the_stored_pointer(async_db
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
     await async_db.commit()
-    assert member.active_organization_id == organization.id
 
-    signed_in = await _identity_service(async_db).sign_in(member)
-    await async_db.commit()
+    member_id = member.id
 
-    assert signed_in.active_organization_id is None
-    stored = await async_db.get(User, member.id)
-    assert stored is not None
-    assert stored.active_organization_id is None
+    with pytest.raises(SsoSignInRequiredError):
+        await _identity_service(async_db).sign_in(member)
+
+    seated = (
+        await async_db.execute(
+            select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == member_id)
+        )
+    ).scalar_one()
+    assert seated == 0
 
 
-async def test_signing_in_again_reaches_no_endpoint_of_an_enforcing_organization(
+async def test_turning_enforcement_on_ends_the_session_of_a_member_it_now_refuses(
     client: TestClient, async_db: AsyncSession
 ) -> None:
-    """Driven over HTTP against a roster read, because the bypass was in the scope every route resolves."""
+    """What protects a session seated before enforcement, driven over HTTP.
+
+    NOTE: There is no second enforcement check on the routes themselves. A session that survived
+    this revocation would still resolve the organization it was seated in, so the revocation is the
+    control rather than a convenience, and that is why it is asserted end to end here.
+    """
     organization = await create_organization(async_db, slug="acme")
-    organization.sso_required = True
-    organization.sso_break_glass_waived = True
-    async_db.add(organization)
-    member = await _member_with_email(
-        async_db, organization, role="owner", email="mo@acme.example", full_name="Mo Member", password=True
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
     )
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member", password=True
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
 
     signed_in = await _identity_service(async_db).sign_in(member)
     await async_db.commit()
-    assert signed_in.session_token
     client.cookies.set(SESSION_COOKIE_NAME, signed_in.session_token)
+    assert client.get(f"{API_ROOT}/organizations/me/members").status_code == 200
 
-    assert client.get(f"{API_ROOT}/organizations/me/members").status_code == 403
-    assert client.get(f"{API_ROOT}/organizations/me/sso").status_code == 403
-    assert (
-        client.put(
-            f"{API_ROOT}/organizations/me/sso/enforcement",
-            json={"required": False, "break_glass_user_id": None, "break_glass_waived": True},
-        ).status_code
-        == 403
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
     )
+    await async_db.commit()
+
+    assert client.get(f"{API_ROOT}/organizations/me/members").status_code == 401
 
 
-async def test_a_passkey_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
+async def test_a_passkey_sign_in_is_refused_where_every_organization_requires_the_connection(
+    async_db: AsyncSession,
+) -> None:
+    """A passkey proves the same account, so enforcement refuses it for the same reason a password is refused."""
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
     organization.sso_break_glass_waived = True
@@ -681,10 +696,8 @@ async def test_a_passkey_sign_in_reaches_no_enforcing_organization(async_db: Asy
     )
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(member)
-
-    assert signed_in.active_organization_id is None
-    assert signed_in.session_token
+    with pytest.raises(SsoSignInRequiredError):
+        await _identity_service(async_db).sign_in(member)
 
 
 async def test_a_member_linked_through_the_connection_reaches_the_enforcing_organization(
