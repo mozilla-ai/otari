@@ -111,6 +111,33 @@ describe("GuardrailParameterFields", () => {
       expect(onChange).toHaveBeenLastCalledWith("mode", "")
     })
 
+    it("never offers a required enum's prompt as a choice", async () => {
+      const user = userEvent.setup()
+      render(
+        <GuardrailParameterFields
+          specs={[
+            spec({
+              name: "mode",
+              type: "enum",
+              choices: ["strict", "lenient"],
+            }),
+          ]}
+          scopeName="alinia"
+          values={{}}
+          errors={{}}
+          disabled={false}
+          onChange={() => {}}
+        />,
+      )
+
+      const trigger = screen.getByRole("button", { name: /Mode/ })
+      expect(trigger).toHaveTextContent("Choose a value")
+      await user.click(trigger)
+      expect(
+        screen.getAllByRole("option").map((option) => option.textContent),
+      ).toEqual(["strict", "lenient"])
+    })
+
     it("shows an error in place of the description, not beside it", () => {
       render(
         <GuardrailParameterFields

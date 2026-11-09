@@ -47,6 +47,8 @@ export function DefaultBudgetPicker({
       label="Default member budget"
       value={value}
       onChange={onChange}
+      // `Select` shows "" as nothing chosen, so the placeholder names it.
+      placeholder="No default"
       // No description and nothing that can be invalid, so there is no message
       // this could ever hold. `FieldMessages` reserves the line by default, and
       // `FilterSelect` reserved nothing, so the swap to `Select` brought ~23px

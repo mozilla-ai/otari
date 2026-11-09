@@ -18,9 +18,6 @@ import {
 // guardrail and no parameter: it renders whatever the guardrails service says
 // its profiles take.
 
-/** The blank choice of an enum, under a value no choice can be named. */
-const UNSET_CHOICE = "__unset__"
-
 /** What a field shows when it is left blank, which is the profile's own default. */
 function placeholderFor(spec: GuardrailParameterSpec): string | undefined {
   if (spec.default === null || spec.default === undefined) return undefined
@@ -94,23 +91,20 @@ function ParameterControl({
     return (
       <Select
         label={label}
-        value={String(value ?? "") || UNSET_CHOICE}
+        value={String(value ?? "")}
         isDisabled={disabled}
-        onChange={(next) => onChange(next === UNSET_CHOICE ? "" : next)}
+        onChange={onChange}
+        // `Select` shows "" as nothing chosen, so the unset state is named by
+        // the placeholder. An optional enum also offers it as a blank entry,
+        // which leaves the profile's own default in force; a required one has
+        // no such state, so the prompt is a placeholder and never a choice.
+        placeholder={spec.required ? "Choose a value" : "Default"}
         description={error ? undefined : description}
         isInvalid={Boolean(error)}
         errorMessage={error}
         shouldReserveMessage
-        // A blank option is what leaves the profile's own default in force,
-        // so an optional enum stays clearable; a required one has no such
-        // state and its blank entry is the unset the error message names.
-        // Carried under a sentinel, because `Select` reads an empty value as
-        // "nothing chosen" and would show a placeholder instead of this label.
         options={[
-          {
-            value: UNSET_CHOICE,
-            label: spec.required ? "Choose a value" : "Default",
-          },
+          ...(spec.required ? [] : [{ value: "", label: "Default" }]),
           ...spec.choices.map((choice) => ({ value: choice, label: choice })),
         ]}
       />

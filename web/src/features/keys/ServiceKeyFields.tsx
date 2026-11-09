@@ -68,9 +68,9 @@ export function useServiceKeyReady(
 
 const NO_BUDGETS: readonly LabelableBudget[] = []
 
-// The "no default" choice, under a value that is not an id. `Select` reads an
-// empty value as nothing chosen and would show its placeholder, not this label.
-const NO_DEFAULT_BUDGET = "__none__"
+// The "no default" choice. `Select` shows "" as nothing chosen, so this label is
+// also the placeholder that names it while it is the value.
+const NO_DEFAULT_BUDGET_LABEL = "None: uncapped unless a request names one"
 
 /**
  * The budgets a service key in this scope may start end users on. The
@@ -202,21 +202,16 @@ export function ServiceKeyFields({
           </fieldset>
           <Select
             label="Default end-user budget"
-            value={value.defaultBudgetId || NO_DEFAULT_BUDGET}
-            onChange={(next) =>
-              onChange({
-                ...value,
-                defaultBudgetId: next === NO_DEFAULT_BUDGET ? "" : next,
-              })
+            value={value.defaultBudgetId}
+            onChange={(defaultBudgetId) =>
+              onChange({ ...value, defaultBudgetId })
             }
+            placeholder={NO_DEFAULT_BUDGET_LABEL}
             // Nothing to say beside it and nothing that can be invalid, so no
             // message line to hold open under it.
             shouldReserveMessage={false}
             options={[
-              {
-                value: NO_DEFAULT_BUDGET,
-                label: "None: uncapped unless a request names one",
-              },
+              { value: "", label: NO_DEFAULT_BUDGET_LABEL },
               ...value.budgetIds.map((budgetId) => ({
                 value: budgetId,
                 label: labelOf(budgetId),
