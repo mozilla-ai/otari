@@ -442,6 +442,10 @@ models.dev has no entry for the offering, its download is v1, which has no
 from the model's `type`. The list repeats what models.dev says, so a model it
 gives the wrong protocol shows the wrong route until models.dev is corrected.
 
+The dashboard's "Use this model" drawer reads this list. It shows the request
+for the route of the offering that answers, and offers a choice where the list
+has more than one ([Models and Routing](https://docs.otari.ai/guides/dashboard/dashboard#models-and-routing)).
+
 ### Browsing the grouped catalog
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
