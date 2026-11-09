@@ -5,7 +5,9 @@ from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
+from openai.types.responses import ResponseCompletedEvent, ResponseCreatedEvent
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 
@@ -22,7 +24,7 @@ class _FakeResponse:
         self._payload = payload
         self.usage = usage
 
-    def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
+    def model_dump(self, *, exclude_none: bool = False, by_alias: bool = False) -> dict[str, Any]:
         return self._payload
 
 
@@ -32,7 +34,7 @@ class _FakeStreamEvent:
         self._payload = payload
         self.response = response
 
-    def model_dump_json(self, *, exclude_none: bool = False) -> str:
+    def model_dump_json(self, *, exclude_none: bool = False, by_alias: bool = False) -> str:
         return json.dumps(self._payload)
 
 
@@ -305,6 +307,71 @@ def test_responses_endpoint_no_usage_data(
 
     assert result.status_code == 200
     assert result.json()["id"] == "resp_no_usage"
+
+
+_JSON_SCHEMA_FORMAT = {
+    "type": "json_schema",
+    "name": "answer",
+    "schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+    "strict": True,
+}
+
+
+def _structured_response(status: str = "completed") -> Response:
+    """A Responses object echoing the JSON schema it was asked for, as OpenAI and Groq answer."""
+    return Response.model_validate(
+        {
+            "id": "resp_json",
+            "object": "response",
+            "created_at": 1700000000,
+            "model": "gpt-4.1",
+            "status": status,
+            "output": [],
+            "parallel_tool_calls": True,
+            "tool_choice": "auto",
+            "tools": [],
+            "text": {"format": _JSON_SCHEMA_FORMAT},
+            "usage": {
+                "input_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 7,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 12,
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_responses_endpoint_returns_the_json_schema_under_its_wire_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+    stream: bool,
+) -> None:
+    """``text.format.schema`` is ``schema_`` in Python, and a client reading ``schema_`` finds no schema."""
+    responses_request_body.update({"stream": stream, "text": {"format": _JSON_SCHEMA_FORMAT}})
+
+    async def _events() -> AsyncIterator[ResponseCreatedEvent | ResponseCompletedEvent]:
+        yield ResponseCreatedEvent(
+            type="response.created", sequence_number=0, response=_structured_response("in_progress")
+        )
+        yield ResponseCompletedEvent(type="response.completed", sequence_number=1, response=_structured_response())
+
+    reply: Any = _events() if stream else _structured_response()
+
+    with patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock, return_value=reply):
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
+
+    assert result.status_code == 200, result.text
+    if stream:
+        bodies = [json.loads(line[6:])["response"] for line in result.iter_lines() if line.startswith("data: {")]
+    else:
+        bodies = [result.json()]
+    assert len(bodies) == (2 if stream else 1)
+    for body in bodies:
+        assert body["text"]["format"] == _JSON_SCHEMA_FORMAT
+        Response.model_validate(body)
 
 
 def test_responses_endpoint_streaming_mid_stream_error(

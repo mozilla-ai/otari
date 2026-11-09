@@ -300,7 +300,8 @@ class _ResponsesAdapter:
         )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
-        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
+        # By alias, so a JSON schema format's ``schema`` keeps its wire name rather than its field name, ``schema_``.
+        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
@@ -653,6 +654,7 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    body = result.model_dump(exclude_none=True)
+    # By alias, as each streamed event is (see ``format_chunk``).
+    body = result.model_dump(exclude_none=True, by_alias=True)
     await idempotency.complete(body, response)
     return body

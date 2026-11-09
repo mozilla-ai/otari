@@ -483,7 +483,7 @@ def test_responses_retry_is_replayed(
     class _Result:
         usage = None
 
-        def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
+        def model_dump(self, *, exclude_none: bool = False, by_alias: bool = False) -> dict[str, Any]:
             return {"id": "resp_idem", "output": [{"type": "message", "content": "Hello"}]}
 
     provider = AsyncMock(return_value=_Result())
