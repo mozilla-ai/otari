@@ -330,7 +330,12 @@ def test_requiring_zero_data_retention_lists_a_model_the_workspaces_own_declared
     declared = _ok(
         client.post(
             f"{API_ROOT}/organizations/me/provider-keys",
-            json={"provider": "anthropic", "name": "declared", "api_key": "sk-org-zdr-9012", "zero_data_retention": True},
+            json={
+                "provider": "anthropic",
+                "name": "declared",
+                "api_key": "sk-org-zdr-9012",
+                "zero_data_retention": True,
+            },
             headers=master_key_header,
         )
     )
