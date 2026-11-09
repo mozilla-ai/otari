@@ -154,6 +154,17 @@ class TestHalfConfiguredOAuthIsAnnounced:
         finally:
             gateway_logger.removeHandler(caplog.handler)
 
+    def test_an_address_too_malformed_to_parse_still_refuses_rather_than_raising(self) -> None:
+        """The refusal is the answer for it either way, and a raise here would answer 500 instead."""
+        config = GatewayConfig(
+            public_base_url="https://[bad",
+            oauth_google_client_id="google-id",
+            oauth_google_client_secret="google-secret",  # noqa: S106
+        )
+
+        with pytest.raises(OAuthNotConfiguredError):
+            oauth_service.require_configured(config, "google")
+
     def test_an_address_carrying_credentials_is_refused_for_what_is_wrong_with_it(self) -> None:
         """An https address the library still refuses must not be reported as needing https."""
         config = GatewayConfig(

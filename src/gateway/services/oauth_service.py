@@ -462,8 +462,16 @@ def require_configured(config: GatewayConfig, provider: str) -> None:
 
 
 def _address_carries_credentials(config: GatewayConfig) -> bool:
-    """Whether this deployment's own address embeds a user or a password."""
-    parsed = urlsplit(config.public_base_url or "")
+    """Whether this deployment's own address embeds a user or a password.
+
+    An address this cannot parse carries nothing to report, and the refusal it is deciding between
+    is the right answer for it either way: this only runs once the library has already refused the
+    redirect URI the address built.
+    """
+    try:
+        parsed = urlsplit(config.public_base_url or "")
+    except ValueError:
+        return False
     return parsed.username is not None or parsed.password is not None
 
 
