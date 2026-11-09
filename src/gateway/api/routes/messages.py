@@ -545,6 +545,7 @@ _ERR_PERMISSION = "permission_error"
 _ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
+_ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
 # through ``error_kind_for_status``, so one status cannot be classified two ways.
@@ -555,6 +556,7 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.NOT_FOUND: _ERR_NOT_FOUND,
     ErrorKind.PERMISSION: _ERR_PERMISSION,
     ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
+    ErrorKind.REQUEST_TOO_LARGE: _ERR_REQUEST_TOO_LARGE,
 }
 
 

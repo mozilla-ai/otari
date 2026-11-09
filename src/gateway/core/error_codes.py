@@ -40,6 +40,8 @@ MODEL_NOT_FOUND = "model_not_found"
 # ``provider_supported_countries`` closes the model's provider to the country the request comes from.
 COUNTRY_NOT_SUPPORTED = "country_not_supported"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+# The provider refused the request for its size (an upstream 413), such as a prompt over a tokens-per-minute limit.
+REQUEST_TOO_LARGE = "request_too_large"
 # The model the request reached does not accept a kind of content the request carries, such as an image.
 UNSUPPORTED_CONTENT = "unsupported_content"
 # The provider cannot express a request parameter for the model, such as ``response_format`` on one with no JSON mode.

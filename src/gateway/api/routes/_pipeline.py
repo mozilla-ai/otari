@@ -143,6 +143,7 @@ from gateway.core.error_codes import (
     PROVIDER_ERROR,
     PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
+    REQUEST_TOO_LARGE,
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     UPSTREAM_RATE_LIMITED,
@@ -532,6 +533,7 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+PROVIDER_REQUEST_TOO_LARGE_DETAIL = "The provider refused the request as too large (reduce the request size)"
 
 
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
@@ -566,6 +568,7 @@ class ErrorKind(Enum):
     NOT_FOUND = auto()
     PERMISSION = auto()
     RATE_LIMIT = auto()
+    REQUEST_TOO_LARGE = auto()
 
 
 # An error flattened into an ``HTTPException`` no longer carries its kind, so a
@@ -575,6 +578,7 @@ _STATUS_ERROR_KINDS = {
     status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
     status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
     status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
     status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
 }
 
@@ -912,6 +916,13 @@ def classify_provider_error(
         return ProviderErrorMapping(
             status.HTTP_429_TOO_MANY_REQUESTS, _upstream_message_detail(exc, PROVIDER_RATE_LIMITED_DETAIL)
         )
+    # A 413 refuses the request for its size, so it fails the same way on every
+    # retry and the provider's sentence (the limit, the size requested) is what
+    # tells the caller how far to shrink it.
+    if status_code == 413:
+        return ProviderErrorMapping(
+            status.HTTP_413_CONTENT_TOO_LARGE, _upstream_message_detail(exc, PROVIDER_REQUEST_TOO_LARGE_DETAIL)
+        )
     return None
 
 
@@ -933,6 +944,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(UNSUPPORTED_CONTENT)
     if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
         return error_headers(UNSUPPORTED_PARAMETER)
+    if status_code == status.HTTP_413_CONTENT_TOO_LARGE and upstream_exception_shape(exc)[1] == 413:
+        return error_headers(REQUEST_TOO_LARGE)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
         return error_headers(missing.code)

@@ -29,6 +29,7 @@ from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
     CONTEXT_LENGTH_EXCEEDED,
     PROVIDER_CREDENTIAL_REJECTED,
+    REQUEST_TOO_LARGE,
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     error_code_of,
@@ -100,6 +101,11 @@ def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
     return f"The prompt is too long for every model tried ({tried} attempts)."
 
 
+def request_too_large_for_every_attempt_detail(tried: int) -> str:
+    """413 detail for a request every attempt refused as too large."""
+    return f"The request is too large for every model tried ({tried} attempts)."
+
+
 def no_attempt_accepts_images_detail(tried: int) -> str:
     """400 detail for a request carrying an image that no attempt's model accepts."""
     return f"None of the models tried accepts image content ({tried} attempts)."
@@ -145,6 +151,12 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     statuses = {answer.status_code for answer in answers}
     if statuses == {status.HTTP_404_NOT_FOUND}:
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=no_attempt_served_detail(len(errors)))
+    if statuses == {status.HTTP_413_CONTENT_TOO_LARGE}:
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=request_too_large_for_every_attempt_detail(len(errors)),
+            headers=error_headers(REQUEST_TOO_LARGE),
+        )
     if statuses != {status.HTTP_400_BAD_REQUEST}:
         return None
     if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
