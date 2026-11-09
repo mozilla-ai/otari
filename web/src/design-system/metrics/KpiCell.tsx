@@ -23,6 +23,25 @@ export function KpiCell({
   graphic?: ReactNode
 }) {
   return (
+    // `grid-rows-subgrid` over `row-span-4` is what keeps the five values on one
+    // baseline. The cells are equal-height grid items, so a wrapped label used
+    // to make its own cell taller and push its value down while the other four
+    // stayed put (measured with a 1180px column: value tops 241 against 223).
+    // Subgridding the cell's four parts onto the strip's own rows lines the
+    // labels, values, deltas and graphics up with their neighbors instead, and
+    // reserves nothing when no label wraps, so it costs no dead space wide.
+    // `items-end` on the label is what makes a one-line label sit on the same
+    // baseline as the last line of a two-line one.
+    // `minmax(0,1fr)` for the cell's own column, not the `auto` a grid gives
+    // itself by default. The strip's tracks are already `minmax(0,1fr)`, so the
+    // cell's box is its track; what was unbounded was the column INSIDE it,
+    // which took its floor from the widest child. The subline never wraps, so
+    // its min-content is the whole string: measured with a 59-character
+    // subline, the inner column came out 356px inside a 283px cell and every
+    // child sized to it, the sparkline included, painted 129px into the cell
+    // beside it (218px at 1280, since the track shrinks and the string does
+    // not). Bounding the column is what makes the truncation and the
+    // sparkline's `w-full` mean anything.
     //
     // The rule between cells belongs to a cell with a neighbor on its right,
     // so it comes off the last cell of each row, at every column count. On a
