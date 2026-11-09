@@ -1,5 +1,7 @@
 import { Chip, type ChipTone } from "@/design-system/indicators/Chip"
+import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { KEEPING_CONTENT } from "./explain"
 import { GATE_KIND, GATE_MOMENT, says } from "./gateWords"
 import type { GuardrailVerdict } from "./gateway"
 import type { GateCheck, JudgeCalls } from "./types"
@@ -136,9 +138,9 @@ export function GateCard({ gate }: { gate: GateCheck }) {
       {gate.detail ? <Read title="What it found" text={gate.detail} /> : null}
       {!gate.evidence && !gate.detail ? (
         <p className="text-caption text-subtle">
-          What this check read is not kept. <code>otari hook</code> sends it
+          What the gate checked is not shown. <code>otari hook</code> sends it
           with <code>OTARI_HOOK_REPORT_CONTENT=1</code>, to a server that keeps
-          content.
+          content. <DocsLink href={KEEPING_CONTENT}>How to keep it</DocsLink>
         </p>
       ) : null}
     </div>
