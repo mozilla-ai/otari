@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { FiLock } from "react-icons/fi"
 
 import type {
@@ -73,26 +73,30 @@ export function SessionContent({
 
   if (access === "break_glass") {
     return (
-      <InfoBanner tone="warning">
-        Opened by break-glass, without its owner's share. The opening is
-        recorded with your reason, and every owner of the organization can see
-        it.
-      </InfoBanner>
+      <Band>
+        <InfoBanner tone="warning">
+          Opened by break-glass, without its owner's share. The opening is
+          recorded with your reason, and every owner of the organization can see
+          it.
+        </InfoBanner>
+      </Band>
     )
   }
   if (access === "share" && detail.content_share) {
     const share = detail.content_share
     return (
-      <InfoBanner>
-        Shared with you by the person whose session this is.
-        {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
-        you read it, and when.
-      </InfoBanner>
+      <Band>
+        <InfoBanner>
+          Shared with you by the person whose session this is.
+          {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
+          you read it, and when.
+        </InfoBanner>
+      </Band>
     )
   }
   if (holdsPrivate) {
     return (
-      <div className="flex flex-col gap-3">
+      <Band>
         <InfoBanner>
           What this session was about is private to the person whose session it
           is. They can share it with the organization's admins, or with the team
@@ -101,7 +105,7 @@ export function SessionContent({
         {onBreakGlass ? (
           <BreakGlassAction detail={detail} onOpened={onBreakGlass} />
         ) : null}
-      </div>
+      </Band>
     )
   }
   // On ownership alone, not on the content having opened: during a key-source
@@ -109,6 +113,21 @@ export function SessionContent({
   // stop a share and see who read it.
   if (owned) return <OwnerSharing detail={detail} />
   return null
+}
+
+/**
+ * The band the session's notice sits in, above the peek's two panes.
+ *
+ * Drawn by whatever has something to say rather than by the caller: a wrapper
+ * around a null child still draws its own border, and an ordinary session says
+ * nothing at all.
+ */
+function Band({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-3 border-b border-border px-4 py-3">
+      {children}
+    </div>
+  )
 }
 
 /** Whether the reader owns the session and it kept something of theirs to share. */
@@ -251,7 +270,7 @@ function OwnerSharing({ detail }: { detail: TraceDetail }) {
   if (items.length === 0 && !shares.error) return null
 
   return (
-    <div className="flex flex-col gap-3">
+    <Band>
       <ErrorBanner error={shares.error ?? endShare.error} />
       {shares.hasNextPage ? (
         <div>
@@ -279,7 +298,7 @@ function OwnerSharing({ detail }: { detail: TraceDetail }) {
           ))}
         </ul>
       ) : null}
-    </div>
+    </Band>
   )
 }
 
