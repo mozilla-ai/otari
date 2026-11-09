@@ -760,6 +760,33 @@ def test_a_fetch_tools_cost_tier_is_set_only_by_its_configuration() -> None:
         resolve_fetch(config, None, requested="reader", for_search=None, request_options={"depth": "basic"})
 
 
+def test_a_search_tool_whose_cost_tier_the_provider_refuses_does_not_run(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"depth": "Basic"}}})
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="test", request_options=None)
+    assert refused.value.message == "Search tool 'test' is not configured correctly."
+    assert "Dropping an option" not in _warnings(caplog)
+    # Nor is it the in-loop default, so in-loop search is off.
+    assert resolve_search(config, _policy(), requested=None, request_options=None) is None
+
+
+def test_a_fetch_tool_whose_cost_tier_the_provider_refuses_names_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(
+        fetch_tools={"reader": {"provider": "fake", "options": {"depth": "deep"}}}, web_fetch_default_tool="reader"
+    )
+
+    assert resolve_fetch(config, None, requested=None, for_search=None).name == "builtin_fetch"
+    assert "Fetch instance 'reader' is left out: fake does not take the value of its option 'depth'" in _warnings(
+        caplog
+    )
+    assert "deep" not in _warnings(caplog)
+    with pytest.raises(SearchToolNotFoundError):
+        resolve_fetch(config, None, requested="reader", for_search=None)
+
+
 def test_a_cost_tier_stays_open_where_the_provider_reports_the_cost(monkeypatch: pytest.MonkeyPatch) -> None:
     reporting = any_search.AnySearch.get_provider_metadata("fake").model_copy(update={"reports_cost": True})
     real = any_search.AnySearch.get_provider_metadata

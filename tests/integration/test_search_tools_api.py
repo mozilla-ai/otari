@@ -949,6 +949,26 @@ def test_a_stored_instance_is_tested_by_name(client: TestClient, master_key_head
     assert resp.json() == {"ok": False, "error": "timeout", "hits": None, "characters": None}
 
 
+@pytest.fixture
+def refused_tier_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A client whose config-file search tool sets a cost tier value the ``fake`` provider refuses."""
+    file_tool = {"provider": "fake", "options": {"depth": "Basic"}}
+    yield from build_test_client(test_config.model_copy(update={"search_tools": {"from-file": file_tool}}))
+
+
+def test_a_tool_whose_cost_tier_the_provider_refuses_is_refused_a_test(
+    refused_tier_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    resp = refused_tier_client.post(
+        f"{API_ROOT}/search-tools/from-file/test", json={"query": "q"}, headers=master_key_header
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Search tool 'from-file' does not run: fake does not take the value of its option 'depth', "
+        "which sets the price of each call."
+    )
+
+
 @pytest.mark.parametrize("trusted", [False, True])
 def test_builtin_fetch_is_tested_with_one_fetch_as_a_fetch_tool_call_makes(
     client: TestClient,
