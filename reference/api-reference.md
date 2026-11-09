@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/497e07baf79c7d1e28ba9331637f16fd74434e0a/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/887a13dc347bf51d510e2177886c7965709bce37/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -357,6 +357,21 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
   estimate from the request and the text streamed so far: tokens only, with
   no per-request charge.
+- A stream the provider cut after it started answering, with no usage
+  reported or only the input tokens (an Anthropic stream), is billed the same
+  way under `estimate`: the reported input tokens, or an estimate of the
+  request, plus an estimate of the text already streamed, never a projected
+  full answer. The row stays an `error` with its error message, so it counts
+  in the error totals, and its estimated cost counts in spend. A stream the
+  client abandoned after the provider reported only its input tokens is
+  topped up the same way, so leaving early never costs less than the output
+  already received.
+- When a usage row is written for a stream cut before it completed,
+  `stream_cut_by` records who ended it: `provider` when the upstream dropped
+  it or failed after it started answering, `client` when the caller
+  disconnected. A provider failure before the first chunk is an ordinary
+  error, and a client disconnect that writes no row (above) records nothing.
+  The field is null on any row whose stream was not cut.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -1104,7 +1119,7 @@ Anthropic answers it, whose message names each failing field.
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
-| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
+| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions, and Responses translated from a chat completion) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
@@ -1167,9 +1182,10 @@ provider with its own Responses API, a stream is finished once the provider send
 `response.completed`, `response.incomplete` or `response.failed`, and one that
 closes before them ends the same way. A Responses stream Otari
 [translates from a chat completion](#responses-on-providers-without-a-responses-api)
-always ends in `response.completed`, or in `response.incomplete` when the
-provider stopped for length or a content filter, so one the provider cut short
-is not caught and closes as a success. The error event's message is the `detail` the same failure would carry as an HTTP
+ends in `response.completed`, or in `response.incomplete` when the
+provider stopped for length or a content filter, once a chunk reports its
+`finish_reason`, as on Chat Completions. One that closes without any ends in
+the same error event. The error event's message is the `detail` the same failure would carry as an HTTP
 error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed
