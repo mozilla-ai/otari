@@ -904,8 +904,18 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
-precedence. Rates and settled costs use decimal arithmetic and costs are rounded
+Each start writes the config file's prices to the database. An entry with no
+`effective_at` adds a version only when its rates differ from the version in
+force, whoever set that version, so an unchanged file adds nothing, and a start
+puts the file's rate back over one set since through `/api/v1/pricing` or the
+dashboard. To keep a rate set there, remove the model's entry from this file or
+give it the same rate. An entry with `effective_at` adds its version once, and a
+version already stored at that instant is kept. An entry for a model of a
+[hosted provider](hosted-providers.md) is skipped with a warning, because this
+file prices only the `providers:` and `decision_providers:` instances and the
+tools it declares: price a hosted provider's model through the pricing API or
+the Hosted providers page.
+Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
 A stored price change, made through the API, the dashboard or a catalog update,
@@ -1013,8 +1023,12 @@ provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
 Each stored rate also carries its `unit` (one of the units under
-[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin` (`config` or `api`), so a rate the config file re-seeds on
-every restart is distinguishable from one set in the dashboard.
+[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin`:
+`config` for a rate from this file, `api` for one set through the pricing API or
+the dashboard, `seed` for one a catalog update copied from models.dev for a
+model a hosted provider serves, and `migration` for one an upgrade wrote. It is
+null on a rate stored before origins were recorded. A catalog update moves only
+a `seed` rate.
 
 ### A public catalog
 

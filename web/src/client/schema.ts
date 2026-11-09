@@ -16831,7 +16831,7 @@ export interface components {
             model_key: string;
             /**
              * Origin
-             * @description Which writer set this row: config, api, or migration. Null when recorded before origins were.
+             * @description Which writer set this row: config, api, seed or migration. Null before origins were recorded.
              */
             origin: string | null;
             /** Output Price Per Million */
