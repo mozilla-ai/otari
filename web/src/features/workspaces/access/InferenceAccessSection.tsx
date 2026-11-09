@@ -150,15 +150,17 @@ export function InferenceAccessSection({
     }
   }
 
+  // No dialog without the policy: one left open across a switch to a workspace
+  // whose policy cannot be read would save there while its rows are held.
   const openKey =
-    open?.kind === "key"
+    open?.kind === "key" && policy.data
       ? keyRows.find((row) => row.org_provider_key_id === open.id)
       : undefined
   const openKeyRecord = openKey
     ? byId.get(openKey.org_provider_key_id)
     : undefined
   const openHosted =
-    open?.kind === "hosted"
+    open?.kind === "hosted" && policy.data
       ? hostedRows.find((row) => row.provider === open.provider)
       : undefined
 
