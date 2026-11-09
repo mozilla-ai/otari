@@ -21,11 +21,10 @@ When the model emits an MCP tool call, Otari:
 - calls the model again
 
 The loop stops when the model returns a normal assistant response. Its last
-allowed round, the one `max_tool_iterations` names, offers the model none of
-Otari's tools and tells it to answer from the results it already has, so a model
-that would keep calling tools still ends with an answer. Your own tools stay on
-offer in that round. The request fails only if the model calls one of Otari's
-tools anyway.
+allowed round (the one `max_tool_iterations` names) offers the model none of
+Otari's tools and tells it to answer from the results it already has. Your own
+tools stay on offer in that round. The request fails only if the model calls
+one of Otari's tools anyway.
 
 That loop is managed MCP. To run the tool loop in your own application instead,
 see [Caller-orchestrated MCP](#caller-orchestrated-mcp).
@@ -77,12 +76,9 @@ Which stored servers a key reaches, and which of their tools, is each server's
 as an unknown id does, and the tools it may not run are never offered to the
 model.
 
-The same stored servers are what
-[caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
-registered once serves both integration modes. The two read a disabled server
-differently, and deliberately: the loop above resolves a list and skips one
-entry, while an endpoint asked about exactly that server answers `404` rather
-than returning nothing.
+[Caller-orchestrated MCP](#caller-orchestrated-mcp) refers to the same stored
+servers by id. It treats a disabled server differently: its endpoints answer
+`404` for it, where the managed loop skips it.
 
 ### Configuring them
 
@@ -118,13 +114,11 @@ an owner/admin of that workspace.
 - `name` is unique within a workspace; a duplicate is refused with `409`.
 - `enabled: false` keeps the row and its token but takes the server out of
   every request that names it.
-- The URL is checked for SSRF safety when it is stored as well as when a
-  request uses it, and must be `https://` when a token is set. A stored URL that
-  passes the first check and fails the second, because the host it resolves to
-  moved, refuses the request with a `500`: the endpoint is a workspace setting
-  the caller cannot see or fix, so the reason goes to the log rather than into
-  the response. A URL sent in the request body is yours to fix and still fails
-  with a `400` naming what was wrong with it.
+- The URL is checked for SSRF safety when it is stored and again when a
+  request uses it, and must be `https://` when a token is set. A stored URL
+  that fails the second check (because the host it resolves to moved) refuses
+  the request with a `500`, with the reason in the log only. A URL sent in the
+  request body fails with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 - `everyone_tools` (default `["*"]`) is the server's default policy, and
   `read_tools` (default `[]`) the tools labeled read; see
@@ -215,9 +209,8 @@ server can mark any tool read-only, so a hint counts only once a manager saves i
 - **A denied key cannot tell the server exists.** Every route answers it as it
   would an unknown id: `GET /api/v1/mcp/servers` leaves the server out, a
   completion naming it in `mcp_server_ids` gets a `404`, and discovery and
-  execution answer `404 mcp_server_not_found`. A `403` would confirm the server
-  is there, so a restricted key could map a workspace's servers by probing ids.
-  To see why a key was turned away, use `GET .../access/check` (below).
+  execution answer `404 mcp_server_not_found`. To see why a key was turned
+  away, use `GET .../access/check` (below).
 - **A tool outside the key's rule is never offered to the model.** On
   `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
 - **In a completion, the model is told what it may not use.** The server's line in
@@ -281,7 +274,10 @@ one per key.
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request. [Combining tools](tools.md#combining-tools) describes how, including when a server tool named like a built-in is refused
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
-- Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` with a fixed detail that names neither server; rename or remove the inline entry, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
+- Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name:
+  - two `mcp_servers` entries sharing a name: `400` naming it;
+  - an `mcp_servers` name colliding with a stored server of your workspace: `400` with a fixed detail that names neither server (rename or remove the inline entry);
+  - two stored servers sharing a name: `500`, with the names in the log
 - A URL whose host Otari cannot read is refused as invalid with a `400` before any address check, so an IPv6 host needs brackets (`http://[2400:8901::1]:8787/mcp`) and a port has to be a number
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
 - The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
@@ -299,23 +295,22 @@ names, and parsed input. A matching
 Each block uses a `content_block_start` / `content_block_stop` pair. Without an
 MCP client beta, Otari still runs the call but omits these activity blocks.
 
-The blocks report execution without transferring it: Otari runs the call, feeds
-the result back to the model, and returns one logical Messages stream. It strips
-the blocks from history echoed on later turns and never includes the server URL,
-authorization token, or headers. Chat Completions and Responses streams continue
-to hide this activity because they have no equivalent server-owned MCP vocabulary.
+The blocks report execution only: Otari runs the call, feeds the result back to
+the model, and returns one logical Messages stream. It strips the blocks from
+history echoed on later turns and never includes the server URL, authorization
+token, or headers. Chat Completions and Responses streams do not carry this
+activity.
 
 ## Caller-orchestrated MCP
 
-Otari supports two MCP integration modes, and they are alternatives rather than
-layers.
+Otari has two alternative MCP integration modes:
 
-**Managed MCP** is the loop the sections above describe: you send `mcp_servers` or `mcp_server_ids`
-with a completion, and Otari owns the model/tool loop.
-
-**Caller-orchestrated MCP** hands the loop back to your application. Otari
-provides two stored-server endpoints, and your application decides whether a
-proposed call may run:
+- **Managed MCP** is the loop the sections above describe: you send
+  `mcp_servers` or `mcp_server_ids` with a completion, and Otari owns the
+  model/tool loop.
+- **Caller-orchestrated MCP** hands the loop back to your application. Otari
+  provides two stored-server endpoints, and your application decides whether a
+  proposed call may run:
 
 1. `GET /api/v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a
    stored MCP server exposes to the authenticated workspace.
@@ -333,16 +328,13 @@ What Otari enforces independently is authentication, that the stored server is
 one the authenticated workspace may reach, the stored tool allowlist, URL
 safety, and its own execution bounds.
 
-Between the two requests Otari holds nothing open: no model stream, no MCP
-session, no database session, no worker-local state. That is why your
-application can pause for a person for as long as it needs to.
+Between the two requests Otari holds nothing open (no model stream, MCP
+session, database session or worker-local state), so your application can pause
+for a person for as long as it needs to.
 
-Both endpoints refer to a server by the id it was registered under. There is no
-inline server field: registering a remote MCP server with Otari
-once, rather than transmitting a URL and a credential per request, is what keeps
-authorization, credential storage, revocation, and allowlist policy on Otari's
-side of the boundary. Local `stdio` servers stay outside this: a remote Otari
-deployment cannot reach a machine-local process.
+Both endpoints refer to a server by the id it was registered under; there is no
+inline server field. Local `stdio` servers are not supported, since a remote
+Otari deployment cannot reach a machine-local process.
 
 ### Listing the servers a key can reach
 
@@ -411,8 +403,7 @@ safety from a tool's name or description. Your risk policy is yours.
 
 `tools` is either the complete authorized catalog or absent: a pagination
 failure or a discovery ceiling returns `502 mcp_discovery_limit_exceeded` with no
-tools at all, because a short catalog would be read as the complete input to
-your authorization policy. The one exception is `warnings`, which names a tool
+tools at all, never a partial list. The one exception is `warnings`, which names a tool
 whose descriptor Otari could not carry, for example a schema that is too large or
 one with a `$ref` pointing outside itself:
 
@@ -468,25 +459,19 @@ The successful body is the native MCP result:
 }
 ```
 
-`isError: true` is still an HTTP 200. The server handled the call and classified
-the outcome itself, so it is a definitive result rather than a transport failure,
-and it is not a retry signal.
+`isError: true` is still an HTTP 200: the server handled the call and
+classified the outcome itself. It is a definitive result, not a retry signal.
 
 `server_revision` is the value discovery returned. Persist it with the proposed
 call and send it back. It is an opaque revision of the stored server's URL,
 credential, enabled state and allowlist, so a configuration change between your
 authorization decision and this request is refused with
-`409 mcp_server_changed` rather than executed against something else. It is not
-an approval credential.
+`409 mcp_server_changed`. It is not an approval credential.
 
-It detects Otari-side configuration changes only. A remote
-server that changes its own catalog, or a tool's behavior, behind an unchanged
-URL will not move it; catching that would need another live `tools/list` at
-execution time, which this version does not do. The revision binds the request
-only to the stored server configuration returned by discovery. The calling
-application is responsible for binding the server id,
-revision, remote tool name, and final arguments to its authorization or approval
-record. Neither mechanism binds the call to an immutable remote implementation.
+It detects Otari-side configuration changes only. A remote server that changes
+its own catalog, or a tool's behavior, behind an unchanged URL does not change
+it. The calling application is responsible for binding the server id, revision,
+remote tool name, and final arguments to its authorization or approval record.
 
 `client_execution_id` is a canonical UUID you generate, for correlation across
 your service and Otari. It is not proof of approval and **not an idempotency
@@ -506,8 +491,7 @@ session rather than as a session of its own. Discovery is not recorded.
 ### Never retry an execution automatically
 
 Repeating a request with the same `client_execution_id` may execute the tool
-again. Otari implements no deduplication, because a worker-local one would not
-survive a second process or a restart.
+again. Otari implements no deduplication.
 
 Send exactly one HTTP attempt for `POST /api/v1/mcp/execute`, and make sure nothing
 on the path adds attempts of its own: your SDK, your own retry policy, and the
@@ -546,8 +530,7 @@ Both endpoints share one error body:
 
 `detail` is a fixed safe message per category; `code` and `execution_state` are
 stable enums. `request_id` is an opaque Otari request id, present in every error
-body and returned in `Otari-Request-ID` on success and failure alike, which is
-why a successful body stays the plain MCP result. No error carries a server URL,
+body; the `Otari-Request-ID` header carries it on success and failure alike. No error carries a server URL,
 a credential, a header, your arguments, a result, or raw
 exception text.
 

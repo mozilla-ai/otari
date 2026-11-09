@@ -4,12 +4,9 @@ icon: laptop-code
 
 # Framework integrations
 
-Point the AI tools and frameworks you already use at Otari, and their requests
-are tracked and can use budgets, fallback routing and guardrails, with few
-changes to how you work. Budgets and guardrails apply once you set them up; see
-[Set a budget and ceiling](set-a-budget-and-ceiling.md) and
-[Manage guardrails](manage-guardrails.md). Each guide shows the settings for otari.ai first and for a gateway
-you run second.
+Otari integrates with popular AI development frameworks and coding tools. By connecting your existing tools and applications to Otari, you can manage all your LLM requests and benefit from features such as usage tracking, cost management, [budgets](set-a-budget-and-ceiling.md), fallback routing, and [guardrails](manage-guardrails.md), where supported. Explore the integration guides to learn how to configure each tool to work with Otari, with minimal changes to your existing workflows.
+
+## Supported integrations
 
 - [Claude Code](use-with-claude-code.md)
 - [Codex](use-with-codex.md)

@@ -1,8 +1,7 @@
 # Use with LangChain
 
-LangChain chains and agents run through Otari with `langchain-otari`, whose
-`ChatOtari` is LangChain's `ChatOpenAI` pointed at Otari's OpenAI-compatible API
-(`POST /api/v1/chat/completions`). Every call then gets Otari's budgets, usage
+`langchain-otari` gives LangChain a chat model, `ChatOtari`, that sends
+requests through Otari. Your chains and agents then get Otari's budgets, usage
 tracking, fallback routing and guardrails. For graphs, see
 [Use with LangGraph](use-with-langgraph.md).
 
@@ -14,16 +13,16 @@ Install the package:
 pip install langchain-otari
 ```
 
-Create an API key on the **API keys** page of the [otari.ai](https://otari.ai)
+Create a key on the **API keys** page of the [otari.ai](https://otari.ai)
 dashboard and export it:
 
 ```bash
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-On otari.ai that key is all the configuration there is (your organization needs
-credit or provider keys of its own there, or requests answer 402). For a gateway
-you run yourself, use a key it issued and also export its API root:
+On otari.ai, the key is all you need, as long as your organization has credit or
+its own provider keys (otherwise requests answer `402`). For a gateway you run,
+use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -40,24 +39,23 @@ print(llm.invoke("Say hello in one sentence.").content)
 ```
 
 Without `OTARI_BASE_URL`, requests go to otari.ai's gateway,
-`https://api.otari.ai/api/v1`. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use. Set `OTARI_BASE_URL` to the EU host in that case.
-`base_url` and `api_key` arguments override both
-variables. `ChatOtari` never falls back to `OPENAI_API_KEY`, so an OpenAI key in
-your environment is not sent to the gateway by mistake, and it asks Otari for
-token usage on streams too.
+`https://api.otari.ai/api/v1`. EU accounts set `OTARI_BASE_URL` to
+`https://eu.api.otari.ai/api/v1` ([Base URL](api-reference.md#base-url)).
+The `base_url` and `api_key` arguments override both variables. `ChatOtari`
+never reads `OPENAI_API_KEY`, so an OpenAI key in your environment is never sent
+to the gateway, and it reports token usage on streams too.
 
-`ChatOtari` takes every `ChatOpenAI` argument and works for every provider Otari
-routes to: Otari translates the Chat Completions request for Anthropic, Mistral,
-Gemini and the rest, so the same chain switches provider by changing only
-`model`. Write `model` as Otari spells it, `provider:model`
-(`ChatOtari(model="anthropic:claude-sonnet-4-6")`), or as a routing policy or
-alias name; [Model format](models.md#model-format) has every spelling and
-[Listing available models](models.md#listing-available-models) shows which your
-key can use.
+`ChatOtari` takes every `ChatOpenAI` argument and works with every provider Otari
+routes to, so a chain switches provider by changing only `model`. Write `model`
+as Otari spells it, `provider:model` (such as
+`ChatOtari(model="anthropic:claude-sonnet-4-6")`), or as a routing policy or
+alias name. See [Model format](models.md#model-format) and
+[Listing available models](models.md#listing-available-models).
 
 ## Agents and tools
 
-`create_agent` runs the tool loop; every model call in it goes through Otari:
+`create_agent` runs the tool loop, and every model call in it goes through
+Otari:
 
 ```python
 from langchain.agents import create_agent
@@ -107,15 +105,14 @@ print()
 
 ## One key per project
 
-Give each project its own Otari key, so its usage and spend are reported apart, a
-budget on the key caps that project alone, and revoking the key stops only that
-project. See [Access control](access-control.md) and
-[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Give each project its own key. Its usage is then reported separately, a
+[budget on the key](api-keys.md#cap-a-keys-spend) caps that project alone, and
+deleting the key stops only that project.
 
 ## Without the package
 
-`ChatOtari` is a thin layer over `ChatOpenAI`, so the same thing works with
-`langchain-openai` alone:
+`ChatOtari` is a thin layer over `ChatOpenAI`, so `langchain-openai` alone also
+works:
 
 ```python
 import os

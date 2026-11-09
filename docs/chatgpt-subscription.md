@@ -76,9 +76,8 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Configured pricing also drives budget enforcement. A counterfactual price can
-therefore exhaust a real Otari budget even though the subscription charged no
-per-request fee.
+Configured pricing also drives budget enforcement, so a counterfactual price
+can exhaust a real Otari budget.
 
 ## Route a request
 
@@ -93,5 +92,5 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-Provider routing, API-key access, usage logging, and configured budgets work as
-they do for any other named instance.
+Routing, API-key access, usage logging and budgets work as for any other named
+instance.
