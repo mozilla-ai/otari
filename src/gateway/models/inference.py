@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
@@ -20,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
+from gateway.models.money import UsdCost
 
 
 class BatchRecord(Base):
@@ -111,9 +113,11 @@ class VideoJobRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # What a completed job reported, kept because a provider that renders inside
-    # the start call has no job to look up later: its length, and where its video is.
+    # the start call has no job to look up later: its length, what the provider
+    # charged for it, and where its video is.
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_seconds: Mapped[int | None] = mapped_column(Integer)
+    completed_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
     output_url: Mapped[str | None] = mapped_column(Text)
     output_mime_type: Mapped[str | None] = mapped_column(String(255))
 

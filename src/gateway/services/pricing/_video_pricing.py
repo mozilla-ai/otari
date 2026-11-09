@@ -10,7 +10,8 @@ block prices video in another unit, or not at all, has no video rate.
 from dataclasses import replace
 from decimal import Decimal
 
-from gateway.core.metered_pricing import UnitRate
+from gateway.core.metered_pricing import UnitRate, quantize_cost
+from gateway.models.money import MAX_USD_COST
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing._charge import UsageCharge
 from gateway.services.pricing._price_rules import NO_FACTS, PriceFacts, apply_rules
@@ -42,3 +43,17 @@ def price_video(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = 
 
 def _applied(rate: ModelPricing | None, facts: PriceFacts) -> ModelPricing | None:
     return None if rate is None else apply_rules(rate, facts).rate
+
+
+def reported_video_cost(cost: float | None) -> Decimal | None:
+    """The provider's own ``cost`` for a video in USD, to the micro-dollar, or ``None`` when it is not a usable one.
+
+    A negative or non-finite amount, or one past the largest a cost column
+    holds, is neither kept nor billed.
+    """
+    if cost is None:
+        return None
+    amount = Decimal(str(cost))
+    if not amount.is_finite() or not 0 <= amount <= MAX_USD_COST:
+        return None
+    return quantize_cost(amount)

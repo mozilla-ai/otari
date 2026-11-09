@@ -356,6 +356,7 @@ async def test_a_completed_job_is_remembered_with_its_length_and_its_video(async
         status="completed",
         seconds=5,
         outputs=[VideoOutput(b64_data="AAAA"), VideoOutput(url="https://cdn.example/v.webm", mime_type="video/webm")],
+        cost=0.3899126,
     )
 
     await service.remember_completed(record, job)
@@ -363,8 +364,24 @@ async def test_a_completed_job_is_remembered_with_its_length_and_its_video(async
 
     assert remembered is not None
     assert (remembered.id, remembered.status, remembered.seconds) == ("video_done", "completed", 5)
+    assert remembered.cost == pytest.approx(0.389913)
     assert [(o.url, o.mime_type) for o in remembered.outputs] == [("https://cdn.example/v.webm", "video/webm")]
     assert remembered.completed_at is not None and remembered.created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_providers_charge_past_what_a_cost_holds_is_not_remembered(async_db: AsyncSession) -> None:
+    service = await _service(async_db)
+    await _record(service, "video_done")
+    record = await service.find("video_done")
+    assert record is not None
+
+    await service.remember_completed(
+        record, VideoJob(id="video_done", model="veo", status="completed", outputs=[], cost=1e13)
+    )
+    remembered = service.remembered(await service.find("video_done"))  # type: ignore[arg-type]
+
+    assert remembered is not None and remembered.cost is None
 
 
 @pytest.mark.asyncio
@@ -378,3 +395,4 @@ async def test_a_completed_job_with_only_inline_data_is_remembered_without_an_ou
     remembered = service.remembered(await service.find("video_done"))  # type: ignore[arg-type]
 
     assert remembered is not None and remembered.outputs == [] and remembered.seconds is None
+    assert remembered.cost is None
