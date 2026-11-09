@@ -969,7 +969,11 @@ class OrganizationService:
         an organization whose own SSO enforcement refuses the caller.
 
         NOTE: ``blocked`` is applied before the page is cut, so ``count`` is the number of
-        destinations the caller actually has and a page is short only at the end of the list.
+        destinations the caller actually has and a page is short only at the end of the list. That
+        is why the caller's own memberships are read in full rather than a page of them: the
+        refusal is not a condition the database can express, and counting what it leaves means
+        asking it of every membership. The set is the organizations one person belongs to, and
+        ``blocked`` answers off the row in hand for any that require nothing of their own.
         """
         rows = await self.members.get_active_by_user_with_organizations(user.id)
         admitted = [row for row in rows if not await blocked(row[1])]
