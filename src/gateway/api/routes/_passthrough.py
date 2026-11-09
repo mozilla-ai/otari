@@ -81,6 +81,8 @@ from gateway.core.error_codes import (
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
+    RefusalException,
+    body_fields_of,
     error_headers,
 )
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
@@ -544,11 +546,11 @@ async def run_passthrough(
 
     async def _refuse(
         reservation: ReservationHandle, resolved: ResolvedProvider, status_code: int, detail: str, **headers: str
-    ) -> HTTPException:
+    ) -> RefusalException:
         """Refund ``reservation``, record the refusal, and return the exception to raise."""
         await refund_reservation(db, reservation)
         await _log_rejection(detail, row_model=resolved.model, row_provider=resolved.instance, status_code=status_code)
-        return HTTPException(status_code=status_code, detail=detail, headers=headers or None)
+        return RefusalException(status_code, detail, headers=headers or None)
 
     async def _serve_hosted(
         resolved: ResolvedProvider, reservation: ReservationHandle, country_gate: CountryGate
@@ -922,9 +924,11 @@ async def run_passthrough(
                         strategy=config.budget_strategy,
                     )
                 except HTTPException as exc:
-                    raise await _refuse(
+                    refused = await _refuse(
                         reservation, resolved, exc.status_code, str(exc.detail), **(exc.headers or {})
-                    ) from exc
+                    )
+                    refused.fields = body_fields_of(exc)
+                    raise refused from exc
 
     refused_model = refuse_model(resolved) if refuse_model is not None else None
     if refused_model is not None:

@@ -150,6 +150,15 @@ Otari, on a request that names an end user on a service key:
 
 Blocking the key's user stops its end users too.
 
+When an end user's own budget refuses a request (`budget_exceeded` with
+`Otari-Budget-Scope: user`), or the end user is blocked (`user_blocked`), the
+refusal names it by the id the request gave, both in the message
+(`End user 'alice' ...`) and as `end_user` in the body, beside `code`:
+`{"detail": "End user 'alice' is blocked", "code": "user_blocked", "end_user": "alice"}`.
+A service can route the refusal to its own user from that field without
+parsing the message. A refusal from any other budget, such as the key's
+ceiling, carries no `end_user`.
+
 Moving an end user (to a budget on the key's list) restarts its period on the
 new budget and applies that budget's per-minute limits, but keeps its spend,
 tokens and requests so far, as moving any user between budgets does: an
