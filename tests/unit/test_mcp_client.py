@@ -364,7 +364,7 @@ def test_an_embedded_text_resource_reaches_the_model_with_its_text() -> None:
             EmbeddedResource(
                 type="resource",
                 resource=TextResourceContents(
-                    uri="repo://o/r/contents/a.py", mimeType="text/x-python", text="def f():\n    pass\n"
+                    uri="repo://o/r/contents/a.py", mime_type="text/x-python", text="def f():\n    pass\n"
                 ),
             ),
         ]
@@ -380,7 +380,7 @@ def test_an_embedded_blob_resource_is_summarized_not_decoded() -> None:
         content=[
             EmbeddedResource(
                 type="resource",
-                resource=BlobResourceContents(uri="repo://o/r/contents/a.png", mimeType="image/png", blob="iVBORw0K"),
+                resource=BlobResourceContents(uri="repo://o/r/contents/a.png", mime_type="image/png", blob="iVBORw0K"),
             )
         ]
     )
