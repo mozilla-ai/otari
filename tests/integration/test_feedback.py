@@ -1,4 +1,4 @@
-"""Feedback authentication, explicit payloads, and disabled deployments."""
+"""Feedback authentication, explicit payloads, the delivery port, and disabled deployments."""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -12,14 +12,40 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api import deps
+from gateway import container as container_module
+from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
+from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL, FeedbackDeliveryError
 from gateway.models.tenancy import DashboardSession, User
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.feedback import FeedbackService
 
-from .conftest import build_test_client
+from .conftest import build_test_client, declared_test_providers, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """Feedback is off unless a deployment turns it on."""
+    return shared_test_config(postgres_url, declared_test_providers()).model_copy(update={"feedback_enabled": True})
+
+
+@pytest.fixture(autouse=True)
+def _never_the_real_receiver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A send no test stubbed fails here instead of reaching api.otari.ai and the team's channel."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"a test reached the real feedback receiver at {request.url}")
+
+    original = ReceiverFeedbackDeliveryAdapter.__init__
+
+    def guarded(self: ReceiverFeedbackDeliveryAdapter, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        original(self, transport=transport or httpx.MockTransport(refuse))
+
+    monkeypatch.setattr(ReceiverFeedbackDeliveryAdapter, "__init__", guarded)
+
+
+def test_an_unstubbed_receiver_is_refused_locally() -> None:
+    assert isinstance(ReceiverFeedbackDeliveryAdapter()._transport, httpx.MockTransport)
 
 
 @pytest.fixture
@@ -30,7 +56,11 @@ def deliveries(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
         calls.append(request)
         return httpx.Response(204)
 
-    monkeypatch.setattr(deps, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive)))
+    monkeypatch.setattr(
+        container_module,
+        "ReceiverFeedbackDeliveryAdapter",
+        partial(ReceiverFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
+    )
     return calls
 
 
@@ -173,7 +203,11 @@ def test_a_receiver_that_refuses_the_address_is_explained(
     def receive(request: httpx.Request) -> httpx.Response:
         return httpx.Response(422 if "reply_to" in json.loads(request.content) else 204)
 
-    monkeypatch.setattr(deps, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive)))
+    monkeypatch.setattr(
+        container_module,
+        "ReceiverFeedbackDeliveryAdapter",
+        partial(ReceiverFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
+    )
     user = _sign_in_member(client, db_session, master_key_header)
     ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email})
     assert ticked.status_code == 422
@@ -269,3 +303,70 @@ def test_disabled_feedback_is_not_mounted(test_config: GatewayConfig, deliveries
         assert client.get(f"{API_ROOT}/bootstrap").json()["feedback_enabled"] is False
         assert client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}).status_code == 404
     assert not deliveries
+
+
+class RecordingDelivery:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def deliver(self, *, message: str, reply_to: str | None, sender_id: Any) -> None:
+        self.calls.append({"message": message, "reply_to": reply_to, "sender_id": sender_id})
+
+
+def test_a_bound_delivery_receives_the_verified_sender(
+    client: TestClient, db_session: Session, master_key_header: dict[str, str], deliveries: list[httpx.Request]
+) -> None:
+    recording = RecordingDelivery()
+    client.app.state.container.bind(FeedbackDeliveryPort, lambda session: recording)  # type: ignore[attr-defined]
+    user = _sign_in_member(client, db_session, master_key_header)
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email}).status_code == 204
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Quiet"}).status_code == 204
+    client.cookies.clear()
+    assert (
+        client.post(f"{API_ROOT}/feedback", json={"message": "Operator"}, headers=master_key_header).status_code == 204
+    )
+    assert recording.calls == [
+        {"message": "Idea", "reply_to": user.email, "sender_id": user.id},
+        {"message": "Quiet", "reply_to": None, "sender_id": user.id},
+        {"message": "Operator", "reply_to": None, "sender_id": None},
+    ]
+    assert not deliveries
+
+
+class RefusingDelivery:
+    def __init__(self, status_code: int, retry_after: int | None = None) -> None:
+        self.error = FeedbackDeliveryError(status_code, retry_after)
+
+    async def deliver(self, *, message: str, reply_to: str | None, sender_id: Any) -> None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("raised", "retry_after", "answered", "detail", "retry_header"),
+    [
+        (413, None, 413, "Feedback is too large.", None),
+        (422, None, 422, "Check the feedback text.", None),
+        (429, 30, 429, "Please wait before sending more feedback.", "30"),
+        (500, None, 503, "We could not confirm delivery. Please try again.", None),
+        (502, 30, 503, "We could not confirm delivery. Please try again.", None),
+    ],
+)
+def test_a_bound_delivery_refusal_is_answered_by_the_port_contract(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    raised: int,
+    retry_after: int | None,
+    answered: int,
+    detail: str,
+    retry_header: str | None,
+) -> None:
+    refusing = RefusingDelivery(raised, retry_after)
+    client.app.state.container.bind(FeedbackDeliveryPort, lambda session: refusing)  # type: ignore[attr-defined]
+    response = client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}, headers=master_key_header)
+    assert response.status_code == answered
+    assert response.json()["detail"] == detail
+    assert response.headers.get("Retry-After") == retry_header
+
+
+def test_feedback_is_off_by_default(postgres_url: str) -> None:
+    assert GatewayConfig(database_url=postgres_url).feedback_enabled is False

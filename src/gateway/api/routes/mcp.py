@@ -458,6 +458,24 @@ def _begin_trace(
     return trace
 
 
+def _record_refusal(
+    trace: RequestTrace | None, tool_name: str, server_name: str, server_id: object, decided_by: str
+) -> None:
+    """Record a tool call the access rules refused before dispatch on the call's trace, if one is open."""
+    if trace is not None:
+        trace.record_tool_call(
+            tool_name=tool_name,
+            tool_type="mcp",
+            started=datetime.now(UTC),
+            ok=False,
+            arguments=None,
+            mcp_server=server_name,
+            mcp_server_id=str(server_id),
+            decided_by=decided_by,
+            refused=True,
+        )
+
+
 async def _require_safe_url(server: ResolvedMcpServer) -> None:
     """Run the existing MCP SSRF policy over the resolved URL."""
     try:
@@ -716,34 +734,12 @@ async def execute_mcp_tool(
 
             def record_denied(denied: WorkspaceMcpServerAccessDeniedError) -> None:
                 # The caller is told the server does not exist; the trace says which server, and why.
-                if trace is not None:
-                    trace.record_tool_call(
-                        tool_name=request.tool_name,
-                        tool_type="mcp",
-                        started=datetime.now(UTC),
-                        ok=False,
-                        arguments=None,
-                        mcp_server=denied.name,
-                        mcp_server_id=str(denied.mcp_server_id),
-                        decided_by=denied.decided_by,
-                        refused=True,
-                    )
+                _record_refusal(trace, request.tool_name, denied.name, denied.mcp_server_id, denied.decided_by)
 
             server = await _resolve_server(principal, servers, request.mcp_server_id, on_denied=record_denied)
             allowed, decided_by = _decide_tool(principal, server, request.tool_name)
             if not allowed:
-                if trace is not None:
-                    trace.record_tool_call(
-                        tool_name=request.tool_name,
-                        tool_type="mcp",
-                        started=datetime.now(UTC),
-                        ok=False,
-                        arguments=None,
-                        mcp_server=server.name,
-                        mcp_server_id=str(server.id),
-                        decided_by=decided_by,
-                        refused=True,
-                    )
+                _record_refusal(trace, request.tool_name, server.name, server.id, decided_by)
                 raise McpExecutionError(CODE_TOOL_NOT_ALLOWED, ExecutionState.NOT_STARTED, 403)
             if request.server_revision != server.revision:
                 # In memory, over the resolution already made, so this costs no database or MCP round trip.

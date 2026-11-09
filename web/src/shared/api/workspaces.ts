@@ -22,6 +22,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   ORGANIZATIONS,
@@ -390,6 +391,7 @@ function invalidateWorkspaceProviderKeys(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 export function useSetWorkspaceProviderKeyOverride() {
@@ -511,6 +513,7 @@ function invalidateWorkspaceHostedProviders(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 /** What the workspace requires of every provider serving it. */
@@ -553,6 +556,7 @@ export function useSetWorkspaceProviderPolicy() {
       })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
     },
   })
 }

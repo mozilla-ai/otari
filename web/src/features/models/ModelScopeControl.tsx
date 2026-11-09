@@ -14,7 +14,9 @@ import {
 } from "@/shared/api/organizations"
 import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
+import { useWorkspaceProviderPolicy } from "@/shared/api/workspaces"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The control is reused for two layers of the same allow-list grammar: a user's
 // default and a key's (narrower) override. The wording differs between them, so
@@ -28,14 +30,30 @@ export function ModelScopeControl({
   title = "Model access",
   description,
   anyLabel = "Any model",
+  workspaceId,
 }: {
   initial: string[] | undefined
   onChange: (value: string[] | undefined, valid: boolean) => void
   title?: ReactNode
   description?: ReactNode
   anyLabel?: string
+  /**
+   * Offers only what this workspace may call; unset is the caller's whole
+   * reach, and `null` holds the choices until the workspace is known.
+   */
+  workspaceId?: string | null
 }) {
-  const models = useModels()
+  const models = useModels(workspaceId !== null, workspaceId ?? "")
+  // A workspace requiring zero data retention refuses every provider its own
+  // listing leaves out, so nothing else may add a wildcard or an alias for one.
+  // Until its policy answers, the listing alone decides.
+  const policy = useWorkspaceProviderPolicy(workspaceId || null)
+  const { isUnknown } = useSelectedWorkspace()
+  // Held because the workspace could not be read, not because it is coming.
+  const isWorkspaceUnread = workspaceId === null && isUnknown
+  const isNarrowed =
+    workspaceId === null ||
+    (!!workspaceId && policy.data?.require_zero_data_retention !== false)
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
   const providers = useDeploymentProviderNames(isSettled && isOperator)
@@ -55,6 +73,8 @@ export function ModelScopeControl({
       .map((model) => model.id)
       .filter((id) => providerInstanceOf(id) !== undefined)
       .sort((a, b) => a.localeCompare(b))
+    const listed = new Set(ids.map((id) => providerInstanceOf(id) as string))
+    const reachable = (instance: string) => !isNarrowed || listed.has(instance)
     const instances = [
       ...new Set([
         ...providers,
@@ -63,9 +83,11 @@ export function ModelScopeControl({
         ...(orgKeys.data ?? [])
           .filter((key) => !key.archived_at && key.usable && !key.slug)
           .map((key) => key.provider),
-        ...ids.map((id) => providerInstanceOf(id) as string),
+        ...listed,
       ]),
-    ].sort((a, b) => a.localeCompare(b))
+    ]
+      .filter(reachable)
+      .sort((a, b) => a.localeCompare(b))
     const providerOf = (id: string) =>
       providerDisplayName(providerInstanceOf(id) ?? "")
     const candidates: AccessOption[] = [
@@ -79,11 +101,13 @@ export function ModelScopeControl({
         label: providerModelId(id),
         hint: providerOf(id),
       })),
-      ...(aliases.data ?? []).map((alias) => ({
-        id: alias.target,
-        label: alias.name,
-        hint: `Alias for ${providerModelId(alias.target)} · ${providerOf(alias.target)}`,
-      })),
+      ...(aliases.data ?? [])
+        .filter((alias) => reachable(providerInstanceOf(alias.target) ?? ""))
+        .map((alias) => ({
+          id: alias.target,
+          label: alias.name,
+          hint: `Alias for ${providerModelId(alias.target)} · ${providerOf(alias.target)}`,
+        })),
     ]
     // First label wins, so a model keeps its own name over the alias that
     // resolves to it.
@@ -108,17 +132,22 @@ export function ModelScopeControl({
         hint: option.hint === provider ? undefined : option.hint,
       }
     })
-  }, [models.data, providers, orgKeys.data, aliases.data])
+  }, [models.data, providers, orgKeys.data, aliases.data, isNarrowed])
 
   // A failed read is said even when what did load fills the list, which is then
   // incomplete. `isLoading`: a key read a plain member never makes stays pending.
-  const isReading = models.isPending || context.isPending || orgKeys.isLoading
-  const catalogHint =
-    models.isError || orgKeys.isError
+  const isReading =
+    !isWorkspaceUnread &&
+    (models.isPending || context.isPending || orgKeys.isLoading)
+  const catalogHint = isWorkspaceUnread
+    ? "Could not read your workspace, so no models are offered. Reload to try again."
+    : models.isError || orgKeys.isError
       ? "Could not load the model catalog. Reload to try again."
-      : !isReading && catalog.length === 0
-        ? "No providers or models discovered yet. Add a provider first."
-        : null
+      : policy.isError && !policy.data
+        ? "Could not read this workspace's data retention policy, so only the models it lists are offered. Reload to try again."
+        : !isReading && catalog.length === 0
+          ? "No providers or models discovered yet. Add a provider first."
+          : null
 
   const copy: AccessListCopy = {
     inherit: anyLabel,

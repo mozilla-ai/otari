@@ -403,11 +403,11 @@ describe("AccountMenu", () => {
   })
 })
 
-it("opens feedback from a phone-only row right after Documentation", async () => {
+it("opens Contact from a phone-only row right after Documentation", async () => {
   mockCaller(OPERATOR)
   const onOpenFeedback = vi.fn()
   await openMenu({ feedback_enabled: true, onOpenFeedback })
-  const trigger = screen.getByRole("button", { name: "Feedback" })
+  const trigger = screen.getByRole("button", { name: "Contact" })
   // From md up the top bar carries it, as it carries Documentation.
   expect(trigger).toHaveClass("md:hidden")
   expect(trigger.previousElementSibling).toBe(
@@ -417,11 +417,11 @@ it("opens feedback from a phone-only row right after Documentation", async () =>
   expect(onOpenFeedback).toHaveBeenCalledOnce()
 })
 
-it("hides the feedback row when the deployment has feedback off", async () => {
+it("hides the Contact row when the deployment has feedback off", async () => {
   mockCaller(OPERATOR)
   await openMenu({ feedback_enabled: false, onOpenFeedback: vi.fn() })
   expect(
-    screen.queryByRole("button", { name: "Feedback" }),
+    screen.queryByRole("button", { name: "Contact" }),
   ).not.toBeInTheDocument()
 })
 

@@ -72,12 +72,16 @@ from gateway.schemas.providers import (
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
+from gateway.services.catalog import offered_model_types
+from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
+from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
 # What a client is told about where a rate came from. The spellings are
@@ -216,11 +220,19 @@ def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> 
     return resolved
 
 
-def _model_public(row: OrgProviderKeyModel, price: _Price | None) -> OrgProviderKeyModelPublic:
+def _kinds(key: OrgProviderKey, models: Sequence[str]) -> dict[str, ModelType | None]:
+    """What kind each model on ``key`` is, by models.dev."""
+    return offered_model_types(cached_models_dev_catalog(), key.provider, models)
+
+
+def _model_public(
+    row: OrgProviderKeyModel, price: _Price | None, model_type: ModelType | None
+) -> OrgProviderKeyModelPublic:
     return OrgProviderKeyModelPublic(
         id=row.id,
         org_provider_key_id=row.org_provider_key_id,
         model=row.model,
+        type=model_type,
         input_price_per_million=price.input_price_per_million if price else None,
         output_price_per_million=price.output_price_per_million if price else None,
         cache_read_price_per_million=price.cache_read_price_per_million if price else None,
@@ -310,14 +322,29 @@ class OrgProviderModelService:
     # ------------------------------------------------------------------
 
     async def list_models(
-        self, *, user: User, key_id: uuid.UUID, skip: int = 0, limit: int = 500
+        self,
+        *,
+        user: User,
+        key_id: uuid.UUID,
+        skip: int = 0,
+        limit: int = 500,
+        model_type: OfferedModelType | None = None,
     ) -> OrgProviderKeyModelsPublic:
-        """One page of a key's offered models, each priced as it currently serves."""
+        """One page of a key's offered models, of one kind or of every kind, each priced as it currently serves.
+
+        Every row is read, because the kind is not stored and each kind's count covers the whole key.
+        """
         async with self.uow:
             key = await self._key_for_user(user, key_id)
-            rows, count = await self.models.list_for_key(key_id, skip=skip, limit=limit)
-            prices = await self._current_prices(key, rows)
-        return OrgProviderKeyModelsPublic(data=[_model_public(row, prices.get(row.model)) for row in rows], count=count)
+            rows = await self.models.list_all_for_key(key_id)
+            kinds = _kinds(key, [row.model for row in rows])
+            page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit)
+            prices = await self._current_prices(key, page.rows)
+        return OrgProviderKeyModelsPublic(
+            data=[_model_public(row, prices.get(row.model), kinds.get(row.model)) for row in page.rows],
+            count=page.count,
+            type_counts=page.type_counts,
+        )
 
     async def available_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderAvailableModelsPublic:
         """What the provider says it serves on this key's stored credential.
@@ -391,7 +418,7 @@ class OrgProviderModelService:
                 # with a 500 rather than the 409 it is.
                 raise OrgProviderModelAlreadyOfferedError(provider, conflict.model) from conflict
             prices = await self._current_prices(key, [row])
-            public = _model_public(row, prices.get(row.model))
+            public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
         await self.refresh_overlay()
         return public
 
@@ -428,7 +455,7 @@ class OrgProviderModelService:
             row.enabled = enabled
             await self.models.save(row)
             prices = await self._current_prices(key, [row])
-            public = _model_public(row, prices.get(row.model))
+            public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
         await self.refresh_overlay()
         return public
 

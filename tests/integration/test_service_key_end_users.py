@@ -294,6 +294,8 @@ def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
     assert refused.headers["Otari-Error-Code"] == "budget_exceeded"
     assert refused.headers["Otari-Budget-Scope"] == "user"
     assert refused.json()["code"] == "budget_exceeded"
+    assert refused.json()["end_user"] == "carol"
+    assert refused.json()["detail"].startswith("End user 'carol' ")
 
 
 def test_end_users_are_listed_and_counted_by_owner_and_external_id(
@@ -378,3 +380,37 @@ def test_a_key_excluded_from_budget_skips_its_budgets_minute_limits(
 
     assert exempt_statuses == [200, 200]
     assert counted_statuses == [200, 429]
+
+
+def test_a_blocked_end_user_is_named_in_the_refusal_body(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    budget_id = _budget(client, master_key_header, request_limit=5)
+    _, headers = _service_key(client, master_key_header, "svc-blocked", end_user_budget_id=budget_id)
+    assert _chat(client, headers, "dave").status_code == 200
+    dave = _end_user(db_session, "svc-blocked", "dave")
+    assert dave is not None
+    blocked = client.patch(f"{API_ROOT}/users/{dave.user_id}", json={"blocked": True}, headers=master_key_header)
+    assert blocked.status_code == 200, blocked.text
+
+    chat = _chat(client, headers, "dave")
+    messages = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": MODEL_NAME,
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+            "metadata": {"user_id": "dave"},
+        },
+        headers=headers,
+    )
+
+    assert chat.status_code == 403
+    assert chat.json() == {"detail": "End user 'dave' is blocked", "code": "user_blocked", "end_user": "dave"}
+    assert messages.status_code == 403
+    assert messages.json() == {
+        "type": "error",
+        "error": {"type": "permission_error", "message": "End user 'dave' is blocked"},
+        "end_user": "dave",
+        "code": "user_blocked",
+    }

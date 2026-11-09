@@ -6,14 +6,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
+from gateway.core.error_codes import RefusalException
 from gateway.models.budgets import Budget
 from gateway.models.users import User
-from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail, user_subject
+from gateway.services.budgets._refusals import BlockedAxis, blocked_on, end_user_fields, refusal_detail, user_subject
 from gateway.services.budgets._reservations import reserve_budget
 
 
 def test_user_subject_names_an_end_user_by_external_id() -> None:
     assert user_subject("u") == "User 'u'"
+    assert end_user_fields(None) == {}
+    assert end_user_fields("alice") == {"end_user": "alice"}
     assert user_subject("eu_a886c78298c7419caf4764794945248e", external_id="alice") == "End user 'alice'"
     blocked = BlockedAxis("budget", remaining=Decimal("0.003747"), held=Decimal("0.008224"))
     assert refusal_detail(
@@ -67,6 +70,8 @@ async def test_reserve_budget_names_end_user_external_id_on_refusal(monkeypatch:
         "End user 'alice' has $0.003747 of budget remaining, less than this request's estimated cost of $0.008224. "
         "The estimate assumes 8192 output tokens; a lower output token limit on the request may let it fit"
     )
+    assert isinstance(exc_info.value, RefusalException)
+    assert exc_info.value.fields == {"end_user": "alice"}
 
     blocked_end_user = User(
         user_id="eu_a886c78298c7419caf4764794945248e",
@@ -81,6 +86,8 @@ async def test_reserve_budget_names_end_user_external_id_on_refusal(monkeypatch:
         await reserve_budget(db, user_id="eu_a886c78298c7419caf4764794945248e", estimate=Decimal("0.001"))
     assert blocked_exc.value.status_code == 403
     assert blocked_exc.value.detail == "End user 'alice' is blocked"
+    assert isinstance(blocked_exc.value, RefusalException)
+    assert blocked_exc.value.fields == {"end_user": "alice"}
 
 
 def test_a_spent_allowance_keeps_its_wording() -> None:

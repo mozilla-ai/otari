@@ -428,7 +428,7 @@ function OrganizationStatus() {
   // this caller. The catalog is filtered to the selectors this caller may name,
   // so an empty one means there is nothing to send a request to yet. Not asked
   // until a workspace is selected, since the guide is about one.
-  const models = useModels(scope !== undefined)
+  const models = useModels(scope !== undefined, scope)
   const hasNoModels = models.isSuccess && models.data.data.length === 0
   const usage = useHasAnyUsage(hasNoModels)
   // Withheld by the server from a member, so a member is not asked.

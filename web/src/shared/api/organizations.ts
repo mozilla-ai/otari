@@ -42,6 +42,7 @@ import type {
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   NO_RETRY,
@@ -640,6 +641,9 @@ function invalidateOrgProviderKeys(
       queryKey: [ORGANIZATION_PROVIDER_MODELS],
     })
   }
+  // Every key write, a default included: which key serves decides which
+  // offerings a workspace requiring zero data retention may fall back to.
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
   if (catalog) {
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
@@ -659,6 +663,7 @@ function invalidateOrgProviderModels(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 // The organization's own upstream provider credentials (#670), which every
@@ -893,13 +898,15 @@ export function useOrgProviderModels(
   keyId: string,
   page: number,
   pageSize: number,
+  /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
+  type = "",
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize],
+    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize, type],
     queryFn: () =>
       apiFetch<OrgProviderModels>(
-        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}`,
       ),
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>

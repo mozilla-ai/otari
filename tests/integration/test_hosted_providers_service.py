@@ -57,6 +57,7 @@ from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.providers._hosted_catalog import KEEP_FETCH_TOOL, KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
+from gateway.types.models_dev import parse_catalog_v2
 
 pytestmark = pytest.mark.asyncio
 
@@ -490,6 +491,29 @@ async def test_the_model_list_carries_each_models_current_price(
     assert (by_model["o3"].price_source, by_model["o3"].input_price_per_million) == ("deployment", 20.0)
     assert by_model["unpriced"].price_source is None
     assert by_model["unpriced"].enabled is False
+
+
+async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_dev = parse_catalog_v2({"openai": {"models": {"gpt-4o": {"type": "chat"}, "dall-e-3": {"type": "image"}}}})
+    monkeypatch.setattr(
+        "gateway.services.providers._hosted_provider_service.cached_models_dev_catalog", lambda: models_dev
+    )
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o", "dall-e-3", "mystery")
+
+    listed = await service.list_models("openai")
+    assert {model.model: model.type for model in listed.data} == {
+        "dall-e-3": "image",
+        "gpt-4o": "chat",
+        "mystery": None,
+    }
+    assert listed.type_counts == {"image": 1, "chat": 1, "unknown": 1}
+
+    chat = await service.list_models("openai", model_type="chat")
+    assert ([model.model for model in chat.data], chat.count) == (["gpt-4o"], 1)
+    assert chat.type_counts == listed.type_counts
 
 
 async def test_adding_a_model_prices_it_at_what_was_asked(

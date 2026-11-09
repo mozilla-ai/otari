@@ -692,16 +692,18 @@ function ActivityPageContent({
   // outlives the form.
   const onSetModelPrice = (rates: ManualRates, modelKey: string) =>
     setModelPrice.mutateAsync(
-      {
-        model_key: modelKey,
-        input_price_per_million: rates.input_price_per_million,
-        output_price_per_million: rates.output_price_per_million,
-        cache_read_price_per_million:
-          rates.cache_read_price_per_million ?? null,
-        cache_write_price_per_million:
-          rates.cache_write_price_per_million ?? null,
-        unit: rates.unit ?? "token",
-      },
+      rates.rates !== undefined
+        ? { model_key: modelKey, rates: rates.rates }
+        : {
+            model_key: modelKey,
+            input_price_per_million: rates.input_price_per_million,
+            output_price_per_million: rates.output_price_per_million,
+            cache_read_price_per_million:
+              rates.cache_read_price_per_million ?? null,
+            cache_write_price_per_million:
+              rates.cache_write_price_per_million ?? null,
+            unit: rates.unit ?? "token",
+          },
       { onSuccess: () => setModelPriceKey(undefined) },
     )
 

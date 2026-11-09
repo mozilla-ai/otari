@@ -106,6 +106,29 @@ describe("buildCurlSnippet", () => {
 })
 
 describe("buildPythonSnippet", () => {
+  it("gives the Keys page and the setup guide the same request, key as a string", () => {
+    // Both pass the key's value, so nothing reads the environment here.
+    expect(buildPythonSnippet(INPUT)).toBe(
+      [
+        "from openai import OpenAI",
+        "",
+        `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key="gw-abc123")`,
+        "resp = client.chat.completions.create(",
+        '    model="openai:gpt-4o-mini",',
+        '    messages=[{"role": "user", "content": "Hello"}],',
+        ")",
+        "print(resp.choices[0].message.content)",
+      ].join("\n"),
+    )
+  })
+
+  it("reads a key given as a shell reference from the environment", () => {
+    const snippet = buildPythonSnippet({ ...INPUT, apiKey: "$OTARI_API_KEY" })
+
+    expect(snippet).toMatch(/^import os\n\nfrom openai import OpenAI\n/)
+    expect(snippet).toContain('api_key=os.environ["OTARI_API_KEY"])')
+  })
+
   it("points the OpenAI client at the gateway's API root", () => {
     expect(buildPythonSnippet(INPUT)).toContain(
       `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key="gw-abc123")`,

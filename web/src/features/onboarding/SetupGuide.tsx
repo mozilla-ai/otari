@@ -97,7 +97,7 @@ function SetupFlow({
   const prefersReducedMotion = usePrefersReducedMotion()
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
-  const models = useModels()
+  const models = useModels(true, workspaceId)
   const baseUrl = resolveSnippetBaseUrl()
 
   // Every way out retires the guide on the server; this hides the sheet while

@@ -207,6 +207,7 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "output_price_per_million": 2.0,
         "pricing_tiers": [],
         "unit": "token",
+        "rates": {"text": {"input": {"price": 1.0, "unit": "token"}, "output": {"price": 2.0, "unit": "token"}}},
     }
 
 

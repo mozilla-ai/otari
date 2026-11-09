@@ -9806,7 +9806,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's, at the comparison context where one was asked for.
+             * @description The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -9829,6 +9829,11 @@ export interface components {
              * @description Which price lists the priced offerings came from, distinct and sorted.
              */
             price_sources: ("organization" | "deployment" | "defaults")[];
+            /**
+             * Price Unit
+             * @description What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
             /** Provider Count */
             provider_count: number;
             /**
@@ -9916,7 +9921,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's, at the comparison context where one was asked for.
+             * @description The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -9937,6 +9942,11 @@ export interface components {
              * @description Which price lists the priced offerings came from, distinct and sorted.
              */
             price_sources: ("organization" | "deployment" | "defaults")[];
+            /**
+             * Price Unit
+             * @description What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
             /** Provider Count */
             provider_count: number;
             /**
@@ -12939,7 +12949,8 @@ export interface components {
          *     ``enabled`` is the serving switch; a model offered without a discoverable
          *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
          *     while it waits for a rate, ``operator`` when an operator switched it off,
-         *     ``unavailable`` when its provider refused to serve it.
+         *     ``unavailable`` when its provider refused to serve it. ``type`` is the
+         *     kind of model, from models.dev, and None when it does not know.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -12970,6 +12981,8 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Provider */
             provider: string;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /** Unit */
             unit?: string | null;
             /** Updated At */
@@ -13006,12 +13019,19 @@ export interface components {
         /**
          * HostedModelsPublic
          * @description A page of one hosted provider's offered models, and how many there are in total.
+         *
+         *     ``count`` is the total of the kind asked for, and ``type_counts`` how many
+         *     of each kind the provider offers, ``unknown`` for a model of no known kind.
          */
         HostedModelsPublic: {
             /** Count */
             count: number;
             /** Data */
             data: components["schemas"]["HostedModelPublic"][];
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * HostedModelsRefreshPublic
@@ -14425,6 +14445,8 @@ export interface components {
             pricing_tiers?: (components["schemas"]["PricingTier"] | {
                 [key: string]: number;
             })[];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, web_search, and the overrides and multipliers that change a price when a condition holds. The fields above are its text view. Null where the stored block cannot be read. */
+            rates?: components["schemas"]["RatesDocument-Output"] | null;
             /**
              * Unit
              * @default token
@@ -14763,7 +14785,8 @@ export interface components {
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
          *     ``unit`` says what the rates are per, as on a pricing row: token, request
-         *     or image, so a per-request rate is not read as a per-token one.
+         *     or image, so a per-request rate is not read as a per-token one. ``type``
+         *     is the kind of model, from models.dev, and None when it does not know.
          */
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
@@ -14797,6 +14820,8 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Pricing Id */
             pricing_id?: string | null;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /**
              * Unit
              * @default token
@@ -14822,12 +14847,19 @@ export interface components {
         /**
          * OrgProviderKeyModelsPublic
          * @description One page of a key's offered models, and how many there are in total.
+         *
+         *     ``count`` is the total of the kind asked for, and ``type_counts`` how many
+         *     of each kind the key offers, ``unknown`` for a model of no known kind.
          */
         OrgProviderKeyModelsPublic: {
             /** Count */
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyModelPublic"][];
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * OrgProviderKeyPublic
@@ -15769,7 +15801,7 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
@@ -15784,7 +15816,7 @@ export interface components {
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate per request or per image
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -15902,12 +15934,12 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate per request or per image
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -16799,7 +16831,7 @@ export interface components {
             model_key: string;
             /**
              * Origin
-             * @description Which writer set this row: config, api, or migration. Null when recorded before origins were.
+             * @description Which writer set this row: config, api, seed or migration. Null before origins were recorded.
              */
             origin: string | null;
             /** Output Price Per Million */
@@ -17971,6 +18003,12 @@ export interface components {
          */
         SearchProviderOptionSchema: {
             /**
+             * Cost Tier
+             * @description True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.
+             * @default false
+             */
+            cost_tier: boolean;
+            /**
              * Default
              * @description The value the provider uses when the option is not set.
              */
@@ -17989,7 +18027,7 @@ export interface components {
             name: string;
             /**
              * Operator Only
-             * @description True when only an instance or a credential may set it, never a workspace or a request.
+             * @description True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.
              * @default false
              */
             operator_only: boolean;
@@ -18068,6 +18106,12 @@ export interface components {
              * @description Fetch: true when the provider runs a page's JavaScript before reading it.
              */
             renders_javascript?: boolean | null;
+            /**
+             * Reports Cost
+             * @description True when the provider's answer says what each call cost, which is then what the call is billed.
+             * @default false
+             */
+            reports_cost: boolean;
             /**
              * Reports Final Url
              * @description Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.
@@ -23044,7 +23088,7 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
-                /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
+                /** @description Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match. */
                 max_input?: number | null;
                 pricing?: "all" | "custom" | "default" | "priced" | "unpriced";
                 source?: "all" | "discovered" | "custom";
@@ -24536,6 +24580,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only models of this kind; `unknown` for those no source names a kind for */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
             };
             header?: never;
             path: {
@@ -25934,6 +25980,8 @@ export interface operations {
             query?: {
                 /** @description Only the models this provider instance serves, described as served there. */
                 provider?: string | null;
+                /** @description For a signed-in caller, only the models a request billed to this workspace may call. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -26391,7 +26439,10 @@ export interface operations {
     };
     "routing-list_automatic_fallbacks": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only the offerings a request billed to this workspace may call. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26405,6 +26456,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutomaticFallbacksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -28108,6 +28168,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Only models of this kind; `unknown` for those no source names a kind for */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
             };
             header?: never;
             path: {

@@ -67,6 +67,8 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     # warning line that never points at the From name as the cause.
     message["From"] = f"{sanitize_header_value(envelope.sender_name)} <{sanitize_header_value(envelope.sender_email)}>"
     message["To"] = sanitize_header_value(envelope.to)
+    if envelope.reply_to:
+        message["Reply-To"] = sanitize_header_value(envelope.reply_to)
     # Plain text first, then HTML: per RFC 2046, a mail client renders the last
     # alternative it understands, so this is the order that prefers HTML.
     message.attach(MIMEText(envelope.message.text, "plain"))

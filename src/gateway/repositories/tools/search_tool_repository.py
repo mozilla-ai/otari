@@ -46,11 +46,9 @@ class SearchToolRepository(BaseRepository[SearchToolCredential, BaseModel, BaseM
         stmt = select(SearchToolCredential).execution_options(populate_existing=True)
         return (await self.db.execute(stmt)).scalars().all()
 
-    async def list_by_kind(self, kind: str | None = None) -> Sequence[SearchToolCredential]:
-        """Every stored row, or every one of ``kind``, ordered by name."""
-        stmt = select(SearchToolCredential).order_by(SearchToolCredential.name)
-        if kind is not None:
-            stmt = stmt.where(SearchToolCredential.kind == kind)
+    async def list_by_kind(self, kind: str) -> Sequence[SearchToolCredential]:
+        """Every stored row of ``kind``, ordered by name."""
+        stmt = select(SearchToolCredential).where(SearchToolCredential.kind == kind).order_by(SearchToolCredential.name)
         return (await self.db.execute(stmt)).scalars().all()
 
     async def get_for_update(self, name: str) -> SearchToolCredential | None:

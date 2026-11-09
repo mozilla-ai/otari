@@ -44,6 +44,7 @@ from gateway.ports.billing_port import (
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -1833,6 +1834,13 @@ async def get_workspace_web_search_policies(
     )
 
 
+def build_deployment_pricing_service(uow: UnitOfWork) -> DeploymentPricingService:
+    """The one assembly, shared by the hosted-providers service and startup's config pricing seed."""
+    return DeploymentPricingService(
+        uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
+    )
+
+
 def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> HostedProviderService:
     """Build the hosted-providers service on ``uow``.
 
@@ -1850,9 +1858,7 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
-        pricing=DeploymentPricingService(
-            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
-        ),
+        pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
     )
@@ -2638,13 +2644,23 @@ async def get_deployment_trace_scope(
     )
 
 
-async def get_feedback_service(
+def get_feedback_service() -> FeedbackService:
+    return FeedbackService()
+
+
+async def get_feedback_delivery_port(
+    container: Annotated[Container, Depends(get_container)],
     db: Annotated[AsyncSession, Depends(get_db)],
     _authenticated: Annotated[str | None, Depends(verify_master_key)],
-) -> FeedbackService:
-    """Finish authentication's database work before waiting for the receiver."""
+) -> FeedbackDeliveryPort:
+    """Resolve where accepted feedback goes, with authentication's database work finished first.
+
+    Delivery can wait seconds on the network, so the request's connection goes
+    back to the pool here. The adapter gets no session: one that needs the
+    database opens its own unit of work.
+    """
     await release_session(db)
-    return FeedbackService()
+    return container.resolve(FeedbackDeliveryPort, None)
 
 
 class _DirectToolAccounts:
@@ -2876,6 +2892,7 @@ __all__ = [
     "get_session_identity",
     "reset_config",
     "set_config",
+    "get_feedback_delivery_port",
     "get_feedback_service",
     "get_file_store",
     "get_log_writer",

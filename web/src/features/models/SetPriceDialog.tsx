@@ -1,5 +1,6 @@
 import { Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
+import type { RatesDocument } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
@@ -7,25 +8,31 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { isValidModelKey } from "@/features/models/modelKey"
 import {
+  hasOutputRate,
   PRICING_UNIT_DESCRIPTION,
   PRICING_UNIT_OPTIONS,
   type PricingUnit,
   pricingUnitOf,
+  ratesForUnit,
   toStoredRate,
+  unitOutputRateLabel,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
 
 // Per-1M rates an operator enters to price a model. Input and output are
 // required; the cache rates are optional (blank folds those tokens into the
 // fresh-input charge, matching how unset cache pricing behaves).
-// `unit` is set only by a dialog that offers the choice, and a rate for
-// requests or images arrives already converted to its per-million value.
+// `unit` is set only by a dialog that offers the choice, and a rate in any
+// other unit arrives already converted to its per-million value. `rates` is set
+// for a price the per-million fields would store in the wrong place (a second
+// of video), and is then sent instead of them.
 export interface ManualRates {
   input_price_per_million: number
   output_price_per_million: number
   cache_read_price_per_million?: number
   cache_write_price_per_million?: number
   unit?: PricingUnit
+  rates?: RatesDocument
 }
 
 interface RateFieldProps {
@@ -94,7 +101,7 @@ export interface SetPriceDialogProps {
    * `collectModelKey`.
    */
   initialModelKey?: string
-  /** Offer the unit the price is per (tokens, requests, images, characters). */
+  /** Offer the unit the price is per (tokens, requests, images, seconds, and so on). */
   chooseUnit?: boolean
   /** The unit selected when the dialog opens. Only read with `chooseUnit`. */
   initialUnit?: PricingUnit
@@ -144,13 +151,15 @@ export function SetPriceDialog({
   const cacheWriteRate = parseRate(cacheWrite)
 
   const keyInvalid = collectModelKey && !isValidModelKey(modelKey)
-  // A request, image or character price is one rate: there is no output, and no cache.
+  // A price in any unit but tokens is one rate: there is no output, and no
+  // cache. A minute of audio has an output rate, left blank where nothing is made.
   const isTokens = unit === "token"
 
   const isInvalid =
     keyInvalid ||
     inputRate === null ||
     Number.isNaN(inputRate) ||
+    (hasOutputRate(unit) && Number.isNaN(outputRate ?? 0)) ||
     (isTokens &&
       (outputRate === null ||
         Number.isNaN(outputRate) ||
@@ -165,10 +174,14 @@ export function SetPriceDialog({
   const rates = (): ManualRates | undefined => {
     if (isInvalid || inputRate === null) return undefined
     if (!isTokens) {
+      const block = ratesForUnit(inputRate, unit)
       return {
         input_price_per_million: toStoredRate(inputRate, unit),
-        output_price_per_million: 0,
+        output_price_per_million: hasOutputRate(unit)
+          ? toStoredRate(outputRate ?? 0, unit)
+          : 0,
         unit,
+        ...(block === undefined ? {} : { rates: block }),
       }
     }
     if (outputRate === null) return undefined
@@ -280,6 +293,13 @@ export function SetPriceDialog({
             isRequired
             autoFocus={focusFirstRate}
           />
+          {hasOutputRate(unit) ? (
+            <RateField
+              label={unitOutputRateLabel(unit)}
+              value={output}
+              onChange={setOutput}
+            />
+          ) : null}
         </div>
       )}
     </FormDialog>

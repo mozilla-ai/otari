@@ -22,6 +22,7 @@ import type {
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   HOSTED_CATALOG_UPDATE_PREVIEW,
   HOSTED_PROVIDER_AVAILABLE_MODELS,
@@ -63,6 +64,7 @@ function useInvalidateHosted() {
     void queryClient.invalidateQueries({ queryKey: [PRICING] })
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
     void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
   }
 }
@@ -133,12 +135,14 @@ export function useHostedModels(
   provider: string,
   page: number,
   pageSize: number,
+  /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
+  type = "",
 ) {
   return useQuery({
-    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize],
+    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize, type],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>

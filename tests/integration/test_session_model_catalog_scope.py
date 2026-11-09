@@ -644,6 +644,27 @@ def test_a_workspace_requiring_zero_data_retention_lists_no_undeclared_offering(
     assert _OPENAI_MODEL in other
 
 
+def test_the_flat_listing_naming_a_workspace_requiring_zero_data_retention_lists_no_undeclared_model(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /models answers for one workspace the way the grouped catalog does."""
+    monkeypatch.setattr(
+        workspace_hosted_access, "_zero_retention_workspaces", frozenset({world.workspaces["alpha_one"]})
+    )
+
+    def listed(workspace: str) -> set[str]:
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+        try:
+            response = client.get(f"{API_ROOT}/models", params={"workspace_id": str(world.workspaces[workspace])})
+            assert response.status_code == status.HTTP_200_OK, response.text
+            return {model["id"] for model in response.json()["data"]}
+        finally:
+            client.cookies.clear()
+
+    assert _LISTED_AS[_OPENAI_MODEL] not in listed("alpha_one")
+    assert _LISTED_AS[_OPENAI_MODEL] in listed("alpha_two")
+
+
 def test_naming_another_organizations_workspace_is_not_found(client: TestClient, world: _World) -> None:
     status_code, _ = _grouped_for_workspace(client, world, "alpha_owner", world.workspaces["beta_one"])
     assert status_code == status.HTTP_404_NOT_FOUND

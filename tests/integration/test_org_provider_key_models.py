@@ -65,6 +65,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.models_dev import parse_catalog_v2
 
 pytestmark = pytest.mark.asyncio
 
@@ -473,6 +474,36 @@ async def test_an_offered_model_says_what_its_rate_is_per(
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     assert listed.data[0].unit == "request"
     assert listed.data[0].input_price_per_million == 2000.0
+
+
+async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """models.dev names the kind; a model it does not know is ``unknown``, a kind of its own."""
+    models_dev = parse_catalog_v2({"openai": {"models": {"gpt-4o": {"type": "chat"}, "dall-e-3": {"type": "image"}}}})
+    monkeypatch.setattr(
+        "gateway.services.providers._org_provider_model_service.cached_models_dev_catalog", lambda: models_dev
+    )
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-4o", "dall-e-3", "mystery")
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert {model.model: model.type for model in listed.data} == {
+        "dall-e-3": "image",
+        "gpt-4o": "chat",
+        "mystery": None,
+    }
+    assert listed.type_counts == {"image": 1, "chat": 1, "unknown": 1}
+
+    images = await _service(async_db).list_models(user=owner, key_id=key_id, model_type="image")
+    assert ([model.model for model in images.data], images.count) == (["dall-e-3"], 1)
+    assert images.type_counts == listed.type_counts
+
+    unknown = await _service(async_db).list_models(user=owner, key_id=key_id, model_type="unknown")
+    assert [model.model for model in unknown.data] == ["mystery"]
 
 
 async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_it(

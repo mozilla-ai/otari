@@ -77,7 +77,10 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import {
+  useNarrowingWorkspace,
+  useSelectedWorkspace,
+} from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 import { ExpiryFields } from "./ExpiryFields"
@@ -443,6 +446,7 @@ function CreateKeyDialog({
   )
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
+  const narrowingWorkspace = useNarrowingWorkspace()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -737,6 +741,7 @@ function CreateKeyDialog({
             <OwnerAccessNote userId={userId} users={ownerOptions} />
           ) : null}
           <ModelScopeControl
+            workspaceId={narrowingWorkspace}
             title="Restrict this key's models"
             description={
               isDeploymentWide
@@ -1029,6 +1034,7 @@ function EditKeyForm({
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}
       <ModelScopeControl
+        workspaceId={apiKey.workspace_id ?? undefined}
         title="Restrict this key's models"
         description={
           isDeploymentWide

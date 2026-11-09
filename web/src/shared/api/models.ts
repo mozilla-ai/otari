@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
   CatalogQueryParams,
@@ -7,7 +7,13 @@ import type {
   ModelListResponse,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { CATALOG, DISCOVERABLE, MODELS, NO_RETRY } from "@/shared/api/queryKeys"
+import {
+  CATALOG,
+  DISCOVERABLE,
+  MODELS,
+  NO_RETRY,
+  workspaceMeta,
+} from "@/shared/api/queryKeys"
 
 // The catalog folded by model, priced for the caller. Any session may read it,
 // like `/v1/models`; the detail is keyed under the list so a pricing write that
@@ -31,6 +37,7 @@ export function useCatalog(
   return useQuery({
     ...NO_RETRY,
     queryKey: [CATALOG, "list", params],
+    meta: workspaceMeta(params.workspace_id),
     queryFn: ({ signal }) =>
       apiFetch<CatalogResponse>(`/catalog/models?${search}`, { signal }),
     staleTime: 60_000,
@@ -57,22 +64,30 @@ export function useCatalog(
  *
  * Debounce the term before it gets here (`useDebounced`), or every keystroke is
  * a request and the answers race.
+ *
+ * `workspaceId` narrows the matches to what a request billed to that workspace
+ * may call; empty is the caller's whole reach, and `null` holds the read until
+ * the workspace is known (`useNarrowingWorkspace`).
  */
 export function useCatalogSearch(
   search: string,
   limit: number,
   enabled = true,
+  workspaceId: string | null = "",
 ) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, "search", search, limit],
+    queryKey: [CATALOG, "search", search, limit, workspaceId ?? ""],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<CatalogResponse>(
-        `/catalog/models?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/catalog/models?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ""}`,
       ),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
-    enabled,
+    // Never across workspaces, for the reason `useCatalog` gives.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[4] === (workspaceId ?? "") ? previous : undefined,
+    enabled: enabled && workspaceId !== null,
   })
 }
 
@@ -89,6 +104,7 @@ export function useCatalogModel(
   return useQuery({
     ...NO_RETRY,
     queryKey: [CATALOG, "model", modelId, workspaceId],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
       // the slash is the path's, not the id's to encode.
@@ -108,12 +124,19 @@ export function useCatalogModel(
 // `enabled` is not the operator composition the reads below use: the catalog is
 // readable by any signed-in caller and is already narrowed server-side to what
 // that caller could route to. It is for a page with nothing to ask about yet,
-// such as an overview before a workspace is selected.
-export function useModels(enabled = true) {
+// such as an overview before a workspace is selected. `workspaceId` narrows it
+// to what a request billed to that workspace may call.
+export function useModels(enabled = true, workspaceId = "") {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [MODELS],
-    queryFn: () => apiFetch<ModelListResponse>("/models"),
+    queryKey: [MODELS, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<ModelListResponse>(
+        workspaceId
+          ? `/models?workspace_id=${encodeURIComponent(workspaceId)}`
+          : "/models",
+      ),
     staleTime: 60_000,
     enabled,
   })

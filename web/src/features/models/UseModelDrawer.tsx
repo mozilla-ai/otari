@@ -4,15 +4,23 @@ import { useState } from "react"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
 import { CopyableValue, CopyField } from "@/design-system/actions/CopyField"
+import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import {
+  formatOfferingPrice,
+  formatPricedRate,
+  pricingUnitOf,
+} from "@/features/models/pricingUnit"
+import { API_ROOT } from "@/shared/api/client"
+import { docsSourceHref } from "@/shared/helpers/docs"
+import {
+  buildEndpointRequest,
+  type CatalogEndpoint,
+} from "@/shared/helpers/endpointSnippets"
 import { formatRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
-import {
-  buildCurlSnippet,
-  buildPythonSnippet,
-  resolveSnippetBaseUrl,
-} from "@/shared/helpers/requestSnippets"
+import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 
 import { providerModelId } from "./modelKey"
 
@@ -23,8 +31,14 @@ import { providerModelId } from "./modelKey"
 
 const GATEWAY_PICKS = "__gateway__"
 
-function rate(value: number | null | undefined): string {
-  return value == null ? "unpriced" : formatRate(value)
+/** The price the gateway's pick is at, as the sentence naming it reads. */
+function cheapestPrice(offering: CatalogOffering): string {
+  const pricing = offering.pricing
+  if (pricing == null) return "no price"
+  const unit = pricingUnitOf(pricing.unit)
+  return unit === "token"
+    ? `${formatRate(pricing.input_price_per_million)} per 1M in`
+    : formatPricedRate(pricing.input_price_per_million, unit)
 }
 
 /** What a request sends for an offering: its short spelling where there is one. */
@@ -50,6 +64,9 @@ export function UseModelDrawer({
     model.selector ? GATEWAY_PICKS : (model.offerings[0]?.selector ?? ""),
   )
   const [language, setLanguage] = useState("curl")
+  // Keyed to its offering, so a refresh that moves the gateway's pick opens on
+  // the new offering's first route.
+  const [picked, setPicked] = useState({ offering: "", route: "" })
 
   const cheapest = model.offerings.find(
     (catalogModel) => catalogModel.selector === model.resolves_to,
@@ -58,7 +75,7 @@ export function UseModelDrawer({
   const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
   const offeringOptions = model.offerings.map((offering) => ({
     value: offering.selector,
-    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
+    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${formatOfferingPrice(offering.pricing)}`,
   }))
   const options = model.selector
     ? [
@@ -66,11 +83,20 @@ export function UseModelDrawer({
         ...offeringOptions,
       ]
     : offeringOptions
-  const input = {
+  // The routes of the offering that answers. Empty is "not known", so the
+  // request falls back to chat rather than to a guess from the model's kind.
+  const answering = (pinned ?? cheapest)?.selector ?? ""
+  const routes = (pinned ?? cheapest)?.endpoints ?? []
+  const route = picked.offering === answering ? picked.route : ""
+  const shownRoute: CatalogEndpoint =
+    routes.find((candidate) => candidate === route) ??
+    routes[0] ??
+    "/chat/completions"
+  const request = buildEndpointRequest(shownRoute, {
     baseUrl,
     apiKey: "$OTARI_API_KEY",
     model: sendAs,
-  }
+  })
 
   return (
     <Drawer isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -126,8 +152,7 @@ export function UseModelDrawer({
                           <code className="text-mono-caption">
                             {selectorFor(cheapest)}
                           </code>{" "}
-                          at {rate(cheapest.pricing?.input_price_per_million)}{" "}
-                          per 1M in
+                          at {cheapestPrice(cheapest)}
                         </>
                       ) : null}
                       . Pick a provider to pin one instead and send its
@@ -147,7 +172,10 @@ export function UseModelDrawer({
                 <FilterSelect
                   ariaLabel="Provider"
                   value={choice}
-                  onChange={setChoice}
+                  onChange={(next) => {
+                    setChoice(next)
+                    setPicked({ offering: "", route: "" })
+                  }}
                   options={options}
                 />
                 <p className="text-caption">
@@ -175,29 +203,99 @@ export function UseModelDrawer({
 
               <section className="flex flex-col gap-2">
                 <h3 className="text-title">3. Make your first request</h3>
-                <TabRow>
-                  <Tab
-                    isActive={language === "curl"}
-                    onPress={() => setLanguage("curl")}
-                  >
-                    cURL
-                  </Tab>
-                  <Tab
-                    isActive={language === "python"}
-                    onPress={() => setLanguage("python")}
-                  >
-                    Python (OpenAI SDK)
-                  </Tab>
-                </TabRow>
-                <CopyField
-                  label={language === "curl" ? "cURL" : "Python"}
-                  value={
-                    language === "curl"
-                      ? buildCurlSnippet(input)
-                      : buildPythonSnippet(input)
-                  }
-                  isMultiline
-                />
+                {routes.length > 1 ? (
+                  <FilterSelect
+                    ariaLabel="Route"
+                    value={shownRoute}
+                    onChange={(next) =>
+                      setPicked({ offering: answering, route: next })
+                    }
+                    options={routes.map((candidate) => ({
+                      value: candidate,
+                      label: `${API_ROOT}${candidate}`,
+                    }))}
+                  />
+                ) : null}
+                <p className="text-sm text-muted">
+                  {routes.length === 0 ? (
+                    <>
+                      models.dev names no route for this offering, so this is
+                      the chat request, to{" "}
+                    </>
+                  ) : (
+                    <>Calls </>
+                  )}
+                  <code className="text-mono-caption">
+                    POST {API_ROOT}
+                    {shownRoute}
+                  </code>
+                  .
+                  {request?.upload ? (
+                    <>
+                      {" "}
+                      Replace{" "}
+                      <code className="text-mono-caption">
+                        {request.upload}
+                      </code>{" "}
+                      with the path to your own file.
+                    </>
+                  ) : null}
+                  {request?.voice ? (
+                    <>
+                      {" "}
+                      Voices differ by provider: if this one does not list{" "}
+                      <code className="text-mono-caption">{request.voice}</code>
+                      , use one it does.
+                    </>
+                  ) : null}
+                </p>
+                {request ? (
+                  <>
+                    <TabRow>
+                      <Tab
+                        isActive={language === "curl"}
+                        onPress={() => setLanguage("curl")}
+                      >
+                        cURL
+                      </Tab>
+                      <Tab
+                        isActive={language === "python"}
+                        onPress={() => setLanguage("python")}
+                      >
+                        Python
+                      </Tab>
+                    </TabRow>
+                    <CopyField
+                      label={language === "curl" ? "cURL" : "Python"}
+                      value={
+                        language === "curl" ? request.curl : request.python
+                      }
+                      isMultiline
+                    />
+                    {language === "python" ? (
+                      <p className="text-caption">
+                        Needs{" "}
+                        <code className="text-mono-caption">
+                          pip install {request.pythonPackage}
+                        </code>
+                        .
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted">
+                    This route takes a model from the gateway's{" "}
+                    <code className="text-mono-caption">
+                      decision_providers
+                    </code>
+                    , not this offering's selector.{" "}
+                    <DocsLink
+                      href={docsSourceHref("api-reference.md", "decisions")}
+                    >
+                      How to ask for a decision
+                    </DocsLink>
+                  </p>
+                )}
               </section>
             </Drawer.Body>
           </Drawer.Dialog>

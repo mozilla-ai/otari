@@ -31,8 +31,6 @@ PROVIDERS = [
 class Expected:
     """What a provider's live answers must hold."""
 
-    # It reports what each search cost.
-    reports_cost: bool
     # The native options under which a search returns dated hits; None for a provider that dates none.
     dated: dict[str, Any] | None = None
     # Its hits carry a snippet by default.
@@ -43,23 +41,25 @@ class Expected:
 
 EXPECTED: dict[str, Expected] = {
     # DeepSeek returns page text only on request, so the snippet is what a hit says by default.
-    "deepseek": Expected(reports_cost=False, dated={}, snippets=True),
-    "exa": Expected(reports_cost=True, dated={"category": "news"}),
+    "deepseek": Expected(dated={}, snippets=True),
+    "exa": Expected(dated={"category": "news"}),
     # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
-    "mojeek": Expected(reports_cost=False, dated={}, snippets=True),
+    "mojeek": Expected(dated={}, snippets=True),
+    # Perplexity returns page text and no snippet, and dates the hits it knows a day for.
+    "perplexity": Expected(dated={}),
     # Serply returns Google's snippet and no page text, and dates no hit.
     # Searched where SEARXNG_BASE_URL names an instance, on two engines with public APIs, which answer CI where
     # scraping engines meet CAPTCHAs. Neither has a time filter, so a search with one comes back empty.
-    "searxng": Expected(reports_cost=False, dated={}, snippets=True, options={"engines": "wikinews,arxiv"}),
-    "serply": Expected(reports_cost=False, snippets=True),
+    "searxng": Expected(dated={}, snippets=True, options={"engines": "wikinews,arxiv"}),
+    "serply": Expected(snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
-    "synthetic": Expected(reports_cost=False, dated={}),
+    "synthetic": Expected(dated={}),
 }
 
 
 def _require_key(provider: str) -> None:
     metadata = AnySearch.get_provider_metadata(provider)
-    for variable in (metadata.env_key, metadata.env_api_base):
+    for variable in (metadata.env_key, metadata.env_api_base if metadata.requires_api_base else None):
         if variable and not os.environ.get(variable):
             pytest.skip(f"{variable} is not set")
 
@@ -79,7 +79,7 @@ async def test_a_live_search_returns_hits(provider: str) -> None:
     assert 1 <= len(result.hits) <= 3
     assert all(hit.url.startswith(("http://", "https://")) for hit in result.hits)
     assert (result.cost is None) == (result.cost_source == "none")
-    if EXPECTED[provider].reports_cost:
+    if AnySearch.get_provider_metadata(provider).reports_cost:
         assert result.cost_source == "reported"
     if EXPECTED[provider].snippets:
         assert any(hit.snippet for hit in result.hits)

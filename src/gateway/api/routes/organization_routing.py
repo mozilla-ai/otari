@@ -448,7 +448,12 @@ async def delete_organization_alias(
 
 @fallbacks_router.get("")
 async def list_automatic_fallbacks(
-    visible: VisibleWorkspacesDep, routing: RoutingServiceDep
+    visible: VisibleWorkspacesDep,
+    routing: RoutingServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Only the offerings a request billed to this workspace may call."),
+    ] = None,
 ) -> AutomaticFallbacksResponse:
     """The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
 
@@ -462,7 +467,9 @@ async def list_automatic_fallbacks(
     organization's usage reads use.
     """
     fallbacks = await routing.automatic_fallbacks(
-        organization_id=visible.organization_id, workspace_ids=visible.workspace_ids
+        organization_id=visible.organization_id,
+        workspace_ids=visible.workspace_ids,
+        serving_workspace_id=workspace_id,
     )
     return AutomaticFallbacksResponse(
         window_days=FALLBACK_WINDOW.days,
