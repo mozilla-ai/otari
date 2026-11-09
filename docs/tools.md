@@ -1219,6 +1219,23 @@ refuse such a value when a tool is saved.
   takes no result count and no recency filter: Otari keeps at most 10 results and,
   for a `time_range`, drops the hits dated before it. Its hits carry page text but
   no snippet.
+- **You.com** (`youdotcom`) needs an API key, read from the tool's `api_key`, such
+  as `${YDC_API_KEY}`. It reports no cost, so a search is billed at the tool's own
+  rate (its `price_per_call`, or a `search` price set on the dashboard's Web
+  search page or through the API). You.com's
+  [pricing](https://you.com/docs/administration/billing), read 2026-11-09, is
+  $5 per 1,000 searches, up to 100 results each, highlights included.
+  `extraction: {extraction_mode: full_page}`, which returns each page as text,
+  adds $1 per 1,000 pages You.com crawls live rather than serves from its
+  cache, so a full-page search for 10 results costs from $0.005 to $0.015.
+  `extraction` is not a cost tier, so a workspace or a request can set it; set
+  the tool's rate with that in mind. A search returns at most 100 results, 50
+  under highlights, the default, and its hits carry the highlights as a snippet
+  and page text only under `full_page`. Highlights share 8,192 tokens across a
+  search's results, so a search for few results returns long snippets, which
+  Otari cuts before a model or a direct search sees them;
+  `extraction: {extraction_mode: highlights, highlights: {total_max_tokens: 1024}}`
+  asks for less.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate. The tool's `api_base` is the instance's root URL, and the
   instance must list `json` under `search.formats`, or every search fails with

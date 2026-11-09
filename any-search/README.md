@@ -357,6 +357,55 @@ lacking `url` or `title`, or with either of the wrong type, or with a `text` or 
 neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
 tag `unexpected_response`. Fields the adapter does not read are ignored.
 
+## You.com
+
+`youdotcom` calls You.com's [Search API](https://you.com/docs/api-reference/search/v1-search),
+`POST /v1/search`, with the key in the `X-API-Key` header, read from `YDC_API_KEY` when not
+passed, as You.com's SDK reads it. The query travels in the JSON body.
+
+It sends what You.com's Python SDK sends by default, so moving from the SDK changes nothing:
+`language` `EN`, `knowledge` `core` and `extraction` `{"extraction_mode": "highlights"}`, the
+passages of each page that address the query. An option passed as `None` is not sent, so
+`knowledge=None` or `extraction=None` turns that default off. Highlights share a budget of 8,192
+tokens across a search's results, so a search for two results can bring back over 10,000
+characters a hit. To get less, or the whole page, pass `extraction`, which is sent as given:
+
+```python
+await engine.search(query, extraction={"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}})
+await engine.search(query, extraction={"extraction_mode": "full_page"})  # each page as Markdown, billed per page
+await engine.search(query, extraction=None)  # each result's description as its snippet
+```
+
+| `SearchHit` | From You.com |
+|---|---|
+| `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
+| `snippet` | `contents.highlights`, joined; `description` when there are none |
+| `text` | `contents.markdown`, which comes back only with `extraction_mode` `full_page` |
+| `published` | `page_age`, ISO 8601 without a zone, so UTC; in another form, `None`, and the value stays in `raw` |
+
+You.com reports no cost. `max_results` becomes `count`, 10 when it is not passed, at most 100, and
+at most 50 under highlights, which You.com refuses above that. `time_range` becomes `freshness`,
+which takes `day` to `year` or a range of dates, and wins over that option. The other native
+options are `offset`, `country`, `safesearch`, `include_domains`, `exclude_domains`,
+`boost_domains`, `strict_operators` and `crawl_timeout`; `--describe youdotcom` lists them. The
+`knowledge` results carry no URL and the `snippets` of a search without highlights are not read,
+so both stay in `raw`.
+
+You.com signals every failure with an HTTP status. Any status from 400 raises `ProviderError`,
+tagged by status: `unauthorized` for a 401, `forbidden` for a 403, which is what a made-up or
+revoked key gets, and `invalid_request` for a 422, whose `error` sentence can quote the request
+and never reaches the error. A 402 is tagged with the code in its `error`, such as
+`payment_required`. Any other status is `http_error`. A successful search carries no error of its
+own.
+
+Every field read from a successful answer is checked: `results` must be an object, and its `web`,
+which You.com leaves out of a search with no results, a list when present. Each item read before
+the count is reached must be an object whose `url` and `page_age` are strings or null, whose
+`title` and `description` are strings, and whose `contents` is an object with `highlights` a list
+of strings and `markdown` a string, each when present. A `page_age` that
+starts like an ISO 8601 date and does not parse fails too. Anything else raises `ProviderError`
+with the tag `unexpected_response`. Fields the adapter does not read are ignored.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its

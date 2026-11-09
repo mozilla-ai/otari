@@ -386,3 +386,30 @@ The first provider whose price per call depends on an option.
 - Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
+
+### 2026-11-09, You.com (any-search)
+
+The first provider whose SDK sends defaults on options that have a list of values.
+
+- A default the adapter sends must be one a host can turn off. You.com's SDK sends `language`
+  `EN` and `knowledge` `core`, and null turns each off, as it does `extraction`. otari refuses a
+  value an option's `enum` does not list, and null is in none, so those two name their values in
+  the description instead, like Exa's `contents` and Mojeek's `date`, which have no enum either.
+- The status a provider documents may not be the one it sends. You.com lists a 401 for a bad key,
+  but a made-up or empty key gets a 403 `{"message": "Forbidden"}` from the gateway in front of
+  the API, and no key at all a 402 `payment_required`. Tag by status, and take a code from the
+  body only where it is one, the 402's `error`; a 422's `error` is a sentence that quotes the
+  request (`highlights supports count up to 50, got 60`).
+- A budget shared across results makes snippets long when there are few: highlights share 8,192
+  tokens, so two results came back at 10,000 to 13,500 characters each. otari cuts them;
+  `extraction.highlights.total_max_tokens`, from 1,024, asks for less.
+- A mode can lower the result cap. Under highlights a `count` above 50 is a 422, while one above
+  100 is answered with no results, so the adapter caps the count by mode.
+- An empty answer can drop the list rather than empty it: a search with no results answered
+  `results: {}`, with no `web`. `web` is optional, `results` required.
+- You.com accepts values it does not apply: a `freshness` of `decade`, a `country` or `language`
+  of `XX`, and an `offset` of 10, past the documented 9, are each answered 200.
+- Fixture recipes: `normal` with `--max-results 2` and `extraction` set to
+  `{"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}}` keeps it small;
+  `empty` with `include_domains` naming a domain that does not exist; `error` with a made-up key,
+  a 403.
