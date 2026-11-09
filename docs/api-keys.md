@@ -47,8 +47,8 @@ form:
 | **Always reject (403)** | Rejected, even where the deployment accepts |
 | **Always accept** | Accepted, and billed to the key's own user |
 
-Spend always stays with the key's user, so accepting a mismatch never lets a key
-charge someone else.
+On an ordinary key, spend always stays with the key's user, so accepting a
+mismatch never lets a key charge someone else.
 
 An application that passes its own customer ids has two options:
 

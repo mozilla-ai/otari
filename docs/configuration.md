@@ -622,7 +622,8 @@ How the request is translated:
   or the session id Claude Code sends) keys the provider's prompt cache, scoped
   to the caller, so the session id itself never reaches the provider.
 - Anthropic's server tools are not forwarded: Otari's own web search, web fetch
-  and code execution serve them.
+  and code execution serve them where configured (see [Built-in tools](tools.md)),
+  and one Otari does not serve is dropped.
 
 The setting covers `/v1/messages` traffic only, and only where the instance's
 provider has a Responses API; an instance whose provider has none keeps the
@@ -690,7 +691,8 @@ next time a request uses it.
 
 ### End-user identifiers
 
-Every request reaches a provider under the deployment's one account. A provider
+Every request reaches a provider under the account of the credential that
+serves it, which many users usually share. A provider
 that enforces its usage policy per end user needs an identifier for each, or a
 block meant for one person lands on the whole account.
 

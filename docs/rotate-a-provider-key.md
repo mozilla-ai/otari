@@ -22,7 +22,7 @@ Provider keys are resolved at request time. Your application's API keys do not n
 3. Click **Add provider key**. Select the same provider, enter a distinct **Name**, and paste the new API key.
 4. Set the new key as the provider's default by clicking **Make default provider** (its star icon).
 5. For each workspace that pins the old key, open it on **Workspaces**, select its **Providers** tab, and choose **Always use this key** from the new key's **More** menu.
-6. Send a test request from each affected workspace. Confirm it completes successfully in the workspace's **Overview**, on its **Requests** tab.
+6. Send a test request from each affected workspace. Confirm it completes successfully, and not on a fallback, in the workspace's **Overview**, on its **Requests** tab.
 
 ## Remove the old key
 

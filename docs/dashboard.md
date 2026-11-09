@@ -203,8 +203,8 @@ collapsed row with its status, its arguments and what it returned. This is shown
 only in the Playground and is not saved; an API request still gets only the final
 message (see [What clients receive](tools.md#what-clients-receive)).
 
-**What is stored.** Nothing, until you save a conversation or record a
-comparison. The first time, you are asked to agree to content retention; you can
+**What is stored.** Each request is recorded in usage, as any request is. Its
+content is kept only once you save a conversation or record a comparison. The first time, you are asked to agree to content retention; you can
 withdraw that later, which blocks new saves and deletes nothing. Saved
 conversations, comparisons and pinned models are visible only to you, and each
 can be deleted.

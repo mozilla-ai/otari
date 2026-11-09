@@ -72,8 +72,8 @@ opens, with no KMS call and no CloudTrail record. Use `aws_kms_only` where only
 your KMS key may open session content: content sealed with `OTARI_SECRET_KEY`
 then reads back empty.
 
-The gateway calls `kms:GenerateDataKey`, `kms:Decrypt` and `kms:DescribeKey`
-with the encryption context `otari:purpose=trace-content`,
+The gateway calls `kms:GenerateDataKey` and `kms:Decrypt` with the encryption
+context `otari:purpose=trace-content`,
 `otari:workspace=<workspace id>` and `otari:session=<trace id>`. A policy can
 allow only that purpose and require every call to name a workspace and session:
 
@@ -90,7 +90,8 @@ allow only that purpose and require every call to name a workspace and session:
 }
 ```
 
-Also allow `kms:DescribeKey` on the key and on each previous key. The gateway
+Also allow `kms:DescribeKey` on the key and on each previous key, without those
+conditions, since it carries no encryption context. The gateway
 calls it every few minutes, so an alias moved to a new key is followed without
 a restart.
 

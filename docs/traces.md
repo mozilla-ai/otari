@@ -1,6 +1,8 @@
 # Agent traces
 
-Otari records an **agent trace** for every completion it serves. A trace is the
+Otari records an **agent trace** for the completions it serves. Capture is
+best-effort: it can be turned off, and spans are dropped when the writer is
+full (see [Settings](trace-storage.md#settings)). A trace is the
 whole session an agent ran: its turns, and inside each turn every request, LLM
 call, routing attempt, guardrail check, MCP connection and tool call, with their
 timing and cost. It answers what an agent run did and cost, not only what one

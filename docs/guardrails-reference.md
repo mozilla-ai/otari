@@ -201,8 +201,8 @@ A read of a definition carries `build_state`:
 deployment-wide answer here: with several workers or replicas, a read taken
 seconds after a write can say `pending` on one and `built` on the next, and both
 are true. Treat a lasting `pending` as worth a second look rather than as a
-failure, and `failed` as the one to act on: a definition with a mistyped
-credential saves fine and then shows `failed`.
+failure, and `failed` as the one to act on. `built` does not prove the vendor
+accepts the credential: some guardrails reach the vendor only when they check.
 
 ## Which profiles exist, and what they take
 

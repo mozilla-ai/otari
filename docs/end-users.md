@@ -68,11 +68,12 @@ Otari-End-User-Budget: <memories budget id>
 - **Use a stable id per person.** Every new id creates an end user, even if the
   request is then refused, so a per-session or per-request id fills the key's
   [cap](#capping-a-keys-end-users).
-- An id is at most 256 characters and can be any string, `/` included.
+- An id is 1 to 256 characters and can be any string, `/` included. An empty
+  id counts as naming no one.
 - The header only matters when the request creates the end user. An existing end
   user keeps its budget.
 - A budget not on the key's list is refused with `403`
-  (`end_user_budget_not_allowed`).
+  (`end_user_budget_not_allowed`), even for an existing end user.
 - The response's `Otari-End-User-Budget` header names the budget the end user is
   actually on.
 

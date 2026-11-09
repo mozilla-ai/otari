@@ -5,8 +5,8 @@ or another instrumented application. Imported events appear on the **Overview**
 with their source and an estimate of what the same usage would cost on the API.
 
 Importing works on a gateway you run, not on otari.ai today. It needs a
-budget-exempt API key or the master key, and only a deployment's operator has
-either. To record a client's usage on otari.ai, route its requests through Otari
+budget-exempt API key or the master key, and only a deployment's operator can
+create either (an operator can give an exempt key to a member). To record a client's usage on otari.ai, route its requests through Otari
 instead.
 
 ## Enforcement boundary
@@ -106,7 +106,9 @@ POST /otlp/v1/metrics   content-free coding-agent outcome metrics
   records carry no trustworthy user. With any other key, usage is refused and
   spans are not kept.
 - Otari records usage from spans that carry the OpenTelemetry GenAI token
-  attributes, and never stores prompt, response or tool content.
+  attributes. It never keeps response or tool output; prompts, commands and file
+  paths are kept only where trace content is on and the client sends them (see
+  [Keeping what a span was about](traces.md#keeping-what-a-span-was-about)).
 - The spans also appear on the key's agent trace; see
   [Agent traces](traces.md#instrumented-agents).
 

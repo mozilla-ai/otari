@@ -38,7 +38,8 @@ URL plus `/api/v1`. See [Base URL](api-reference.md#base-url).
 opencode names a model `<provider id>/<model>`, and everything after `otari/`
 goes to Otari unchanged, so write it as Otari spells it:
 
-- On otari.ai, `otari/openai/gpt-4o` lets Otari choose the provider, and
+- On otari.ai, a catalog id such as `otari/deepseek/deepseek-v4.1-flash` lets
+  Otari choose the provider, and
   `otari/anthropic:claude-sonnet-4-6` pins one.
 - On your own gateway, use `provider:model` for a provider it has, such as
   `otari/openai:gpt-4o`.

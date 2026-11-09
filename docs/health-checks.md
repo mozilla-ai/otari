@@ -34,7 +34,8 @@ Open **Deployment → Health** in the dashboard. It shows:
 ## What a check sends
 
 Every chat model gets the prompt (`Reply with the single word: pong` by
-default), capped at 16 output tokens. Any answer passes; an error, or no answer
+default), capped at 16 output tokens, or 256 for a reasoning model (both
+configurable under [Schedule](#schedule)). Any answer passes; an error, or no answer
 within 60 seconds, fails.
 
 Models of kind embedding, rerank, transcription, image, speech, video, realtime

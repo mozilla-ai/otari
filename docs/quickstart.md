@@ -7,7 +7,7 @@ icon: bolt
 
 This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears on the workspace's Overview.
 
-**Estimated time: 5 minutes.** All you need is an otari.ai account.
+**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](manage-provider-keys.md).
 
 To run Otari on your own machine instead, follow the [Self-hosted quickstart](self-hosted-quickstart.md).
 
@@ -44,7 +44,7 @@ Pick a model your workspace can use.
 2. Choose a model using the available filters, including modality, provider, vendor, capabilities, and more, to quickly find the option that best fits your needs.
 3. After selecting a model, click **Use this model**, and copy the model selector from the panel that opens.
 
-otari.ai exposes an OpenAI-compatible endpoint at `https://api.otari.ai/api/v1`, or `https://eu.api.otari.ai/api/v1` for an account in the European Union. The fastest first check is one cURL request that you can copy. The example uses `deepseek/deepseek-v4-pro-0813`.
+otari.ai exposes an OpenAI-compatible endpoint at `https://api.otari.ai/api/v1`, or `https://eu.api.otari.ai/api/v1` for an account in the European Union. The fastest first check is one cURL request that you can copy. The examples use `deepseek/deepseek-v4-pro-0813`; replace it with the selector you copied.
 
 ```bash
 curl https://api.otari.ai/api/v1/chat/completions \
@@ -79,7 +79,7 @@ print(response.choices[0].message.content)
 
 ![The Overview's Requests tab, listing requests with their user, model, tokens, cost and status.](assets/screenshots/quickstart-requests.png)
 
-**Success**: Once the request appears on the Overview, your hosted path is working. From there, you can add budgets, more providers, or an editor integration.
+**Success**: Once the request appears on the Overview as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
 
 ## What's next?
 

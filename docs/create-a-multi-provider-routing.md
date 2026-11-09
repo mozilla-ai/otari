@@ -153,15 +153,15 @@ Multi-provider routing is not just a nice-to-have abstraction. It changes how yo
 
 So far, every request has succeeded on the primary, so you haven't seen the fallback do anything yet. You can trigger it on purpose to confirm the chain works.
 
-Temporarily break the primary for a test workspace only, then send the same request:
+Temporarily break the primary for the workspace you used above, then send the same request with its API key:
 
 1. In **Organization** → **Providers** → **Inference**, add an OpenAI key with an invalid value, named `fallback-test`. Leave the Anthropic key valid.
-2. Pin the test workspace to `fallback-test`, as in [Control workspace access](manage-provider-keys.md#control-workspace-access). Other workspaces keep the organization's key.
+2. Pin that workspace to `fallback-test`, as in [Control workspace access](manage-provider-keys.md#control-workspace-access). Other workspaces keep the organization's key.
 3. Send the same `production-chat` request from step 4, unchanged.
 
 The request still succeeds, but the response now comes from Anthropic. OpenAI refused the key, Otari moved to the next entry, and Anthropic served the call. `Otari-Fallback` is now `true`, and `Otari-Model` names the Anthropic model. The Requests tab records both attempts.
 
-When you're done, remove the `fallback-test` key so the test workspace follows the organization's key again.
+When you're done, remove the `fallback-test` key. If the workspace was pinned to another key before, pin it back.
 
 ## A good first production pattern
 
