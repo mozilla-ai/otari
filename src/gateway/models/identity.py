@@ -17,6 +17,10 @@ MAX_SUBJECT_LENGTH = 255
 MAX_BLOCK_REASON_LENGTH = 500
 
 OIDC_PROVIDER_PREFIX = "oidc:"
+# An issuer is named as a provider by prefixing it, so the room for one is what the provider column
+# holds less the prefix. Stated here rather than at each boundary, because a limit split between
+# two places drifts.
+MAX_OIDC_ISSUER_LENGTH = MAX_PROVIDER_LENGTH - len(OIDC_PROVIDER_PREFIX)
 
 
 class EmailAssertion(StrEnum):
