@@ -9,6 +9,7 @@ extension is what registers the hook with pi; see docs/agent-guardrails.md.
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,35 @@ def test_home_relative_path_is_expanded(monkeypatch: pytest.MonkeyPatch, repo: P
     assert result.exit_code == 2, result.output
     result = _invoke(_pre(repo, "read", {"path": f"~/{repo.name}/.env"}))
     assert result.exit_code == 2, result.output
+
+
+def test_tilde_name_path_is_not_expanded(repo: Path) -> None:
+    # `~name` is not pi's `~/` form; expanduser would treat it as another user's home and raise for an unknown one.
+    (repo / "CHANGELOG.md").write_text("", encoding="utf-8")
+    result = _invoke(_pre(repo, "edit", {"path": "~nosuchuser-xyz/CHANGELOG.md"}))
+    assert result.exit_code == 0, result.output
+    assert hook_cli._hook_pi_expand_home("~nosuchuser-xyz/x", "pi") == "~nosuchuser-xyz/x"
+
+
+def test_nested_judge_call_exits_before_evaluating(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    # A pi judge call runs the pi-otari Stop hook again; the marker ends that even where the repo root is found.
+    monkeypatch.setenv(hook_cli._HOOK_NESTED_ENV, "1")
+    result = _invoke(_pre(repo, "edit", {"path": "CHANGELOG.md"}))
+    assert result.exit_code == 0, result.output
+    assert result.output == ""
+
+
+def test_judge_and_generate_calls_carry_the_nested_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    hook_cli._hook_run_judge_subprocess(["pi"], "p", deadline=time.monotonic() + 60, label="pi -p")
+    hook_cli._gates_generate_run_cli(["pi"], "p", label="pi -p")
+    assert [env[hook_cli._HOOK_NESTED_ENV] for env in seen] == ["1", "1"]
 
 
 def test_read_maps_to_read_target(repo: Path) -> None:

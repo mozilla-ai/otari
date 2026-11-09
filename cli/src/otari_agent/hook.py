@@ -107,8 +107,11 @@ _PI_READ_TOOL_PATH_FIELDS = {"read": "path"}
 
 def _hook_pi_expand_home(target: Any, harness: str) -> Any:
     """pi's tools accept a `~/...` path and expand it themselves; match that so a gate sees the real target."""
-    if harness == "pi" and isinstance(target, str) and target.startswith("~"):
-        return str(Path(target).expanduser())
+    if harness == "pi" and isinstance(target, str) and (target == "~" or target.startswith("~/")):
+        try:
+            return str(Path(target).expanduser())
+        except RuntimeError:
+            return target
     return target
 
 
@@ -1341,6 +1344,16 @@ _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
+# Set in the environment of every model-CLI call `otari hook` and `otari guardrails generate` make, so a
+# hook the extension registers inside that call (pi-otari does, user-wide) exits at once rather than
+# judging the judge, wherever the call's own working directory sits.
+_HOOK_NESTED_ENV = "OTARI_HOOK_IN_JUDGE"
+
+
+def _hook_nested_env() -> dict[str, str]:
+    return {**os.environ, _HOOK_NESTED_ENV: "1"}
+
+
 def _hook_run_judge_subprocess(
     argv: list[str],
     prompt: str,
@@ -1388,6 +1401,7 @@ def _hook_run_judge_subprocess(
             argv,
             input=prompt,
             cwd=_hook_judge_workdir(),
+            env=_hook_nested_env(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1645,10 +1659,9 @@ def _hook_call_pi_p(pi_path: str, model: str | None, prompt: str, *, deadline: f
     here so a model routed through Otari resolves. That extension also
     registers `otari hook --harness pi` on pi's Stop event, so this call
     would re-enter the hook were nothing else in the way. What stops the loop
-    is `otari hook` itself: this runs from `_hook_judge_workdir()`
-    (`~/.otari/judge-workdir`), which is not a git repository and holds no
-    guardrail, so the nested `otari hook` finds no repo or rules and exits 0
-    immediately without evaluating anything.
+    is `_HOOK_NESTED_ENV`, which this call's environment carries and which
+    makes the nested `otari hook` exit 0 at once, even where `$HOME` is itself
+    a repository whose guardrail has a judge gate.
 
     outcome is always one of "pass"/"fail"/"error", the same contract
     `_hook_call_claude_p` returns, parsed from pi's stdout. No "prompt is too
@@ -2555,6 +2568,9 @@ def hook(
     already calls), it runs the callback above unchanged.
     """
     if ctx.invoked_subcommand is not None:
+        return
+
+    if os.environ.get(_HOOK_NESTED_ENV):
         return
 
     # Typed at a terminal rather than piped in by a harness. The `json.load`
@@ -3526,6 +3542,7 @@ def _gates_generate_run_cli(argv: list[str], prompt: str, *, label: str) -> str:
             argv,
             input=prompt,
             cwd=_hook_judge_workdir(),
+            env=_hook_nested_env(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -3884,7 +3901,7 @@ def guardrails() -> None:
     envvar="OTARI_GUARDRAILS_GENERATE_CLI",
     help=(
         "Comma-separated, ordered CLI backend(s) to try (claude, codex, pi). Defaults to claude, "
-        "then codex, whichever is found on PATH first."
+        "then codex, then pi, whichever is found on PATH first."
     ),
 )
 @click.option(
