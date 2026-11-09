@@ -20,7 +20,6 @@ import {
   useHostedAvailableModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
-
 import {
   canSubmitDraft,
   createBody,

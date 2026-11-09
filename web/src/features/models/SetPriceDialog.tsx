@@ -18,6 +18,7 @@ import {
   unitOutputRateLabel,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 // Per-1M rates an operator enters to price a model. Input and output are
 // required; the cache rates are optional (blank folds those tokens into the
@@ -58,7 +59,13 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
+      <Input
+        inputMode="decimal"
+        placeholder="0.00"
+        // A raw Input, so the touch-screen rule the field primitives apply
+        // is applied here.
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
+      />
     </TextField>
   )
 }

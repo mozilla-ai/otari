@@ -459,7 +459,7 @@ export function OrganizationProvidersPage() {
         // the organization's default is marked, and one that is merely
         // available carries nothing. Archived takes the subtle dot, because it
         // is a row still present rather than a problem.
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-medium text-foreground">{row.name}</span>
           {row.is_org_default ? (
             <span className="flex items-center gap-2 text-mono-caption text-muted">
@@ -754,6 +754,7 @@ export function OrganizationProvidersPage() {
         <TableScrollFrame className="otari-provider-keys-table">
           <DataTable
             ariaLabel="Organization provider keys"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}

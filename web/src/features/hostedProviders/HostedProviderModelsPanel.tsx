@@ -207,6 +207,7 @@ export function HostedProviderModelsPanel({
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${provider.name}`}
+              mobileLayout="cards"
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}

@@ -34,8 +34,14 @@ import { apiKeyLabel } from "./requestColumns"
 export function RequestDetail({
   entry,
   onPriceModel,
+  isInset = true,
 }: {
   entry: UsageEntry
+  /**
+   * Whether the detail pads itself to the panel's 16px edge. Off inside a
+   * trace's detail column, which already pads its contents by that much.
+   */
+  isInset?: boolean
   /**
    * Absent for a caller who does not operate the deployment. Pricing a model is a
    * deployment-wide write (`/pricing`), so offering the button to a tenant
@@ -65,7 +71,9 @@ export function RequestDetail({
       ? null
       : userDisplay(entry.user_id, entry.user_alias, memberLabels)
   return (
-    <div className="@container flex flex-col gap-5 px-3 pt-3 pb-4">
+    <div
+      className={`@container flex flex-col gap-5 ${isInset ? "px-4 pt-3 pb-4" : ""}`}
+    >
       {/* A skip is the walk moving past a full model, not a failure, so it is
           worded and styled as a note rather than an error. */}
       {isSkipped ? (

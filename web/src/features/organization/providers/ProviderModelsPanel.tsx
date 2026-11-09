@@ -310,6 +310,7 @@ export function ProviderModelsPanel({
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
+              mobileLayout="cards"
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}

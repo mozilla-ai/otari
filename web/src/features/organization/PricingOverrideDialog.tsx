@@ -26,7 +26,7 @@ import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
-
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import {
   deploymentManagedSelectors,
   findOverlapping,
@@ -89,7 +89,13 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
+      <Input
+        inputMode="decimal"
+        placeholder="0.00"
+        // A raw Input, so the touch-screen rule the field primitives apply
+        // is applied here.
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
+      />
       {description ? <span className="text-caption">{description}</span> : null}
     </TextField>
   )

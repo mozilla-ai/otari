@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow, tabClassName } from "@/design-system/navigation/TabRow"
 
@@ -443,5 +443,94 @@ describe("Segmented", () => {
       .closest("label") as HTMLElement
     expect([...label.classList]).toContain("shrink-0")
     expect([...label.classList]).toContain("whitespace-nowrap")
+  })
+})
+
+describe("TabRow scrolling", () => {
+  // jsdom lays nothing out, so the boxes and the row's scroll are stubbed: a
+  // 200px row with an active tab drawn at 250 to 300, past its right edge.
+  let scrollLeft = new WeakMap<Element, number>()
+  const realScrollLeft = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "scrollLeft",
+  )
+  const box = (left: number, right: number) =>
+    ({
+      left,
+      right,
+      top: 0,
+      bottom: 20,
+      width: right - left,
+      height: 20,
+    }) as DOMRect
+
+  beforeEach(() => {
+    scrollLeft = new WeakMap()
+    Object.defineProperty(Element.prototype, "scrollLeft", {
+      configurable: true,
+      get() {
+        return scrollLeft.get(this) ?? 0
+      },
+      set(value: number) {
+        scrollLeft.set(this, value)
+      },
+    })
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        return this.getAttribute("aria-pressed") === "true"
+          ? box(250, 300)
+          : box(0, 200)
+      },
+    )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    if (realScrollLeft)
+      Object.defineProperty(Element.prototype, "scrollLeft", realScrollLeft)
+  })
+
+  it("brings an active tab past the edge into its own row, clear of the fade, and moves no ancestor", () => {
+    // `scrollIntoView` scrolls every ancestor, the page included; the row has
+    // to scroll itself instead.
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    render(
+      <TabRow>
+        <Tab isActive={false} onPress={() => {}}>
+          24h
+        </Tab>
+        <Tab isActive onPress={() => {}}>
+          12mo
+        </Tab>
+      </TabRow>,
+    )
+    const row = screen.getByRole("button", { name: "12mo" }).parentElement
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    // Right edge 300 against the row's 200, less the 3rem (48px) fade.
+    expect(row?.scrollLeft).toBe(148)
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView")
+  })
+
+  it("fades the edge that has more beyond it and only that edge", () => {
+    render(
+      <TabRow>
+        <Tab isActive={false} onPress={() => {}}>
+          Today
+        </Tab>
+      </TabRow>,
+    )
+    const row = screen.getByRole("button", { name: "Today" })
+      .parentElement as HTMLElement
+    Object.defineProperty(row, "clientWidth", { value: 200 })
+    Object.defineProperty(row, "scrollWidth", { value: 500 })
+    const at = (left: number) => {
+      row.scrollLeft = left
+      row.dispatchEvent(new Event("scroll"))
+      return row.dataset.fade
+    }
+    expect(at(0)).toBe("end")
+    expect(at(100)).toBe("both")
+    expect(at(300)).toBe("start")
   })
 })

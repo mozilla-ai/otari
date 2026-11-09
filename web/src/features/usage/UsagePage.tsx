@@ -353,6 +353,7 @@ function BreakdownTable({
     <TableScrollFrame className="otari-breakdown flex flex-col gap-2">
       <DataTable
         ariaLabel={`Spend by ${dimensionLabel.toLowerCase()}`}
+        mobileLayout="cards"
         columns={columns}
         rows={visible}
         getRowKey={rowKey}
@@ -468,6 +469,7 @@ function ToolBreakdownTable({
     <TableScrollFrame className="otari-breakdown">
       <DataTable
         ariaLabel="Spend by gateway-run tool"
+        mobileLayout="cards"
         columns={columns}
         rows={rows}
         getRowKey={(row) => row.tool}
@@ -1289,10 +1291,14 @@ function UsagePageContent({
     visibleSecondary.find((dimension) => dimension.key === secondaryDim) ??
     visibleSecondary[0]
 
+  // On a phone the row spans the column with the window at its start, so it
+  // lines up with the filters above it.
   const introAction = (
-    <div className="flex items-center gap-3">
-      <span className="text-overline">
-        {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
+    <div className="flex items-center gap-3 max-md:justify-between">
+      {/* "· UTC" held to the date, as on the request timeline. */}
+      <span className="text-overline text-balance">
+        {formatWindowLabel(effectiveStart, effectiveEnd)}
+        {"\u00a0·\u00a0"}UTC
       </span>
       <RefreshButton
         onRefresh={refresh}
@@ -1354,7 +1360,7 @@ function UsagePageContent({
           the window and the entity pickers, so only Refresh remains. */}
       {embedded ? (
         <div className="otari-toolbar flex flex-wrap items-center gap-3 pb-3">
-          <div className="ml-auto">{introAction}</div>
+          <div className="ml-auto max-md:ml-0 max-md:w-full">{introAction}</div>
         </div>
       ) : (
         <FilterChips

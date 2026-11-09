@@ -217,6 +217,7 @@ export function AgentRecommendersPage() {
         <TableScrollFrame className="otari-subagent-routers-table">
           <DataTable
             ariaLabel="Subagent routers"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}

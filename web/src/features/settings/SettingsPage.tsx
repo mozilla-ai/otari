@@ -673,13 +673,21 @@ export function SettingsPage() {
           ref={searchRef}
           type="search"
           aria-label="Search settings"
-          placeholder="Search settings (press / to focus)…"
+          // The shortcut is a keyboard's, so the hint asks for a fine pointer
+          // rather than for the field helper's "not coarse": with no pointer
+          // to go on, a hint about a key nobody may have is left out.
+          placeholder={
+            window.matchMedia?.("(pointer: fine)").matches
+              ? "Search settings (press / to focus)…"
+              : "Search settings…"
+          }
+          aria-keyshortcuts="/"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape") setSearch("")
           }}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-body focus:border-accent focus:outline-none"
+          className={`min-w-0 flex-1 ${INPUT_CLASS}`}
         />
         <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only

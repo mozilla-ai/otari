@@ -32,7 +32,7 @@ export function GatewayCall({
     return <Skeleton className="h-24 w-full" ariaLabel="Loading the request" />
   }
   const entry = group.data?.find((row) => row.id === attemptId)
-  if (entry) return <RequestDetail entry={entry} />
+  if (entry) return <RequestDetail entry={entry} isInset={false} />
   return (
     <>
       <div className="flex">

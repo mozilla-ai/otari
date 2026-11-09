@@ -26,7 +26,6 @@ import {
   useVerifyOrganizationDomain,
 } from "@/shared/api/organizations"
 import { formatRelative } from "@/shared/helpers/format"
-
 import { canManage, membershipLabel } from "./roles"
 
 // Email-domain auto-join: anyone who signs in with a verified address at a
@@ -338,6 +337,7 @@ export function OrganizationDomainsPage() {
         <TableScrollFrame className="otari-domains-table">
           <DataTable
             ariaLabel="Organization email domains"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}
