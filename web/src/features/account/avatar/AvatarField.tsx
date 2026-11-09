@@ -47,8 +47,10 @@ export const FIELD_FACES = COLS * ROWS
 // A face fills 70% of its cell and rows sit one cell apart, so row and column
 // gaps match and a face swollen by the lens still clears its neighbors. A
 // narrow frame gets a smaller shape at full size rather than a shrunken one,
-// which keeps every cell over the 44px touch floor.
+// and no cell goes below the 44px touch floor: on the narrowest phones the
+// outer ring's tips reach a little further toward the edge instead.
 const MAX_PITCH = 52
+const MIN_PITCH = 44
 const MIDDLE_ROW_SPAN = 9.8
 const COMPACT_BELOW = 480
 const COMPACT_MIDDLE_ROW_SPAN = 7.6
@@ -151,9 +153,12 @@ export function AvatarField({
   const reticleRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 520, height: 300 })
   const isCompact = size.width < COMPACT_BELOW
-  const pitch = Math.min(
-    MAX_PITCH,
-    size.width / (isCompact ? COMPACT_MIDDLE_ROW_SPAN : MIDDLE_ROW_SPAN),
+  const pitch = Math.max(
+    MIN_PITCH,
+    Math.min(
+      MAX_PITCH,
+      size.width / (isCompact ? COMPACT_MIDDLE_ROW_SPAN : MIDDLE_ROW_SPAN),
+    ),
   )
   const pitchRef = useRef(pitch)
   pitchRef.current = pitch
