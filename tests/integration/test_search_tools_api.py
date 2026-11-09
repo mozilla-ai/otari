@@ -453,7 +453,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply", "synthetic"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "perplexity", "searxng", "serply", "synthetic"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -474,6 +474,21 @@ def test_search_catalog_serves_the_library_metadata(
     # Serply's query is in the URL and its key in a header.
     serply = catalog["serply"]
     assert (serply["max_results"], serply["query_in_url"], serply["key_in_url"]) == (10, True, False)
+
+
+def test_a_cost_tier_the_provider_reports_no_cost_for_is_set_only_by_a_tools_configuration(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    perplexity = _catalog(catalog_client, headers=master_key_header)["perplexity"]
+    assert perplexity["reports_cost"] is False
+    (tier,) = [option for option in perplexity["options"] if option["cost_tier"]]
+    assert (tier["name"], tier["enum"], tier["default"], tier["operator_only"]) == (
+        "search_type",
+        ["web", "fast"],
+        "web",
+        True,
+    )
+    assert not any(option["operator_only"] for option in perplexity["options"] if not option["cost_tier"])
 
 
 def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:

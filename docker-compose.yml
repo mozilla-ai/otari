@@ -79,6 +79,8 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - SERPLY_API_KEY=${SERPLY_API_KEY:-}
       - SYNTHETIC_API_KEY=${SYNTHETIC_API_KEY:-}
+      # Perplexity's key serves its models too, under `providers:`.
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       # And for fetch providers, under `fetch_tools:` as
       # `api_key: ${TABSTACK_API_KEY}`.
       - TABSTACK_API_KEY=${TABSTACK_API_KEY:-}

@@ -219,6 +219,39 @@ request (`timestamp` with `date=1`), so neither is required: the date is read fr
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
+## Perplexity
+
+`perplexity` calls Perplexity's [Search API](https://docs.perplexity.ai/api-reference/search-post),
+`POST /search`, with the key read from `PERPLEXITY_API_KEY` and the base URL from
+`PERPLEXITY_BASE_URL` when not passed, as Perplexity's SDK reads them. The key travels as a
+Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Perplexity |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""` |
+| `text` | `snippet`: the passages Perplexity takes from the page, cut to `max_tokens_per_page`; none when it is empty |
+| `published` | `date`, an ISO 8601 date, when Perplexity sends one; a date without a zone is UTC |
+
+`max_results` is sent as Perplexity's `max_results`, at most 20; without it Perplexity returns 10.
+`time_range` becomes `search_recency_filter`, and wins over that option when both are passed.
+Native options, under Perplexity's own names: `search_type` (`web` or `fast`, the cost tier),
+`search_recency_filter` (`hour` to `year`), `search_domain_filter`, `country`,
+`search_language_filter`, `max_tokens_per_page`, `max_tokens`, and the date filters
+`search_after_date_filter`, `search_before_date_filter`, `last_updated_after_filter` and
+`last_updated_before_filter`, as `MM/DD/YYYY`. Perplexity refuses a recency filter, `time_range`
+included, together with `search_after_date_filter` or `search_before_date_filter`. Its `people`
+search type is not offered. Perplexity reports no cost.
+
+Perplexity signals every failure with an HTTP status and an `error` object. Any status from 400
+raises `ProviderError`, tagged with `error.type` (`invalid_api_key`, `invalid_request`,
+`invalid_country_code`), else `http_error`; the message never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url`, `title` or `snippet`, or with one of them not a string, or with a `date` that is
+neither a string nor null, or that does not parse, raises `ProviderError` with the tag
+`unexpected_response`. Fields the adapter does not read, `last_updated` among them, are ignored.
+
 ## SearXNG
 
 `searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,
