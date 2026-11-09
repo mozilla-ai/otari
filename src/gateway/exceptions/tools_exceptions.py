@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from fastapi import status
 
-from gateway.core.error_codes import PRICING_REQUIRED
+from gateway.core.error_codes import PRICING_REQUIRED, WEB_ACCESS_DISABLED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -148,6 +148,8 @@ class WebToolExecutorPinnedError(TenancyForbiddenError):
 class WebAccessRefusedError(Exception):
     """A workspace's web search policy refuses the web access a request declared."""
 
+    error_code: str | None = None
+
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
@@ -155,6 +157,8 @@ class WebAccessRefusedError(Exception):
 
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
+
+    error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
         super().__init__("web access is not enabled for this workspace")
@@ -169,6 +173,8 @@ class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
 
 class WebSearchNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Search alone."""
+
+    error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
         super().__init__("web search is not enabled for this workspace")
