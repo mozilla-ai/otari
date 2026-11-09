@@ -99,7 +99,12 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, country_not_supported
+from gateway.api.routes._helpers import (
+    GUARDRAILS_RESULT_HEADER,
+    apply_input_guardrails,
+    country_gate_for,
+    country_not_supported,
+)
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -1399,6 +1404,16 @@ class RequestContext:
         # The budget of the end user a service key named, which a streamed
         # response has to carry itself (see ``build_streaming_response``).
         self.end_user_budget_id = end_user_budget_id
+
+
+def _guardrail_headers(response: Response | None) -> dict[str, str]:
+    """``Otari-Guardrails`` as the input guardrails wrote it on the route's injected ``Response``.
+
+    A streamed answer is a ``StreamingResponse`` the route builds itself, which does not
+    take headers from the injected one, so the verdict has to be carried across by hand.
+    """
+    value = response.headers.get(GUARDRAILS_RESULT_HEADER) if response is not None else None
+    return {GUARDRAILS_RESULT_HEADER: value} if value else {}
 
 
 def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
@@ -6624,6 +6639,7 @@ async def run_single_attempt_stream(
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
+    response: Response | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -6780,7 +6796,12 @@ async def run_single_attempt_stream(
         price_facts=ctx.price_facts,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(served_tools.container_lease) | _end_user_headers(ctx) | served_by,
+        extra_headers=(
+            _container_headers(served_tools.container_lease)
+            | _end_user_headers(ctx)
+            | _guardrail_headers(response)
+            | served_by
+        ),
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,

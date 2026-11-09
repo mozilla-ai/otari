@@ -5,57 +5,54 @@ icon: shield-halved
 
 # Manage guardrails
 
-A guardrail checks the content of a request before it reaches a provider, to
-catch what breaks your safety or compliance rules: personal data, toxicity,
-prompt injection and the like. A guardrail can block the requests it flags, or
-only record them, and runs on the whole organization or on chosen workspaces.
+Guardrails evaluate model traffic before it reaches a provider. Use them to detect content that violates your safety or compliance requirements.
 
-Only organization owners and admins can add, change or remove guardrails.
+A guardrail can monitor matching requests or block them, and can be applied to the entire organization or only to selected workspaces.
+
+For what each guardrail checks, see [Inference Guardrails](guardrails.md).
 
 ## Configure a guardrail
 
-1. Open **Organization**, then **Guardrails**.
+Only organization owners and admins can add, edit, or delete guardrails.
+
+1. From the dashboard, open **Organization** → **Guardrails**.
 2. Click **Configure guardrail**.
-3. Choose the check you want, such as content safety, PII or hallucination,
-   then a guardrail from the catalog for it.
-4. Give it a name, enter the provider's API key if it needs one, and fill in
-   the remaining fields, which depend on the guardrail you chose.
-5. Click **Configure guardrail** to save it.
+3. Follow the steps in the dialog:
+   1. Select the type of risk you want to detect, such as content safety, PII, or hallucination.
+   2. Choose a guardrail from the catalog for that check.
+   3. Give the guardrail a name.
+   4. Enter the provider's API key, if it needs one.
+   5. Complete the remaining configuration steps. These may vary depending on the guardrail provider you selected.
+4. Click **Configure guardrail** to save your settings.
 
 ![The New guardrail dialog, with a check and a guardrail chosen and a name filled in.](assets/screenshots/manage-guardrails-configure.png)
 
 ## Mandate a guardrail
 
-A configured guardrail runs on nothing until you mandate it.
+Each guardrail can be applied across the entire organization or to specific workspaces. You can configure it to either **block requests** or **monitor them** without blocking. Once mandated, the guardrail will run on every chat completions, messages and responses request from the selected workspaces. Embeddings and other endpoints are not checked.
 
 1. In **Guardrails**, click **Mandate a guardrail**.
-2. Choose the guardrail you configured, or your own guardrail service.
-3. Choose the **Mode**: block the requests it flags, or monitor them without
-   blocking.
-4. Choose what happens **If unreachable**: refuse the request or serve it
-   unchecked. Only a blocking guardrail can refuse; a monitoring one always
-   serves.
-5. Choose where it runs: every workspace, including new ones, or chosen
-   workspaces.
-6. Click **Mandate a guardrail** to save it.
+2. Choose whether you want to use a guardrail configured from the catalog or your own guardrail service.
+3. Choose the **Mode**: whether the guardrail should block requests or monitor them only.
+4. Choose what should happen **If unreachable**: refuse the request or serve it unchecked. Only blocking guardrails can refuse requests; monitoring guardrails will always serve them.
+5. Select where the guardrail should run: every workspace, including new ones, or selected workspaces.
+6. Click **Mandate a guardrail** to save your settings.
 
 ![The Mandated guardrail dialog, with a guardrail profile and endpoint, its mode and where it runs.](assets/screenshots/manage-guardrails-mandate.png)
 
-From then on, the guardrail runs on every request from those workspaces.
-
 ## Test a guardrail
 
-Click **Test** on a guardrail's row, enter the text to check, and run the test.
-The guardrail evaluates it as it would a real request, and nothing you enter is
-saved.
+Before applying a guardrail, you can test how it evaluates specific content. Enter the text you want to check, and the guardrail will process it just as it would a real request. Nothing entered during the test is saved. To test a guardrail:
 
-## Change or remove a guardrail
+1. In **Guardrails**, click Test on the guardrail you want to test. A guardrail from your own service is tested from its mandate's row, once mandated.
+2. Enter the text you want to check against the guardrail.
+3. Optionally, fill in any other fields the guardrail takes, such as a model output for checks that evaluate responses.
+4. Click Run test to see how the guardrail evaluates the content.
 
-Click **Edit** on a guardrail's row to change its credentials or settings, or
-**Remove** to take it away. Remove its mandates first: a guardrail a mandate
-still runs cannot be removed.
+## Edit or delete a guardrail
 
-What each guardrail checks, how mandates combine with the guardrails a request
-asks for, and the API for all of this are in
-[Inference Guardrails](guardrails.md). Every mandate and definition field is in
-the [Inference Guardrails reference](guardrails-reference.md).
+In **Guardrails**, click **Edit** on the guardrail you want to update to modify its credentials or configuration parameters.
+
+To delete a guardrail, make sure it is no longer mandated. If the guardrail is still in use, click **Remove** on each of its mandates first. Once all mandates have been removed, click **Remove** on the guardrail itself.
+
+Deleting a guardrail is permanent and cannot be undone. Make sure you no longer need the guardrail before confirming the deletion.

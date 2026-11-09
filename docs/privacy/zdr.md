@@ -18,7 +18,7 @@ The following table summarizes the retention classifications of providers suppor
 
 | Provider       | Data retention | Model training | Privacy Policy                                                        | Models |
 | :------------- | :------------- | :------------- | :-------------------------------------------------------------------- | :----- |
-| Amazon Bedrock | Zero retention | No             | [Privacy](https://www.together.ai/privacy)                            | 49     |
+| Amazon Bedrock | Zero retention | No             | [Privacy](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html) | 49     |
 | Fireworks AI   | Zero retention | No             | [Privacy](https://fireworks.ai/privacy-policy)                        | 15     |
 | Mistral AI     | Zero retention | No             | [Privacy](https://legal.mistral.ai/terms/get-started/#privacy-policy) | 25     |
 | Nebius         | Zero retention | No             | [Privacy](https://docs.nebius.com/legal/privacy)                      | 22     |

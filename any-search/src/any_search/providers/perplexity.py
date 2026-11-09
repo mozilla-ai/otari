@@ -9,6 +9,8 @@ when both are passed.
 ``search_type`` picks one of Perplexity's two cost tiers: ``web``, its
 default, and ``fast``. Perplexity's third type, ``people``, is not offered: it
 returns people's profiles, takes up to 50 results, and has no Search API price.
+Perplexity runs it when asked, so the adapter refuses any ``search_type`` but
+``web`` and ``fast`` before it sends the request.
 
 Each result's ``snippet`` is text from the page, the passages relevant to the
 query, cut to ``max_tokens_per_page``. It becomes the hit's text, and the
@@ -50,11 +52,13 @@ from typing import Any
 import httpx
 
 from any_search._api import AnySearch
-from any_search._errors import ProviderError, safe_tag
+from any_search._errors import ProviderError, UnsupportedValueError, safe_tag
 from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
 
 MAX_RESULTS = 20
 """The most results Perplexity's web search returns for one search."""
+
+_SEARCH_TYPES = ["web", "fast"]
 
 # Native options copied into the request as they are; time_range wins over search_recency_filter.
 _PASSED_THROUGH = (
@@ -95,7 +99,7 @@ class PerplexityProvider(AnySearch):
             OptionSpec(
                 name="search_type",
                 type="string",
-                enum=["web", "fast"],
+                enum=_SEARCH_TYPES,
                 default="web",
                 cost_tier=True,
                 description=(
@@ -155,6 +159,8 @@ class PerplexityProvider(AnySearch):
         time_range: TimeRange | None,
         options: dict[str, Any],
     ) -> SearchResult:
+        if options.get("search_type") not in (None, *_SEARCH_TYPES):
+            raise UnsupportedValueError(self.METADATA.name, "search_type", _SEARCH_TYPES)
         payload: dict[str, Any] = {"query": query}
         limit = None if max_results is None else min(max_results, MAX_RESULTS)
         if limit is not None:

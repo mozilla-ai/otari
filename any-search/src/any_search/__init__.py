@@ -9,7 +9,7 @@ async with AnySearch.create("fake", timeout=15.0) as provider:
 
 # The library's own version, bumped in the PR that changes the library. Set
 # before the imports: ``_http`` reads it while this package is still importing.
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from any_search._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnySearch, asearch, shared_parameter_problems
 from any_search._errors import (
@@ -18,6 +18,7 @@ from any_search._errors import (
     ProviderError,
     UnsupportedParameterError,
     UnsupportedProviderError,
+    UnsupportedValueError,
 )
 from any_search._logging import install as install_log_filter
 from any_search._types import OptionSpec, ProviderMetadata, SearchError, SearchHit, SearchResult, TimeRange
@@ -37,6 +38,7 @@ __all__ = [
     "TimeRange",
     "UnsupportedParameterError",
     "UnsupportedProviderError",
+    "UnsupportedValueError",
     "asearch",
     "install_log_filter",
     "shared_parameter_problems",

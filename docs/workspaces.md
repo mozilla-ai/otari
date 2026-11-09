@@ -4,82 +4,53 @@ icon: desk
 
 # Organizations and workspaces
 
-This guide creates, organizes and deletes workspaces, and deletes an
-organization. An organization is your company or team, and a workspace is the
-boundary for one app, environment, team or customer inside it; what each one
-owns, and the roles members hold in them, is under [How it works](#how-it-works).
-On otari.ai
-the organization also holds the [balance](billing.md) that every workspace
-spends from.
+A workspace is the boundary for one app, environment, team, or customer. It keeps provider access, API keys, budgets, usage history, and members separate from other workspaces.
 
-Managing workspaces needs an owner or admin of the organization.
+If two workloads need different keys, budgets, access, or reporting, they should usually live in different workspaces.
 
-## Choose how to split workspaces
+Most dashboard tools are scoped to the active workspace, including Overview, Models, Routing, Tools, API keys, and Members.
 
-If two workloads need different keys, budgets, access or reporting, give them
-different workspaces. Common splits:
+## What's inside a workspace?
 
-- **Per application**: one workspace per service or product, so usage and budgets stay separate.
-- **Per environment**: `myapp-dev`, `myapp-staging` and `myapp-prod`.
-- **Per team**: isolate keys and spending for different teams or departments.
-- **Per customer**: for SaaS workloads, one workspace per customer for isolated tracking.
+### Provider access
 
-A `{product}-{environment}` naming convention scales better than ad hoc names once
-you have more than a handful.
+Provider keys are managed at the organization level. By default, a workspace can use any of them. You can pin a workspace to a specific provider key, or disable keys it shouldn't use.
 
-## Create a workspace
+### API keys
 
-1. Open **Organization**, then **Workspaces**.
-2. Click **Create workspace**. The workspace switcher offers **Create workspace**
-   too.
-3. Enter a **Name** and, optionally, a **Description**, and click
-   **Create workspace**.
+Workspace-scoped keys that your application uses to call otari.ai. API keys belong to their workspace.
 
-A new workspace can use every provider key and hosted provider its organization
-can. To narrow that, select the workspace and open its **Providers** tab; see
-[Control workspace access](provider-keys.md#control-workspace-access).
+### Budgets and usage
 
-The API, an SDK or automation addresses a workspace by its id, which
-`GET /api/v1/workspaces` lists.
+Spending limits, token counts, costs, and request logs for everything the workspace processes.
 
-## Delete a workspace
+### Members and routing
 
-1. Open **Organization**, then **Workspaces**.
-2. Find the workspace, click **Delete** (the bin icon), and confirm with
-   **Delete workspace**.
+Workspace-specific members, routing rules, MCP server settings, and other runtime behavior for that workload.
 
-The workspace goes with its memberships. The gateway refuses to delete one that
-still holds API keys, aliases, routing policies or usage. Keys, aliases and
-policies can be removed first, but the usage of requests the gateway served is
-never deleted (only imported usage is), so a workspace that has served requests
-cannot be deleted. It also refuses to delete an
-organization's last workspace; create another before deleting it.
+## What lives at the organization level instead
 
-## Delete an organization
+A few things are intentionally above workspaces and apply across the whole organization:
 
-1. Open **Organization**, then **Org settings**.
-2. Click **Delete organization** and confirm.
+* **Spend & budgets**: at the org level, which roll up across workspaces.
+* **Providers**: which determine what providers and models are available to the organization.
+* **Organization** settings and org-level members.
+* **Balance**: which is shared across all workspaces in the organization; see [Billing](billing.md).
 
-Which organizations can be deleted, what goes with one, and where its members
-land afterwards is in [Deleting an organization](#deleting-an-organization).
+The simplest mental model is: organization equals your company, and workspace equals a project or environment inside it.
 
-## How it works
+## How teams use workspaces
 
-### What each one owns
+Common patterns:
 
-An organization is the tenant boundary. It owns workspaces, members, provider
-keys, pricing overrides, guardrail policy, and organization-wide usage views.
+* **Per application**: one workspace per service or product so usage and budgets stay separate
+* **Per environment**: `myapp-dev`, `myapp-staging`, and `myapp-prod`
+* **Per team**: isolate keys and spending for different teams or departments
+* **Per customer**: for SaaS workloads, one workspace per customer for isolated tracking and billing visibility
 
-A workspace groups the resources used by a team or application. API keys, usage,
-aliases, routing policies, MCP servers, and tool policy are resolved in a
-workspace.
+A naming convention helps. `{product}-{environment}` scales better than ad hoc names once you have more than a handful.
 
-Each workspace has its own page under **Organization**, then **Workspaces**:
-**General** for its name and defaults, and **Providers** for the providers and
-models it may use
-([Control workspace access](provider-keys.md#control-workspace-access)).
-
-### Roles
+## Roles
 
 Organization and workspace memberships use four roles:
 
@@ -90,25 +61,15 @@ Organization and workspace memberships use four roles:
 | Member | Use the workspace and read permitted resources |
 | Viewer | Read-only: sees the API keys billed to them but cannot create, change, rotate or delete one, and cannot run Playground completions or uploads |
 
-### Workspace-scoped spend
+## Workspace-scoped spend
 
-A request's usage lands in the workspace of the API key that authenticated it
-(see [How a request is attributed](access-control.md#how-a-request-is-attributed)).
-Organization and workspace usage views then apply the signed-in identity's
-membership.
+A request's usage lands in the workspace of the API key that sent it (see [How a request is attributed](access-control.md#how-a-request-is-attributed)). A request that falls back to another model still counts as one request.
 
-Routing fallback and built-in tools can create several internal attempts, but a
-successful request remains one caller-visible request. The activity log records
-the attempt group and the model that served it.
+## Constraints worth knowing
 
-### Deleting an organization
+* A workspace does not own provider keys. It controls which organization-level provider keys are available to it.
+* A workspace that still holds API keys, aliases, routing policies, or usage cannot be deleted. Usage from requests Otari served is kept for good, so a workspace that has served requests stays. The organization's last workspace cannot be deleted either.
+* Workspace IDs are stable. If an application is already wired to a workspace ID, migrate it before deleting that workspace.
+* An owner or admin can delete an organization from **Organization** → **Org settings**, under the same condition: none of its workspaces may hold usage, API keys, aliases, or routing policies. Members move to another organization they belong to.
 
-An owner or admin can delete their active organization, in the dashboard or
-with `DELETE /api/v1/organizations/me`, while it has no usage: the gateway
-refuses an organization whose workspaces still hold usage, API keys, aliases or
-routing policies, so a deletion never takes spend history with it. The
-deployment's default organization and the only organization the caller belongs
-to cannot be deleted either. Its workspaces, memberships, pending invitations
-and organization-level settings go with it. Everyone whose active organization
-it was moves to the oldest other organization they belong to; someone who
-belongs to no other organization is left with none until they join one.
+Ready to create a workspace? See [Manage workspaces](manage-workspaces.md).

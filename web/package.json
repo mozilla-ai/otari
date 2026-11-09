@@ -27,7 +27,7 @@
   "dependencies": {
     "@heroui/react": "3.2.7",
     "@heroui/styles": "3.2.7",
-    "@tanstack/react-query": "^5.105.1",
+    "@tanstack/react-query": "^5.105.2",
     "@tanstack/react-router": "^1.170.46",
     "canvas-confetti": "^1.9.4",
     "react": "^19.3.1",
@@ -40,10 +40,10 @@
     "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.10",
-    "@biomejs/biome": "2.5.13",
+    "@babel/core": "^8.1.0",
+    "@biomejs/biome": "2.6.4",
     "@playwright/test": "^1.64.1",
-    "@rolldown/plugin-babel": "^0.2.4",
+    "@rolldown/plugin-babel": "^0.3.0",
     "@storybook/addon-docs": "10.6.5",
     "@storybook/react-vite": "10.6.5",
     "@tailwindcss/vite": "4.3.3",
@@ -55,7 +55,7 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "babel-plugin-react-compiler": "1.0.0",
     "jsdom": "^30.1.3",
     "openapi-typescript": "^7.13.0",
@@ -63,6 +63,6 @@
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

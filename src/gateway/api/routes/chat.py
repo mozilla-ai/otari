@@ -726,6 +726,7 @@ async def run_chat_completion(
             model=resolved.model,
             display_model=resolved.alias,
             base_request_fields=request_fields,
+            response=response,
         )
 
     resolved = await resolve_dispatch_provider(

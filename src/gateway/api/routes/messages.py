@@ -1171,6 +1171,7 @@ async def create_message(
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
+            response=response,
         )
 
     # ------------------------------------------------------------------

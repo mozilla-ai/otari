@@ -24,13 +24,14 @@ curl -X POST http://localhost:8000/api/v1/hosted-providers \
   -d '{"provider": "gemini", "api_key": "AIza..."}'
 ```
 
-Otari stores the key encrypted and offers every model Gemini lists on it; each
-model with a price is switched on, and an unpriced model arrives switched off.
+Otari stores the key encrypted and lists every model Gemini offers on it.
+Priced models are switched on; unpriced ones arrive switched off.
+
 To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
 [Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
-Otari does not read `GEMINI_API_KEY` from its environment unless a declaration
-names it; see [Configuring a provider](../models.md#configuring-a-provider).
+Otari reads `GEMINI_API_KEY` only if a declaration names it; see
+[Configuring a provider](../models.md#configuring-a-provider).
 
 ## Choose a model
 

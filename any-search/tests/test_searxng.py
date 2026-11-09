@@ -13,7 +13,13 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from any_search import MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
+from any_search import (
+    MissingCredentialError,
+    ProviderError,
+    SearchResult,
+    UnsupportedParameterError,
+    UnsupportedValueError,
+)
 from any_search._http import USER_AGENT
 from any_search.providers.searxng import MAX_RESULTS, SearxngProvider
 
@@ -93,7 +99,7 @@ async def test_a_method_other_than_get_or_post_is_refused_before_any_request(met
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         async with SearxngProvider(api_base=BASE, client=client) as searxng:
-            with pytest.raises(ValueError, match="method must be one of get, post"):
+            with pytest.raises(UnsupportedValueError, match="^searxng takes method get or post$"):
                 await searxng.search("python release", method=method)
     assert sent == []
 

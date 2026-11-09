@@ -1,59 +1,51 @@
 # Use with opencode
 
-[opencode](https://opencode.ai) lets you register any OpenAI-compatible backend
-as a provider. Otari exposes an OpenAI-compatible endpoint
-(`POST /api/v1/chat/completions`), so you can
-route opencode through Otari to get budgets, usage tracking, and traces without
-changing how you code.
+[opencode](https://opencode.ai) can use any OpenAI-compatible backend as a
+provider, including Otari.
 
 ## Quick start
 
-Create an API key on the **API keys** page of the otari.ai dashboard, then add
-Otari as a provider in your `opencode.jsonc`:
+1. Create a key on the dashboard's **API keys** page.
+2. Add Otari as a provider in your `opencode.jsonc`:
 
-```jsonc
-{
-  "provider": {
-    "otari": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "https://api.otari.ai/api/v1",
-        "apiKey": "{env:OTARI_API_KEY}"
-      }
-    }
-  }
-}
-```
+   ```jsonc
+   {
+     "provider": {
+       "otari": {
+         "npm": "@ai-sdk/openai-compatible",
+         "options": {
+           "baseURL": "https://api.otari.ai/api/v1",
+           "apiKey": "{env:OTARI_API_KEY}"
+         }
+       }
+     }
+   }
+   ```
 
-`baseURL` is the Otari API root, `/api/v1` (opencode appends `/chat/completions`
-itself). Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1`
-instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming
-the host to use. On a gateway you run yourself, use its URL plus `/api/v1`, such
-as `http://localhost:8000/api/v1`, and a key it issued.
+3. Export the key and run opencode with a model:
 
-Export your key so opencode reads it from the environment instead of the config
-file, then run with a model:
+   ```bash
+   export OTARI_API_KEY=<your-otari-key>
+   opencode --model otari/openai:gpt-4o
+   ```
 
-```bash
-export OTARI_API_KEY=<your-otari-key>
-opencode --model otari/openai:gpt-4o
-```
-
-The `apiKey` is sent as `Authorization: Bearer <key>`, which Otari accepts for
-every key it issues.
+`baseURL` ends in `/api/v1`; opencode adds `/chat/completions` itself. EU
+accounts use `https://eu.api.otari.ai/api/v1`, and a gateway you run uses its
+URL plus `/api/v1`. See [Base URL](api-reference.md#base-url).
 
 ## Choosing a model
 
-opencode names a model as `<provider id>/<model>`, and the provider id here is
-`otari`, from your config. Everything after `otari/` is sent to Otari unchanged,
-so write it as Otari spells it. On otari.ai, `otari/openai/gpt-4o` or
-`otari/anthropic/claude-sonnet-4-6` lets Otari choose the provider, and a
-`provider:model` selector such as `otari/anthropic:claude-sonnet-4-6` pins one.
-On your own gateway, use `provider:model` for any provider it is configured
-with, such as `otari/openai:gpt-4o`. [Model format](models.md#model-format) has
-the spellings Otari accepts, and
-[Listing available models](models.md#listing-available-models) shows which
-models your key can use.
+opencode names a model `<provider id>/<model>`, and everything after `otari/`
+goes to Otari unchanged, so write it as Otari spells it:
+
+- On otari.ai, a catalog id such as `otari/deepseek/deepseek-v4.1-flash` lets
+  Otari choose the provider, and
+  `otari/anthropic:claude-sonnet-4-6` pins one.
+- On your own gateway, use `provider:model` for a provider it has, such as
+  `otari/openai:gpt-4o`.
+
+See [Model format](models.md#model-format) and
+[Listing available models](models.md#listing-available-models).
 
 To list only the open-weight models a key can use, ask the catalog for them:
 `GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
@@ -61,7 +53,5 @@ are the names to configure.
 
 ## See also
 
-- [Use with Claude Code](use-with-claude-code.md): drive the Claude Code CLI
-  through the same Otari via the Anthropic Messages API.
-- [Use with Codex](use-with-codex.md): drive the Codex CLI through the
-  same Otari via the OpenAI Responses API.
+- [Use with Claude Code](use-with-claude-code.md)
+- [Use with Codex](use-with-codex.md)
