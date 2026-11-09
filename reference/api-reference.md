@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/8f0d79e626189456775a720e9098c66ea317a4f7/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/2d1bfc7bdaeca68ffe1a53297e662d83e9481245/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -606,7 +606,10 @@ the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
 the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. The access check reads the key's `allowed_tools`, else its user's,
+and provider. Where there is no tool to pick (the deployment configures none, or
+several and no default), a call that names none still runs on the organization
+key, as the tool `web_search` on the key's provider, with a 30 second timeout.
+The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`. With neither set, it follows the key's model access,
 or its user's when the key has none: unrestricted model access runs every search
 tool, and restricted model access runs only a tool named by its deprecated
@@ -672,7 +675,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | Situation | Status | `Otari-Error-Code` |
 |---|---|---|
 | No credentials, or a key that is not valid | 401 | |
-| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool named is not configured, or the call names none and there is no tool to pick (none configured, or several with no default) nor an organization search key to stand in | 400 | |
 | The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
 | A `provider_options` key the provider does not take from a request | 400 | |
 | `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
