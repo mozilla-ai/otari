@@ -463,6 +463,7 @@ def test_search_catalog_serves_the_library_metadata(
         "serply",
         "synthetic",
         "tavily",
+        "youdotcom",
     ]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
