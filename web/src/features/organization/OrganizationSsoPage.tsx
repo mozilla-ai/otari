@@ -324,10 +324,9 @@ function strandedKeysExplanation(): string {
 function affectedHeadline(preflight: OrganizationSsoPreflight): string {
   const { affected_count: affected, total_members: total } = preflight
   if (affected === 0) {
-    return `All ${total} members already sign in this way, so nobody loses access.`
+    return `All ${total} members already use it. Nobody loses access.`
   }
-  const people = affected === 1 ? "1 of" : `${affected} of`
-  return `${people} ${total} members do not, and will be locked out until they sign in through it.`
+  return `${affected} of ${total} members lose access until they sign in with your provider.`
 }
 
 function PreflightPanel() {
@@ -422,25 +421,35 @@ function EnforcementSection({
       </Checkbox>
       {required ? (
         <div className="flex flex-col gap-3">
-          <Select
-            label="Owner who can still sign in if your provider breaks"
-            value={breakGlassWaived ? "" : breakGlassUserId}
-            onChange={(value) => {
-              setBreakGlassUserId(value)
-              setBreakGlassWaived(false)
-            }}
-            options={candidates.map((owner) => ({
-              value: owner.user_id ?? "",
-              label: displayName(owner),
-            }))}
-            placeholder="Choose an owner"
-            isDisabled={breakGlassWaived}
-            shouldReserveMessage={false}
-          />
+          {candidates.length === 0 ? (
+            <p className="text-caption">
+              No owner here can sign in without your provider, so this
+              organization cannot keep a way back in. Waive it below to turn
+              enforcement on, knowing a provider outage needs an operator to
+              undo.
+            </p>
+          ) : (
+            <Select
+              label="Owner who can still sign in if your provider breaks"
+              value={breakGlassWaived ? "" : breakGlassUserId}
+              onChange={(value) => {
+                setBreakGlassUserId(value)
+                setBreakGlassWaived(false)
+              }}
+              options={candidates.map((owner) => ({
+                value: owner.user_id ?? "",
+                label: displayName(owner),
+              }))}
+              placeholder="Choose an owner"
+              isDisabled={breakGlassWaived}
+              shouldReserveMessage={false}
+            />
+          )}
           {chosenOwner ? (
             <p className="text-caption">
-              {displayName(chosenOwner)} keeps a non-SSO route and may still
-              sign in without your provider.
+              {displayName(chosenOwner)} can sign in without your provider, so
+              they stay exempt from this for as long as it is named. Review it
+              when people change.
             </p>
           ) : null}
           <Checkbox

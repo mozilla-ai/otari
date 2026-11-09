@@ -364,7 +364,9 @@ describe("OrganizationSsoPage", () => {
     renderPage(<OrganizationSsoPage />)
 
     expect(
-      await screen.findByText(/2 of 3 members do not, and will be locked out/),
+      await screen.findByText(
+        /2 of 3 members lose access until they sign in with your provider/,
+      ),
     ).toBeInTheDocument()
     expect(screen.getByText("Alex Doe")).toBeInTheDocument()
     expect(screen.getByText(/and 1 other$/)).toBeInTheDocument()
@@ -421,7 +423,7 @@ describe("OrganizationSsoPage", () => {
     await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
 
     expect(
-      await screen.findByText(/Jane Owner keeps a non-SSO route/),
+      await screen.findByText(/Jane Owner can sign in without your provider/),
     ).toBeInTheDocument()
   })
 
