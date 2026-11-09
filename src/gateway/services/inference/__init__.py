@@ -114,11 +114,17 @@ from gateway.services.inference._upstream_user import (
     upstream_user_identifier,
     with_upstream_user,
 )
-from gateway.services.inference._videos import CompletedVideoUsage, VideoJobService, VideoRateLookup
+from gateway.services.inference._videos import (
+    ESTIMATED_VIDEO_SECONDS,
+    CompletedVideoUsage,
+    VideoJobService,
+    VideoRateLookup,
+)
 
 __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
     "CompletedVideoUsage",
+    "ESTIMATED_VIDEO_SECONDS",
     "admit_deployment_paid",
     "describe_port_error",
     "EMBEDDINGS_BILLING",

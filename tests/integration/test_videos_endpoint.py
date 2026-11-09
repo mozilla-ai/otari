@@ -506,20 +506,55 @@ def test_a_completed_job_the_provider_gives_no_length_for_is_billed_for_the_leng
     assert _spend(client, master_key_header) == (0.5, 0.0)
 
 
-def test_a_completed_job_whose_length_nobody_knows_is_recorded_once_with_no_cost(
+def test_a_completed_job_whose_length_nobody_knows_is_billed_once_at_what_the_provider_charged(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     _per_second(client, master_key_header)
     headers = _user_key(client, master_key_header)
     assert _start(client, headers).status_code == 200
 
-    first = _read(client, headers, _job(status="completed"))
-    second = _read(client, headers, _job(status="completed"))
+    first = _read(client, headers, _job(status="completed", cost=0.39))
+    second = _read(client, headers, _job(status="completed", cost=0.39))
 
     assert first.status_code == 200 and second.status_code == 200
     (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
-    assert (row.cost, row.billing_meters) == (None, None)
-    assert _spend(client, master_key_header) == (0.0, 0.0)
+    assert (row.cost, row.billing_meters, row.pricing_breakdown) == (Decimal("0.39"), None, None)
+    assert row.pricing_source is None
+    assert _spend(client, master_key_header) == (0.39, 0.0)
+
+
+def test_a_completed_job_whose_length_and_charge_nobody_knows_is_billed_for_the_assumed_length(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    _per_second(client, master_key_header)
+    headers = _user_key(client, master_key_header)
+    assert _start(client, headers).status_code == 200
+
+    response = _read(client, headers, _job(status="completed"))
+
+    assert response.status_code == 200, response.text
+    (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
+    assert (row.cost, row.billing_meters) == (Decimal("0.8"), {"seconds": 8})
+    assert row.pricing_source == "deployment"
+    assert _spend(client, master_key_header) == (0.8, 0.0)
+
+
+def test_a_job_rendered_in_the_start_call_with_no_length_is_billed_its_charge_once(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    _per_second(client, master_key_header)
+    headers = _user_key(client, master_key_header)
+    done = _job(status="completed", cost=0.25, outputs=[VideoOutput(url="https://cdn.example/v.mp4")])
+    assert _start(client, headers, done).status_code == 200
+    forgotten = AsyncMock(side_effect=RuntimeError("no such job in this process"))
+
+    with patch("gateway.api.routes.videos.aretrieve_video", new=forgotten):
+        read = client.get(f"{API_ROOT}/videos/video_abc", headers=headers)
+
+    assert read.status_code == 200, read.text
+    (row,) = _rows(db_session_factory, "/v1/videos/completed", expected=1)
+    assert row.cost == Decimal("0.25")
+    assert _spend(client, master_key_header) == (0.25, 0.0)
 
 
 def test_a_failed_job_is_never_billed(
