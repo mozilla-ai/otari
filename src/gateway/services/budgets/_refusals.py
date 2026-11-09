@@ -74,6 +74,11 @@ def user_subject(user_id: str, *, external_id: str | None = None) -> str:
     return f"User '{user_id}'"
 
 
+def end_user_fields(external_id: str | None) -> dict[str, str]:
+    """The ``end_user`` a refusal's body names a service key's end user by, so a service routes it without parsing."""
+    return {} if external_id is None else {"end_user": external_id}
+
+
 def refusal_detail(
     subject: str,
     blocked: BlockedAxis,

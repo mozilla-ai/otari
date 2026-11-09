@@ -8,6 +8,8 @@ carries it as ``error.code``. A code, once sent, keeps its meaning.
 
 from collections.abc import Mapping
 
+from fastapi import HTTPException
+
 ERROR_CODE_HEADER = "Otari-Error-Code"
 # Which budget refused: ``user`` for the billed user's own budget, otherwise the
 # scope of the ceiling (one of ``models.budgets.ScopeType``).
@@ -88,3 +90,27 @@ def error_headers(
 def error_code_of(headers: Mapping[str, str] | None) -> str | None:
     """The code a refusal's headers carry, or None."""
     return (headers or {}).get(ERROR_CODE_HEADER)
+
+
+class RefusalException(HTTPException):
+    """A refusal whose error body carries ``fields`` beside ``detail`` and ``code``.
+
+    A field goes in the body only, never in a header: its value may be caller
+    text, such as an end user's id, that a header cannot encode.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        fields: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code=status_code, detail=detail, headers=dict(headers) if headers else None)
+        self.fields = dict(fields or {})
+
+
+def body_fields_of(exc: BaseException) -> dict[str, str]:
+    """The fields ``exc`` adds to its error body, empty for anything but a :class:`RefusalException`."""
+    return exc.fields if isinstance(exc, RefusalException) else {}

@@ -54,7 +54,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
-from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -1135,6 +1135,7 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
     A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
+    A ``RefusalException`` adds its fields beside ``code``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
@@ -1146,7 +1147,11 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
         return with_request_id(request, await http_exception_handler(request, exc))
     return with_request_id(
         request,
-        JSONResponse({"detail": exc.detail, "code": code}, status_code=exc.status_code, headers=exc.headers),
+        JSONResponse(
+            {"detail": exc.detail, "code": code, **body_fields_of(exc)},
+            status_code=exc.status_code,
+            headers=exc.headers,
+        ),
     )
 
 
