@@ -1,0 +1,5 @@
+root: ./
+
+structure:
+  readme: privacy/data-collection.md
+  summary: SUMMARY.md
