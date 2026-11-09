@@ -128,7 +128,9 @@ function Band({ children }: { children: ReactNode }) {
   return (
     <section
       aria-label="About this session's content"
-      className="flex max-h-[40%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border px-4 py-3"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container takes focus so a keyboard can scroll it where nothing inside does
+      tabIndex={0}
+      className="focus-visible:otari-focus-ring flex max-h-[40%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border px-4 py-3"
     >
       {children}
     </section>
