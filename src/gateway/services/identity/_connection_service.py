@@ -176,6 +176,10 @@ class OIDCConnectionService:
             current = await self._connections.get_by_id(connection_id)
             if current is None:
                 raise OIDCConnectionNotFoundError
+            if current.issuer != issuer:
+                # The row now names an issuer this document did not come from, and sign-in finds a
+                # connection by its resolved issuer and dials the endpoints in its document.
+                raise OIDCConnectionConflictError
             current.resolved_issuer = discovered.resolved_issuer
             current.discovery_document = discovered.document
             current.discovered_at = discovered.discovered_at
@@ -228,9 +232,11 @@ class OIDCConnectionService:
 
         async with self._uow:
             # NOTE: Re-read rather than reuse the row above, which may have been edited or deleted
-            # while discovery was out.
+            # while discovery was out. A row now naming another issuer keeps what it has: this
+            # document did not come from it, and a sign-in is in flight on the metadata returned
+            # below rather than on what is stored.
             current = await self._connections.get_by_id(connection_id)
-            if current is not None:
+            if current is not None and current.issuer == issuer:
                 current.resolved_issuer = discovered.resolved_issuer
                 current.discovery_document = discovered.document
                 current.discovered_at = discovered.discovered_at

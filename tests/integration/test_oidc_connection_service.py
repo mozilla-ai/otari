@@ -11,11 +11,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlmodel import col
 
 from gateway.core.database import release_session
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    OIDCConnectionConflictError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
     OIDCDiscoveryError,
@@ -111,6 +114,19 @@ async def _delete_in_another_session(db: AsyncSession, admin: User) -> None:
     try:
         async with AsyncSession(other_engine, expire_on_commit=False) as other:
             await _connection_service(other).delete_for_user(user=admin)
+    finally:
+        await other_engine.dispose()
+
+
+async def _rename_issuer_in_another_session(db: AsyncSession, connection_id: uuid.UUID, issuer: str) -> None:
+    """Change the stored issuer the way a concurrent save would, committing it."""
+    other_engine = create_async_engine(db.get_bind().engine.url)
+    try:
+        async with AsyncSession(other_engine, expire_on_commit=False) as other:
+            await other.execute(
+                update(OIDCConnection).where(col(OIDCConnection.id) == connection_id).values(issuer=issuer)
+            )
+            await other.commit()
     finally:
         await other_engine.dispose()
 
@@ -528,6 +544,50 @@ async def test_test_for_user_refuses_an_organization_with_no_connection(async_db
 
     with pytest.raises(OIDCConnectionNotFoundError):
         await _connection_service(async_db).test_for_user(user=admin)
+
+
+async def test_test_for_user_stores_nothing_for_an_issuer_the_row_no_longer_names(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sibling of the deleted case: a row edited while discovery was out names another issuer.
+
+    Sign-in finds a connection by its resolved issuer and dials the endpoints in its document, so
+    writing one issuer's document onto another's row points sign-in at the wrong provider.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    # Read as values rather than held as a row, because the concurrent commit below expires one.
+    connection_id = (
+        await async_db.execute(
+            select(col(OIDCConnection.id)).where(col(OIDCConnection.organization_id) == organization.id)
+        )
+    ).scalar_one()
+    before = (
+        await async_db.execute(
+            select(col(OIDCConnection.discovery_document)).where(col(OIDCConnection.id) == connection_id)
+        )
+    ).scalar_one()
+
+    async def _discover_then_rename(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        await _rename_issuer_in_another_session(async_db, connection_id, "https://other.acme.example")
+        return DiscoveredProvider(resolved_issuer=issuer, document=_document(issuer), discovered_at=datetime.now(UTC))
+
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.discover_connection_metadata", _discover_then_rename)
+
+    with pytest.raises(OIDCConnectionConflictError):
+        await _connection_service(async_db).test_for_user(user=admin)
+
+    after = (
+        await async_db.execute(
+            select(col(OIDCConnection.issuer), col(OIDCConnection.discovery_document)).where(
+                col(OIDCConnection.id) == connection_id
+            )
+        )
+    ).one()
+    assert after.issuer == "https://other.acme.example"
+    assert after.discovery_document == before
 
 
 async def test_test_for_user_refuses_a_connection_deleted_while_discovery_is_out(
