@@ -28,7 +28,6 @@ import {
   useTestUnsavedSearchTool,
   useUpdateSearchTool,
 } from "@/shared/api/tools"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatUnitRate } from "@/shared/helpers/format"
 import { ProviderOptionFields } from "./ProviderOptionFields"
 import {
@@ -422,7 +421,7 @@ export function WebToolDialog({
               </a>
             ) : undefined
           }
-          autoFocus={allowsFieldAutoFocus()}
+          autoFocus
         />
       )}
 

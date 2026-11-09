@@ -1425,8 +1425,8 @@ body {
   --field-padding-block: 0.375rem;
 }
 /* The form size meets the phone's 44px floor too, the way the dense places do
-   in design-system.css. Left at 36, a dialog on a phone put 36px fields above
-   44px buttons, and a page put them under a toolbar whose fields were 44. */
+   in design-system.css, so a field matches the buttons and toolbar fields
+   beside it there. */
 @media (max-width: 767px) {
   :root {
     --field-height: 2.75rem;
@@ -1496,23 +1496,25 @@ main {
  * Touch, once.
  *
  * Two platform defaults that make a phone treat the dashboard as a page
- * rather than an app, past the tap highlight HeroUI already clears. A control
- * that could be double-tapped to zoom holds its click for a beat while the
- * browser waits for a second tap; HeroUI's own buttons opt out, and the links,
- * rail rows and tabs here did not. And a long press on a tab or a hand-rolled
- * button selects its label or opens the link callout.
+ * rather than an app; HeroUI already clears the tap highlight. A control that
+ * could be double-tapped to zoom holds its click for a beat while the browser
+ * waits for a second tap, so every control opts out, not only HeroUI's own
+ * buttons. And a long press on a control selects its label or opens the link
+ * callout.
  *
- * Keyed on what the element is, like the cursor above. A table cell or a card
- * keeps selectable text: that is content, and ids are copied out of it.
+ * Keyed on what the element is, like the cursor above. `[role="button"]` is
+ * left out of the second list because HeroUI's tooltip trigger is a `div`
+ * with that role around text, and a table cell or a card keeps selectable
+ * text: that is content, and ids are copied out of it.
  *
  * The shell scrolls inside `<main>` and the document never scrolls, so the
- * document's own overscroll (Android's pull-to-refresh, iOS's rubber band on
- * the whole frame) is only ever a scroll that ran past the content and
- * reloaded the page or moved the header.
+ * document's vertical overscroll (Android's pull-to-refresh, iOS's rubber band
+ * on the whole frame) only ever reloads the page or moves the header. The
+ * horizontal axis is left alone: it is a desktop trackpad's back and forward.
  * ============================================================= */
 html,
 body {
-  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 @layer base {
   a,
@@ -1531,7 +1533,6 @@ body {
   }
   button,
   summary,
-  [role="button"],
   [role="tab"],
   [role="switch"],
   [role="menuitem"] {
@@ -1961,16 +1962,16 @@ body {
 }
 
 /* A toolbar's leading ghost. Edgeless here, so its label is the part the eye
-   lines up, and the button's own inline padding put that label 11px inside the
-   column edge every field and card below it starts on. Pulled out by the
-   padding, the label lands on the edge and the target keeps its width. Only
-   the first item: a later one sits after a gap, and pulling it would overlap
+   lines up, and it is pulled out by its own inline padding (the values in the
+   ghost padding rule below) so the label lands on the column edge the fields
+   and cards below it start on, while the target keeps its width. Only the
+   first item: a later one sits after a gap, and pulling it would overlap
    whatever is in front of it. */
 .otari-toolbar > .button--ghost.button--sm:not(.button--icon-only):first-child {
-  margin-inline-start: -11px;
+  margin-inline-start: -0.6875rem;
 }
 .otari-toolbar > .button--ghost.button--md:not(.button--icon-only):first-child {
-  margin-inline-start: -15px;
+  margin-inline-start: -0.9375rem;
 }
 
 /* The public auth pages' footer row, which holds plain text links and one
@@ -2004,11 +2005,10 @@ body {
   .button--ghost:not(.button--sm):not(.button--icon-only):first-child {
   margin-inline-start: -13px;
 }
+/* `data-hovered` alone, which react-aria sets for a mouse and never for a
+   tap; a bare `:hover` stayed applied after a tap on Help. */
 .otari-auth-actions
-  .button--ghost:not(.button--sm):not(.button--icon-only):is(
-    :hover,
-    [data-hovered="true"]
-  ) {
+  .button--ghost:not(.button--sm):not(.button--icon-only)[data-hovered="true"] {
   --button-fg: var(--color-link-hover);
 }
 
@@ -2293,15 +2293,12 @@ body {
   }
 }
 
-/* The text-entry floor on a touch screen, which is the input-size twin of the
- * button floor above. iOS zooms the page into any field under 16px when it
- * takes focus and does not zoom back out, so a reader who tapped a search box
- * was left on a cropped, drifted page. HeroUI's own fields are 16px only below
- * 640px, so an iPhone held sideways (844 to 932 wide) zoomed on every one of
- * them, and `INPUT_CLASS` and the native search boxes were 14px at every
- * width. Keyed on the pointer rather than on width for that reason: the zoom
- * belongs to the touch screen, not to a narrow window. Unlayered, so it wins
- * over a `text-sm` at the call site, which is the point. */
+/* The text-entry floor on a touch screen, the input-size twin of the button
+ * floor above. iOS zooms the page into any field under 16px when it takes
+ * focus and does not zoom back out. Keyed on the pointer rather than on width,
+ * because the zoom belongs to the touch screen: HeroUI's own fields are 16px
+ * only below 640px, and an iPhone held sideways is 844 to 932 wide. Unlayered,
+ * so it wins over a `text-sm` at the call site, which is the point. */
 @media (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
     [type="color"]
@@ -3252,10 +3249,8 @@ body {
   background: var(--color-surface-muted);
 }
 /* Everywhere the dense desk size below does not apply, which is every touch
-   screen and every narrow window: the description drops under its label
-   instead of sharing the line with it. At 268px "Use it without the secret"
-   took three lines beside "Workload identity…" and the next item's description
-   was cut off mid-sentence; stacked, each one reads on a line or two. */
+   screen and every narrow window, the description drops under its label: at
+   the menu's 268px, sharing the line wrapped a description to three lines. */
 @media not all and (min-width: 48rem) and (pointer: fine) {
   .otari-key-actions-menu .menu-item {
     flex-wrap: wrap;
@@ -3263,7 +3258,8 @@ body {
   }
   .otari-key-actions-menu .menu-item [slot="description"] {
     flex-basis: 100%;
-    margin-left: 1.5rem;
+    /* The label's own start: a 14px icon and the item's 0.5rem gap. */
+    margin-left: 1.375rem;
     text-align: left;
   }
 }

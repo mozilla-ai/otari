@@ -14,7 +14,6 @@ import { ALL_TOOLS, isLiteralToolName } from "@/features/tools/mcpAccess"
 import { parseAllowedTools, urlProblem } from "@/features/tools/mcpServerForm"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import { useTestWorkspaceMcpServerConnection } from "@/shared/api/tools"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 // The form that registers a server. Changing one afterwards happens on the
 // server's own page (`McpServerDetailPage`), so this is an add and nothing else.
@@ -229,7 +228,7 @@ export function McpServerDialog({
         onChange={setName}
         placeholder="github"
         isRequired
-        autoFocus={allowsFieldAutoFocus()}
+        autoFocus
         description="Unique in this workspace."
       />
       <Field

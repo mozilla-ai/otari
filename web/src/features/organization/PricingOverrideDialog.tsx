@@ -89,7 +89,13 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
+      <Input
+        inputMode="decimal"
+        placeholder="0.00"
+        // A raw Input, so the touch-screen rule the field primitives apply
+        // is applied here.
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
+      />
       {description ? <span className="text-caption">{description}</span> : null}
     </TextField>
   )
@@ -380,7 +386,7 @@ export function PricingOverrideDialog({
           value={modelKey}
           onChange={setModelKey}
           isRequired
-          autoFocus={allowsFieldAutoFocus()}
+          autoFocus
           source="catalog"
           isInvalid={keyReason !== undefined}
           errorMessage={keyReason}
@@ -408,7 +414,7 @@ export function PricingOverrideDialog({
             // The first field on the edit path: the model key's own `Field`, which
             // carries `autoFocus` on the add path, is replaced by a read-only
             // block there, and focus was landing on the frame's Close control.
-            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
+            autoFocus={focusFirstRate}
           />
           <RateField
             label="Output, per 1M tokens"
@@ -438,7 +444,7 @@ export function PricingOverrideDialog({
             value={input}
             onChange={setInput}
             isRequired
-            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
+            autoFocus={focusFirstRate}
           />
           {twoRates(unit) ? (
             <RateField

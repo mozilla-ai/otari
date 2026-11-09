@@ -64,8 +64,8 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
         {open_signup ? (
           <a
             href="#/signup"
-            // An anchor dressed as a button misses the phone's 44px floor,
-            // which is keyed on HeroUI's own button slot.
+            // An anchor dressed as a button: the phone's 44px floor is keyed
+            // on HeroUI's own button slot, so it says so itself.
             className={`${buttonVariants({ size: "sm", variant: "primary" })} max-md:min-h-11`}
           >
             Sign up
@@ -92,8 +92,7 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
         <Drawer isOpen={menuOpen} onOpenChange={setMenuOpen}>
           <Drawer.Trigger
             aria-label="Open menu"
-            // `inline-flex` centers the glyph, which a bare block button left
-            // in its top-left corner, and `-mr-3` hands the glyph's 12px of
+            // `inline-flex` centers the glyph, and `-mr-3` hands its 12px of
             // side padding to the gutter, so the glyph rather than its box
             // lines up with the page's right edge.
             className={`${buttonVariants({ variant: "ghost", isIconOnly: true })} -mr-3 inline-flex size-11 items-center justify-center md:hidden`}

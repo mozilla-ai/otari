@@ -25,7 +25,6 @@ import {
   useUpdateOrganizationDomain,
   useVerifyOrganizationDomain,
 } from "@/shared/api/organizations"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatRelative } from "@/shared/helpers/format"
 import { canManage, membershipLabel } from "./roles"
 
@@ -115,7 +114,7 @@ function ClaimForm({
         value={domain}
         onChange={setDomain}
         isRequired
-        autoFocus={allowsFieldAutoFocus()}
+        autoFocus
         placeholder="example.com"
         description="The domain your colleagues' addresses end in. A whole address works too; only its domain is stored. Public providers like gmail.com can't be claimed."
       />

@@ -407,11 +407,10 @@ function hasZeroDataRetention(model: CatalogModelSummary): boolean {
 /**
  * One fact on a card's last line, carrying the separator in front of it.
  *
- * The line wraps on a phone, and a separator that is its own flex item lands at
- * the start of the next line ("| priced in several units"). Here each fact
- * owns the rule before it, the row is pulled left by one separator's width, and
- * the paragraph clips: a fact that opens a line has its separator cut off at
- * the edge, and every other one keeps it in the gap.
+ * The line wraps on a phone. Each fact owns the rule before it, the row is
+ * pulled left by one separator's width, and the paragraph clips, so a fact
+ * that opens a line has its separator cut off at the edge and every other one
+ * keeps it in the gap.
  */
 function Fact({ children }: { children: ReactNode }) {
   return (
@@ -765,8 +764,7 @@ export function ModelCatalogView({
         >
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             {/* The search takes the first line to itself on a phone, so the
-                view controls share the second in either view. Left to wrap,
-                the table view stranded Filters alone on a line of its own. */}
+                view controls share the second in either view. */}
             <div className="min-w-[12rem] flex-1 max-sm:basis-full">
               <SearchInput
                 value={filters.query}

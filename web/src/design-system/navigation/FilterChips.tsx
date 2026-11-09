@@ -23,11 +23,9 @@ export interface FilterChip {
 }
 
 /**
- * The row the filters themselves sit in. Sized to what each one carries on a
- * desk, where they read as a sentence. On a phone that sizing wrapped them into
- * a column of controls with a different right edge each (a 24h select beside a
- * Status one, then three combo boxes of another width under them), so there
- * they take a two-column grid and fill their cell.
+ * The row the filters themselves sit in. On a desk each filter is sized to
+ * what it carries, so the row reads as a sentence; on a phone they take a
+ * two-column grid and fill their cell, so the column keeps one right edge.
  */
 const FILTER_ROW =
   "otari-toolbar flex flex-wrap items-end gap-3 max-md:grid max-md:grid-cols-2 max-md:[&>*]:w-full max-md:[&>*]:min-w-0"
@@ -113,15 +111,14 @@ export function FilterChips({
       >
         {/* On a phone `start` takes its own line, so the toggle always opens
             the next one and can take the leading pull a first item gets (see
-            `.otari-toolbar` in globals.css); beside a start control it would
-            have overlapped it. */}
+            `.otari-toolbar` in globals.css) without overlapping anything. */}
         {start ? (
           <div className="min-w-0 max-w-full max-md:basis-full">{start}</div>
         ) : null}
         <Button
           size="sm"
           variant="ghost"
-          className={start ? "max-md:-ms-[11px]" : undefined}
+          className={start ? "max-md:-ms-[0.6875rem]" : undefined}
           onPress={() => setOpen((prev) => !prev)}
           aria-expanded={open}
           aria-controls={regionId}

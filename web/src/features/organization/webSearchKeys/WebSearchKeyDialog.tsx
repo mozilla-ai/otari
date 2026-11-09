@@ -25,7 +25,6 @@ import {
   useCreateOrgWebSearchKey,
   useUpdateOrgWebSearchKey,
 } from "@/shared/api/webSearchKeys"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { KIND_COPY, offeredProviders } from "./webSearchKeys"
 
 // Adds one of the organization's search or fetch keys, or edits one. The
@@ -213,7 +212,7 @@ export function WebSearchKeyDialog({
               </a>
             ) : undefined
           }
-          autoFocus={allowsFieldAutoFocus()}
+          autoFocus
         />
       )}
 

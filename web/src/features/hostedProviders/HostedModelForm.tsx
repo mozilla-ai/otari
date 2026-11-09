@@ -20,7 +20,6 @@ import {
   useHostedAvailableModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import {
   canSubmitDraft,
   createBody,
@@ -126,7 +125,7 @@ export function HostedModelForm({
       onChange={(value) => setDraft({ ...draft, [key]: value })}
       inputMode="decimal"
       placeholder="0.00"
-      autoFocus={allowsFieldAutoFocus() && focusFirstRate && key === "input"}
+      autoFocus={focusFirstRate && key === "input"}
       isRequired={
         editing !== undefined &&
         (key === "input" || (key === "output" && draft.unit === "token"))

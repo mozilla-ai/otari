@@ -4,7 +4,6 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useSetPricing } from "@/shared/api/pricing"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { parsePerCallPrice, perCallText, type ToolRateRow } from "./toolRates"
 
 const PRICE_ERROR = "An amount in dollars, such as 0.01."
@@ -75,7 +74,7 @@ export function ToolRateForm({
         }}
         inputMode="decimal"
         placeholder="0.00"
-        autoFocus={allowsFieldAutoFocus()}
+        autoFocus
         isRequired
         isInvalid={isInvalid}
         errorMessage={isInvalid ? PRICE_ERROR : undefined}

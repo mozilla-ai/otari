@@ -64,11 +64,10 @@ export function DisclosureRow({
             <span className="text-caption text-subtle">{help}</span>
           ) : null}
         </span>
-        {/* On a phone the status drops to its own line under the help, with
-            the chevron still on the label's line. Beside the label it held its
-            width and left the label a 60px column, one word to a line ("Lets /
-            the / model / read"). `contents` hands the two parts to the
-            button's own wrapping row there, without moving either in the DOM. */}
+        {/* On a phone the status takes its own line under the help, with the
+            chevron kept on the label's line, so the label keeps its width.
+            `contents` hands both to the button's wrapping row there without
+            moving either in the DOM. */}
         <span className="flex shrink-0 items-center gap-3 max-sm:contents">
           {trailing ? (
             <span

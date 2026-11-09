@@ -26,7 +26,6 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaceMembers,
 } from "@/shared/api/workspaces"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 // A workspace's roster and the dialog that adds to it, kept out of the page so
 // the rules they encode (a workspace's members are a subset of the
@@ -122,7 +121,7 @@ export function AddWorkspaceMemberDialog({
             value={userId}
             onChange={setUserId}
             placeholder="Select a member…"
-            autoFocus={allowsFieldAutoFocus()}
+            autoFocus
             options={candidates.map((member) => ({
               value: member.user_id ?? "",
               label: memberLabel(member),
@@ -182,11 +181,10 @@ export function WorkspaceMembersPanel({
       ) : rows.length === 0 ? (
         <p className="text-sm text-muted">This workspace has no members yet.</p>
       ) : (
-        // Rows divided by hairlines rather than a stack of filled boxes, which
-        // is how every other list here reads. The role select takes one width
-        // in every row, so the column of selects shares a left edge instead of
-        // following the length of "Owner" or "Member"; on a phone the controls
-        // take their own line and the select fills what Remove leaves.
+        // Rows divided by hairlines, as every other list here reads. The role
+        // select takes one width in every row, so the selects share a left
+        // edge; on a phone the controls take their own line and the select
+        // fills what Remove leaves.
         <ul className="flex flex-col divide-y divide-border-subtle border-y border-border-subtle">
           {rows.map((member) => (
             <li

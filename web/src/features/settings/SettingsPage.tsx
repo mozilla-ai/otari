@@ -673,8 +673,9 @@ export function SettingsPage() {
           ref={searchRef}
           type="search"
           aria-label="Search settings"
-          // The shortcut is a keyboard's; on a touch screen the hint only
-          // cost the field the width to show its own name.
+          // The shortcut is a keyboard's, so the hint asks for a fine pointer
+          // rather than for the field helper's "not coarse": with no pointer
+          // to go on, a hint about a key nobody may have is left out.
           placeholder={
             window.matchMedia?.("(pointer: fine)").matches
               ? "Search settings (press / to focus)…"

@@ -59,8 +59,7 @@ export function RefreshButton({
   return (
     <span className="inline-flex items-center gap-2">
       {freshness ? (
-        // One line: in a narrow row "Updated 0s / ago" broke after the
-        // figure, and the label beside it had the width to give instead.
+        // One line; in a narrow row the label beside it gives the width.
         <span className="text-caption whitespace-nowrap">
           Updated {freshness}
         </span>

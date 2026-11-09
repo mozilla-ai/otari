@@ -23,39 +23,17 @@ export function KpiCell({
   graphic?: ReactNode
 }) {
   return (
-    // `grid-rows-subgrid` over `row-span-4` is what keeps the five values on one
-    // baseline. The cells are equal-height grid items, so a wrapped label used
-    // to make its own cell taller and push its value down while the other four
-    // stayed put (measured with a 1180px column: value tops 241 against 223).
-    // Subgridding the cell's four parts onto the strip's own rows lines the
-    // labels, values, deltas and graphics up with their neighbors instead, and
-    // reserves nothing when no label wraps, so it costs no dead space wide.
-    // `items-end` on the label is what makes a one-line label sit on the same
-    // baseline as the last line of a two-line one.
-    // `minmax(0,1fr)` for the cell's own column, not the `auto` a grid gives
-    // itself by default. The strip's tracks are already `minmax(0,1fr)`, so the
-    // cell's box is its track; what was unbounded was the column INSIDE it,
-    // which took its floor from the widest child. The subline never wraps, so
-    // its min-content is the whole string: measured with a 59-character
-    // subline, the inner column came out 356px inside a 283px cell and every
-    // child sized to it, the sparkline included, painted 129px into the cell
-    // beside it (218px at 1280, since the track shrinks and the string does
-    // not). Bounding the column is what makes the truncation and the
-    // sparkline's `w-full` mean anything.
     //
-    // The rule between cells belongs to a cell with a neighbor on its right, so
-    // it comes off the last cell of each row and not only the last cell: at two
-    // and three columns the row's end cell drew a rule against nothing. On a
-    // phone the left lane starts flush with the page column instead of 28px
-    // inside it, the right lane sits 16px off the rule, and an odd cell left
-    // over at the end takes the whole row rather than half of it with nothing
-    // beside it.
+    // The rule between cells belongs to a cell with a neighbor on its right,
+    // so it comes off the last cell of each row, at every column count. On a
+    // phone the left lane starts flush with the page column, the right lane
+    // sits 16px off the rule, and an odd last cell takes the whole row.
     <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r max-sm:px-4 max-sm:odd:pl-0 max-sm:even:pr-0 max-sm:even:border-r-0 max-sm:last:odd:col-span-2 max-sm:last:odd:pr-0 sm:max-xl:[&:nth-child(3n)]:border-r-0">
       <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
-          would out-weigh the page title above it. */}
-      {/* One line: a figure and its unit ("15.85 s") never part. */}
+          would out-weigh the page title above it. One line, so a figure and its
+          unit ("15.85 s") never part. */}
       <span className="text-mono-figure font-normal text-nowrap text-foreground">
         {value}
       </span>
@@ -65,15 +43,13 @@ export function KpiCell({
           strip is there to carry, and a cell with a spare line would break the
           shared baseline the subgrid buys. */}
       {/* Most-judged to least, left to right: a severity, then the comparison,
-          then the raw fact. It never wraps: a second line here made one cell
-          taller than its siblings and silently undid the shared baseline the
-          subgrid buys. The severity and the delta hold their width; the subline
-          is the only thing that gives, and it truncates, because its facts also
-          live in the breakdown tables while a delta lives nowhere else.
-          On a phone a half-width cell has room for the delta and four
-          characters of the subline, which truncated to "0.0…", so there the
-          subline takes a line of its own. The subgrid shares that row's
-          height across the strip's row, so the baseline still holds. */}
+          then the raw fact. The severity and the delta hold their width; the
+          subline is the only thing that gives, and it truncates, because its
+          facts also live in the breakdown tables while a delta lives nowhere
+          else. On a desk the line never wraps. On a phone, where a half-width
+          cell leaves the subline a few characters, it takes a line of its own
+          instead; the subgrid gives that height to every cell in the strip's
+          row, so their baselines still line up. */}
       <span className="flex min-h-[1.125rem] items-center gap-2 text-xs text-nowrap text-muted max-sm:flex-wrap max-sm:content-start max-sm:gap-y-0.5">
         {severity ? <SeverityMark severity={severity} /> : null}
         {severity && delta ? <Separator /> : null}

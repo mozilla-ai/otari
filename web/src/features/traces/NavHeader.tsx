@@ -59,10 +59,9 @@ export function NavHeader({
   const allLabel = everythingCollapsed ? "Expand all" : "Collapse all"
   return (
     <div className="otari-toolbar grid min-h-11 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 border-b border-border pr-2 pl-1 max-md:grid-cols-[minmax(0,1fr)_auto] max-md:pl-4">
-      {/* Below md the tree is the whole width, with nothing to give room to.
-          The grid drops that track with it: left at three, the search took
-          the button's `auto` column and sat 4px off the panel's edge, while
-          the trace's own heading above it starts at 16. */}
+      {/* Below md the tree is the whole width, with nothing to give room to,
+          so the grid drops that track and the search starts on the panel's
+          16px edge. */}
       <span className="max-md:hidden">{panelButton}</span>
       {/* Borderless, to sit flush in the header. Escape clears the query. */}
       <AriaSearchField

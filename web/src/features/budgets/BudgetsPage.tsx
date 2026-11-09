@@ -54,7 +54,6 @@ import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 import {
@@ -354,7 +353,7 @@ function BudgetForm({
         label="Name (optional)"
         value={name}
         onChange={setName}
-        autoFocus={allowsFieldAutoFocus()}
+        autoFocus
         placeholder="team-free-tier"
         description={`A label to recognize this budget later. Left blank, it is shown as "${unnamedLabel}".`}
       />

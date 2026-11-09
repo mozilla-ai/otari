@@ -1291,9 +1291,8 @@ function UsagePageContent({
     visibleSecondary.find((dimension) => dimension.key === secondaryDim) ??
     visibleSecondary[0]
 
-  // On a phone the row spans the column with the window at its start, rather
-  // than hanging off the right edge with its left end wherever the text ran
-  // out, which lined up with nothing above or below it.
+  // On a phone the row spans the column with the window at its start, so it
+  // lines up with the filters above it.
   const introAction = (
     <div className="flex items-center gap-3 max-md:justify-between">
       {/* "· UTC" held to the date, as on the request timeline. */}

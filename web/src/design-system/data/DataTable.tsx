@@ -320,8 +320,8 @@ function DataCardList<Row extends object>({
                 <div className="flex min-h-11 min-w-0 flex-1 items-center">
                   <div className="min-w-0 flex-1">{title.cell(row)}</div>
                 </div>
-                {/* The title's 44px line, so a 32px row action centers on the
-                    title instead of hanging 6px above it. */}
+                {/* The title's 44px line, so a 32px row action centers on
+                    the title. */}
                 {actions ? (
                   <div className="flex min-h-11 shrink-0 items-center">
                     {actions.cell(row)}
@@ -337,12 +337,9 @@ function DataCardList<Row extends object>({
                     >
                       <dt className="text-overline">{col.header}</dt>
                       <dd className="min-w-0 text-sm">
-                        {/* An end-aligned cell pushes its figure to the right
-                            edge of whatever holds it, which in a card is the
-                            whole value lane: one value per card sat across the
-                            screen from the others. Shrunk to its content, the
-                            figure starts in the lane and keeps its own lines
-                            aligned to each other. */}
+                        {/* Shrunk to its content, so an end-aligned figure starts
+                            in the value lane with the others and keeps its own
+                            lines aligned to each other. */}
                         {col.align === "end" ? (
                           <div className="w-fit max-w-full">
                             {col.cell(row)}

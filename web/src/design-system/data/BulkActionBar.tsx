@@ -63,41 +63,28 @@ export function BulkActionBar({
           Foreground, not accent: this is a count, not a destination, and accent
           ink on something unclickable promises an interaction that is not
           there. */}
-      {/* On a phone the bar is two lines rather than three: the count and
-          Clear share the first, the actions take the second, and the leading
-          action's label lines up under the count. Left to wrap, Clear fell to
-          a line of its own and the bar stood 150px over the list. `contents`
-          and `order` move them without changing the DOM, so the reading and
-          focus order stay what they are on a desk. */}
-      <span
-        role="status"
-        aria-live="polite"
-        className="text-body max-sm:order-1"
-      >
+      <span role="status" aria-live="polite" className="text-body">
         {label}
       </span>
+      {/* Clear sits with the count it clears, ahead of the actions, so the
+          order the Tab key and a screen reader take is the order drawn at
+          every width. On a phone it ends the count's line and the actions
+          take the next, their first label under the count. */}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="max-sm:ml-auto max-sm:-me-[0.6875rem]"
+        onPress={onClear}
+      >
+        Clear
+      </Button>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="max-sm:order-5"
-          onPress={onSelectAllMatching}
-        >
+        <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {formatNumber(matchingTotal)} matching this filter
         </Button>
       ) : null}
-      <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:contents">
-        <div className="flex flex-wrap items-center gap-2 max-sm:order-4 max-sm:basis-full max-sm:[&>.button--ghost:first-child]:-ms-[11px]">
-          {children}
-        </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="max-sm:order-2 max-sm:ml-auto max-sm:-me-[11px]"
-          onPress={onClear}
-        >
-          Clear
-        </Button>
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0 max-sm:basis-full max-sm:[&>.button--ghost:first-child]:-ms-[0.6875rem]">
+        {children}
       </div>
     </div>
   )

@@ -22,10 +22,9 @@ export function PlaygroundToolbar({
   /** The prompt-capture switch, where the deployment can keep trace content. */
   capture?: ReactNode
 }) {
-  // On a phone the three buttons keep their glyphs and put their words in
-  // the accessible name only: worded, the row wrapped to two lines and left
-  // New chat alone under Files. The mode switch keeps its labels, since its
-  // two options have no glyphs to fall back on.
+  // On a phone the three buttons keep their glyphs and carry their words in
+  // the accessible name only, so the row fits on one line. The mode switch
+  // keeps its labels: its options have no glyphs to fall back on.
   return (
     <div className="flex flex-wrap items-center gap-3 max-sm:gap-2">
       <Segmented

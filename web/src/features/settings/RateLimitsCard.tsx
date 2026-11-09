@@ -15,7 +15,6 @@ import {
   useRateLimitRules,
   useUpdateRateLimitRule,
 } from "@/shared/api/rateLimits"
-import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatNumber } from "@/shared/helpers/format"
 
@@ -204,7 +203,7 @@ function RuleDialog({
         onChange={(name) => set({ name })}
         isRequired
         isDisabled={isEdit}
-        autoFocus={allowsFieldAutoFocus() && !isEdit}
+        autoFocus={!isEdit}
         placeholder="keys"
         isInvalid={nameError !== ""}
         errorMessage={nameError}

@@ -55,8 +55,9 @@ operator. See [testing.md](./testing.md).
   no pointer, revealed on hover where there is.
 - **A keyboard shortcut needs a button too.** If a feature is reachable only by a chord, it is
   unreachable on the device with no keyboard.
-- **Guard `autoFocus` outside a modal.** On a page load it raises the soft keyboard over half
-  the screen. Inside a dialog the operator just opened it is expected, so it is fine there.
+- **Guard `autoFocus` on a touch screen.** It raises the soft keyboard over half the screen,
+  on a page and in a dialog alike. `Field`, `ComboBoxField` and `MultiSelect` apply the guard
+  themselves; a raw `Input` asks `allowsFieldAutoFocus()` (`@/shared/helpers/autoFocus`).
 
 ## Tables
 
@@ -90,6 +91,6 @@ wrapper so the header, filters, and pagination stay put.
 - A fixed-pixel layout container.
 - `opacity-0 group-hover:*` on a control that does something.
 - A 32px icon button with no mobile size override.
-- `autoFocus` on a page mount, unguarded.
+- `autoFocus` on a raw `Input`, unguarded.
 - A table with no answer below `md`.
 - `px` in an arbitrary value where the thing should scale with text.

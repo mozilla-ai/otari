@@ -59,7 +59,13 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
+      <Input
+        inputMode="decimal"
+        placeholder="0.00"
+        // A raw Input, so the touch-screen rule the field primitives apply
+        // is applied here.
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
+      />
     </TextField>
   )
 }
@@ -235,7 +241,7 @@ export function SetPriceDialog({
           value={modelKey}
           onChange={setModelKey}
           isRequired
-          autoFocus={allowsFieldAutoFocus()}
+          autoFocus
           isInvalid={modelKey.trim() !== "" && keyInvalid}
           errorMessage="Include the provider or instance prefix, as in ollama:llama3.2."
           description="The selector callers send as model, prefix included (for example vllm:mistral-small)."
@@ -262,7 +268,7 @@ export function SetPriceDialog({
               value={input}
               onChange={setInput}
               isRequired
-              autoFocus={allowsFieldAutoFocus() && focusFirstRate}
+              autoFocus={focusFirstRate}
             />
             <RateField
               label="Output $ / 1M"
@@ -292,7 +298,7 @@ export function SetPriceDialog({
             value={input}
             onChange={setInput}
             isRequired
-            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
+            autoFocus={focusFirstRate}
           />
           {hasOutputRate(unit) ? (
             <RateField
