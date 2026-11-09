@@ -87,7 +87,9 @@ estimate prices the request's output token limit (`max_tokens`, or
 `max_output_tokens` on responses; a deployment default, 1024 tokens unless
 changed, when it sets none), and where the model charges for output the refusal names that
 figure, so a lower limit may let the request fit. A
-budget already at its cap is refused as `has exceeded budget limit`.
+budget already at its cap is refused as `has exceeded budget limit`. On a
+service key, the refusal names the end user as the request did
+(`End user 'alice'`), not by Otari's internal id.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
