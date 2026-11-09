@@ -44,6 +44,7 @@ from gateway.services.pricing._usage_pricing import (
 )
 from gateway.services.pricing._video_pricing import (
     VIDEO_SECONDS,
+    charged_as_reported,
     estimate_video_cost,
     price_video,
     reported_video_cost,
@@ -112,6 +113,7 @@ __all__ = [
     "bundled_generation",
     "can_price",
     "charge_tool_calls",
+    "charged_as_reported",
     "current_index",
     "invalid_rate_count",
     "load_bundled_index",

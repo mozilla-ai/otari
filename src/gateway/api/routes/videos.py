@@ -12,8 +12,9 @@ credential ladder, the usage row) with the estimate for the length asked for at
 the model's per-second video rate, and settles at no cost: the length is known
 only when the job completes. The first retrieval that finds the job completed
 bills it once through the video job service, which owns the length, the price
-and the claim. A model with no per-second video rate is refused before the job
-starts.
+and the claim: a job whose length nobody states is billed what the provider
+charged, else the length the estimate assumed. A model with no per-second video
+rate is refused before the job starts.
 
 A completed job is remembered on its record, so a later read answers from it
 even where the provider keeps no job to look up, as DeepInfra does.
@@ -54,7 +55,7 @@ from gateway.schemas.inference import (
     VideoJobResponse,
     VideoJobSummary,
 )
-from gateway.services.inference import VIDEO_BILLING, DeploymentCharge, VideoJobService
+from gateway.services.inference import ESTIMATED_VIDEO_SECONDS, VIDEO_BILLING, DeploymentCharge, VideoJobService
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing import PriceFacts, estimate_video_cost, video_rate
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -67,10 +68,6 @@ router = APIRouter(prefix="/videos", tags=["videos"])
 # completion is billed.
 USAGE_ENDPOINT = "/v1/videos"
 USAGE_ENDPOINT_COMPLETED = "/v1/videos/completed"
-
-# What the estimate assumes when the request names no length: the longest
-# default a served provider renders, so the reservation is never short.
-ESTIMATED_SECONDS = 8
 
 ConfigDep = Annotated[GatewayConfig, Depends(get_config)]
 LogWriterDep = Annotated[LogWriter, Depends(get_log_writer)]
@@ -136,7 +133,7 @@ async def create_video(
     - API key without user field: Use the shared "default" user
     """
     api_key, _ = auth_result
-    estimated_seconds = request.seconds if request.seconds is not None else ESTIMATED_SECONDS
+    estimated_seconds = request.seconds if request.seconds is not None else ESTIMATED_VIDEO_SECONDS
     forward = request.model_dump(exclude_unset=True, exclude={"model", "prompt", "user"})
 
     async def call_provider(resolved: ResolvedProvider) -> VideoJob:
@@ -249,13 +246,14 @@ async def _settle(
                 cost,
                 model=record.model,
                 description=f"{record.provider}:{record.model}",
-                expects_cost=job.seconds is not None or record.seconds is not None,
+                expects_cost=True,
                 savepoint=db.begin_nested,
             )
 
     await jobs.settle_completed(
         record,
         reported_seconds=job.seconds,
+        reported_cost=job.cost,
         endpoint=USAGE_ENDPOINT_COMPLETED,
         workspace_id=workspace_id,
         organization_id=organization_id,
@@ -351,8 +349,10 @@ async def retrieve_video(
     """The job's status, from its record once it completed, else from the provider that runs it.
 
     The first retrieval that finds the job completed bills its length at the
-    model's per-second video price. A key reads only the jobs its user started
-    in its workspace; the master key reads any job.
+    model's per-second video price. A job whose length neither the provider
+    nor the request states is billed what the provider charged for it, else
+    the length its reservation assumed. A key reads only the jobs its user
+    started in its workspace; the master key reads any job.
     """
     record, job, _, _ = await _retrieve(
         video_id, raw_request=raw_request, auth_result=auth_result, db=db, config=config, jobs=jobs

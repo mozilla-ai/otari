@@ -1199,7 +1199,7 @@ as a price per image, and a token price is never read as a price per request.
 | Audio transcription | `audio` input | The length the provider reports, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
 | Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
 | Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
-| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is recorded with no cost, which is unknown rather than free | `second` per second ([Videos](api-reference.md#videos)) |
+| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is billed what the provider charged, else 8 seconds | `second` per second ([Videos](api-reference.md#videos)) |
 
 A rate that cannot price what an endpoint reports leaves the request unpriced:
 

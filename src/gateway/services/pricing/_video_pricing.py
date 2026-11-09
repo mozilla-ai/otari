@@ -5,6 +5,9 @@ provider reports at the rate found for the model. The rate is the ``video``
 slot of the row's ``rates`` block, read through the reader every rate goes
 through, so an operator's price and a catalog price read alike. A model whose
 block prices video in another unit, or not at all, has no video rate.
+
+A job whose length nobody states is billed at what the provider charged for it,
+where the provider says.
 """
 
 from dataclasses import replace
@@ -39,6 +42,15 @@ def price_video(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = 
     applied = apply_rules(rate, facts)
     charge = price_slot(applied.rate, "video", "output", {"second": seconds})
     return None if charge is None else replace(charge, lines=applied.explain(charge.lines, path="video.output"))
+
+
+def charged_as_reported(cost: float | None) -> UsageCharge | None:
+    """A video billed at the provider's own ``cost`` in USD, or ``None`` when it states no usable one.
+
+    No meter and no line: no rate priced it, so there is nothing to explain.
+    """
+    amount = reported_video_cost(cost)
+    return None if amount is None else UsageCharge(cost=amount, meters={}, lines=[])
 
 
 def _applied(rate: ModelPricing | None, facts: PriceFacts) -> ModelPricing | None:

@@ -16,7 +16,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.inference_exceptions import VideoJobNotFoundError
 from gateway.log_config import logger
 from gateway.repositories.inference import VideoJobRepository
-from gateway.services.pricing import PriceFacts, price_video, reported_video_cost
+from gateway.services.pricing import PriceFacts, charged_as_reported, price_video, reported_video_cost
 
 if TYPE_CHECKING:
     import uuid
@@ -24,6 +24,26 @@ if TYPE_CHECKING:
     from gateway.models.inference import VideoJobRecord
     from gateway.services.pricing import UsageCharge
     from gateway.services.pricing_service import ResolvedPricing
+
+
+def _price_length(record: VideoJobRecord, found: ResolvedPricing | None, seconds: int) -> UsageCharge | None:
+    """What ``seconds`` of the job cost at the rate ``found``, under the rules its request meets."""
+    if found is None or seconds < 0:
+        return None
+    facts = PriceFacts(
+        at=record.created_at,
+        resolution=record.resolution,
+        aspect_ratio=record.aspect_ratio,
+        duration=seconds,
+        input_video=record.input_video,
+        generate_audio=record.generate_audio,
+    )
+    return price_video(found.pricing, seconds, facts=facts)
+
+
+# The length a job is taken to be when nobody states one: the longest default a
+# served provider renders, so neither the reservation nor the bill is short.
+ESTIMATED_VIDEO_SECONDS = 8
 
 
 @dataclass(frozen=True)
@@ -220,38 +240,35 @@ class VideoJobService:
         record: VideoJobRecord,
         *,
         reported_seconds: int | None,
+        reported_cost: float | None,
         endpoint: str,
         workspace_id: uuid.UUID,
         organization_id: uuid.UUID | None,
         deployment_paid: bool,
         charge_deployment: Callable[[Decimal | None], Awaitable[None]] | None = None,
     ) -> bool:
-        """Bill a completed job once, its length at the model's per-second rate, and tell whether this call did.
+        """Bill a completed job once and tell whether this call did.
 
-        The length is what the provider reports, else what the request asked
-        for. A job with no per-second rate now stays unclaimed, so a later read
-        bills it once a rate exists. One whose length nobody knows is claimed
-        with no cost, so it is not retried forever. ``charge_deployment`` is
-        given the cost before the row is written, where the deployment paid for
-        the job.
+        A job is priced at the model's per-second rate for the length the
+        provider reports, else the length the request asked for. Where nobody
+        states a length, it is billed what the provider charged for it, else
+        the length its reservation assumed at the per-second rate. A job the
+        rate has to price and no rate does stays unclaimed, so a later read
+        bills it once a rate exists. ``charge_deployment`` is given the cost
+        before the row is written, where the deployment paid for the job.
         """
         if record.accounted_at is not None:
             return False
         seconds = reported_seconds if reported_seconds is not None else record.seconds
-        found = await self._rate(
-            record.provider, record.model, organization_id=organization_id, deployment_paid=deployment_paid
-        )
-        pricing = found.pricing if found is not None else None
-        facts = PriceFacts(
-            at=record.created_at,
-            resolution=record.resolution,
-            aspect_ratio=record.aspect_ratio,
-            duration=seconds,
-            input_video=record.input_video,
-            generate_audio=record.generate_audio,
-        )
-        charge = price_video(pricing, seconds, facts=facts) if seconds is not None and seconds >= 0 else None
-        if seconds is not None and charge is None:
+        # A charge the provider states prices only a job of no stated length, so no rate prices it and none is named.
+        found: ResolvedPricing | None = None
+        charge = charged_as_reported(reported_cost) if seconds is None else None
+        if charge is None:
+            found = await self._rate(
+                record.provider, record.model, organization_id=organization_id, deployment_paid=deployment_paid
+            )
+            charge = _price_length(record, found, ESTIMATED_VIDEO_SECONDS if seconds is None else seconds)
+        if charge is None:
             logger.warning(
                 "Video job %s on %s:%s completed with no per-second video price; it stays unbilled until one is set",
                 record.id,
