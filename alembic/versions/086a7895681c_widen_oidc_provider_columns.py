@@ -12,7 +12,7 @@ connection is named by its issuer URL instead, which does not fit in 50 or
 plain ``ALTER COLUMN`` on PostgreSQL, so one form works on both engines.
 
 Revision ID: 086a7895681c
-Revises: 90b7e153c41f
+Revises: 012b723efd0d
 Create Date: 2026-11-03
 """
 
@@ -44,7 +44,40 @@ def upgrade() -> None:
         )
 
 
+# Each column's old width, which a value stored since the upgrade can exceed.
+_OLD_WIDTHS = (
+    ("oauth_identity_link", "provider", 50),
+    ("oauth_pending_state", "provider", 32),
+    ("user", "oauth_provider", 50),
+)
+
+
+def _refuse_names_that_no_longer_fit() -> None:
+    """Refuse the downgrade while any stored provider is too long for its old column.
+
+    An organization's own connection is named by its issuer URL, which does not fit the old widths,
+    so narrowing the column would either fail with the engine's own error or lose the name that
+    identifies an account. Naming the rows is the only honest answer: nothing here can invent a
+    shorter name for them.
+    """
+    connection = op.get_bind()
+    for table, column, width in _OLD_WIDTHS:
+        offending = connection.execute(
+            # The identifiers are quoted because one of these tables is named ``user``, which
+            # PostgreSQL reserves.
+            sa.text(f'SELECT count(*) FROM "{table}" WHERE length("{column}") > :width'),  # noqa: S608 (literals above)
+            {"width": width},
+        ).scalar_one()
+        if offending:
+            raise RuntimeError(
+                f"{offending} row(s) in {table}.{column} name a provider longer than {width} "
+                f"characters, which the old column cannot hold. Remove those sign-in records, then "
+                f"migrate again."
+            )
+
+
 def downgrade() -> None:
+    _refuse_names_that_no_longer_fit()
     with op.batch_alter_table("oauth_pending_state") as batch_op:
         batch_op.alter_column(
             "provider", existing_type=sa.String(length=255), type_=sa.String(length=32), existing_nullable=False
