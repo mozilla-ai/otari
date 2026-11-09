@@ -1,5 +1,12 @@
 import { Modal, Spinner } from "@heroui/react"
-import { type RefObject, useEffect, useId, useRef, useState } from "react"
+import {
+  type CSSProperties,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
 import { FiX } from "react-icons/fi"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -71,7 +78,8 @@ export function FeedbackDialog({
   const composeRef = useRef<HTMLFormElement>(null)
   // The compose's height when the thanks replaced it, which the thanks keep so
   // the frame does not shrink under the reader: the consent line wraps to one,
-  // two or three lines with the address it names.
+  // two or three lines with the address it names. Only on the floating frame:
+  // the sheet is the viewport's height, which a rotation changes.
   const [heldHeight, setHeldHeight] = useState<number | null>(null)
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
@@ -185,8 +193,14 @@ export function FeedbackDialog({
               <div
                 ref={thanksRef}
                 data-feedback-view="sent"
-                style={heldHeight ? { minHeight: heldHeight } : undefined}
-                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24"
+                style={
+                  heldHeight
+                    ? ({
+                        "--feedback-held-height": `${heldHeight}px`,
+                      } as CSSProperties)
+                    : undefined
+                }
+                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>=640px)_and_(height>=640px)]:min-h-(--feedback-held-height)"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}

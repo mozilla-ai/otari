@@ -50,6 +50,7 @@ const field = () => screen.getByRole("textbox", { name: "Contact" })
 afterEach(() => {
   onlineManager.setOnline(true)
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe("FeedbackDialog", () => {
@@ -312,6 +313,25 @@ describe("FeedbackDialog", () => {
     })
     await screen.findByRole("heading", { name: "Thank you!" })
     expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it("holds the compose's height on the floating frame only, never on the sheet", async () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(320)
+    const { user } = setup({ email: "ada@example.com" })
+    await user.type(field(), "Idea")
+    await user.click(screen.getByRole("button", { name: SEND }))
+    await screen.findByRole("heading", { name: "Thank you!" })
+    const thanks = screen
+      .getByRole("dialog", { name: "Thank you!" })
+      .querySelector<HTMLElement>('[data-feedback-view="sent"]')
+    expect(thanks?.style.getPropertyValue("--feedback-held-height")).toBe(
+      "320px",
+    )
+    // A pixel floor on the sheet would outlast a rotation to a shorter viewport.
+    expect(thanks?.style.minHeight).toBe("")
+    expect(thanks).toHaveClass(
+      "[@media(width>=640px)_and_(height>=640px)]:min-h-(--feedback-held-height)",
+    )
   })
 
   it("sends again after a failed send", async () => {
