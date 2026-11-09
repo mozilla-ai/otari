@@ -359,12 +359,14 @@ that candidate's provider:
   chain.
 - What a fallback spends counts against its own provider's budgets.
 
-In a plan with more than one candidate, a chat completion's `reasoning_effort`
-is left off each candidate that [models.dev](https://models.dev) says does not
-reason. A candidate models.dev does not describe gets it as asked.
-`response_format` is never left off; check each candidate's
-`supported_parameters` on `GET /api/v1/models` when building a policy that
-sends it.
+In a plan with more than one candidate, the reasoning hint is left off each
+candidate that [models.dev](https://models.dev) says does not reason: a chat
+completion's `reasoning_effort`, a response's `reasoning` and the
+`reasoning.encrypted_content` entry of its `include`, and a message's
+`thinking`. A candidate models.dev does not describe gets them as asked.
+`response_format` and a response's `text.format` are never left off; check
+each candidate's `supported_parameters` on `GET /api/v1/models` when building
+a policy that sends them.
 
 ## Failure behavior
 
