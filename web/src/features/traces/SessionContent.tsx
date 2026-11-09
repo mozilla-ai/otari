@@ -378,7 +378,11 @@ function ShareRow({
           ))}
         </ul>
       )}
-      {readCount > reads.length || earlier.hasNextPage ? (
+      {(
+        isPaging && earlier.data
+          ? earlier.hasNextPage
+          : readCount > newest.length
+      ) ? (
         <Button
           variant="ghost"
           className="min-h-11 self-start md:min-h-9"

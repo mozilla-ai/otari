@@ -1,5 +1,6 @@
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { useBreakGlassLog } from "@/shared/api/traces"
 import { formatDateTime } from "@/shared/helpers/format"
@@ -25,8 +26,12 @@ export function BreakGlassLog() {
     <SettingsGroup title="Break-glass openings">
       <div className="flex flex-col gap-2 py-3">
         <ErrorBanner error={log.error} />
-        {(log.isPending || log.isError) && !log.data ? null : items.length ===
-          0 ? (
+        {log.isError && !log.data ? null : log.isPending && !log.data ? (
+          <Skeleton
+            className="h-16 w-full"
+            ariaLabel="Loading the break-glass openings"
+          />
+        ) : items.length === 0 ? (
           <p className="text-caption">
             No owner has opened a session's content by break-glass.
           </p>

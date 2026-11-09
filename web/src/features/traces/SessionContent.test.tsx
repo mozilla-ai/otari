@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -291,6 +291,37 @@ describe("SessionContent", () => {
     expect(
       sent.some((call) => call.url.includes(`/shares/${SHARE.id}/reads?`)),
     ).toBe(true)
+  })
+
+  it("drops the earlier-reads button once the last page is in, whatever the count said", async () => {
+    const newest = {
+      reader_user_id: null as null,
+      reader_email: "newest@example.test",
+      read_at: "2026-10-22T10:00:00Z",
+    }
+    // Counted before the list was read, so it can say more than the pages hold.
+    mockApi([{ ...SHARE, reads: [newest], read_count: 3 }], [], [newest])
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          summary: traceSummary({ user_id: "alice" }),
+          content_access: "owner",
+          spans: [{ ...tool, content: { command: "pytest -x" } }],
+        })}
+      />,
+    )
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Show earlier reads (3 in all)",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Show earlier reads/ }),
+      ).not.toBeInTheDocument(),
+    )
   })
 
   it("pages to older shares, so a running one past the first page can still be ended", async () => {

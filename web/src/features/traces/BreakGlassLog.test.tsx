@@ -55,6 +55,24 @@ describe("BreakGlassLog", () => {
     )
   })
 
+  it("shows the log loading rather than nothing while the first page is on its way", async () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise(() => {}))
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <BreakGlassLog />
+      </QueryClientProvider>,
+    )
+
+    expect(
+      screen.getByLabelText("Loading the break-glass openings"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/No owner has opened/)).toBeNull()
+  })
+
   it("does not report that nobody has opened anything when the read failed", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ detail: "Forbidden" }), {
