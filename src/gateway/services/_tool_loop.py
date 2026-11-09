@@ -279,15 +279,16 @@ async def run_tool_loop(
 
     1. ``exit_before_split``: format-level terminal check that runs before any
        tool accounting (chat: no choices, or finish_reason is not
-       ``tool_calls``; responses: ``incomplete_details`` is set). When it fires, nothing is executed even if the result
-       carries gateway-owned calls. They are filtered out as in step 3.
+       ``tool_calls``; messages: stop_reason is ``max_tokens``; responses:
+       ``incomplete_details`` is set). When it fires, nothing is executed even
+       if the result carries gateway-owned calls. They are filtered out as in
+       step 3.
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
        sees calls it can dispatch itself. Note the ordering divergence kept
-       from the pre-engine modules: messages runs this branch before any
-       stop-reason check, so a mixed batch executes owned calls even when the
-       model stopped for another reason, while chat and responses never reach
-       this branch from a round that stopped short.
+       from the pre-engine modules: messages runs this branch before checking
+       for ``tool_use``, so a mixed batch executes owned calls when the model
+       stopped for another reason short of the token limit.
     3. Nothing owned, or ``exit_after_split`` (messages: stop_reason is not
        ``tool_use``): return the result as the final answer, without the owned
        calls of a round the model stopped short, as the streaming loop does.

@@ -647,6 +647,39 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
     assert pool.calls == []  # never executed
 
 
+@pytest.mark.asyncio
+async def test_loop_runs_no_gateway_call_from_a_cut_off_round_beside_a_foreign_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mixed batch cut off by the token limit runs none of the gateway's calls and returns only the caller's."""
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _message_response(
+            stop_reason="max_tokens",
+            content=[
+                _tool_use("foreign_id", "user_tool", {}),
+                _tool_use("owned_id", "fetch_url", {}),
+            ],
+        )
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "max_tokens": 100,
+            "tools": [{"name": "user_tool", "input_schema": {"type": "object"}}],
+        },
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+    assert out.stop_reason == "max_tokens"
+    assert pool.calls == []
+    assert [getattr(b, "id", None) for b in out.content] == ["foreign_id"]
+
+
 # ---------- on_first_response (lock-in callback) ----------
 
 
