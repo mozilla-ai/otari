@@ -285,7 +285,7 @@ export function InferenceAccessSection({
             <Toggle
               label="Require zero data retention"
               isSelected={requiresZeroRetention}
-              isDisabled={!canManage || policy.isPending || setPolicy.isPending}
+              isDisabled={!canManage || !policy.data || setPolicy.isPending}
               onChange={(next) =>
                 setPolicy.mutate({
                   workspaceId,
@@ -298,6 +298,13 @@ export function InferenceAccessSection({
       </SettingsGroup>
       {isLoading ? (
         <span className="text-caption">Loading…</span>
+      ) : !policy.data ? (
+        // A failed read is not "not required": no row can say whether it is
+        // blocked, so none is offered until the policy can be read.
+        <span className="text-caption">
+          The providers are held until this workspace's data retention policy
+          can be read.
+        </span>
       ) : keyRows.length === 0 && hostedRows.length === 0 ? (
         <span className="text-caption">
           This organization holds no provider keys and the deployment hosts no
