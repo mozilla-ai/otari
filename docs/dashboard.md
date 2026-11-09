@@ -130,7 +130,9 @@ Inference**, which an offering on one of its keys links to. See
 
 **Routing** lists each policy with its main model, its backups in order, and who
 it applies to. In the policy forms you pick a model, then a provider. See
-[Failover](routing.md#failover).
+[Failover](routing.md#failover). A policy's **Test** section shows the models a
+request would try, in order, and any left out with the reason, without sending
+one. See [Explain a policy](routing.md#explain-a-policy).
 
 **Automatic fallback**, on the Routing page, lists every model your organization
 sent requests to in the last 30 days, most requested first, by catalog id (see

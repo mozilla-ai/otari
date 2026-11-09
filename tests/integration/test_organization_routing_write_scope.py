@@ -338,6 +338,64 @@ def test_both_lists_narrow_to_a_named_workspace(client: TestClient, world: _Worl
         assert {row["name"] for row in foreign.json() if row["source"] == "stored"} == set()
 
 
+_EXPLAIN = f"{_POLICIES}/explain"
+
+
+def _explain_body(world: _World, workspace: str = "alpha_one", **body: Any) -> dict[str, Any]:
+    return {"workspace_id": str(world.workspaces[workspace]), **body}
+
+
+def test_a_member_explains_a_stored_policy_in_their_workspace(client: TestClient, world: _World) -> None:
+    """Explain is a read, so whoever may list the workspace's policies may see what they compile to."""
+    body = _policy_body(world, name="explained")
+    body["spec"] = {"select": [{"default": _ALPHA_TARGET}], "on_failure": ["openai:gpt-4o"]}
+    assert _post(client, world, "alpha_admin", _POLICIES, body).status_code == status.HTTP_200_OK
+
+    explained = _post(client, world, "alpha_member", _EXPLAIN, _explain_body(world, name="explained"))
+    assert explained.status_code == status.HTTP_200_OK, explained.text
+    plan = explained.json()
+    assert plan["name"] == "explained"
+    assert [f"{row['instance']}:{row['model']}" for row in plan["candidates"]] == [_ALPHA_TARGET, "openai:gpt-4o"]
+
+
+def test_a_draft_is_explained_without_being_saved(client: TestClient, world: _World) -> None:
+    draft = {"select": [{"default": _ALPHA_TARGET}]}
+    explained = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, name="unsaved", spec=draft))
+    assert explained.status_code == status.HTTP_200_OK, explained.text
+    assert explained.json()["candidates"][0]["model"] == "gpt-4o-mini"
+    assert "unsaved" not in {row["name"] for row in _get(client, world, "alpha_admin", _POLICIES).json()}
+
+
+def test_a_draft_targeting_what_the_organization_cannot_reach_is_refused(client: TestClient, world: _World) -> None:
+    """The same guard as a save, so a draft cannot show what an unreachable target would resolve to."""
+    draft = {"select": [{"default": _ALPHA_TARGET}], "on_failure": [_BETA_TARGET]}
+    refused = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, spec=draft))
+    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+    assert _BETA_TARGET in refused.json()["detail"]
+
+
+def test_explain_resolves_a_name_only_in_the_callers_workspace(client: TestClient, world: _World) -> None:
+    """Another tenant's workspace is not found, and so is their policy's name from this one."""
+    beta_policy = {
+        "name": "beta-only",
+        "spec": {"select": [{"default": _BETA_TARGET}]},
+        "workspace_id": str(world.workspaces["beta_one"]),
+    }
+    assert _post(client, world, "beta_owner", _POLICIES, beta_policy).status_code == status.HTTP_200_OK
+
+    foreign = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, "beta_one", name="beta-only"))
+    assert foreign.status_code == status.HTTP_404_NOT_FOUND, foreign.text
+    own = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, name="beta-only"))
+    assert own.status_code == status.HTTP_404_NOT_FOUND, own.text
+
+
+def test_explain_needs_a_workspace_and_refuses_a_user_scope(client: TestClient, world: _World) -> None:
+    unscoped = _post(client, world, "alpha_admin", _EXPLAIN, {"spec": {"select": [{"default": _ALPHA_TARGET}]}})
+    assert unscoped.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, unscoped.text
+    scoped = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, name="x", user_id="someone"))
+    assert scoped.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, scoped.text
+
+
 def test_the_deployment_wide_writers_still_refuse_a_tenant(client: TestClient, world: _World) -> None:
     """The control: these routers exist so those gates do not have to loosen."""
     assert _post(
@@ -353,6 +411,9 @@ def test_the_deployment_wide_writers_still_refuse_a_tenant(client: TestClient, w
         ).status_code
         == status.HTTP_403_FORBIDDEN
     )
+    assert _post(
+        client, world, "alpha_admin", f"{API_ROOT}/routing/policies/explain", _explain_body(world, name="x")
+    ).status_code == (status.HTTP_403_FORBIDDEN)
 
 
 def test_both_lists_are_bounded(client: TestClient, world: _World) -> None:

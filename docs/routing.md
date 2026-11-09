@@ -218,8 +218,17 @@ otari routing explain balanced --allowed-model "anthropic:*"
 ```
 
 The command shows ordered candidates, filtered candidates and their reasons,
-effective weighted shares, and mandatory guardrails. The API equivalent is
-`POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
+effective weighted shares, and mandatory guardrails. It reads `config.yml`
+only, so it does not see policies created in the dashboard or through the API.
+
+For those, open the policy in the dashboard: its **Test** section shows the
+same plan, and for a policy with a budget tier-down, a budget-used field to
+try it with. On a deployment you run, the API equivalent is
+`POST /api/v1/routing/policies/explain`, which needs the operator; it can also
+validate an unsaved draft. Members of an organization use
+`POST /api/v1/organizations/me/routing-policies/explain` instead, from a
+dashboard session, naming one of their workspaces in `workspace_id`. A draft
+sent there may only target models the organization can already reach.
 
 ## Agent model recommendations
 

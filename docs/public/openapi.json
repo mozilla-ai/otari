@@ -42902,6 +42902,56 @@
         ]
       }
     },
+    "/api/v1/organizations/me/routing-policies/explain": {
+      "post": {
+        "description": "Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.\n\nThe tenant reading of ``POST /api/v1/routing/policies/explain``: any member\nwho may see the workspace, which is who may already read its policies here.\n``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.\nA draft ``spec`` must only target models the organization reaches, as saving\nit would, so a draft cannot probe what an unsaved policy would resolve to.",
+        "operationId": "routing-explain_organization_routing_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Explain Organization Routing Policy",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/api/v1/organizations/me/routing-policies/{name}": {
       "delete": {
         "description": "Delete a stored policy from one of the organization's workspaces. Owners and admins only.",

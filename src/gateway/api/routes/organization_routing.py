@@ -80,9 +80,12 @@ from gateway.api.routes.aliases import (
     upsert_alias_in_workspace,
 )
 from gateway.api.routes.routing import (
+    ExplainRequest,
+    ExplainResponse,
     PolicyRequest,
     PolicyResponse,
     delete_policy_in_workspace,
+    explain_in_workspace,
     upsert_policy_in_workspace,
     validated_spec,
 )
@@ -102,6 +105,7 @@ from gateway.services.routing import FALLBACK_WINDOW
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     VisibleWorkspaceScope,
+    resolve_visible_workspace,
     resolve_visible_workspace_scope,
     resolve_workspace_in_organization,
 )
@@ -360,6 +364,45 @@ async def delete_organization_routing_policy(
         model_provider=None,
     )
     await delete_policy_in_workspace(name, db, config, workspace_id=resolved, user_id=None)
+
+
+@policies_router.post("/explain")
+async def explain_organization_routing_policy(
+    request: ExplainRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    current_identity: CurrentIdentity,
+    model_provider: RequestSessionModelProviderPortDep,
+) -> ExplainResponse:
+    """Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.
+
+    The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
+    who may see the workspace, which is who may already read its policies here.
+    ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
+    A draft ``spec`` must only target models the organization reaches, as saving
+    it would, so a draft cannot probe what an unsaved policy would resolve to.
+    """
+    _reject_user_scope(request.user_id)
+    if request.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="workspace_id is required: an organization's routing entries belong to one of its workspaces.",
+        )
+    workspace = await resolve_visible_workspace(
+        db,
+        user=current_identity,
+        workspace_id=request.workspace_id,
+        organizations=OrganizationService(db, membership_listener=None),
+    )
+    if request.spec is not None:
+        await _require_reachable_targets(
+            db,
+            config,
+            user=current_identity,
+            targets=validated_spec(request.name or "(draft)", request.spec).static_selectors(),
+            model_provider=model_provider,
+        )
+    return explain_in_workspace(request, config, workspace_id=workspace.id)
 
 
 @aliases_router.get("")
