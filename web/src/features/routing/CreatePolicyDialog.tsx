@@ -20,8 +20,8 @@ import {
   useSetRoutingPolicy,
 } from "@/shared/api/routing"
 import { useUsers } from "@/shared/api/users"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
-
 import { BackupList } from "./BackupList"
 import { nameProblemOf, PolicyNameField } from "./PolicyNameField"
 import { PolicyPreview } from "./PolicyPreview"
@@ -266,7 +266,11 @@ export function CreatePolicyDialog({
         />
       ) : (
         <>
-          <PolicyNameField value={name} onChange={setName} autoFocus />
+          <PolicyNameField
+            value={name}
+            onChange={setName}
+            autoFocus={allowsFieldAutoFocus()}
+          />
 
           {intent === "fallback" || intent === "tierdown" ? (
             // Reads the catalog, not discovery, which lists only the

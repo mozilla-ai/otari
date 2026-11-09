@@ -380,7 +380,10 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
-    padding: 0.75rem 1rem 1rem;
+    /* The sheet's own 24px inset, which its header and body keep at this
+       width. At 16px the stacked buttons ran 8px past the fields above them
+       on both sides, the one edge in the sheet that lined up with nothing. */
+    padding: 0.75rem 1.5rem 1rem;
   }
   .otari-form-dialog__actions,
   .otari-dialog__actions {
@@ -492,9 +495,15 @@
    This said `--color-border` and all sixteen per-table classes overrode it to
    `--color-border-subtle`, so the base was simply the wrong value: sixteen
    consumers and no exceptions is not a default worth keeping. Moved here, and
-   the copies are gone. Must stay in step with the row rule below. */
+   the copies are gone. Must stay in step with the row rule below.
+
+   No fill either, which is data.md's rest state: HeroUI paints every cell
+   `bg-surface`, so the body came out white everywhere except a pinned first
+   column, which sets the page ground so scrolled cells pass under it, and the
+   row read as two colors with a seam where the pin ended. */
 .otari-table .table__row .table__cell {
   border-color: var(--color-border-subtle);
+  background-color: transparent;
 }
 
 /* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
@@ -507,8 +516,19 @@
   border-color: var(--color-border-subtle);
 }
 
-.otari-table .table__row:hover .table__cell {
-  background-color: var(--color-surface-muted);
+/* Behind a hover-capable pointer only. A tap fakes `:hover` and leaves it on
+   the row until the next tap somewhere else, so on a phone the row a reader
+   last touched stayed lit as though it were selected. */
+@media (hover: hover) {
+  .otari-table .table__row:hover .table__cell {
+    background-color: var(--color-surface-muted);
+  }
+}
+
+/* data.md's selected ground, the same one a phone card takes. HeroUI's own is
+   `bg-surface/10`, a tenth of white over the page, which no reader can see. */
+.otari-table .table__row[data-selected="true"] .table__cell {
+  background-color: var(--color-primary-subtle);
 }
 
 /* Let the text in a row be highlighted with the mouse (issue #478). Two things
@@ -588,6 +608,22 @@
      504px pane). The call site's `max-w-3xl` still caps it. */
   left: calc(50% + var(--rail-width, 0px) / 2);
   width: calc(100% - var(--rail-width, 0px) - 2rem);
+}
+/* While the bar is up, the end of the page scrolls clear of it. It is fixed to
+ * the viewport, so nothing in flow made room, and at the bottom of a list the
+ * last row sat under it with no way to scroll it out: on a phone, where the bar
+ * is two lines of 44px controls, that was the whole last key and its menu.
+ * Space added after the content rather than before it, so no row moves when a
+ * selection starts. Sized to the bar with its 16px offset, at each width. */
+main:has(.otari-bulk-bar)::after {
+  content: "";
+  display: block;
+  height: 4.5rem;
+}
+@media (max-width: 639px) {
+  main:has(.otari-bulk-bar)::after {
+    height: 8.5rem;
+  }
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and

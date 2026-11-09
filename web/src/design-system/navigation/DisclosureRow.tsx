@@ -53,8 +53,8 @@ export function DisclosureRow({
         aria-expanded={isOpen}
         aria-controls={panelId}
         onClick={onToggle}
-        className={`flex min-h-11 w-full items-center px-4 py-3 text-left transition-colors duration-150 ease-out hover:bg-surface-subtle focus-visible:otari-focus-ring motion-reduce:transition-none ${
-          chevronPlacement === "start" ? "gap-2" : "gap-6"
+        className={`flex min-h-11 w-full items-center px-4 py-3 text-left transition-colors duration-150 ease-out hover:bg-surface-subtle focus-visible:otari-focus-ring motion-reduce:transition-none max-sm:flex-wrap max-sm:gap-y-1 ${
+          chevronPlacement === "start" ? "gap-x-2" : "gap-x-6"
         }`}
       >
         {chevronPlacement === "start" ? chevron : null}
@@ -64,8 +64,21 @@ export function DisclosureRow({
             <span className="text-caption text-subtle">{help}</span>
           ) : null}
         </span>
-        <span className="flex shrink-0 items-center gap-3">
-          {trailing}
+        {/* On a phone the status drops to its own line under the help, with
+            the chevron still on the label's line. Beside the label it held its
+            width and left the label a 60px column, one word to a line ("Lets /
+            the / model / read"). `contents` hands the two parts to the
+            button's own wrapping row there, without moving either in the DOM. */}
+        <span className="flex shrink-0 items-center gap-3 max-sm:contents">
+          {trailing ? (
+            <span
+              className={`flex items-center max-sm:order-last max-sm:basis-full ${
+                chevronPlacement === "start" ? "max-sm:pl-6" : ""
+              }`}
+            >
+              {trailing}
+            </span>
+          ) : null}
           {chevronPlacement === "end" ? chevron : null}
         </span>
       </button>

@@ -7,7 +7,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { Fragment, useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
@@ -404,11 +404,25 @@ function hasZeroDataRetention(model: CatalogModelSummary): boolean {
   return (model.zero_data_retention_providers?.length ?? 0) > 0
 }
 
-/** A separator between the facts on a card's last line. */
-function Sep() {
+/**
+ * One fact on a card's last line, carrying the separator in front of it.
+ *
+ * The line wraps on a phone, and a separator that is its own flex item lands at
+ * the start of the next line ("| priced in several units"). Here each fact
+ * owns the rule before it, the row is pulled left by one separator's width, and
+ * the paragraph clips: a fact that opens a line has its separator cut off at
+ * the edge, and every other one keeps it in the gap.
+ */
+function Fact({ children }: { children: ReactNode }) {
   return (
-    <span aria-hidden="true" className="text-subtle">
-      |
+    <span className="flex items-center">
+      <span
+        aria-hidden="true"
+        className="w-[1.0625rem] shrink-0 text-center text-subtle"
+      >
+        |
+      </span>
+      {children}
     </span>
   )
 }
@@ -432,7 +446,7 @@ function ModelCard({
       : `${model.provider_count} providers`
   const content = (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className={titleClass}>{title}</span>
           {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
@@ -446,37 +460,29 @@ function ModelCard({
       {model.description ? (
         <p className="line-clamp-2 text-sm text-muted">{model.description}</p>
       ) : null}
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
-        <span className="flex items-center gap-1.5">
-          {makerKey ? (
-            <MakerMark vendorSlug={makerKey} label={model.vendor ?? ""} />
+      <p className="overflow-hidden text-caption">
+        <span className="-ml-[1.0625rem] flex flex-wrap items-center gap-y-1">
+          <Fact>
+            <span className="flex items-center gap-1.5">
+              {makerKey ? (
+                <MakerMark vendorSlug={makerKey} label={model.vendor ?? ""} />
+              ) : null}
+              by {model.vendor ?? "unknown vendor"}
+            </span>
+          </Fact>
+          {model.type ? <Fact>{MODEL_TYPE_LABELS[model.type]}</Fact> : null}
+          {model.release_date ? (
+            <Fact>{formatReleaseDate(model.release_date)}</Fact>
           ) : null}
-          by {model.vendor ?? "unknown vendor"}
+          {model.context_window != null ? (
+            <Fact>{formatContext(model.context_window)} context</Fact>
+          ) : null}
+          {listedPrices(model).map((price) => (
+            <Fact key={price}>
+              <span className="tabular-nums">{price}</span>
+            </Fact>
+          ))}
         </span>
-        {model.type ? (
-          <>
-            <Sep />
-            <span>{MODEL_TYPE_LABELS[model.type]}</span>
-          </>
-        ) : null}
-        {model.release_date ? (
-          <>
-            <Sep />
-            <span>{formatReleaseDate(model.release_date)}</span>
-          </>
-        ) : null}
-        {model.context_window != null ? (
-          <>
-            <Sep />
-            <span>{formatContext(model.context_window)} context</span>
-          </>
-        ) : null}
-        {listedPrices(model).map((price) => (
-          <Fragment key={price}>
-            <Sep />
-            <span className="tabular-nums">{price}</span>
-          </Fragment>
-        ))}
       </p>
     </>
   )
@@ -758,7 +764,10 @@ export function ModelCatalogView({
           aria-busy={catalog.isFetching}
         >
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
-            <div className="min-w-[12rem] flex-1">
+            {/* The search takes the first line to itself on a phone, so the
+                view controls share the second in either view. Left to wrap,
+                the table view stranded Filters alone on a line of its own. */}
+            <div className="min-w-[12rem] flex-1 max-sm:basis-full">
               <SearchInput
                 value={filters.query}
                 onChange={(query) => updateFilters({ ...filters, query })}

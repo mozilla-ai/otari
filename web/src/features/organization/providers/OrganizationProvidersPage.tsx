@@ -754,6 +754,7 @@ export function OrganizationProvidersPage() {
         <TableScrollFrame className="otari-provider-keys-table">
           <DataTable
             ariaLabel="Organization provider keys"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}

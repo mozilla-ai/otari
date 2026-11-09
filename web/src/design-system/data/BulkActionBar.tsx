@@ -63,17 +63,39 @@ export function BulkActionBar({
           Foreground, not accent: this is a count, not a destination, and accent
           ink on something unclickable promises an interaction that is not
           there. */}
-      <span role="status" aria-live="polite" className="text-body">
+      {/* On a phone the bar is two lines rather than three: the count and
+          Clear share the first, the actions take the second, and the leading
+          action's label lines up under the count. Left to wrap, Clear fell to
+          a line of its own and the bar stood 150px over the list. `contents`
+          and `order` move them without changing the DOM, so the reading and
+          focus order stay what they are on a desk. */}
+      <span
+        role="status"
+        aria-live="polite"
+        className="text-body max-sm:order-1"
+      >
         {label}
       </span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
-        <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="max-sm:order-5"
+          onPress={onSelectAllMatching}
+        >
           Select all {formatNumber(matchingTotal)} matching this filter
         </Button>
       ) : null}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {children}
-        <Button size="sm" variant="ghost" onPress={onClear}>
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:contents">
+        <div className="flex flex-wrap items-center gap-2 max-sm:order-4 max-sm:basis-full max-sm:[&>.button--ghost:first-child]:-ms-[11px]">
+          {children}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="max-sm:order-2 max-sm:ml-auto max-sm:-me-[11px]"
+          onPress={onClear}
+        >
           Clear
         </Button>
       </div>

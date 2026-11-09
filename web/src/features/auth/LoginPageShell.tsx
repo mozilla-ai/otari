@@ -56,6 +56,10 @@ export function LoginPageShell({
             isIconOnly
             label={isDark ? "Switch to light theme" : "Switch to dark theme"}
             onPress={toggle}
+            // The glyph, not its 44px box, meets the header's right edge, the
+            // way the lockup's own pull puts the mark on the left one and the
+            // footer's text sits on both.
+            className="-mr-3"
           >
             <ThemeIcon aria-hidden />
           </IconButton>

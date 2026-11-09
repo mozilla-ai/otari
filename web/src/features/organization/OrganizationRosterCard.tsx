@@ -71,6 +71,7 @@ export function OrganizationRosterCard({
         <Card.Content className="p-0">
           <DataTable
             ariaLabel="Organization members"
+            mobileLayout="cards"
             columns={columns}
             rows={members}
             getRowKey={memberRowKey}

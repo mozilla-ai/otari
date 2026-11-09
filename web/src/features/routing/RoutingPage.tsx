@@ -250,6 +250,7 @@ export function RoutingPage() {
         <TableScrollFrame className="otari-routing-table">
           <DataTable
             ariaLabel="Routing policies"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={rowKeyOf}

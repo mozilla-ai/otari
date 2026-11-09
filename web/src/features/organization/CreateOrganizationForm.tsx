@@ -6,6 +6,7 @@ import {
   useCreateOrganization,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 // Create an organization and move into it. Two calls, because the server keeps
 // them apart on purpose: creating one does not change which organization the
@@ -82,7 +83,7 @@ export function CreateOrganizationForm({
           onChange={setName}
           placeholder="Research"
           isRequired
-          autoFocus
+          autoFocus={allowsFieldAutoFocus()}
           description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
           shouldReserveMessage
         />

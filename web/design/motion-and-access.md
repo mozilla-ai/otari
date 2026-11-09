@@ -112,6 +112,14 @@ sees neither change.
 
 Hover is never the only channel. A hover state that carries information alone does
 not exist on a phone: pair it with a fill *and* an ink change, as the rail rows do.
+A hover rule written in plain CSS goes inside `@media (hover: hover)`, or a tap
+leaves it applied until the next tap elsewhere; Tailwind's `hover:` already is.
+
+The platform's own touch chrome is off once, in `globals.css`: no double-tap
+delay on a control, no long-press selection of a button's label, and no
+overscroll on the document. HeroUI already clears the tap highlight. A field does not take focus by itself on a touch
+screen (`allowsFieldAutoFocus`), because that raises the keyboard over a dialog
+its reader has not yet seen.
 
 ## Names
 

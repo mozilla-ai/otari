@@ -26,7 +26,7 @@ import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
-
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import {
   deploymentManagedSelectors,
   findOverlapping,
@@ -380,7 +380,7 @@ export function PricingOverrideDialog({
           value={modelKey}
           onChange={setModelKey}
           isRequired
-          autoFocus
+          autoFocus={allowsFieldAutoFocus()}
           source="catalog"
           isInvalid={keyReason !== undefined}
           errorMessage={keyReason}
@@ -408,7 +408,7 @@ export function PricingOverrideDialog({
             // The first field on the edit path: the model key's own `Field`, which
             // carries `autoFocus` on the add path, is replaced by a read-only
             // block there, and focus was landing on the frame's Close control.
-            autoFocus={focusFirstRate}
+            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
           />
           <RateField
             label="Output, per 1M tokens"
@@ -438,7 +438,7 @@ export function PricingOverrideDialog({
             value={input}
             onChange={setInput}
             isRequired
-            autoFocus={focusFirstRate}
+            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
           />
           {twoRates(unit) ? (
             <RateField

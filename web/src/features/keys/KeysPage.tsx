@@ -66,6 +66,7 @@ import {
 } from "@/shared/api/apiKeys"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUsers } from "@/shared/api/users"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
@@ -689,7 +690,7 @@ function CreateKeyDialog({
         value={keyName}
         onChange={setKeyName}
         placeholder="ci-bot"
-        autoFocus
+        autoFocus={allowsFieldAutoFocus()}
         description="A label to recognize this key later."
         shouldReserveMessage
       />
@@ -1005,7 +1006,7 @@ function EditKeyForm({
         value={keyName}
         onChange={setKeyName}
         placeholder="ci-bot"
-        autoFocus
+        autoFocus={allowsFieldAutoFocus()}
         shouldReserveMessage={false}
       />
       <ExpiryFields

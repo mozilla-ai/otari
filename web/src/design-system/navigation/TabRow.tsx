@@ -49,10 +49,20 @@ export function Tab({
   const ref = useRef<HTMLButtonElement>(null)
   // The row scrolls rather than wrapping, so on a phone the active tab can sit
   // past its edge, opened from a link, with nothing to say it is there.
+  //
+  // The row's own scroll and nothing else. `scrollIntoView` scrolls every
+  // ancestor too, so on a phone any page with a tab row below the fold opened
+  // already scrolled down to it: the Overview landed past its filters and the
+  // first four figures, with the chart's Cost tab at the top of the screen.
   useEffect(() => {
-    if (isActive) {
-      ref.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
-    }
+    const tab = ref.current
+    const row = tab?.parentElement
+    if (!isActive || !tab || !row) return
+    const tabBox = tab.getBoundingClientRect()
+    const rowBox = row.getBoundingClientRect()
+    if (tabBox.left < rowBox.left) row.scrollLeft -= rowBox.left - tabBox.left
+    else if (tabBox.right > rowBox.right)
+      row.scrollLeft += tabBox.right - rowBox.right
   }, [isActive])
   return (
     <button
@@ -79,8 +89,36 @@ export function Tab({
  * what a screen reader needs; the row is only spacing.
  */
 export function TabRow({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  // A row that scrolls has to say so. On a phone the seven usage windows ran
+  // past the column and the last one was cut through its label at the edge,
+  // which read as a rendering fault rather than as more to reach. The edge
+  // that has more beyond it fades out; an edge with nothing past it stays
+  // sharp, so a row that fits looks exactly as it did.
+  useEffect(() => {
+    const row = ref.current
+    if (!row) return
+    const sync = () => {
+      const start = row.scrollLeft > 1
+      const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1
+      row.dataset.fade =
+        start && end ? "both" : start ? "start" : end ? "end" : "none"
+    }
+    sync()
+    row.addEventListener("scroll", sync, { passive: true })
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(sync)
+    observer?.observe(row)
+    return () => {
+      row.removeEventListener("scroll", sync)
+      observer?.disconnect()
+    }
+  }, [])
   return (
-    <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto">
+    <div
+      ref={ref}
+      className="inline-flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain data-[fade=both]:[mask-image:linear-gradient(to_right,transparent,black_3rem,black_calc(100%-3rem),transparent)] data-[fade=end]:[mask-image:linear-gradient(to_right,black_calc(100%-3rem),transparent)] data-[fade=start]:[mask-image:linear-gradient(to_left,black_calc(100%-3rem),transparent)]"
+    >
       {children}
     </div>
   )

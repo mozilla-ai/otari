@@ -624,6 +624,7 @@ export function ModelDetailView({
             <TableScrollFrame className="otari-offerings-table">
               <DataTable
                 ariaLabel={`Offerings of ${model.name}`}
+                mobileLayout="cards"
                 columns={offeringColumns({
                   canOverride,
                   withUsage,

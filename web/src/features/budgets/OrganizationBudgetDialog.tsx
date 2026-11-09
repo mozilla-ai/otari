@@ -9,7 +9,7 @@ import {
   useCreateOrganizationBudget,
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { unnamedBudgetLabel } from "./budgetLabel"
 import { CountLimitFields, countToInput, parseCount } from "./CountLimitFields"
 import {
@@ -168,7 +168,7 @@ export function OrganizationBudgetDialog({
         value={name}
         onChange={setName}
         placeholder="Engineering monthly"
-        autoFocus
+        autoFocus={allowsFieldAutoFocus()}
         description={`Optional. What this budget is called wherever it is handed out. Left blank, that is "${unnamedLabel}".`}
       />
       <Field

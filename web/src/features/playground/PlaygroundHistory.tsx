@@ -245,7 +245,8 @@ export function PlaygroundHistory({
           // header draws: an icon-only ghost never takes one, wherever it
           // renders (globals.css).
           <Button className="min-h-11 shrink-0 md:min-h-9">
-            <FiClock aria-hidden className="size-4" /> History
+            <FiClock aria-hidden className="size-4" />
+            <span className="max-sm:sr-only">History</span>
           </Button>
         }
       >

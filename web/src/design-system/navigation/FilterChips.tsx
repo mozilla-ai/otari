@@ -22,6 +22,16 @@ export interface FilterChip {
   onClear: () => void
 }
 
+/**
+ * The row the filters themselves sit in. Sized to what each one carries on a
+ * desk, where they read as a sentence. On a phone that sizing wrapped them into
+ * a column of controls with a different right edge each (a 24h select beside a
+ * Status one, then three combo boxes of another width under them), so there
+ * they take a two-column grid and fill their cell.
+ */
+const FILTER_ROW =
+  "otari-toolbar flex flex-wrap items-end gap-3 max-md:grid max-md:grid-cols-2 max-md:[&>*]:w-full max-md:[&>*]:min-w-0"
+
 export function FilterChips({
   chips,
   children,
@@ -73,11 +83,13 @@ export function FilterChips({
   if (alwaysOpen) {
     return (
       <div className="flex flex-col gap-2">
-        <div className="otari-toolbar flex flex-wrap items-end gap-3">
+        <div className={FILTER_ROW}>
           {start}
           {children}
           {end ? (
-            <div className="ml-auto flex items-center gap-3">{end}</div>
+            <div className="ml-auto flex items-center gap-3 max-md:col-span-2">
+              {end}
+            </div>
           ) : null}
         </div>
         {chips.length > 0 ? (
@@ -99,10 +111,17 @@ export function FilterChips({
           chips.length > 0 ? "pointer-coarse:gap-y-5" : ""
         }`}
       >
-        {start}
+        {/* On a phone `start` takes its own line, so the toggle always opens
+            the next one and can take the leading pull a first item gets (see
+            `.otari-toolbar` in globals.css); beside a start control it would
+            have overlapped it. */}
+        {start ? (
+          <div className="min-w-0 max-w-full max-md:basis-full">{start}</div>
+        ) : null}
         <Button
           size="sm"
           variant="ghost"
+          className={start ? "max-md:-ms-[11px]" : undefined}
           onPress={() => setOpen((prev) => !prev)}
           aria-expanded={open}
           aria-controls={regionId}
@@ -119,9 +138,7 @@ export function FilterChips({
         // The revealed pickers are the same place as the row that reveals
         // them, so they take the same dense height. Without the class they came
         // out 40px under a 38px row, which is two sizes for one control.
-        className={
-          open ? "otari-toolbar flex flex-wrap items-end gap-3" : "hidden"
-        }
+        className={open ? FILTER_ROW : "hidden"}
       >
         {children}
       </div>

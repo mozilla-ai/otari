@@ -42,12 +42,21 @@ export function KpiCell({
     // beside it (218px at 1280, since the track shrinks and the string does
     // not). Bounding the column is what makes the truncation and the
     // sparkline's `w-full` mean anything.
-    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r">
+    //
+    // The rule between cells belongs to a cell with a neighbor on its right, so
+    // it comes off the last cell of each row and not only the last cell: at two
+    // and three columns the row's end cell drew a rule against nothing. On a
+    // phone the left lane starts flush with the page column instead of 28px
+    // inside it, the right lane sits 16px off the rule, and an odd cell left
+    // over at the end takes the whole row rather than half of it with nothing
+    // beside it.
+    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r max-sm:px-4 max-sm:odd:pl-0 max-sm:even:pr-0 max-sm:even:border-r-0 max-sm:last:odd:col-span-2 max-sm:last:odd:pr-0 sm:max-xl:[&:nth-child(3n)]:border-r-0">
       <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
           would out-weigh the page title above it. */}
-      <span className="text-mono-figure font-normal text-foreground">
+      {/* One line: a figure and its unit ("15.85 s") never part. */}
+      <span className="text-mono-figure font-normal text-nowrap text-foreground">
         {value}
       </span>
       {/* One line, always present, so no cell is shorter than its neighbors.
@@ -60,14 +69,20 @@ export function KpiCell({
           taller than its siblings and silently undid the shared baseline the
           subgrid buys. The severity and the delta hold their width; the subline
           is the only thing that gives, and it truncates, because its facts also
-          live in the breakdown tables while a delta lives nowhere else. */}
-      <span className="flex min-h-[1.125rem] items-center gap-2 text-xs text-nowrap text-muted">
+          live in the breakdown tables while a delta lives nowhere else.
+          On a phone a half-width cell has room for the delta and four
+          characters of the subline, which truncated to "0.0…", so there the
+          subline takes a line of its own. The subgrid shares that row's
+          height across the strip's row, so the baseline still holds. */}
+      <span className="flex min-h-[1.125rem] items-center gap-2 text-xs text-nowrap text-muted max-sm:flex-wrap max-sm:content-start max-sm:gap-y-0.5">
         {severity ? <SeverityMark severity={severity} /> : null}
         {severity && delta ? <Separator /> : null}
         {delta}
-        {(severity || delta) && subline ? <Separator /> : null}
+        {(severity || delta) && subline ? (
+          <Separator className="max-sm:hidden" />
+        ) : null}
         {subline ? (
-          <span className="min-w-0 truncate" title={subline}>
+          <span className="min-w-0 truncate max-sm:basis-full" title={subline}>
             {subline}
           </span>
         ) : null}
@@ -83,9 +98,9 @@ export function KpiCell({
 }
 
 /** The middot between two things sharing the line under a value. */
-function Separator() {
+function Separator({ className }: { className?: string }) {
   return (
-    <span aria-hidden className="shrink-0 text-subtle">
+    <span aria-hidden className={`shrink-0 text-subtle ${className ?? ""}`}>
       ·
     </span>
   )

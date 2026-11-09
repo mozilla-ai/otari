@@ -673,13 +673,20 @@ export function SettingsPage() {
           ref={searchRef}
           type="search"
           aria-label="Search settings"
-          placeholder="Search settings (press / to focus)…"
+          // The shortcut is a keyboard's; on a touch screen the hint only
+          // cost the field the width to show its own name.
+          placeholder={
+            window.matchMedia?.("(pointer: fine)").matches
+              ? "Search settings (press / to focus)…"
+              : "Search settings…"
+          }
+          aria-keyshortcuts="/"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape") setSearch("")
           }}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-body focus:border-accent focus:outline-none"
+          className={`min-w-0 flex-1 ${INPUT_CLASS}`}
         />
         <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only

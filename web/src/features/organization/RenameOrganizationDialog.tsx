@@ -2,6 +2,7 @@ import { useState } from "react"
 
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 export interface RenameOrganizationDialogProps {
   isOpen: boolean
@@ -65,7 +66,7 @@ export function RenameOrganizationDialog({
         value={draft}
         onChange={setDraft}
         isRequired
-        autoFocus
+        autoFocus={allowsFieldAutoFocus()}
         description="What this deployment's tenant is called across the dashboard. The slug does not follow a rename."
         shouldReserveMessage
       />

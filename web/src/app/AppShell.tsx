@@ -1180,7 +1180,10 @@ function AppShellChrome() {
                 }
                 aria-expanded={mobileNavOpen}
                 aria-controls="app-sidebar"
-                className="-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:hidden"
+                // `-ml-3` gives the glyph's 12px of side padding to the gutter,
+                // so the three bars rather than their box line up with the page
+                // title under them.
+                className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:hidden"
               >
                 {mobileNavOpen ? (
                   <FiX aria-hidden="true" className="size-5" />

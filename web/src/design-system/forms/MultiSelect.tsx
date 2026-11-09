@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { FiCheck, FiChevronDown } from "react-icons/fi"
-
+import { allowsFieldAutoFocus } from "@/design-system/helpers/autoFocus"
 import { DismissChip } from "../indicators/DismissChip"
 import { FieldMessages } from "./FieldMessages"
 import { INPUT_CLASS } from "./inputClass"
@@ -259,7 +259,7 @@ export function MultiSelect({
             value={query}
             autoComplete="off"
             // biome-ignore lint/a11y/noAutofocus: a form's first field takes it; see feedback.md
-            autoFocus={autoFocus}
+            autoFocus={autoFocus && allowsFieldAutoFocus()}
             onChange={(event) => {
               setQuery(event.target.value)
               setActiveIndex(0)

@@ -1424,6 +1424,14 @@ body {
   --field-height: 2.25rem;
   --field-padding-block: 0.375rem;
 }
+/* The form size meets the phone's 44px floor too, the way the dense places do
+   in design-system.css. Left at 36, a dialog on a phone put 36px fields above
+   44px buttons, and a page put them under a toolbar whose fields were 44. */
+@media (max-width: 767px) {
+  :root {
+    --field-height: 2.75rem;
+  }
+}
 .input,
 .select__trigger {
   min-height: var(--field-height);
@@ -1481,6 +1489,55 @@ main {
   button:disabled,
   [aria-disabled="true"] {
     cursor: not-allowed;
+  }
+}
+
+/* =============================================================
+ * Touch, once.
+ *
+ * Two platform defaults that make a phone treat the dashboard as a page
+ * rather than an app, past the tap highlight HeroUI already clears. A control
+ * that could be double-tapped to zoom holds its click for a beat while the
+ * browser waits for a second tap; HeroUI's own buttons opt out, and the links,
+ * rail rows and tabs here did not. And a long press on a tab or a hand-rolled
+ * button selects its label or opens the link callout.
+ *
+ * Keyed on what the element is, like the cursor above. A table cell or a card
+ * keeps selectable text: that is content, and ids are copied out of it.
+ *
+ * The shell scrolls inside `<main>` and the document never scrolls, so the
+ * document's own overscroll (Android's pull-to-refresh, iOS's rubber band on
+ * the whole frame) is only ever a scroll that ran past the content and
+ * reloaded the page or moved the header.
+ * ============================================================= */
+html,
+body {
+  overscroll-behavior: none;
+}
+@layer base {
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="option"],
+  [role="menuitem"] {
+    touch-action: manipulation;
+  }
+  button,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="menuitem"] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
 }
 
@@ -1697,6 +1754,16 @@ main {
 .alert-dialog__dialog {
   border: 1px solid var(--color-control-border);
 }
+/* Square, which `--radius: 0` alone does not make these four: HeroUI rounds
+   them by `calc(var(--radius-2xl) + var(--spacing) * 1.5)`, so with the radius
+   zeroed the spacing term still leaves a 6px corner on every select, combo box
+   and menu popover, the one rounded surface in the product. */
+.select__popover,
+.combo-box__popover,
+.dropdown__popover,
+.autocomplete__popover {
+  border-radius: 0;
+}
 
 /* The primary button's own ramp, which darkens rather than lightens. HeroUI
    drives it from `--accent`, so this overrides the four variables the button
@@ -1891,6 +1958,19 @@ main {
 .otari-auth-actions .button--ghost,
 .button--ghost.button--icon-only {
   border-color: transparent;
+}
+
+/* A toolbar's leading ghost. Edgeless here, so its label is the part the eye
+   lines up, and the button's own inline padding put that label 11px inside the
+   column edge every field and card below it starts on. Pulled out by the
+   padding, the label lands on the edge and the target keeps its width. Only
+   the first item: a later one sits after a gap, and pulling it would overlap
+   whatever is in front of it. */
+.otari-toolbar > .button--ghost.button--sm:not(.button--icon-only):first-child {
+  margin-inline-start: -11px;
+}
+.otari-toolbar > .button--ghost.button--md:not(.button--icon-only):first-child {
+  margin-inline-start: -15px;
 }
 
 /* The public auth pages' footer row, which holds plain text links and one
@@ -2210,6 +2290,25 @@ main {
   [data-slot="button"] {
     min-height: 2.75rem;
     min-width: 2.75rem;
+  }
+}
+
+/* The text-entry floor on a touch screen, which is the input-size twin of the
+ * button floor above. iOS zooms the page into any field under 16px when it
+ * takes focus and does not zoom back out, so a reader who tapped a search box
+ * was left on a cropped, drifted page. HeroUI's own fields are 16px only below
+ * 640px, so an iPhone held sideways (844 to 932 wide) zoomed on every one of
+ * them, and `INPUT_CLASS` and the native search boxes were 14px at every
+ * width. Keyed on the pointer rather than on width for that reason: the zoom
+ * belongs to the touch screen, not to a narrow window. Unlayered, so it wins
+ * over a `text-sm` at the call site, which is the point. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+    [type="color"]
+  ),
+  textarea,
+  select {
+    font-size: max(1rem, 16px);
   }
 }
 
@@ -3108,9 +3207,11 @@ main {
   flex-shrink: 0;
   color: var(--color-text-muted);
 }
-.otari-key-actions-trigger:hover {
-  color: var(--color-text);
-  background: var(--color-surface-muted);
+@media (hover: hover) {
+  .otari-key-actions-trigger:hover {
+    color: var(--color-text);
+    background: var(--color-surface-muted);
+  }
 }
 /* The ring is `otari-focus-ring` on the trigger; only the offset is local. The
    trigger is flush with the row's right edge, where the utility's outward 2px
@@ -3149,6 +3250,22 @@ main {
 .otari-key-actions-menu .menu-item[data-focused],
 .otari-key-actions-menu .menu-item[data-hovered] {
   background: var(--color-surface-muted);
+}
+/* Everywhere the dense desk size below does not apply, which is every touch
+   screen and every narrow window: the description drops under its label
+   instead of sharing the line with it. At 268px "Use it without the secret"
+   took three lines beside "Workload identity…" and the next item's description
+   was cut off mid-sentence; stacked, each one reads on a line or two. */
+@media not all and (min-width: 48rem) and (pointer: fine) {
+  .otari-key-actions-menu .menu-item {
+    flex-wrap: wrap;
+    row-gap: 0.125rem;
+  }
+  .otari-key-actions-menu .menu-item [slot="description"] {
+    flex-basis: 100%;
+    margin-left: 1.5rem;
+    text-align: left;
+  }
 }
 @media (min-width: 48rem) and (pointer: fine) {
   .otari-key-actions-trigger {

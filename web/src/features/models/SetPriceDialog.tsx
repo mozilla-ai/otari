@@ -18,6 +18,7 @@ import {
   unitOutputRateLabel,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 
 // Per-1M rates an operator enters to price a model. Input and output are
 // required; the cache rates are optional (blank folds those tokens into the
@@ -234,7 +235,7 @@ export function SetPriceDialog({
           value={modelKey}
           onChange={setModelKey}
           isRequired
-          autoFocus
+          autoFocus={allowsFieldAutoFocus()}
           isInvalid={modelKey.trim() !== "" && keyInvalid}
           errorMessage="Include the provider or instance prefix, as in ollama:llama3.2."
           description="The selector callers send as model, prefix included (for example vllm:mistral-small)."
@@ -261,7 +262,7 @@ export function SetPriceDialog({
               value={input}
               onChange={setInput}
               isRequired
-              autoFocus={focusFirstRate}
+              autoFocus={allowsFieldAutoFocus() && focusFirstRate}
             />
             <RateField
               label="Output $ / 1M"
@@ -291,7 +292,7 @@ export function SetPriceDialog({
             value={input}
             onChange={setInput}
             isRequired
-            autoFocus={focusFirstRate}
+            autoFocus={allowsFieldAutoFocus() && focusFirstRate}
           />
           {hasOutputRate(unit) ? (
             <RateField

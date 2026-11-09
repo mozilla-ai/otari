@@ -54,9 +54,9 @@ import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
-
 import {
   budgetLabel,
   budgetLabeler,
@@ -354,7 +354,7 @@ function BudgetForm({
         label="Name (optional)"
         value={name}
         onChange={setName}
-        autoFocus
+        autoFocus={allowsFieldAutoFocus()}
         placeholder="team-free-tier"
         description={`A label to recognize this budget later. Left blank, it is shown as "${unnamedLabel}".`}
       />
@@ -960,6 +960,7 @@ function DeploymentBudgetsPage() {
         <TableScrollFrame className="otari-budgets-table">
           <DataTable
             ariaLabel="Budgets"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={getBudgetRowKey}
