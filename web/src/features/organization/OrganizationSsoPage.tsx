@@ -405,8 +405,9 @@ function EnforcementSection({
       <div className="flex flex-col gap-1">
         <h2 className="text-title">Require sign-in</h2>
         <p className="text-caption">
-          Every other way to act in this organization, including a live session,
-          is refused once this is on.
+          Only members who have signed in through this connection can act in
+          this organization once this is on. Live sessions of the rest end
+          immediately.
         </p>
       </div>
       <PreflightPanel />
