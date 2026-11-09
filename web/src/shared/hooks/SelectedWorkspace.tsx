@@ -9,7 +9,10 @@ import {
 } from "react"
 
 import type { CallerWorkspaceMembership } from "@/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 
 const STORAGE_KEY = "otari.dashboard.selectedWorkspace"
 
@@ -29,6 +32,12 @@ interface SelectedWorkspace {
    * hold a page through the query's retries.
    */
   isSettled: boolean
+  /**
+   * The context read failed with no answer to fall back on, so `selected` is
+   * null because nothing is known, not because the caller belongs to no
+   * workspace. A 404 is the answer that there is no organization, not a failure.
+   */
+  isUnknown: boolean
 }
 
 const Context = createContext<SelectedWorkspace | null>(null)
@@ -91,6 +100,10 @@ export function SelectedWorkspaceProvider({
   }, [])
 
   const isSettled = context.data !== undefined || context.isFetched
+  const isUnknown =
+    context.data === undefined &&
+    context.isError &&
+    !isNoOrganizationError(context.error)
   const value = useMemo(
     () => ({
       memberships,
@@ -98,8 +111,9 @@ export function SelectedWorkspaceProvider({
       select,
       isLoading: context.isLoading,
       isSettled,
+      isUnknown,
     }),
-    [memberships, selected, select, context.isLoading, isSettled],
+    [memberships, selected, select, context.isLoading, isSettled, isUnknown],
   )
 
   return <Context.Provider value={value}>{children}</Context.Provider>
@@ -116,6 +130,7 @@ const NO_WORKSPACE: SelectedWorkspace = {
   select: () => {},
   isLoading: false,
   isSettled: true,
+  isUnknown: false,
 }
 
 export function useSelectedWorkspace(): SelectedWorkspace {
@@ -125,10 +140,11 @@ export function useSelectedWorkspace(): SelectedWorkspace {
 /**
  * The workspace a read narrows to: the selected one's id, `""` for a caller
  * with no workspace (the whole reach), or `null` while the selection is not
- * final, so a workspace-bound read waits rather than answering unscoped first.
+ * final or could not be read, so a workspace-bound read waits rather than
+ * answering unscoped.
  */
 export function useNarrowingWorkspace(): string | null {
-  const { selected, isSettled } = useSelectedWorkspace()
+  const { selected, isSettled, isUnknown } = useSelectedWorkspace()
   if (selected) return selected.workspace_id
-  return isSettled ? "" : null
+  return isSettled && !isUnknown ? "" : null
 }
