@@ -805,7 +805,9 @@ class TestExchange:
     @pytest.mark.asyncio
     async def test_a_failed_identity_fetch_is_the_same_refusal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _Client:
-            async def exchange_code(self, **_: Any) -> object:
+            # The callback is passed positionally, so a keyword-only mock raises TypeError before
+            # the fetch below is reached and the refusal under test is never the one asserted.
+            async def exchange_code(self, _callback: object, **_: Any) -> object:
                 return object()
 
             async def fetch_identity(self, _tokens: object) -> Any:
@@ -813,7 +815,7 @@ class TestExchange:
 
         monkeypatch.setattr(oauth_service, "_client", lambda *_a, **_k: _Client())
 
-        with pytest.raises(OAuthExchangeError):
+        with pytest.raises(OAuthExchangeError) as refusal:
             await oauth_service.exchange_code(
                 configured(),
                 "github",
@@ -822,6 +824,8 @@ class TestExchange:
                 browser_token=BROWSER_TOKEN,
                 db=fake_db(),
             )
+
+        assert str(refusal.value.__cause__) == "userinfo 500"
 
     @pytest.mark.asyncio
     async def test_an_unconfigured_provider_refuses_before_any_outbound_call(self) -> None:
