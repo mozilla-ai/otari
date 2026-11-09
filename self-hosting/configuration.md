@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/c7b0e694899aeec9da1b40bc8c25c3b2f26e62a2/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/c609e3fcd7600f49b288b340846c652b6f7bb223/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/c7b0e694899aeec9da1b40bc8c25c3b2f26e62a2/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/c609e3fcd7600f49b288b340846c652b6f7bb223/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1736,40 +1736,47 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/c7b0e694899aeec9da1b40bc8c25c3b2f26e62a2/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/c609e3fcd7600f49b288b340846c652b6f7bb223/ARCHITECTURE.md) for the extension
 boundary.
 
-## Product feedback
+## Contacting the Otari team
 
-Signed-in dashboard users can choose **Feedback**, beside Documentation in the
-top bar (in the account menu on a phone), to send a message to the Otari team.
-The team receives it privately in Slack. By default only the message is sent:
-no email, screenshot, page URL, account identifier, deployment identifier, or
-usage history is attached. Someone whose account has an email also sees a box
-under the message, **Share _their address_ so the team can reply**. Ticked, the
-gateway adds the signed-in account's email, never an address from the request,
-and only when it is the address the form showed: a page left open while another
-tab signed in as someone else shares nothing. The Slack post shows it as the
-address to reply to. The box starts unticked every time the form opens, and an
-account without an email is not offered it. Opening the form, typing, and
-canceling make no outbound request.
+When `feedback_enabled` is on, signed-in dashboard users can choose **Contact**,
+beside Documentation in the top bar (in the account menu on a phone), to send a
+message to the Otari team. It is off by default, so a self-hosted deployment
+shows no Contact entry unless its operator turns it on. otari.ai turns it on.
 
-The gateway forwards the message to
-`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
-browser's cookies, authorization, referrer, or IP headers. Network peers still
-see connection metadata, so this is private feedback, not anonymous feedback.
-Keep request-body capture disabled for the feedback endpoint in any additional
-logging or tracing you configure.
+Someone whose account has an email the team can reply to sees, under the
+message, that by sending they agree the team can reply to that address about
+this message only. The
+gateway sends the signed-in account's own email with the message, never an
+address from the request, and only when it is the address the form showed: a
+page that showed an address, left open while another tab signed in as someone
+else, is refused and asked to reload. An account without an email, or with one
+the team could not reply to, is shown no such line and its message goes without
+an address to reply to. No screenshot, page URL,
+deployment identifier, or usage history is attached. Opening the form, typing,
+and canceling make no outbound request.
 
-Feedback is on by default. To turn it off, set `feedback_enabled: false` in
-YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. This setting is visible in Settings but
-cannot be changed there at runtime.
+On a self-hosted deployment, the gateway forwards the message and that address
+to `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers, or the account's
+identifier. Network peers still see connection metadata, so this is private,
+not anonymous. Keep request-body capture disabled for the feedback endpoint in
+any additional logging or tracing you configure. On otari.ai, the message is
+emailed to the support team with the account's email as the address to reply
+to, and the team is notified in Slack with the message and the account's user
+ID, never its email.
+
+To turn Contact on, set `feedback_enabled: true` in YAML or
+`OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
+and the Contact entry is hidden. This setting is visible in Settings but cannot
+be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.
 
-Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+Message text accepts up to 4,000 Unicode code points. The gateway waits up to
 10 seconds for the receiver and does not retry automatically. An unconfirmed
 submission stays in the form until the person retries or explicitly discards
 it. Drafts are held only in memory and disappear on page reload. A manual retry
@@ -1790,3 +1797,7 @@ after an unconfirmed delivery can produce a duplicate.
   digest of each declared entry writes every entry once, as if each had changed.
 - **`providers:` entries and the Deployment providers page.** See
   [Upgrading](hosted-providers.md#upgrading).
+- **Contact is off by default.** A deployment that left `feedback_enabled`
+  unset no longer shows the Feedback entry, now named Contact. Set
+  `feedback_enabled: true` to keep offering it; see
+  [Contacting the Otari team](#contacting-the-otari-team).
