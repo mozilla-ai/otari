@@ -31,10 +31,15 @@ Create `end-user-budget-memories` the same way.
 
 ## Create the service key
 
-Only a deployment operator can set `is_service_key` on `POST` or
-`PATCH /api/v1/keys`. List the budgets the key may start its end users on in
-`end_user_budget_ids`, and set `end_user_budget_id` as the default for requests
-that name none:
+Signed in as the deployment operator, open **API keys**, click **Create key**,
+click **Advanced** and tick **Service key**. Pick both budgets under
+**End-user budgets** and `end-user-budget-ai` as the **Default end-user
+budget**, or end users a request starts without a budget header are uncapped,
+and stay uncapped when the key gains a default later.
+Through the API, only a deployment
+operator can set `is_service_key` on `POST` or `PATCH /api/v1/keys`. List the
+budgets the key may start its end users on in `end_user_budget_ids`, and set
+`end_user_budget_id` as the default for requests that name none:
 
 ```http
 POST /api/v1/keys
@@ -84,9 +89,10 @@ what a start writes back, see
 
 Each distinct id a request names creates an end user, so set a
 [rate limit](configuration.md#rate-limit-rules) on a deployment that issues
-service keys. An operator's service key has no `max_end_users` unless you set
-it in `POST` or `PATCH /api/v1/keys`, or in `config.yml`; `null` means no cap.
-How the cap counts is in
+service keys. An operator's service key has no cap unless you set **Max end
+users** on the key in **API keys**, `max_end_users` in `POST` or
+`PATCH /api/v1/keys`, or `max_end_users` in `config.yml`; empty (`null`) means
+no cap. **End users** in the key's menu lists them. How the cap counts is in
 [Capping a key's end users](https://docs.otari.ai/guides/organizations-and-access/end-users#capping-a-keys-end-users).
 
 ## Operator routes

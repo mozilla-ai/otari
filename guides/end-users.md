@@ -32,7 +32,9 @@ cannot be deleted.
 4. Under **End-user budgets**, pick the budgets the key may start end users on.
 5. Pick the **Default end-user budget**, used when a request names none. It
    must be one of the budgets you picked.
-6. Click **Create key** and copy the key.
+6. Set **Max end users**, or keep 10,000; see
+   [Capping a key's end users](#capping-a-keys-end-users).
+7. Click **Create key** and copy the key.
 
 The key belongs to the organization, not to you:
 
@@ -40,16 +42,15 @@ The key belongs to the organization, not to you:
   do not see it.
 - It keeps working if you leave the organization.
 - Its end users stay out of reach of every other key and organization.
-- It can create at most 10,000 end users unless you set another cap; see
-  [Capping a key's end users](#capping-a-keys-end-users).
+- It always has a cap on its end users, which cannot be cleared.
 
 Whether a key is a service key is fixed when you create it. To cap the total
 spend of all its end users together, give the key its own spend ceiling (see
 [Apply a spend ceiling](https://docs.otari.ai/how-to-guides/set-a-budget-and-ceiling#apply-a-spend-ceiling)).
 
 Through the API, a service key is created with `is_service_key`,
-`end_user_budget_ids` and `end_user_budget_id`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a89e11c5ec35774d3b3b4d70c5d220ceb062cca8/docs/public/openapi.json).
+`end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/345f2ca0fc8c49b1f2027028466d3c299818e1e4/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
@@ -87,9 +88,12 @@ End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/search` and
 
 ## 4. Manage end users
 
-The dashboard has no end-user page. Your service manages its end users with its
-service key, addressing each by the id it sends. For example, to move an end
-user to another budget:
+To see a key's end users, open the key's menu in **API keys** and click **End
+users**: each one's budget, spend, requests and whether it is blocked. Search
+by the id your service sends. The list is read-only.
+
+Your service changes its end users with its service key, addressing each by the
+id it sends. For example, to move an end user to another budget:
 
 ```http
 PATCH /api/v1/end-users?external_id=fxa123:memories
@@ -140,10 +144,11 @@ budget, so deleting cannot reset a budget. If erasure fails, the call answers
 
 ### Capping a key's end users
 
-An organization's service key always has a `max_end_users`, 10,000 unless you
-set another when creating or updating the key through the API. An update cannot
-clear it. A key a deployment operator makes has no cap unless the operator sets
-one (see [Service keys on a deployment you run](https://docs.otari.ai/self-hosting/operations/operator-service-keys)).
+Set the cap in **Max end users** when you create or edit the key in **API
+keys**, or as `max_end_users` through the API. An organization's service key
+always has one, 10,000 unless you set another, and an edit cannot clear it. A
+key a deployment operator makes has no cap unless the operator sets one (see
+[Service keys on a deployment you run](https://docs.otari.ai/self-hosting/operations/operator-service-keys)).
 
 When the cap is reached, a request that would create or revive an end user is
 refused with `403` (`end_user_limit_reached`). Existing end users keep working,
@@ -192,4 +197,7 @@ or deleted.
   `.` or `..` segment is refused there with 400.
 
 A deployment operator can also reach any service key's end users with the master
-key; see [Operator routes](https://docs.otari.ai/self-hosting/operations/operator-service-keys#operator-routes).
+key; see [Operator routes](https://docs.otari.ai/self-hosting/operations/operator-service-keys#operator-routes). An owner
+or admin lists the end users of the organization's service keys with a
+dashboard session at `GET /api/v1/organizations/me/keys/{key_id}/end-users`,
+which takes the same list parameters.
