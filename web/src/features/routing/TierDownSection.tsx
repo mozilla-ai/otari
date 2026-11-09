@@ -6,6 +6,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import type { TierDown } from "./policyDraft"
 import { SectionRow } from "./SectionRow"
@@ -18,6 +19,7 @@ export function TierDownSection({
   tierDowns: TierDown[]
   onChange: (next: TierDown[]) => void
 }) {
+  const workspaceId = useSelectedWorkspace().selected?.workspace_id
   const update = (index: number, patch: Partial<TierDown>) =>
     onChange(
       tierDowns.map((tier, i) => (i === index ? { ...tier, ...patch } : tier)),
@@ -58,6 +60,7 @@ export function TierDownSection({
           />
           <div className="min-w-56 flex-1">
             <ModelComboBox
+              workspaceId={workspaceId}
               source="catalog"
               label="Use instead"
               value={tier.target}

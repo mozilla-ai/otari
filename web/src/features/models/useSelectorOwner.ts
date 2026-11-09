@@ -18,12 +18,14 @@ const LOOKUP_LIMIT = 25
 export function useSelectorOwner(
   selector: string,
   enabled = true,
+  workspaceId = "",
 ): CatalogModelSummary | undefined {
   const term = useDebounced(selector.trim())
   const lookup = useCatalogSearch(
     term,
     LOOKUP_LIMIT,
     enabled && isPrefixedSelector(term),
+    workspaceId,
   )
   return findOfferingOwner(lookup.data?.models ?? [], selector)
 }

@@ -448,7 +448,12 @@ async def delete_organization_alias(
 
 @fallbacks_router.get("")
 async def list_automatic_fallbacks(
-    visible: VisibleWorkspacesDep, routing: RoutingServiceDep
+    visible: VisibleWorkspacesDep,
+    routing: RoutingServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Only the offerings a request billed to this workspace may call."),
+    ] = None,
 ) -> AutomaticFallbacksResponse:
     """The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
 
@@ -461,8 +466,12 @@ async def list_automatic_fallbacks(
     workspaces the caller may see in their active organization, by the rule the
     organization's usage reads use.
     """
+    if workspace_id is not None and workspace_id not in visible.workspace_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
     fallbacks = await routing.automatic_fallbacks(
-        organization_id=visible.organization_id, workspace_ids=visible.workspace_ids
+        organization_id=visible.organization_id,
+        workspace_ids=visible.workspace_ids,
+        serving_workspace_id=workspace_id,
     )
     return AutomaticFallbacksResponse(
         window_days=FALLBACK_WINDOW.days,

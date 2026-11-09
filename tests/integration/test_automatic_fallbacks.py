@@ -24,6 +24,7 @@ from gateway.repositories.api_keys import api_key_repository
 from gateway.services import catalog as selectors
 from gateway.services import selector_index_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.providers import _workspace_hosted_access as workspace_hosted_access
 
 from .conftest import build_test_client
 
@@ -268,3 +269,29 @@ def test_another_organization_sees_its_own_traffic_and_order(fallbacks_client: T
 
 def test_the_read_needs_a_signed_in_caller(fallbacks_client: TestClient, world: _World) -> None:
     assert fallbacks_client.get(_PATH).status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+def test_naming_a_workspace_keeps_only_the_offerings_it_may_call(
+    fallbacks_client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workspace requiring zero data retention is refused every configured instance, so none is a backup."""
+    monkeypatch.setattr(
+        workspace_hosted_access, "_zero_retention_workspaces", frozenset({world.workspaces["alpha_one"]})
+    )
+
+    def read(workspace: str) -> tuple[int, dict[str, dict[str, Any]]]:
+        response = fallbacks_client.get(
+            _PATH,
+            params={"workspace_id": str(world.workspaces[workspace])},
+            cookies={SESSION_COOKIE_NAME: world.sessions["alpha_owner"]},
+        )
+        models = response.json().get("models", []) if response.status_code == status.HTTP_200_OK else []
+        return response.status_code, {model["id"]: model for model in models}
+
+    _, required = read("alpha_one")
+    _, other = read("alpha_two")
+    hidden, _ = read("beta_one")
+
+    assert required == {}
+    assert [offering["selector"] for offering in other[_CLAUDE]["offerings"]] == [_FIREWORKS, _ANTHROPIC, _BEDROCK]
+    assert hidden == status.HTTP_404_NOT_FOUND

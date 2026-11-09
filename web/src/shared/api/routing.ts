@@ -99,13 +99,16 @@ export function useRoutingPolicies(workspaceId?: string) {
 
 // The models the caller's organization used in the last 30 days, each with the
 // offerings its catalog ID tries in order. One endpoint for every caller: the
-// server scopes the traffic to the workspaces the caller may see.
-export function useAutomaticFallbacks() {
+// server scopes the traffic to the workspaces the caller may see, and
+// `workspaceId` keeps only the offerings that workspace may call.
+export function useAutomaticFallbacks(workspaceId?: string) {
   return useQuery({
-    queryKey: [AUTOMATIC_FALLBACKS],
+    queryKey: [AUTOMATIC_FALLBACKS, workspaceId ?? null],
     queryFn: () =>
       apiFetch<AutomaticFallbacksResponse>(
-        "/organizations/me/automatic-fallbacks",
+        workspaceId
+          ? `/organizations/me/automatic-fallbacks?workspace_id=${encodeURIComponent(workspaceId)}`
+          : "/organizations/me/automatic-fallbacks",
       ),
     staleTime: 60_000,
   })
