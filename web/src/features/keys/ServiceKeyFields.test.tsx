@@ -255,7 +255,7 @@ describe("maxEndUsersError", () => {
         { ...choice, maxEndUsers: "9".repeat(400) },
         "deployment",
       ),
-    ).toBe("A whole number, 0 or more")
+    ).toBe("At most 9,007,199,254,740,991")
   })
 })
 

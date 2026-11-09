@@ -63,11 +63,12 @@ export function maxEndUsersError(
   if (typed === "") {
     return scope === "organization" ? "Required" : undefined
   }
+  if (!/^\d+$/.test(typed)) return "A whole number, 0 or more"
   // Past the safe range a number rounds, or becomes Infinity, which JSON sends
   // as null and so would clear the cap.
-  return /^\d+$/.test(typed) && Number.isSafeInteger(Number(typed))
+  return Number.isSafeInteger(Number(typed))
     ? undefined
-    : "A whole number, 0 or more"
+    : `At most ${Number.MAX_SAFE_INTEGER.toLocaleString("en-US")}`
 }
 
 /**
