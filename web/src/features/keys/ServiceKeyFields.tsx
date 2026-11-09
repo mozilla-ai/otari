@@ -2,7 +2,7 @@ import type { ApiKey } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 import {
   budgetLabeler,
   type LabelableBudget,
@@ -67,6 +67,10 @@ export function useServiceKeyReady(
 }
 
 const NO_BUDGETS: readonly LabelableBudget[] = []
+
+// The "no default" choice. `Select` shows "" as nothing chosen, so this label is
+// also the placeholder that names it while it is the value.
+const NO_DEFAULT_BUDGET_LABEL = "None: uncapped unless a request names one"
 
 /**
  * The budgets a service key in this scope may start end users on. The
@@ -196,21 +200,23 @@ export function ServiceKeyFields({
               </div>
             )}
           </fieldset>
-          <FilterSelect
-            id="key-end-user-default-budget"
+          <Select
             label="Default end-user budget"
             value={value.defaultBudgetId}
             onChange={(defaultBudgetId) =>
               onChange({ ...value, defaultBudgetId })
             }
+            placeholder={NO_DEFAULT_BUDGET_LABEL}
+            // Nothing to say beside it and nothing that can be invalid, so no
+            // message line to hold open under it.
+            shouldReserveMessage={false}
             options={[
-              { value: "", label: "None: uncapped unless a request names one" },
+              { value: "", label: NO_DEFAULT_BUDGET_LABEL },
               ...value.budgetIds.map((budgetId) => ({
                 value: budgetId,
                 label: labelOf(budgetId),
               })),
             ]}
-            fullWidth
           />
         </>
       ) : null}

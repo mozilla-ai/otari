@@ -47,6 +47,8 @@ export function DefaultBudgetPicker({
       label="Default member budget"
       value={value}
       onChange={onChange}
+      // `Select` shows "" as nothing chosen, so the placeholder names it.
+      placeholder="No default"
       // No description and nothing that can be invalid, so there is no message
       // this could ever hold. `FieldMessages` reserves the line by default, and
       // `FilterSelect` reserved nothing, so the swap to `Select` brought ~23px
@@ -145,26 +147,26 @@ export function NarrowedDefaults({
       )}
       {available.length > 0 && budgets.length > 0 ? (
         <div className="flex items-end gap-2">
-          <FilterSelect
+          <Select
             label="Provider"
             value={provider}
             onChange={setProvider}
-            options={[
-              { value: "", label: "Select a provider…" },
-              ...available.map((instance) => ({
-                value: instance,
-                label: instance,
-              })),
-            ]}
+            isDisabled={isHeld}
+            placeholder="Select a provider…"
+            shouldReserveMessage={false}
+            options={available.map((instance) => ({
+              value: instance,
+              label: instance,
+            }))}
           />
-          <FilterSelect
+          <Select
             label="Budget"
             value={budgetId}
             onChange={setBudgetId}
-            options={[
-              { value: "", label: "Select a budget…" },
-              ...budgetChoices(budgets),
-            ]}
+            isDisabled={isHeld}
+            placeholder="Select a budget…"
+            shouldReserveMessage={false}
+            options={budgetChoices(budgets)}
           />
           <Button
             size="sm"

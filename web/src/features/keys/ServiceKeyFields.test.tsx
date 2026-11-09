@@ -180,6 +180,23 @@ describe("ServiceKeyFields", () => {
       defaultBudgetId: "",
     })
   })
+
+  it("names no default by its label, and picks it back as an empty value", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields({
+      isServiceKey: true,
+      budgetIds: ["eu-ai"],
+      defaultBudgetId: "eu-ai",
+    })
+
+    await pickOption(user, "Default end-user budget", /^None: uncapped/)
+
+    expect(latest()?.defaultBudgetId).toBe("")
+    expect(
+      screen.getByRole("button", { name: /Default end-user budget/ }),
+    ).toHaveTextContent("None: uncapped unless a request names one")
+  })
 })
 
 describe("serviceKeyBody", () => {
