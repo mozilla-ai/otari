@@ -365,6 +365,24 @@ class OAuthIdentityUnknownError(TenancyError):
         )
 
 
+class SsoIdentityNotAdmittedError(TenancyError):
+    """No organization both proves the address's email domain and holds a connection to its issuer.
+
+    Distinct from ``OAuthIdentityUnknownError``, whose advice is to have an address added: nothing
+    here is waiting to be added to, because what admits an address is an organization's proof of its
+    domain. Naming neither the issuer nor the organization, because a refusal is answered to whoever
+    presented the identity and would otherwise say which domains this deployment holds proofs for.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self) -> None:
+        super().__init__(
+            "That sign-in is not set up to admit your email address here. Ask whoever administers "
+            "your organization to confirm its sign-in covers the domain of your address."
+        )
+
+
 class OAuthAccountLinkedElsewhereError(TenancyError):
     """The account that holds the address is linked to another identity at the same provider.
 

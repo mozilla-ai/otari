@@ -16,6 +16,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityLinkConflictError,
     OAuthIdentityUnknownError,
+    SsoIdentityNotAdmittedError,
     TermsNotAcceptedError,
 )
 from gateway.models.base import Base
@@ -254,7 +255,7 @@ async def test_an_authenticated_person_matching_no_organization_is_refused(async
     # No domain claim: nothing proves the identity's email domain, so the connection admits nobody.
     accounts_before = await _count(async_db, User)
 
-    with pytest.raises(OAuthIdentityUnknownError):
+    with pytest.raises(SsoIdentityNotAdmittedError):
         await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
 
     assert await _count(async_db, User) == accounts_before

@@ -21,6 +21,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthIdentityUnknownError,
     PasswordLinkUnavailableError,
     SignInBlockedError,
+    SsoIdentityNotAdmittedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -161,8 +162,9 @@ class IdentityService:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
             OAuthAccountLinkedElsewhereError: If the account the policy returns is linked to another identity
                 at the same provider.
-            OAuthIdentityUnknownError: If the account is deactivated or gone, or no organization both proves
-                an OIDC identity's email domain and holds a connection to the issuer that authenticated it.
+            OAuthIdentityUnknownError: If the account is deactivated or gone.
+            SsoIdentityNotAdmittedError: If no organization both proves an OIDC identity's email domain and
+                holds a connection to the issuer that authenticated it.
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TermsNotAcceptedError: If the sign-in would create or first claim an account without the published
                 terms. Nothing the sign-in staged is kept, including an organization the policy provisioned.
@@ -430,15 +432,15 @@ class IdentityService:
         assertion is not read, and ``trust_email_verified`` stays off for every connection.
 
         Raises:
-            OAuthIdentityUnknownError: If no organization both proves the identity's email domain and holds a
-                connection to the issuer that authenticated it.
+            SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
+                holds a connection to the issuer that authenticated it.
 
         """
         connection = await organization_for_sso_identity(
             external, connections=self._connections, domains=self._domain_claims, now=datetime.now(UTC)
         )
         if connection is None:
-            raise OAuthIdentityUnknownError(label)
+            raise SsoIdentityNotAdmittedError
         account = await self._organizations.provision_sso_tenancy(
             organization_id=connection.organization_id,
             full_name=external.full_name,

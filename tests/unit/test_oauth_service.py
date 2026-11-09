@@ -39,7 +39,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthStateError,
 )
 from gateway.log_config import logger as gateway_logger
-from gateway.models.identity import EmailAssertion
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion
 from gateway.services import oauth_service
 
 
@@ -981,6 +981,14 @@ class TestProviderLabel:
         # The only caller is a refusal, and one that fails to render is worse
         # than one naming a provider nobody configured.
         assert oauth_service.provider_label("acme-oidc") == "acme-oidc"
+
+    def test_an_organizations_own_connection_is_named_for_what_a_person_chose(self) -> None:
+        """The value carries this deployment's key for an issuer, which a refusal must not read out."""
+        label = oauth_service.provider_label(f"{OIDC_PROVIDER_PREFIX}https://login.acme.example")
+
+        assert OIDC_PROVIDER_PREFIX not in label
+        assert "acme.example" not in label
+        assert label == "company sign-in"
 
 
 @pytest.mark.parametrize(("provider", "trusted"), [("github", True), ("google", True), ("acme-oidc", False)])

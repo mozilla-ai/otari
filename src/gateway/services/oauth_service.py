@@ -74,7 +74,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthStateError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
 
 # Which scopes each provider is asked for, and what it calls itself.
@@ -146,12 +146,16 @@ assert set(_PROVIDERS) == set(OAUTH_PROVIDERS), "OAUTH_PROVIDERS and _PROVIDERS 
 def provider_label(provider: str) -> str:
     """The provider's own name, cased the way it writes it, for a message.
 
-    An unknown provider answers with the string it was given rather than
-    raising: the only caller is an error message, and a refusal that fails to
-    render is worse than one naming a provider nobody configured.
+    An organization's own connection answers with what the person chose on the sign-in card, because
+    the value naming it is this deployment's key for an issuer and means nothing to whoever reads a
+    refusal. An otherwise unknown provider answers with the string it was given rather than raising:
+    the only caller is an error message, and a refusal that fails to render is worse than one naming
+    a provider nobody configured.
     """
     known = _PROVIDERS.get(provider)
-    return known.label if known else provider
+    if known is not None:
+        return known.label
+    return "company sign-in" if provider.startswith(OIDC_PROVIDER_PREFIX) else provider
 
 
 def trusts_email_claim(provider: str) -> bool:
