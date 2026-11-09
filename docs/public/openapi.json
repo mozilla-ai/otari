@@ -44433,7 +44433,7 @@
         ]
       },
       "post": {
-        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it. Sharing with an audience that already\nhas a running share returns that share, with the note given here.",
         "operationId": "organization-traces-share_trace_content",
         "parameters": [
           {

@@ -1,6 +1,7 @@
 import type { TraceSpan } from "@/client"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
+import { CONTENT_PRIVATE } from "./exceptionalAccess"
 import { formatDuration } from "./format"
 import { type GuardrailVerdict, gateVerdict } from "./gateway"
 import { clip, clipPath } from "./traceModel"
@@ -71,6 +72,9 @@ export const TURN_NO_INPUT: NoInput = {
 }
 
 export const GATES_NO_INPUT: NoInput = { sentence: "Its gates are under it." }
+
+// A span holding content this reader may not open: who may, rather than why there is none.
+export const PRIVATE_NO_INPUT: NoInput = { sentence: CONTENT_PRIVATE }
 
 export function noInput(span: TraceSpan): NoInput {
   const sentence = notShown(span)

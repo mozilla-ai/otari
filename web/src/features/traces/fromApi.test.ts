@@ -7,7 +7,8 @@ import {
   traceSummary,
 } from "@/tests/traceFixtures"
 
-import { PRIVATE_CONTENT, toTrace } from "./fromApi"
+import { PRIVATE_NO_INPUT } from "./explain"
+import { toTrace } from "./fromApi"
 import { summarizeTrace } from "./types"
 
 describe("toTrace", () => {
@@ -698,7 +699,10 @@ describe("toTrace", () => {
     )
     const byId = new Map(trace.observations.map((o) => [o.id, o]))
 
-    expect(byId.get("tool-1")?.input).toBe(PRIVATE_CONTENT)
+    // Said where a span without input says why, not as the agent's input.
+    expect(byId.get("tool-1")?.noInput).toBe(PRIVATE_NO_INPUT)
+    expect(byId.get("tool-1")?.input).toBeUndefined()
+    expect(byId.get("req-1")?.noInput).not.toBe(PRIVATE_NO_INPUT)
     expect(byId.get("req-1")?.input).toBeUndefined()
   })
 

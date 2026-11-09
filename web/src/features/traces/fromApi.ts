@@ -13,6 +13,7 @@ import {
   gateGroupExplanation,
   groupWords,
   noInput,
+  PRIVATE_NO_INPUT,
   TURN_NO_INPUT,
 } from "./explain"
 import {
@@ -156,13 +157,8 @@ function spanStatus(
 }
 
 // What the span was about, where the deployment keeps content: the one value on
-// its own, so a command or a prompt reads as text rather than as an object. A
-// span whose content the reader may not open says so rather than showing none.
-export const PRIVATE_CONTENT =
-  "Private to the person whose session this is. Anyone else reads it only through their share or a recorded break-glass opening."
-
+// its own, so a command or a prompt reads as text rather than as an object.
 function spanInput(span: TraceSpan): unknown {
-  if (span.content_private) return PRIVATE_CONTENT
   const { "tool.output": _output, ...input } = span.content
   const values = Object.values(input)
   if (values.length === 0) return undefined
@@ -410,8 +406,9 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         input,
         output: spanOutput(span),
         // A gate can read its evidence off a sibling gate of the same check.
-        noInput:
-          input === undefined && !gate?.evidence
+        noInput: span.content_private
+          ? PRIVATE_NO_INPUT
+          : input === undefined && !gate?.evidence
             ? noInput(folded?.opens_turn ? folded : span)
             : undefined,
         gate,

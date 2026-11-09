@@ -551,7 +551,6 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
               }
             />
           </TableScrollFrame>
-          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -564,6 +563,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
             hasNextFallback={traces.data?.has_more ?? false}
             label="Sessions"
           />
+          {isOwner ? <BreakGlassLog /> : null}
         </div>
       </div>
 
