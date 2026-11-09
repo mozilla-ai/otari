@@ -1,4 +1,6 @@
 version: 2
+# Version updates run monthly. Security updates are not scheduled and still open
+# as soon as an advisory lands.
 updates:
   # Keep the SHA-pinned GitHub Actions current. Without this, pinned SHAs go
   # stale and miss upstream security patches; Dependabot bumps both the SHA and
@@ -6,9 +8,9 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
-      # One PR per week for routine minor/patch bumps to cut review noise;
+      # One PR per month for routine minor/patch bumps to cut review noise;
       # major bumps still arrive as individual PRs so they get scrutiny.
       github-actions:
         update-types:
@@ -20,7 +22,7 @@ updates:
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
 
   # Python dependencies resolved through uv. The ecosystem must be "uv", not
   # "pip": the pip ecosystem does not understand uv.lock, so it would leave the
@@ -38,7 +40,7 @@ updates:
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       python-minor-patch:
         update-types:
@@ -56,7 +58,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       dashboard-minor-patch:
         update-types:
