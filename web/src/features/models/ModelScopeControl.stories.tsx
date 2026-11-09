@@ -13,7 +13,7 @@ import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
  *
  * It reads the caller's model catalog, aliases and, for an owner or admin, the
  * organization's provider keys to suggest targets, so these stories declare
- * them; the Mistral key was never refreshed, so it offers only its wildcard.
+ * them.
  * `onChange` reports validity alongside the value, so the page can hold its
  * submit while an entry is incomplete.
  */

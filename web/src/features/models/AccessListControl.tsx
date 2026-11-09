@@ -54,8 +54,8 @@ export interface AccessPicker {
 }
 
 // The shell the model and tool access-lists share. One ``catalog`` is picked in
-// a MultiSelect; ``pickers`` gives several comboboxes instead, each over its own
-// catalog, all adding to the same list of entries.
+// a MultiSelect; ``pickers`` are comboboxes, each over its own catalog, all
+// adding to the same list of entries.
 export function AccessListControl({
   initial,
   onChange,
