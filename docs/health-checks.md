@@ -1,24 +1,21 @@
 # Health checks
 
-Health checks tell an operator which provider is failing before a caller does.
 On a schedule, Otari sends one small completion to every chat model the
 deployment's hosted providers serve, and the Health page shows what each one
 answered. An alert list is emailed when a model stops answering and again when
-it answers.
+it recovers.
 
-Health checks are for operators only, and every deployment offers them.
-`health_checks_enabled: false` in `config.yml` (or
-`OTARI_HEALTH_CHECKS_ENABLED=false`) removes the page, its routes and its worker;
-it is read at startup, so changing it needs a restart.
+Health checks are for operators only. To remove the page, its routes and its
+worker, set `health_checks_enabled: false` in `config.yml` (or
+`OTARI_HEALTH_CHECKS_ENABLED=false`) and restart.
 
 ## What is checked
 
-A run checks the providers on the **Hosted providers** page, and those declared
-under `hosted_providers:` in `config.yml`. A model is checked when it is switched
-on under a provider that is enabled and whose key the deployment can read: the
-models the deployment would serve a request for. A model listed only because it
-has a price, a model switched off, and a provider switched off are not checked.
-A provider restricted to one organization is checked like any other.
+A run checks the providers on the **Hosted providers** page and those under
+`hosted_providers:` in `config.yml`. It checks the models the deployment would
+serve: switched on, under an enabled provider whose key the deployment can
+read, including providers restricted to one organization. Models listed only
+for their price, switched-off models and switched-off providers are skipped.
 
 ## The Health page
 
@@ -36,23 +33,22 @@ Open **Deployment → Health** in the dashboard. It shows:
 
 ## What a check sends
 
-Every chat model is sent the prompt, `Reply with the single word: pong` by
-default, capped at 16 output tokens. Any answer passes, whatever it says. An
-error, or no answer within 60 seconds, fails. A model is skipped when its kind
-is embedding, rerank, transcription, image, speech, video, realtime or `other`.
-The provider's listing gives the kind when it says one, and models.dev gives it
-only when the listing does not (see `type` in [Models](models.md)). A model of
-no known kind is checked as a chat model.
+Every chat model gets the prompt (`Reply with the single word: pong` by
+default), capped at 16 output tokens. Any answer passes; an error, or no answer
+within 60 seconds, fails.
 
-A check goes straight to the provider with that hosted provider's own key and
-endpoint. It
-writes no usage, is billed to no organization and counts against no budget or
-rate limit, but the provider charges for every request.
+Models of kind embedding, rerank, transcription, image, speech, video, realtime
+or `other` are skipped. The kind comes from the provider's listing, else from
+models.dev (see `type` in [Models](models.md)); a model of no known kind is
+checked as chat.
+
+A check goes straight to the provider with that hosted provider's key and
+endpoint. It writes no usage and counts against no budget or rate limit, but
+the provider charges for every request.
 
 ## Schedule
 
-The schedule is off until an operator turns it on in the Schedule card. Its
-settings:
+The schedule is off until an operator turns it on in the **Schedule** card:
 
 | Setting | Default | Range |
 | --- | --- | --- |
@@ -62,13 +58,12 @@ settings:
 | Max output tokens for reasoning models | 256 | 1 to 8192 |
 | Include reasoning models every Nth run | 6 | 0 to 48, where 0 leaves them out and 1 includes them every run |
 
-Reasoning models spend tokens thinking before they answer, so they get a larger
-cap and, because they cost the most, join only every Nth run.
+Reasoning models get a larger cap because they think before answering, and
+join only every Nth run because they cost the most.
 
-With several replicas, every replica polls once a minute and exactly one starts
-each run. Results are kept for 48 hours. When a model that was failing answers
-again, the outage is recorded in the database (when it started, when it ended,
-how many runs it failed and its last error) and kept for 90 days.
+With several replicas, exactly one starts each run. Results are kept for 48
+hours. When a failing model answers again, the outage (start, end, failed runs,
+last error) is recorded and kept for 90 days.
 
 ## Email alerts
 
@@ -80,25 +75,23 @@ results with what the list was last told:
   was failing.
 - A model that keeps failing, or keeps answering, sends nothing.
 
-So an outage sends two emails however many runs it lasts. One run's changes
-share one email, grouped by provider, and its subject names the deployment's
-host, so mail from several deployments says which one it is about.
+An outage therefore sends two emails however long it lasts. One run's changes
+share one email, grouped by provider, with the deployment's host in the
+subject.
 
-The same list is emailed when a hosted model is switched off because its
-provider refused to serve it (see
-[Hosted providers](hosted-providers.md)), once per model. A run that meets
-that refusal switches the model off itself, and the model is then left out of
-the run's alert.
+The list is also emailed, once per model, when a hosted model is switched off
+because its provider refused to serve it (see
+[Hosted providers](hosted-providers.md)). A run that meets that refusal
+switches the model off itself and leaves it out of the run's alert.
 
-Alerts need outgoing mail; see [Configuration](configuration.md) for the
-`smtp_*` settings, `mail_from_email` and `public_base_url`. When no address
-receives an alert, the next run sends it again. A failure found while the list
-is empty is remembered, so an address added later hears about the next change
-rather than the history before it.
+Alerts need outgoing mail: the `smtp_*` settings, `mail_from_email` and
+`public_base_url` (see [Mail](configuration.md#mail)). When no address receives
+an alert, the next run sends it again. An address added later hears about the
+next change, not earlier history.
 
 ## API
 
-The page is built on five operator endpoints under `/api/v1/health-checks`:
+The page uses five operator endpoints under `/api/v1/health-checks`:
 `GET` for the status, `POST /run` to start a run, `POST /disable-failing` to
 switch off every failing model (what **Disable all** calls), and `GET` and
 `PATCH /settings`.

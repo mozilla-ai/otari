@@ -4,40 +4,21 @@ icon: globe
 
 # Configure web search
 
-Each workspace decides whether its requests can search and fetch the web, and
-with which keys. These steps are in the dashboard; the settings they change are
-described in [Built-in tools](tools.md).
+The **Web search** settings let you control how requests from a workspace can access and search the web. You can customize web access for individual workspaces, including which keys searches use, which domains can be accessed, and how many results a search can return.
 
-A workspace setting can only narrow what the deployment allows: it cannot allow
-web access the deployment blocks.
+To configure web search for a workspace:
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools**, then **Web search**.
-3. Turn **Allow in <workspace>** on or off. Off refuses the web search and web
-   fetch Otari runs for the workspace's requests, and direct searches too. A
-   provider's own search or fetch tool that the provider runs itself is not
-   affected; step 5 decides who runs those.
-4. Under **Search with** and **Fetch with**, choose which of the organization's
-   keys the workspace uses, or the organization's default, or the deployment's
-   default tool. Only an owner or admin of the workspace or of the organization
-   can choose; any other member sees the list read-only.
-5. Under **Who runs provider web search** and **Who runs provider web fetch**,
-   choose whether a provider's own search and fetch tools run on the provider or
-   on Otari, or leave them **Not set** for the request and the deployment to
-   decide.
-6. Under **Advanced**, set **Max results for this workspace** to cap the results
-   each search returns, use **Allowed domains** to limit searches and fetched
-   pages to some sites, or **Blocked domains** to keep them away from some, and
-   set the options of the provider the workspace's searches run on. Direct
-   searches apply the switch and the result cap, but not the domain lists or
-   the provider options; see
-   [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
+2. Go to **Tools** → **Web search**.
+3. Turn **Allow in <workspace>** on to allow web search for requests in this workspace, or off to block the web search and fetch tools Otari runs.
+4. Under **Search with** and **Fetch with**, choose which of the organization's keys the workspace uses, or a default. Only an owner or admin can change these.
+5. Under **Who runs provider web search** and **Who runs provider web fetch**, choose whether a provider's own search and fetch tools run on the provider or on Otari, or leave them **Not set**.
+6. Under **Advanced**, set **Max results for this workspace** to limit the number of results returned by each search.
+7. Use **Allowed domains** to restrict searches and fetched content to specific websites.
+8. Use **Blocked domains** to prevent searches and fetches from accessing specific websites.
 
 ![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/configure-web-search.png)
 
-The policy these steps set is described in
-[Per-workspace web-access policy](tools.md#per-workspace-web-access-policy), the
-keys in [Organization search keys](tools.md#organization-search-keys), and who
-runs a provider's own tools in
-[Web-search interception](tools.md#web-search-interception). The purpose hint is
-set through the API.
+Workspace settings can make the deployment-level web search policy more restrictive, but they **cannot override it to allow access that has been blocked at the deployment level**.
+
+For the full policy, including the prompt hint, which is set through the API, see [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).

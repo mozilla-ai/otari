@@ -21,9 +21,9 @@ Run every command that follows from this directory.
 
 ## 2. Create the settings
 
-Otari runs here on environment variables alone, which Compose reads from
-`.env`. Generate the file, unless it already exists: a second `OTARI_SECRET_KEY`
-would make the provider keys Otari has stored undecryptable.
+Compose reads Otari's settings from `.env`. Generate the file only if it does
+not exist yet: a new `OTARI_SECRET_KEY` would make the provider keys Otari has
+already stored undecryptable.
 
 ```bash
 test -e .env || cat > .env <<EOF
@@ -37,8 +37,7 @@ EOF
 export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
 ```
 
-- `OTARI_CONFIG_PATH=/dev/null` tells Compose to start Otari with no
-  configuration file.
+- `OTARI_CONFIG_PATH=/dev/null` starts Otari with no configuration file.
 - `OTARI_DATABASE_URL` keeps Otari's data in the PostgreSQL database that
   Compose starts.
 - `OTARI_DEFAULT_PRICING` prices common models with the prices bundled in Otari.
@@ -47,10 +46,9 @@ export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
 - `OTARI_PROVIDER_ACCOUNT_PEPPER` names the provider accounts that hold copies
   of attached files. Compose requires it.
 
-The last command keeps the master key in your shell for steps 4 and 5, and is
-safe to run again in a new shell. An `.env` that already existed is left alone,
-so check it sets all six variables: Compose refuses to start without
-`OTARI_PROVIDER_ACCOUNT_PEPPER`. Git ignores `.env`.
+The last command puts the master key in your shell for steps 4 and 5; run it
+again in a new shell. If `.env` already existed, check that it sets all six
+variables. Git ignores `.env`.
 
 ## 3. Start Otari
 
@@ -79,9 +77,9 @@ curl -X POST http://localhost:8000/api/v1/hosted-providers \
   -d '{"provider": "openai", "api_key": "sk-..."}'
 ```
 
-Otari stores the key encrypted, asks OpenAI which models the key can use, and
-switches on every one it has a price for. The answer describes the new provider
-and shows only the last four characters of your key.
+Otari stores the key encrypted and switches on every model the key can use that
+Otari has a price for. The answer shows only the last four characters of your
+key.
 
 ## 5. Create an API key
 
@@ -116,12 +114,9 @@ The answer is an OpenAI-style chat completion, with the model's reply in
 ## 7. See it in the dashboard
 
 Open <http://localhost:8000/> and sign in with your master key (`echo
-$OTARI_MASTER_KEY` prints it). On the **Overview**, open the **Requests** tab: your
-request is listed with its model, its tokens and its cost. The OpenAI provider you added is listed
-under **Deployment**, **Hosted providers**, in the account menu.
-
-You now have a gateway that authenticates its callers, holds the provider
-credential for them, and records every request.
+$OTARI_MASTER_KEY` prints it). On the **Overview**, open the **Requests** tab to
+see your request with its model, tokens and cost. The OpenAI provider is under
+**Deployment**, **Hosted providers**, in the account menu.
 
 ## Next steps
 

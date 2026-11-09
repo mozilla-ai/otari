@@ -1,10 +1,8 @@
 # Use with Pydantic AI
 
-[Pydantic AI](https://ai.pydantic.dev) agents run through Otari with
-`pydantic-ai-otari`, a model class that points Pydantic AI at Otari's
-OpenAI-compatible API (`POST /api/v1/chat/completions`). Every agent run then gets
-Otari's budgets, usage tracking, fallback routing and guardrails, with no other
-change to your agent code.
+`pydantic-ai-otari` gives [Pydantic AI](https://ai.pydantic.dev) a model class
+that sends requests through Otari. Your agents then get Otari's budgets, usage
+tracking, fallback routing and guardrails, with no other code change.
 
 ## Quick start
 
@@ -14,16 +12,16 @@ Install the package:
 pip install pydantic-ai-otari
 ```
 
-Create an API key on the **API keys** page of the [otari.ai](https://otari.ai)
+Create a key on the **API keys** page of the [otari.ai](https://otari.ai)
 dashboard and export it:
 
 ```bash
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-On otari.ai that key is all the configuration there is (your organization needs
-credit or provider keys of its own there, or requests answer 402). For a gateway
-you run yourself, use a key it issued and also export its API root:
+On otari.ai, the key is all you need, as long as your organization has credit or
+its own provider keys (otherwise requests answer `402`). For a gateway you run,
+use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -42,22 +40,22 @@ print(result.output)
 ```
 
 Without `OTARI_BASE_URL`, requests go to otari.ai's gateway,
-`https://api.otari.ai/api/v1`. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use. Set `OTARI_BASE_URL` to the EU host in that case.
-To configure the gateway in code instead, pass a
-provider: `OtariModel("openai:gpt-4o", provider=OtariProvider(base_url=..., api_key=...))`.
-`OtariProvider` never falls back to `OPENAI_API_KEY`, so an OpenAI key in your
-environment is not sent to the gateway by mistake.
+`https://api.otari.ai/api/v1`. EU accounts set `OTARI_BASE_URL` to
+`https://eu.api.otari.ai/api/v1` ([Base URL](api-reference.md#base-url)).
+To set the gateway in code, pass a provider:
+`OtariModel("openai:gpt-4o", provider=OtariProvider(base_url=..., api_key=...))`.
+`OtariProvider` never reads `OPENAI_API_KEY`, so an OpenAI key in your
+environment is never sent to the gateway.
 
-`OtariModel` works for every provider Otari routes to: the request is always
-Chat Completions, and Otari translates it for Anthropic, Mistral, Gemini and the
-rest, so the same agent switches provider by changing only the model name. The
-provider part of the name also tells Pydantic AI what the model can do, so
-`anthropic:claude-sonnet-4-6` gets Claude's capabilities rather than OpenAI's.
+`OtariModel` works with every provider Otari routes to, so an agent switches
+provider by changing only the model name. The provider part of the name also
+tells Pydantic AI what the model can do: `anthropic:claude-sonnet-4-6` gets
+Claude's capabilities.
 
 ## Tools
 
-Tools run in your process as usual. Otari forwards the tool definitions to the
-model and the tool results back, and records every model call of the run:
+Tools run in your process as usual, and Otari records every model call of the
+run:
 
 ```python
 from pydantic_ai import Agent
@@ -121,28 +119,27 @@ asyncio.run(main())
 
 ## Choosing a model
 
-Pass the model to `OtariModel` the way Otari spells it, as `provider:model`:
-`OtariModel("anthropic:claude-sonnet-4-6")`. Every example on this page runs
-unchanged on `openai:gpt-4o`, `anthropic:claude-sonnet-4-6` and
-`mistral:mistral-large-latest`. A routing policy or alias name works too,
-`OtariModel("support-agent")`, and then Otari picks the candidate and falls over
-to the next on failure, so the agent code does not change when the policy does.
+Write the model as Otari spells it, `provider:model`, such as
+`OtariModel("anthropic:claude-sonnet-4-6")`. Every example on this page also runs
+on `anthropic:claude-sonnet-4-6` and `mistral:mistral-large-latest`.
 
-[Model format](models.md#model-format) has every spelling Otari accepts,
-[Listing available models](models.md#listing-available-models) shows which your
-key can use, and [Routing](routing.md) covers policies.
+A routing policy or alias name works too, such as
+`OtariModel("support-agent")`. Otari then picks the model and falls back to the
+next one on failure, so your code does not change when the policy does. See
+[Model format](models.md#model-format),
+[Listing available models](models.md#listing-available-models) and
+[Routing](routing.md).
 
 ## One key per project
 
-Give each project its own Otari key, so its usage and spend are reported apart, a
-budget on the key caps that project alone, and revoking the key stops only that
-project. See [Access control](access-control.md) and
-[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Give each project its own key. Its usage is then reported separately, a
+[budget on the key](api-keys.md#cap-a-keys-spend) caps that project alone, and
+deleting the key stops only that project.
 
 ## Without the package
 
-`OtariModel` is a thin layer over Pydantic AI's own OpenAI model, so the same
-thing works with `pydantic-ai-slim[openai]` alone:
+`OtariModel` is a thin layer over Pydantic AI's OpenAI model, so
+`pydantic-ai-slim[openai]` alone also works:
 
 ```python
 import os
@@ -160,11 +157,10 @@ agent = Agent(OpenAIChatModel("openai:gpt-4o", provider=otari))
 print(agent.run_sync("Say hello in one sentence.").output)
 ```
 
-What you give up is the model capabilities that follow the model family: every
-model is described to Pydantic AI as an OpenAI one.
+Without the package, Pydantic AI treats every model as an OpenAI one, so
+models from other families lose their own capabilities.
 
 ## See also
 
-- [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md):
-  the same gateway from LangChain's chat models.
+- [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md)
 - [Agent traces](traces.md): what Otari records about an agent's runs.
