@@ -51,6 +51,7 @@ import {
   canContributeToWorkspace,
   canManage,
 } from "@/features/organization/roles"
+import { KeyMcpAccess } from "@/features/tools/KeyMcpAccess"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
@@ -1059,6 +1060,7 @@ function EditKeyForm({
           setToolScopeValid(isValid)
         }}
       />
+      <KeyMcpAccess workspaceId={apiKey.workspace_id} apiKeyId={apiKey.id} />
       {/* Operator-only, as on the create form: a member editing their own key
           must not be able to take it out of their own budget. */}
       {isDeploymentWide ? (

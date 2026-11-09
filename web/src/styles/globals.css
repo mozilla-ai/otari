@@ -381,6 +381,10 @@
   --color-chart-cat-6: #0871c1;
   --color-chart-cat-7: #a9912b;
   --color-chart-cat-8: #a64450;
+  /* How much chart tone an avatar's background takes, mixed into the surface.
+     Dark needs more: at the light theme's share the tint sinks into the page
+     and the square loses its edge. */
+  --avatar-tint-amount: 14%;
   --color-chart-cat-other: #8b969b;
   --color-chart-ramp-1: #14242c;
   --color-chart-ramp-2: #3c6678;
@@ -643,6 +647,7 @@
   --color-chart-cat-6: #0075dc;
   --color-chart-cat-7: #af9000;
   --color-chart-cat-8: #c04154;
+  --avatar-tint-amount: 26%;
   /* The neutral fold-in slot is the one value that holds across both
      themes: it already clears each surface, and a "not one of the named
      groups" bucket that changed hue with the theme would read as a group. */
@@ -2734,6 +2739,12 @@ main {
 .otari-mcp-table .table__column[data-key="actions"] {
   width: 8.5rem;
   min-width: 8.5rem;
+}
+/* A server's exceptions: two 24px actions keep a fixed lane while who and
+   what share the rest. */
+.otari-mcp-grants-table .table__column[data-key="actions"] {
+  width: 6rem;
+  min-width: 6rem;
 }
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;

@@ -15,6 +15,7 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -28,11 +29,13 @@ from mcp.client.streamable_http import streamable_http_client
 
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
-from gateway.services.mcp_stateless import failure_class
+from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, failure_class
+from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from types import TracebackType
 
     from mcp.types import CallToolResult
@@ -82,6 +85,10 @@ def _origin_bound_http_client(
 
 
 CLOSE_TIMEOUT_SECONDS = 10.0
+# How many withheld tool names a server's access note spells out before it counts the rest.
+_ACCESS_NOTE_MAX_NAMES = 20
+# The note is system text, so a tool name enters it only if it cannot carry instructions; a server lists any string.
+_NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
 
 
@@ -113,6 +120,16 @@ class _ConnectedServer:
     session: ClientSession
     tools: list[dict[str, Any]] = field(default_factory=list)
     purpose_hint: str | None = None
+    stored_server_id: str | None = None
+    # Tools the server lists that the caller's rule does not grant, named in the model's access note.
+    not_granted: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _DeniedTool:
+    server: str
+    decided_by: str
+    server_id: str | None = None
 
 
 class MCPClientPool:
@@ -129,11 +146,17 @@ class MCPClientPool:
         *,
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
+        ceded_tool_names: Iterable[str] = (),
     ):
         self._configs = configs
         self._stack = AsyncExitStack()
         self._servers: dict[str, _ConnectedServer] = {}
         self._tool_owner: dict[str, str] = {}
+        # A server's tools the caller may not use. The pool claims a call to one and refuses it,
+        # so it is never handed to the client as a call of its own, unless the request declares
+        # a tool of that name itself (``ceded_tool_names``).
+        self._denied: dict[str, _DeniedTool] = {}
+        self._ceded = frozenset(ceded_tool_names)
         # Per-request accounting, owned by the route and passed in. None when the
         # pool runs outside a billed request (tests, direct use).
         self._tally = tally
@@ -237,8 +260,14 @@ class MCPClientPool:
         listed = await session.list_tools()
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
+        not_granted: list[str] = []
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
+                self._deny(tool.name, cfg.name, "mcp_server", cfg.stored_server_id)
+                continue
+            if cfg.caller_tool_patterns is not None and not is_mcp_tool_allowed(cfg.caller_tool_patterns, tool.name):
+                self._deny(tool.name, cfg.name, cfg.caller_access_source or "mcp_everyone", cfg.stored_server_id)
+                not_granted.append(tool.name)
                 continue
             if tool.name in self._tool_owner:
                 # Tool-name collision policy: **first server wins**. Subsequent servers'
@@ -257,21 +286,81 @@ class MCPClientPool:
             openai_tools.append(mcp_tool_to_openai(tool))
             self._tool_owner[tool.name] = cfg.name
 
-        return _ConnectedServer(name=cfg.name, session=session, tools=openai_tools, purpose_hint=cfg.purpose_hint)
+        return _ConnectedServer(
+            name=cfg.name,
+            session=session,
+            tools=openai_tools,
+            purpose_hint=cfg.purpose_hint,
+            stored_server_id=cfg.stored_server_id,
+            not_granted=not_granted,
+        )
+
+    def _deny(self, name: str, server: str, decided_by: str, server_id: str | None) -> None:
+        if name not in self._ceded and name not in self._denied:
+            self._denied[name] = _DeniedTool(server=server, decided_by=decided_by, server_id=server_id)
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
         return [t for s in self._servers.values() for t in s.tools]
 
     def owns_tool(self, name: str) -> bool:
-        return name in self._tool_owner
+        """Whether the pool answers a call to ``name``: by running it, or by refusing one the caller may not use."""
+        return name in self._tool_owner or name in self._denied
 
     def purpose_hints(self) -> list[tuple[str, str]]:
-        return [(s.name, s.purpose_hint) for s in self._servers.values() if s.purpose_hint]
+        hints: list[tuple[str, str]] = []
+        for server in self._servers.values():
+            parts = [server.purpose_hint] if server.purpose_hint else []
+            if note := self._access_note(server):
+                parts.append(note)
+            if parts:
+                hints.append((server.name, " ".join(parts)))
+        return hints
+
+    def _access_note(self, server: _ConnectedServer) -> str | None:
+        """Which of the server's tools the caller holds and which it does not, by name, so the model can say so."""
+        withheld = [
+            name
+            for name in server.not_granted
+            if name not in self._tool_owner and name not in self._ceded and _NOTE_SAFE_TOOL_NAME.fullmatch(name)
+        ]
+        if not withheld:
+            return None
+        named = ", ".join(withheld[:_ACCESS_NOTE_MAX_NAMES])
+        if len(withheld) > _ACCESS_NOTE_MAX_NAMES:
+            named += f" and {len(withheld) - _ACCESS_NOTE_MAX_NAMES} more"
+        granted = (
+            ", ".join(name for t in server.tools if _NOTE_SAFE_TOOL_NAME.fullmatch(name := t["function"]["name"]))
+            or "none of its tools"
+        )
+        return (
+            f"The user may use {granted} here. {named} {'exists' if len(withheld) == 1 else 'exist'} "
+            f"but {'is' if len(withheld) == 1 else 'are'} not granted to the user: "
+            "if asked for what only those do, say the user lacks access and a workspace admin can grant it, "
+            "instead of trying."
+        )
 
     def server_name_for_tool(self, name: str) -> str | None:
-        """Return the configured server that owns ``name``, if connected."""
-        return self._tool_owner.get(name)
+        """Return the configured server that owns ``name``, or that refuses it, if connected."""
+        denied = self._denied.get(name)
+        return self._tool_owner.get(name) or (denied.server if denied is not None else None)
+
+    def _refuse(self, name: str, denied: _DeniedTool, arguments: dict[str, Any]) -> MCPToolCallOutcome:
+        """Answer a call to a tool the caller may not use, which never reaches its server."""
+        if self._trace is not None:
+            self._trace.record_tool_call(
+                tool_name=name,
+                tool_type="mcp",
+                started=datetime.now(UTC),
+                ok=False,
+                arguments=arguments,
+                mcp_server=denied.server,
+                mcp_server_id=denied.server_id,
+                decided_by=denied.decided_by,
+                refused=True,
+            )
+        detail = f"{CODE_TOOL_NOT_ALLOWED}: {name} on {denied.server} is not granted to you; ask a workspace admin"
+        return MCPToolCallOutcome(content=f"{TOOL_ERROR_SENTINEL} {detail}", activity_content=detail, is_error=True)
 
     async def _call_tool_result(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         """Execute an MCP call and return the server's native typed result."""
@@ -284,10 +373,23 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            self._spans.record(started, ok=False, arguments=arguments, tool_name=name)
+            self._spans.record(
+                started,
+                ok=False,
+                arguments=arguments,
+                tool_name=name,
+                mcp_server=owner,
+                mcp_server_id=self._servers[owner].stored_server_id,
+            )
             raise
         self._spans.record(
-            started, ok=not result.is_error, arguments=arguments, result=_result_text(result), tool_name=name
+            started,
+            ok=not result.is_error,
+            arguments=arguments,
+            result=_result_text(result),
+            tool_name=name,
+            mcp_server=owner,
+            mcp_server_id=self._servers[owner].stored_server_id,
         )
         return result
 
@@ -301,6 +403,8 @@ class MCPClientPool:
         API format.
         """
         if name not in self._tool_owner:
+            if (denied := self._denied.get(name)) is not None:
+                return self._refuse(name, denied, arguments)
             raise KeyError(f"No MCP server owns tool {name!r}")
         if self._tally is not None and not await self._tally.admit(name):
             self._tally.record_failure(name)

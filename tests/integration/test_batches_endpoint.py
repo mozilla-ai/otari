@@ -1219,6 +1219,41 @@ def test_unrecorded_batch_results_logs_every_retrieval(
     assert len(results_logs) == 2
 
 
+def test_an_unrecorded_batch_is_priced_at_the_time_the_provider_created_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A clock rule reads the batch's creation (2024-04-30), not the time its results are read."""
+    created_then = {"date": {"lt": "2025-01-01"}}
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "rates": {
+                "text": {
+                    "input": {"price": 1, "overrides": [{"when": created_then, "price": 2}]},
+                    "output": {"price": 4},
+                }
+            },
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200, pricing_resp.text
+
+    retrieve_patch, results_patch = _completed_results_patches(
+        CompletionUsage(prompt_tokens=1_000_000, completion_tokens=0, total_tokens=1_000_000)
+    )
+    with retrieve_patch, results_patch:
+        resp = client.get(f"{API_ROOT}/batches/legacy_batch/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    logs = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header).json()
+    row = next(log for log in logs if log["endpoint"] == "/v1/batches/results")
+    assert row["cost"] == pytest.approx(2.0)
+
+
 def test_recorded_batch_foreign_caller_never_reaches_the_provider(
     client: TestClient,
     master_key_header: dict[str, str],

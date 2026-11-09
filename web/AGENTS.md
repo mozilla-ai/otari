@@ -106,7 +106,7 @@ pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
 header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
 line under the password field after a refused sign-in), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
-the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
+the account control, the person's avatar here). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
 
 One seam is a CSS custom property rather than a module: `--shell-corner-clearance`
@@ -254,6 +254,15 @@ the moment it is replaced.
 Screenshot tests cover three viewports and both themes. They are
 workflow-dispatch only, their baselines are gitignored, and CI artifacts are the
 review output until the suite becomes a pull-request gate.
+
+The docs' images are a separate project, `docs` (`web/e2e/docs/`), one spec per
+docs page, named for it. A spec walks the page's steps by the labels the page
+gives in bold and writes its captures into `docs/assets/screenshots/` with
+`docScreenshot`; nothing compares pixels. It runs in `pnpm run e2e`, so a
+relabeled control fails the pull request, and
+`tests/unit/test_docs_screenshots.py` fails until the page says the new label
+too. `pnpm run docs:screenshots` refreshes the committed images, and the release
+publish takes them again (`otari-docs.yml`).
 
 ## Measuring the running dashboard
 

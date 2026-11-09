@@ -253,9 +253,9 @@ class WorkspaceService:
         workspace_update: WorkspaceUpdate,
         stop_content: Callable[[uuid.UUID], Awaitable[None]] | None = None,
     ) -> WorkspacePublic:
-        """Rename a workspace, change its description, or turn keeping its trace content or tool output on or off.
+        """Rename a workspace, change its description, or turn one of its trace content or MCP switches on or off.
 
-        Turning either off calls ``stop_content``, so nothing taken in before the
+        Turning trace content or tool output off calls ``stop_content``, so nothing taken in before the
         switch is stored after it. The order is the rule: only once the caller is
         known to manage the workspace; before the switch, so a failure there changes
         nothing; and again after it, for an export that read the switch on in between.
@@ -267,7 +267,7 @@ class WorkspaceService:
             await stop_content(workspace.id)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
-        for switch in ("trace_content_enabled", "trace_content_tool_output"):
+        for switch in ("trace_content_enabled", "trace_content_tool_output", "request_mcp_servers_allowed"):
             if update_data.get(switch, False) is None:
                 del update_data[switch]
         if "name" in update_data:

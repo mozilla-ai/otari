@@ -121,7 +121,16 @@ path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
 output-token, and cache-token attributes, and records usage from the spans that
-carry tokens. Prompt, response, and tool content is never stored. The spans are
+carry tokens. The conventions count cached tokens inside the input tokens, but
+some instrumentation reports them on top, so Otari reads OpenLLMetry's
+Anthropic spans as counting them in and OpenLIT's as counting them on top. From
+any other emitter, cached tokens that outnumber the input tokens are read as
+reported on top of them. Cache writes are read from
+`gen_ai.usage.cache_write.input_tokens` or
+`gen_ai.usage.cache_creation.input_tokens`, and the share Anthropic bills at
+the one-hour rate from
+`anthropic.usage.cache_creation.ephemeral_1h_input_tokens` where it is sent.
+Prompt, response, and tool content is never stored. The spans are
 also kept on the exporting key's agent trace: how they are grouped into sessions,
 and the per-export limits, are in
 [Agent traces](traces.md#instrumented-agents).
@@ -161,8 +170,10 @@ token is booked once even though a request repeats its usage on several spans:
   input rate ([Cache and tiered pricing](configuration.md#cache-and-tiered-pricing)),
   except from a streamed request's SDK span, which splits out only the writes
   made before the first output token, so all of its writes bill at the
-  cache-write rate. When the SDK and the API both export the request, the
-  second span is a duplicate.
+  cache-write rate. When the SDK and the API both export the request, it is
+  booked once. In one export it is booked from the span that splits out the
+  1-hour writes, or failing that from the one reporting more tokens; across
+  exports, from whichever arrives first.
 - A Managed Agents session is booked from its `anthropic.model_request` spans,
   labeled with the session id, which also groups the session's threads into one
   agent trace.

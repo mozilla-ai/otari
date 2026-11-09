@@ -42,13 +42,13 @@ Keep documentation and AI guidance synchronized with the current repository.
 - Adding or renaming a `##`/`###` heading in `.github/skills/frontend-standards/`
   owes `scripts/rule_coverage/frontend-standards.txt` a line.
 - `CHANGELOG.md` is generated at release; never edit it.
-- A route docstring is carried into `docs/public/openapi.json` and the Postman
-  collection; if you edit one, regenerate both as AGENTS.md describes.
+- A route docstring is carried into `docs/public/openapi.json`; if you edit
+  one, regenerate it as AGENTS.md describes.
 
 ## Validation Commands
 
 - `uv run pytest tests/unit/test_docs_links.py tests/unit/test_docs_style.py tests/unit/test_dashboard_doc.py tests/unit/test_frontend_rule_coverage.py`
 - `make lint`
-- `make openapi-check` and `make postman-check`, if you touched a route
+- `make openapi-check`, if you touched a route
 
 If no docs are out of date, say so and exit without creating a PR.

@@ -67,6 +67,13 @@ def _usd(amount: Decimal, rounding: str) -> str:
     return f"${whole}.{fraction.rstrip('0').ljust(2, '0')}"
 
 
+def user_subject(user_id: str, *, external_id: str | None = None) -> str:
+    """How a refusal names a user: by ``external_id`` for a service key's end user, by ``user_id`` otherwise."""
+    if external_id is not None:
+        return f"End user '{external_id}'"
+    return f"User '{user_id}'"
+
+
 def refusal_detail(
     subject: str,
     blocked: BlockedAxis,

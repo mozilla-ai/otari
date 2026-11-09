@@ -19,15 +19,24 @@ import { memberLabel } from "./roles"
 // one, or it was soft-deleted through `DELETE /v1/users`), and key
 // creation would refuse them. Those are left out rather than mapped, so nothing
 // offers an owner the server will reject.
+/**
+ * The request-plane id a member bills through: their identity's id as a
+ * string, which is what the gateway mints the row under. A member with no row
+ * yet (no key, no Playground request) has none to report, but a rule can still
+ * name them by it, since that is the id the row will take.
+ */
+export function attributionId(member: OrganizationMember): string | null {
+  return member.attribution_user_id ?? member.user_id ?? null
+}
+
 export function memberLabelsByAttributionId(
   members: OrganizationMember[] | undefined,
 ): ReadonlyMap<string, string> {
   return new Map(
-    (members ?? []).flatMap((member): [string, string][] =>
-      member.attribution_user_id
-        ? [[member.attribution_user_id, memberLabel(member)]]
-        : [],
-    ),
+    (members ?? []).flatMap((member): [string, string][] => {
+      const id = attributionId(member)
+      return id ? [[id, memberLabel(member)]] : []
+    }),
   )
 }
 

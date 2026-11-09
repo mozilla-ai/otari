@@ -40,6 +40,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { MemberAvatar } from "@/features/account/avatar/MemberAvatar"
 import {
   budgetLabeler,
   type LabelableBudget,
@@ -79,7 +80,6 @@ import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
-
 import {
   asMembershipRole,
   canManage,
@@ -970,43 +970,46 @@ export function OrganizationMembersPage() {
               : undefined
           const email = member.email && member.full_name ? member.email : null
           return (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm text-foreground">
-                {memberLabel(member)}
-              </span>
-              {email || access ? (
-                // Never wraps, and the address is the only part that gives way.
-                // Seeded with real names the line is three facts in a fixed
-                // lane, and letting it wrap took the row off its 58px pitch and
-                // pushed the name off its baseline. The marker is short and
-                // bounded, so the address truncates and keeps its full value in
-                // the title.
-                <span className="flex items-center gap-1.5 text-nowrap text-xs">
-                  {email ? (
-                    <span className="truncate text-muted" title={email}>
-                      {email}
-                    </span>
-                  ) : null}
-                  {email && access ? (
-                    <span aria-hidden className="text-subtle">
-                      ·
-                    </span>
-                  ) : null}
-                  {access ? (
-                    <span
-                      className={`shrink-0 ${
-                        access.tone === "danger"
-                          ? "text-danger"
-                          : access.tone === "muted"
-                            ? "text-subtle"
-                            : "text-muted"
-                      }`}
-                    >
-                      {access.text}
-                    </span>
-                  ) : null}
+            <div className="flex items-center gap-3">
+              <MemberAvatar userId={member.user_id} />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-sm text-foreground">
+                  {memberLabel(member)}
                 </span>
-              ) : null}
+                {email || access ? (
+                  // Never wraps, and the address is the only part that gives way.
+                  // Seeded with real names the line is three facts in a fixed
+                  // lane, and letting it wrap took the row off its 58px pitch and
+                  // pushed the name off its baseline. The marker is short and
+                  // bounded, so the address truncates and keeps its full value in
+                  // the title.
+                  <span className="flex items-center gap-1.5 text-nowrap text-xs">
+                    {email ? (
+                      <span className="truncate text-muted" title={email}>
+                        {email}
+                      </span>
+                    ) : null}
+                    {email && access ? (
+                      <span aria-hidden className="text-subtle">
+                        ·
+                      </span>
+                    ) : null}
+                    {access ? (
+                      <span
+                        className={`shrink-0 ${
+                          access.tone === "danger"
+                            ? "text-danger"
+                            : access.tone === "muted"
+                              ? "text-subtle"
+                              : "text-muted"
+                        }`}
+                      >
+                        {access.text}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
+              </div>
             </div>
           )
         },
