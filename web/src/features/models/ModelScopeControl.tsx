@@ -28,14 +28,17 @@ export function ModelScopeControl({
   title = "Model access",
   description,
   anyLabel = "Any model",
+  workspaceId,
 }: {
   initial: string[] | undefined
   onChange: (value: string[] | undefined, valid: boolean) => void
   title?: ReactNode
   description?: ReactNode
   anyLabel?: string
+  /** Offers only what this workspace may call; unset is the caller's whole reach. */
+  workspaceId?: string
 }) {
-  const models = useModels()
+  const models = useModels(true, workspaceId)
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
   const providers = useDeploymentProviderNames(isSettled && isOperator)

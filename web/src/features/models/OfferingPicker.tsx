@@ -60,6 +60,7 @@ export function OfferingPicker({
   isRequired,
   autoFocus,
   actions,
+  workspaceId,
 }: {
   /** Unique on the page; names the message line under the row. */
   id: string
@@ -74,6 +75,8 @@ export function OfferingPicker({
   isRequired?: boolean
   autoFocus?: boolean
   actions?: ReactNode
+  /** Narrows the catalog to what this workspace may call; unset is the caller's whole reach. */
+  workspaceId?: string
 }) {
   const [query, setQuery] = useState("")
   // The field reports a keystroke and a pick through the same `onChange`, a
@@ -84,10 +87,14 @@ export function OfferingPicker({
   const isTyping = query !== ""
 
   const term = useDebounced(query.trim())
-  const list = useCatalogSearch(term, MAX_VISIBLE + 1)
+  const list = useCatalogSearch(term, MAX_VISIBLE + 1, true, workspaceId)
   const listed = list.data?.models ?? []
   const known = findOfferingOwner([picked, ...listed], value)
-  const looked = useSelectorOwner(value, known === undefined && !isTyping)
+  const looked = useSelectorOwner(
+    value,
+    known === undefined && !isTyping,
+    workspaceId,
+  )
   const owner = known ?? looked
 
   const visible = listed.slice(0, MAX_VISIBLE)

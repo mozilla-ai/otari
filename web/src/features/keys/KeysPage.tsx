@@ -737,6 +737,7 @@ function CreateKeyDialog({
             <OwnerAccessNote userId={userId} users={ownerOptions} />
           ) : null}
           <ModelScopeControl
+            workspaceId={workspace?.workspace_id}
             title="Restrict this key's models"
             description={
               isDeploymentWide
@@ -1029,6 +1030,7 @@ function EditKeyForm({
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}
       <ModelScopeControl
+        workspaceId={apiKey.workspace_id ?? undefined}
         title="Restrict this key's models"
         description={
           isDeploymentWide

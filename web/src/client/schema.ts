@@ -25934,6 +25934,8 @@ export interface operations {
             query?: {
                 /** @description Only the models this provider instance serves, described as served there. */
                 provider?: string | null;
+                /** @description For a signed-in caller, only the models a request billed to this workspace may call. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -26391,7 +26393,10 @@ export interface operations {
     };
     "routing-list_automatic_fallbacks": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only the offerings a request billed to this workspace may call. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26405,6 +26410,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutomaticFallbacksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

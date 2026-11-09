@@ -6,6 +6,7 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { OfferingPicker } from "@/features/models/OfferingPicker"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // When `walk_attempts` (`api/routes/_attempts.py`) moves on to the next model.
 const BACKUP_HELP =
@@ -41,6 +42,7 @@ export function BackupList({
   isAtCap: boolean
   maxModels: number
 }) {
+  const workspaceId = useSelectedWorkspace().selected?.workspace_id
   const [keys, setKeys] = useState<number[]>(() => backups.map(newRowKey))
   // Every change goes through here, so this only repairs a list replaced from
   // outside, which then starts over with fresh rows.
@@ -107,6 +109,7 @@ export function BackupList({
           {backups.map((entry, index) => (
             <li key={keys[index] ?? index}>
               <OfferingPicker
+                workspaceId={workspaceId}
                 id={`backup-${keys[index] ?? index}`}
                 label={`Backup ${index + 1}`}
                 providerLabel={`Provider ${index + 1}`}

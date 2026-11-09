@@ -641,6 +641,38 @@ describe("Creating in a workspace", () => {
     })
   })
 
+  it("offers only what the selected workspace may call", async () => {
+    // A workspace can refuse a provider (zero data retention, a switched-off
+    // hosted provider), so the pickers and the fallbacks ask for its view.
+    const { calls } = mockApi([], null, [], { context: operatorInWorkspace() })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await startCreate(user)
+    await user.type(
+      screen.getByRole("combobox", { name: /^main model$/i }),
+      "gpt",
+    )
+
+    const scoped = (path: string) =>
+      calls.filter(
+        (call) =>
+          call.url.includes(`${API_ROOT}${path}`) &&
+          new URL(call.url, "http://localhost").searchParams.get(
+            "workspace_id",
+          ) === ADMIN_WORKSPACE,
+      )
+    await waitFor(() => expect(scoped("/catalog/models")).not.toHaveLength(0))
+    expect(
+      calls.filter(
+        (call) =>
+          call.url.includes(`${API_ROOT}/catalog/models`) &&
+          !call.url.includes("workspace_id="),
+      ),
+    ).toHaveLength(0)
+    expect(scoped("/organizations/me/automatic-fallbacks")).not.toHaveLength(0)
+  })
+
   it("writes an admin's policy through the tenant-scoped router", async () => {
     const { calls } = mockApi([], null, [], {
       context: adminContext(),

@@ -1016,6 +1016,17 @@ async def build_merged_catalog(
                 for target in named[mid]
             )
         }
+    # A workspace requiring zero data retention is refused every model on an
+    # undeclared provider, so none is listed, whichever reader built this.
+    requires_zero_data_retention = workspace_requires_zero_data_retention(narrowing_workspace)
+    if narrowing_workspace is not None and requires_zero_data_retention:
+        merged = {
+            mid: obj
+            for mid, obj in merged.items()
+            if mid in aliases
+            or mid in dynamic_policies
+            or workspace_serves_target(config, narrowing_workspace, normalize_pricing_key(config, mid))
+        }
 
     for obj in merged.values():
         mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
@@ -1028,9 +1039,7 @@ async def build_merged_catalog(
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
         alias_targets=targets,
-        # Only a session naming a workspace asks for one workspace's view.
-        requires_zero_data_retention=session_identity is not None
-        and workspace_requires_zero_data_retention(workspace_id),
+        requires_zero_data_retention=requires_zero_data_retention,
     )
 
 

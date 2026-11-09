@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
   CatalogQueryParams,
@@ -57,21 +57,27 @@ export function useCatalog(
  *
  * Debounce the term before it gets here (`useDebounced`), or every keystroke is
  * a request and the answers race.
+ *
+ * `workspaceId` narrows the matches to what a request billed to that workspace
+ * may call; empty is the caller's whole reach.
  */
 export function useCatalogSearch(
   search: string,
   limit: number,
   enabled = true,
+  workspaceId = "",
 ) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, "search", search, limit],
+    queryKey: [CATALOG, "search", search, limit, workspaceId],
     queryFn: () =>
       apiFetch<CatalogResponse>(
-        `/catalog/models?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/catalog/models?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ""}`,
       ),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
+    // Never across workspaces, for the reason `useCatalog` gives.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[4] === workspaceId ? previous : undefined,
     enabled,
   })
 }
@@ -108,12 +114,18 @@ export function useCatalogModel(
 // `enabled` is not the operator composition the reads below use: the catalog is
 // readable by any signed-in caller and is already narrowed server-side to what
 // that caller could route to. It is for a page with nothing to ask about yet,
-// such as an overview before a workspace is selected.
-export function useModels(enabled = true) {
+// such as an overview before a workspace is selected. `workspaceId` narrows it
+// to what a request billed to that workspace may call.
+export function useModels(enabled = true, workspaceId = "") {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [MODELS],
-    queryFn: () => apiFetch<ModelListResponse>("/models"),
+    queryKey: [MODELS, workspaceId],
+    queryFn: () =>
+      apiFetch<ModelListResponse>(
+        workspaceId
+          ? `/models?workspace_id=${encodeURIComponent(workspaceId)}`
+          : "/models",
+      ),
     staleTime: 60_000,
     enabled,
   })

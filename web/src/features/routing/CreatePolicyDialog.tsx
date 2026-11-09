@@ -268,6 +268,7 @@ export function CreatePolicyDialog({
             // Reads the catalog, not discovery, which lists only the
             // process-wide providers and misses organization keys.
             <OfferingPicker
+              workspaceId={workspaceId ?? undefined}
               id="main-model"
               label="Main model"
               value={draft.target}

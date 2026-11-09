@@ -8,6 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import {
   type PoolDraft,
@@ -56,6 +57,7 @@ export function RoutedPoolSection({
   /** Whether the policy already dispatches as many models as it may. */
   isAtCap: boolean
 }) {
+  const workspaceId = useSelectedWorkspace().selected?.workspace_id
   const { backend, models, weights, safeIndex } = pool
   const isWeighted = backend === WEIGHTED_BACKEND
   const isPriority = backend === PRIORITY_BACKEND
@@ -118,6 +120,7 @@ export function RoutedPoolSection({
         <SectionRow key={index} id={`pool-hint-${index}`} modelValue={entry}>
           <div className="min-w-56 flex-1">
             <ModelComboBox
+              workspaceId={workspaceId}
               source="catalog"
               label={`Model ${index + 1}`}
               value={entry}

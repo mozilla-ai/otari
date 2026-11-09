@@ -21,6 +21,7 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
@@ -316,7 +317,9 @@ export function RoutingPage() {
 
 /** The models callers used in the last 30 days, as the gateway reports them. */
 function AutomaticFallbacksSection() {
-  const fallbacks = useAutomaticFallbacks()
+  const fallbacks = useAutomaticFallbacks(
+    useSelectedWorkspace().selected?.workspace_id,
+  )
   return (
     <AutomaticFallbacks
       fallbacks={fallbacks.data?.models ?? []}
