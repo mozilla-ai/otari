@@ -708,6 +708,32 @@ async def test_loop_hides_a_gateway_tool_call_cut_off_by_the_token_limit(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_loop_returns_a_custom_call_beside_a_gateway_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A custom call is the caller's, so a round that also calls a gateway tool runs it and returns the custom call."""
+
+    client_call = ChatCompletionMessageCustomToolCall(
+        id="u", type="custom", custom=Custom(name="apply_patch", input="x")
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        out = _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")])
+        out.choices[0].message.tool_calls = [client_call, *(out.choices[0].message.tool_calls or [])]
+        return out
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=3,
+    )
+    assert out.choices[0].finish_reason == "tool_calls"
+    assert out.choices[0].message.tool_calls == [client_call]
+    assert pool.calls == [("fetch_url", {})]
+
+
+@pytest.mark.asyncio
 async def test_loop_handles_duck_typed_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression: ensure the loop dispatches tool_calls produced by *any* SDK whose
     function-tool-call class isn't the one any_llm aliases. The OpenAI SDK returns

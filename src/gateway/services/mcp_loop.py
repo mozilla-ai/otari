@@ -542,10 +542,9 @@ class _ChatToolLoopStrategy:
         # return type uses the OpenAI SDK's class, while any_llm exposes a
         # same-named but distinct class alias.
         tool_calls = [_tool_call_dict(tc) for tc in sdk_calls if hasattr(tc, "function")]
-        return _execute_split(tool_calls, pool)
-
-    def exit_after_split(self, result: ChatCompletion) -> bool:
-        return False
+        owned, has_foreign = _execute_split(tool_calls, pool)
+        # A custom tool call is always the caller's: the gateway's tools are functions.
+        return owned, has_foreign or len(tool_calls) < len(sdk_calls)
 
     async def _run_into(self, pool: ToolBackend, owned: list[Any], acc: _ChatTotals | None) -> list[dict[str, Any]]:
         """Run ``owned``, adding each ended ``otari_tool_calls`` entry to ``acc`` for the answer to carry."""

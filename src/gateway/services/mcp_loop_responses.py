@@ -448,9 +448,6 @@ class _ResponsesToolLoopStrategy:
     def split_owned(self, result: Response, pool: ToolBackend) -> tuple[list[Any], bool]:
         return _split_function_calls(list(result.output or []), pool)
 
-    def exit_after_split(self, result: Response) -> bool:
-        return False
-
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:

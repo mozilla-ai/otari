@@ -648,14 +648,15 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal", "end_turn"])
 async def test_loop_runs_no_gateway_call_from_a_cut_off_round_beside_a_foreign_call(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stop_reason: str
 ) -> None:
-    """A mixed batch cut off by the token limit runs none of the gateway's calls and returns only the caller's."""
+    """A mixed batch that stopped for any reason but ``tool_use`` runs no gateway call and returns the caller's."""
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         return _message_response(
-            stop_reason="max_tokens",
+            stop_reason=stop_reason,
             content=[
                 _tool_use("foreign_id", "user_tool", {}),
                 _tool_use("owned_id", "fetch_url", {}),
@@ -675,7 +676,7 @@ async def test_loop_runs_no_gateway_call_from_a_cut_off_round_beside_a_foreign_c
         pool=cast(Any, pool),
         max_iterations=5,
     )
-    assert out.stop_reason == "max_tokens"
+    assert out.stop_reason == stop_reason
     assert pool.calls == []
     assert [getattr(b, "id", None) for b in out.content] == ["foreign_id"]
 

@@ -93,11 +93,7 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
     """Per-format hooks for :func:`run_tool_loop`.
 
     ``transcript_key`` names the kwargs entry carrying the conversation
-    (``messages`` for chat/messages, ``input_data`` for responses). The exit
-    hooks preserve each format's historical check ordering: chat inspects the
-    finish_reason before splitting (``exit_before_split``), while messages
-    checks the stop_reason only after the foreign-tool branch
-    (``exit_after_split``); see :func:`run_tool_loop` for the consequences.
+    (``messages`` for chat/messages, ``input_data`` for responses).
     """
 
     transcript_key: str
@@ -117,8 +113,6 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
     def exit_before_split(self, result: ResultT) -> bool: ...
 
     def split_owned(self, result: ResultT, pool: ToolBackend) -> tuple[list[Any], bool]: ...
-
-    def exit_after_split(self, result: ResultT) -> bool: ...
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: AccT | None = None
@@ -279,19 +273,16 @@ async def run_tool_loop(
 
     1. ``exit_before_split``: format-level terminal check that runs before any
        tool accounting (chat: no choices, or finish_reason is not
-       ``tool_calls``; messages: stop_reason is ``max_tokens``; responses:
+       ``tool_calls``; messages: stop_reason is not ``tool_use``; responses:
        ``incomplete_details`` is set). When it fires, nothing is executed even
        if the result carries gateway-owned calls. They are filtered out as in
        step 3.
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
-       sees calls it can dispatch itself. Note the ordering divergence kept
-       from the pre-engine modules: messages runs this branch before checking
-       for ``tool_use``, so a mixed batch executes owned calls when the model
-       stopped for another reason short of the token limit.
-    3. Nothing owned, or ``exit_after_split`` (messages: stop_reason is not
-       ``tool_use``): return the result as the final answer, without the owned
-       calls of a round the model stopped short, as the streaming loop does.
+       sees calls it can dispatch itself.
+    3. Nothing owned, or the round stopped in step 1: return the result as the
+       final answer, without the owned calls of a round the model stopped
+       short, as the streaming loop does.
     4. Otherwise execute the owned calls, extend the transcript, and iterate.
 
     ``on_first_response`` is invoked once, right after the first upstream call
@@ -335,7 +326,7 @@ async def run_tool_loop(
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
-        if stopped or not owned or strategy.exit_after_split(result):
+        if stopped or not owned:
             if owned:
                 # The model stopped before finishing these calls (a token limit, say), so
                 # the gateway does not run them, and the caller never declared the tools.

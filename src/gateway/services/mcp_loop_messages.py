@@ -573,18 +573,12 @@ class _MessagesToolLoopStrategy:
                 logger.warning("Could not add native server-tool blocks to the response content")
 
     def exit_before_split(self, result: MessageResponse) -> bool:
-        # A call the model was writing when it hit the token limit may have cut
-        # input, even beside the caller's own calls.
-        return result.stop_reason == "max_tokens"
+        # A round that stopped for any reason but ``tool_use`` (the token limit, a
+        # refusal) may hold a call with cut input, even beside the caller's own calls.
+        return result.stop_reason != "tool_use"
 
     def split_owned(self, result: MessageResponse, pool: ToolBackend) -> tuple[list[Any], bool]:
         return _split_tool_uses(list(result.content or []), pool)
-
-    def exit_after_split(self, result: MessageResponse) -> bool:
-        # The model emitted tool_use blocks but stopped for another reason
-        # (e.g. ``end_turn`` because ``max_tokens`` was hit mid-tool-call):
-        # exit rather than try to execute them.
-        return result.stop_reason != "tool_use"
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: _MessagesUsageAccumulator | None = None
