@@ -600,6 +600,13 @@ function DeploymentBudgetsPage() {
   }
   const [editing, setEditing] = useState<string>()
   const [historyOpen, setHistoryOpen] = useState<string>()
+  // The history renders under the whole list, which on a phone is a column of
+  // tall cards, so opening it brings it into view rather than appearing to do
+  // nothing.
+  const historyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (historyOpen) historyRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [historyOpen])
   const [pendingDelete, setPendingDelete] = useState<Budget>()
   const [assignmentError, setAssignmentError] = useState<Error>()
   const [pendingAssignments, setPendingAssignments] = useState<{
@@ -970,23 +977,28 @@ function DeploymentBudgetsPage() {
       )}
 
       {historyBudget ? (
-        <Section className="border-y border-border">
-          <div className="flex items-center justify-between border-b border-border py-2">
-            <span className="text-body">
-              Reset history — {nameBudget(historyBudget)}
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onPress={() => setHistoryOpen(undefined)}
-            >
-              Close
-            </Button>
-          </div>
-          {/* The query's own array, not a defaulted copy: a fresh `[]` each
+        <div ref={historyRef}>
+          <Section className="border-y border-border">
+            <div className="flex items-center justify-between border-b border-border py-2">
+              <span className="text-body">
+                Reset history — {nameBudget(historyBudget)}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => setHistoryOpen(undefined)}
+              >
+                Close
+              </Button>
+            </div>
+            {/* The query's own array, not a defaulted copy: a fresh `[]` each
               render would rebuild the alias map on every paint. */}
-          <ResetHistory budgetId={historyBudget.budget_id} users={users.data} />
-        </Section>
+            <ResetHistory
+              budgetId={historyBudget.budget_id}
+              users={users.data}
+            />
+          </Section>
+        </div>
       ) : null}
 
       <ConfirmDialog

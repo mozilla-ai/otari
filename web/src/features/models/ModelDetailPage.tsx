@@ -115,7 +115,8 @@ function RateCell({
   unit: PricingUnit
 }) {
   return (
-    <span className="text-mono-caption">
+    // One line, so a rate and its unit ("$5.00 / 1M") never part.
+    <span className="text-mono-caption whitespace-nowrap">
       {metered == null ? "—" : formatPricedRate(metered, unit)}
     </span>
   )
@@ -216,7 +217,9 @@ function offeringColumns({
       cell: ({ offering: row }) => (
         // The provider's own model ID sits on a second line, so two offerings on
         // one provider (Bedrock's regional profiles) read apart at a glance.
-        <span className="text-body flex items-center gap-2 whitespace-nowrap">
+        // On a phone the held lane wraps, so it does not take most of the
+        // screen from the prices scrolling beside it.
+        <span className="text-body flex items-center gap-2 whitespace-nowrap max-md:whitespace-normal">
           {/* Keyed on the type rather than the instance, which is what the
               instance is named after until an operator renames it. The name
               stays the instance either way, and the type is still spelled out
@@ -238,7 +241,7 @@ function offeringColumns({
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>
-            <code className="text-caption font-mono">
+            <code className="text-caption font-mono max-md:[overflow-wrap:anywhere]">
               {providerModelId(row.selector)}
             </code>
           </span>
@@ -624,7 +627,6 @@ export function ModelDetailView({
             <TableScrollFrame className="otari-offerings-table">
               <DataTable
                 ariaLabel={`Offerings of ${model.name}`}
-                mobileLayout="cards"
                 columns={offeringColumns({
                   canOverride,
                   withUsage,

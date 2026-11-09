@@ -318,7 +318,11 @@ function DataCardList<Row extends object>({
                   </div>
                 ) : null}
                 <div className="flex min-h-11 min-w-0 flex-1 items-center">
-                  <div className="min-w-0 flex-1">{title.cell(row)}</div>
+                  {/* A long unbroken name (a domain, an id) wraps rather than
+                      running under the actions beside it. */}
+                  <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                    {title.cell(row)}
+                  </div>
                 </div>
                 {/* The title's 44px line, so a 32px row action centers on
                     the title. */}

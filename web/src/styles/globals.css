@@ -2552,6 +2552,18 @@ body {
 .otari-offerings-table .table__column[data-key="provider"] {
   min-width: 12.5rem;
 }
+/* On a phone the held provider lane is narrower and its cell wraps, so the
+   prices it exists beside get most of the width, and the column heads keep
+   to one line rather than doubling the header row. */
+@media (max-width: 767px) {
+  .otari-offerings-table .table__column[data-key="provider"] {
+    min-width: 10rem;
+    width: 10rem;
+  }
+  .otari-offerings-table .table__column {
+    white-space: nowrap;
+  }
+}
 /* The identity lane holds while the rest scrolls, as everywhere else. */
 .otari-models-table .table__column:first-child,
 .otari-models-table .table__row .table__cell:first-child,
@@ -2567,6 +2579,12 @@ body {
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
+}
+/* The offerings table sits on the model page's surface frame rather than on
+   the page ground, so its held lane takes the frame's fill. */
+.otari-offerings-table .table__column:first-child,
+.otari-offerings-table .table__row .table__cell:first-child {
+  background-color: var(--color-surface);
 }
 .otari-models-table[data-scrolled="true"] .table__column:first-child,
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,

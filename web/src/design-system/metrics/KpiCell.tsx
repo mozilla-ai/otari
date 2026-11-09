@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { type Severity, SeverityMark } from "./SeverityMark"
 
 export function KpiCell({
@@ -28,13 +28,16 @@ export function KpiCell({
     // so it comes off the last cell of each row, at every column count. On a
     // phone the left lane starts flush with the page column, the right lane
     // sits 16px off the rule, and an odd last cell takes the whole row.
-    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r max-sm:px-4 max-sm:odd:pl-0 max-sm:even:pr-0 max-sm:even:border-r-0 max-sm:last:odd:col-span-2 max-sm:last:odd:pr-0 sm:max-xl:[&:nth-child(3n)]:border-r-0">
+    <div className="@container grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r max-sm:px-4 max-sm:odd:pl-0 max-sm:even:pr-0 max-sm:even:border-r-0 max-sm:last:odd:col-span-2 max-sm:last:odd:pr-0 sm:max-xl:[&:nth-child(3n)]:border-r-0">
       <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
           would out-weigh the page title above it. One line, so a figure and its
           unit ("15.85 s") never part. */}
-      <span className="text-mono-figure font-normal text-nowrap text-foreground">
+      <span
+        className="otari-kpi-figure text-mono-figure font-normal text-nowrap text-foreground"
+        style={{ "--figure-chars": value.length } as CSSProperties}
+      >
         {value}
       </span>
       {/* One line, always present, so no cell is shorter than its neighbors.

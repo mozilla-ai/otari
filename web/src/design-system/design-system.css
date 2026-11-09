@@ -611,6 +611,14 @@
   left: calc(50% + var(--rail-width, 0px) / 2);
   width: calc(100% - var(--rail-width, 0px) - 2rem);
 }
+/* A KPI figure that would overrun its cell shrinks to fit it, and one that
+ * fits keeps the role's 30px. Fira Code's figures advance 0.6em, so
+ * `--figure-chars` of them fill the cell's content width (the cell is the
+ * container) at the size below; `KpiCell` sets the count from the value. */
+.otari-kpi-figure {
+  font-size: min(1.875rem, calc(100cqi / (var(--figure-chars, 1) * 0.6)));
+}
+
 /* While the bar is up, the end of the page scrolls clear of it: the bar is
  * fixed to the viewport, so nothing in flow makes room for it. The space goes
  * after the content rather than before it, so no row moves when a selection
