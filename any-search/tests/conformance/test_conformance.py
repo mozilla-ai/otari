@@ -176,6 +176,7 @@ async def test_a_normal_answer_fills_the_envelope(provider: str) -> None:
         assert isinstance(hit.title, str)
         assert isinstance(hit.snippet, str)
     assert (result.cost is None) == (result.cost_source == "none")
+    assert (result.cost_source == "reported") == AnySearch.get_provider_metadata(provider).reports_cost
     assert "raw=" not in repr(result)
     assert "raw=" not in repr(result.hits[0])
 

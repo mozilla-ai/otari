@@ -180,6 +180,7 @@ async def test_a_normal_answer_fills_the_envelope(provider: str) -> None:
     assert isinstance(page.content_type, str)
     assert page.error is None
     assert (page.cost is None) == (page.cost_source == "none")
+    assert (page.cost_source == "reported") == AnyFetch.get_provider_metadata(provider).reports_cost
     assert "raw=" not in repr(page)
 
 

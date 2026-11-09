@@ -9,7 +9,7 @@ async with AnyFetch.create("builtin") as fetcher:  # once the host has registere
 
 # The library's own version, bumped in the PR that changes the library. Set
 # before the imports: ``_http`` reads it while this package is still importing.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from any_fetch._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnyFetch, afetch, shared_parameter_problems
 from any_fetch._errors import (

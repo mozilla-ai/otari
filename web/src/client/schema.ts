@@ -18003,6 +18003,12 @@ export interface components {
          */
         SearchProviderOptionSchema: {
             /**
+             * Cost Tier
+             * @description True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.
+             * @default false
+             */
+            cost_tier: boolean;
+            /**
              * Default
              * @description The value the provider uses when the option is not set.
              */
@@ -18021,7 +18027,7 @@ export interface components {
             name: string;
             /**
              * Operator Only
-             * @description True when only an instance or a credential may set it, never a workspace or a request.
+             * @description True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.
              * @default false
              */
             operator_only: boolean;
@@ -18100,6 +18106,12 @@ export interface components {
              * @description Fetch: true when the provider runs a page's JavaScript before reading it.
              */
             renders_javascript?: boolean | null;
+            /**
+             * Reports Cost
+             * @description True when the provider's answer says what each call cost, which is then what the call is billed.
+             * @default false
+             */
+            reports_cost: boolean;
             /**
              * Reports Final Url
              * @description Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.

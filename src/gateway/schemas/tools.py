@@ -198,7 +198,17 @@ class SearchProviderOptionSchema(SQLModel):
     description: str = ""
     operator_only: bool = Field(
         default=False,
-        description="True when only an instance or a credential may set it, never a workspace or a request.",
+        description=(
+            "True when only an instance or a credential may set it, never a workspace or a request: an option "
+            "the provider's library marks so, or a cost tier of a provider that reports no cost."
+        ),
+    )
+    cost_tier: bool = Field(
+        default=False,
+        description=(
+            "True when the option's values are the provider's cost tiers: the provider bills a call at a price "
+            "of its own for each value. enum lists the tiers, and default is the one used when the option is unset."
+        ),
     )
 
 
@@ -226,6 +236,10 @@ class SearchProviderSchema(SQLModel):
     )
     doc_url: str | None = Field(default=None, description="The provider's API documentation.")
     tier: str | None = Field(default=None, description="The library's tier for the provider.")
+    reports_cost: bool = Field(
+        default=False,
+        description="True when the provider's answer says what each call cost, which is then what the call is billed.",
+    )
     options: list[SearchProviderOptionSchema] | None = Field(
         default=None,
         description=(
