@@ -207,9 +207,14 @@ function ConnectionDomains({
     <div className="flex flex-col gap-3">
       <h3 className="text-title">Domains that admit sign-in</h3>
       <p className="text-caption">
-        Only someone whose address matches one of these domains is admitted
-        through this connection. Once every domain&rsquo;s proof has expired,
-        this connection stops admitting anyone until one is re-verified.
+        This connection admits an address at one of these domains, and no other.
+        You proved you control them by DNS, which is what makes the address
+        trustworthy rather than your provider&rsquo;s word for it. If every
+        proof expires, nobody can sign in here until one is re-verified.
+      </p>
+      <p className="text-caption text-subtle">
+        A proven domain also adds anyone signing in by other means, with a
+        verified address at it, to this organization as a member.
       </p>
       {domains.length === 0 ? (
         <p className="text-caption text-subtle">

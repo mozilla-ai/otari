@@ -115,7 +115,9 @@ describe("OrganizationSsoPage", () => {
         `proof expires ${formatDate("2099-01-01T00:00:00+00:00")}`,
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText(/stops admitting anyone/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/nobody can sign in here until one is re-verified/),
+    ).toBeInTheDocument()
   })
 
   it("says the email_verified claim is not trusted", async () => {
