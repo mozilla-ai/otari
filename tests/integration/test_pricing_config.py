@@ -1,7 +1,7 @@
 """Tests for pricing configuration from config file."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -822,6 +822,27 @@ async def test_dated_config_pricing_is_not_skipped_for_an_undated_sibling(async_
 
     versions = await _config_versions(async_db)
     assert datetime(2025, 1, 1, tzinfo=UTC) in [version.effective_at for version in versions]
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_is_written_over_a_newer_dated_sibling(async_db: AsyncSession) -> None:
+    """An undated entry whose rates are in force still takes effect when a dated sibling added now overtakes it."""
+    undated = _undated_pricing_config(30.0).pricing["openai:gpt-4"]
+
+    def config_with(pricing: dict[str, PricingConfig]) -> GatewayConfig:
+        return _undated_pricing_config(30.0).model_copy(update={"pricing": pricing})
+
+    now = datetime.now(UTC)
+    two_days_ago = undated.model_copy(update={"effective_at": now - timedelta(days=2)})
+    await initialize_pricing_from_config(config_with({"openai:gpt-4": two_days_ago}), async_db, _pricing(async_db))
+    yesterday = undated.model_copy(update={"input_price_per_million": 25.0, "effective_at": now - timedelta(days=1)})
+
+    await initialize_pricing_from_config(
+        config_with({"openai:gpt-4": undated, "openai/gpt-4": yesterday}), async_db, _pricing(async_db)
+    )
+
+    current = await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC))
+    assert current["openai:gpt-4"].input_price_per_million == Decimal(30)
 
 
 def test_undated_config_pricing_boots_on_a_one_connection_pool(postgres_url: str, test_db: Session) -> None:

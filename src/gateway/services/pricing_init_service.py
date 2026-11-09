@@ -178,10 +178,18 @@ async def initialize_pricing_from_config(
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
-    undated_keys = [
-        normalize_pricing_key(config, key) for key, entry in config.pricing.items() if not entry.effective_at
-    ]
-    in_force = await pricing.current_versions(undated_keys, datetime.now(UTC)) if undated_keys else {}
+    now = datetime.now(UTC)
+    undated_keys: list[str] = []
+    # A dated entry this run may add can overtake the version in force, so an
+    # undated entry is skipped only over a version at least as new as it.
+    latest_dated: dict[str, datetime] = {}
+    for key, entry in config.pricing.items():
+        normalized_key = normalize_pricing_key(config, key)
+        if not entry.effective_at:
+            undated_keys.append(normalized_key)
+        elif (dated := normalize_effective_at(entry.effective_at)) <= now:
+            latest_dated[normalized_key] = max(dated, latest_dated.get(normalized_key, dated))
+    in_force = await pricing.current_versions(undated_keys, now) if undated_keys else {}
 
     # A search or fetch instance's rate written here under its old
     # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
@@ -243,6 +251,7 @@ async def initialize_pricing_from_config(
         current = None if pricing_config.effective_at else in_force.get(model_key)
         if (
             current is not None
+            and current.effective_at >= latest_dated.get(model_key, current.effective_at)
             and DeploymentPricingService.rates_match(current, new_pricing)
             and _same_rates_block(current, new_pricing)
         ):
