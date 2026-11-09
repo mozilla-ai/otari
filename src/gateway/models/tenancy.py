@@ -947,6 +947,13 @@ class WorkspaceUpdate(SQLModel):
             "output. Turning it off keeps none from the next request on, whatever the deployment allows."
         ),
     )
+    request_mcp_servers_allowed: bool | None = Field(
+        default=None,
+        description=(
+            "Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers "
+            "whose access lists the workspace controls."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
@@ -962,6 +969,9 @@ class WorkspacePublic(WorkspaceBase):
             "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment "
             "keeps tool output."
         ),
+    )
+    request_mcp_servers_allowed: bool = Field(
+        default=False, description="Whether this workspace's keys may name MCP servers by URL in a request."
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -1000,11 +1010,38 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
     trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
+    # Off for a new workspace, so its stored servers' access lists cannot be stepped
+    # around by naming a server by URL. The migration that added it kept existing
+    # workspaces on, as they were before the access lists.
+    request_mcp_servers_allowed: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+
+
+# ``WorkspaceMemberRepository.add`` matches this name on a refused insert to
+# tell a vanished workspace (404) from a duplicate membership (409), so it is
+# declared rather than left to PostgreSQL to generate.
+WORKSPACE_MEMBER_WORKSPACE_FK = "fk_workspace_member_workspace_id"
 
 
 class WorkspaceMemberBase(SQLModel):
-    workspace_id: uuid.UUID = Field(foreign_key="workspace.id", ondelete="CASCADE", index=True)
-    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    # Explicit columns because ``Field(foreign_key=...)`` cannot name a constraint.
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            "workspace_id",
+            Uuid(),
+            ForeignKey("workspace.id", name=WORKSPACE_MEMBER_WORKSPACE_FK, ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            "user_id",
+            Uuid(),
+            ForeignKey("user.id", name="fk_workspace_member_user_id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
     role: str = Field(default="member", max_length=32)
     status: str = Field(default="active", max_length=32)
 

@@ -16,6 +16,7 @@ from gateway.core.metered_pricing import billable_usage, price_billable_usage, p
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing import (
     MEASURED_UNITS,
+    PriceFacts,
     Quantities,
     Slot,
     UsageCharge,
@@ -27,7 +28,7 @@ from gateway.services.pricing import (
     validated_units,
 )
 from gateway.services.pricing._usage_pricing import METERS
-from gateway.types.price_unit import PRICE_UNITS
+from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
 _CASES: list[dict[str, Any]] = json.loads(
     (Path(__file__).resolve().parents[1] / "fixtures" / "usage_pricing_cases.json").read_text()
@@ -42,6 +43,7 @@ def _rate(spec: dict[str, Any] | None) -> ModelPricing | None:
         input_price_per_million=Decimal(spec["input"]),
         output_price_per_million=Decimal(spec.get("output", "0")),
         unit=spec["unit"],
+        rates=spec.get("rates"),
     )
 
 
@@ -53,6 +55,7 @@ def _price(case: dict[str, Any]) -> UsageCharge | None:
         if tokens is None or not (tokens["input"] or tokens["output"])
         else billable_usage(input_tokens=tokens["input"], output_tokens=tokens["output"], cache_tokens_included=True),
         units=case["units"],
+        facts=PriceFacts(**case.get("facts", {})),
     )
 
 
@@ -329,6 +332,30 @@ def test_a_token_rate_with_any_price_above_zero_is_not_free(extra: dict[str, Any
 
     assert price_usage(rate, tokens=None, units={"requests": 1}) is None
     assert not can_price(rate, meter="requests", reports_tokens=False)
+
+
+def test_a_token_rate_free_in_its_text_columns_but_not_in_its_block_is_not_free() -> None:
+    """A speech model whose text is free and whose audio output is not settles nothing at zero."""
+    rate = ModelPricing(
+        model_key="gemini:tts",
+        input_price_per_million=Decimal(0),
+        output_price_per_million=Decimal(0),
+        rates={
+            "text": {"input": {"price": 0, "unit": "token"}, "output": {"price": 0, "unit": "token"}},
+            "audio": {"output": {"price": 10, "unit": "token"}},
+        },
+    )
+    speech: frozenset[PriceUnit] = frozenset({"character"})
+
+    assert price_usage(rate, tokens=None, units={"requests": 1}, quantities={"character": 5}, slot=_TEXT_INPUT) is None
+    assert not can_price(rate, meter="requests", reports_tokens=False, slot=_TEXT_INPUT, measures=speech)
+    free_block = ModelPricing(
+        model_key="local:tts",
+        input_price_per_million=Decimal(0),
+        output_price_per_million=Decimal(0),
+        rates={"text": {"input": {"price": 0, "unit": "token"}}, "audio": {"output": {"price": 0, "unit": "token"}}},
+    )
+    assert can_price(free_block, meter="requests", reports_tokens=False, slot=_TEXT_INPUT, measures=speech)
 
 
 _REPORTED = CompletionUsage(prompt_tokens=12, completion_tokens=34, total_tokens=46)

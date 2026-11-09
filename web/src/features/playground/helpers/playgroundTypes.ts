@@ -63,6 +63,12 @@ export interface PanelState {
   isAwaitingFirstToken: boolean
   /** True for the whole request, including while tokens are still arriving. */
   isStreaming: boolean
+  /**
+   * The id every request of this panel's conversation sends as
+   * `Otari-Conversation-Id`, so the gateway groups them into one session.
+   * Unset until the first send; clearing the turns clears it too.
+   */
+  sessionId?: string
 }
 
 export const EMPTY_PANEL: PanelState = {

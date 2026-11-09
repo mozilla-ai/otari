@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, select
+from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, inspect, select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.pricing import MODEL_KIND, ModelPricing
@@ -20,6 +20,12 @@ from gateway.repositories.base_repository import BaseRepository
 # A key list long enough to exceed SQLite's default limit on bind parameters in
 # one statement is a realistic page of one provider's models.
 _KEY_CHUNK = 500
+
+
+def transient_pricing(row: ModelPricing, **changed: Any) -> ModelPricing:
+    """``row`` as an object no session holds, with the columns ``changed`` names replaced."""
+    columns = {attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    return ModelPricing(**{**columns, **changed})
 
 
 class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):

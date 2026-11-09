@@ -75,6 +75,7 @@ from gateway.services.model_access import (
     organization_key_refusal,
     resolve_request_allowlist,
 )
+from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -839,14 +840,23 @@ async def retrieve_batch_results(
         # batch at rates its owner never negotiated.
         # A batch served on the deployment's own credential is priced under its
         # hosted name, at the rate a deployment-paid request settles at.
+        #
+        # A recorded batch is priced under the instance and model it was created
+        # against, the key a live request to the same selector settles under. The
+        # result line's ``model`` is only what the upstream says it served: an alias
+        # or checkpoint name that matches no price, or someone else's, and
+        # ``provider_enum.value`` is the implementation (``openai``), not the named
+        # instance. Legacy batches with no record keep the old key.
         pricing = await find_model_pricing(
             db,
-            provider if deployment_paid else provider_enum.value,
-            batch_model,
+            record.provider if record is not None else (provider if deployment_paid else provider_enum.value),
+            record.model if record is not None else batch_model,
             organization_id=origin_organization_id,
             deployment_paid=deployment_paid,
         )
         if pricing:
+            # A batch with no record is priced at the time the provider says it was created.
+            started = record.created_at if record is not None else datetime.fromtimestamp(batch.created_at, UTC)
             # Through the cost core rather than a local formula, so a batch is
             # priced by the same arithmetic as a live request. **One line at a
             # time**, because a threshold tier is a per-request cliff: charging
@@ -865,7 +875,7 @@ async def retrieve_batch_results(
                 sum(
                     (
                         calculate_token_cost(
-                            pricing,
+                            apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
                             input_tokens=line_prompt,
                             output_tokens=line_completion,
                             cache_read_tokens=line_cache_read,

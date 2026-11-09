@@ -24,11 +24,17 @@ from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.core.config import GatewayConfig
+from gateway.core.config import (
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
+    GatewayConfig,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import report_estimate
-from gateway.services.inference import TRANSCRIPTION_BILLING, speech_billing
+from gateway.services.inference import TRANSCRIPTION_BILLING, speech_billing, speech_cost_headers
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
 
@@ -206,12 +212,33 @@ class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignor
     user: str | None = None
 
 
+_SPEECH_COST_HEADERS: dict[str, Any] = {
+    COST_USD_HEADER: {
+        "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    PRICING_SOURCE_HEADER: {
+        "description": "Which rate priced it: organization, deployment or defaults; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    USAGE_UNIT_HEADER: {
+        "description": "The meter the request was billed on, characters or requests; absent when nothing was billed",
+        "schema": {"type": "string"},
+    },
+    USAGE_UNITS_HEADER: {
+        "description": "How many of that meter were billed; absent when nothing was billed",
+        "schema": {"type": "integer"},
+    },
+}
+
+
 @router.post(
     "/audio/speech",
     response_model=None,
     responses={
         200: {
             "description": "Audio bytes in the requested format",
+            "headers": _SPEECH_COST_HEADERS,
             "content": {
                 "audio/mpeg": {"schema": {"type": "string", "format": "binary"}},
                 "audio/opus": {"schema": {"type": "string", "format": "binary"}},
@@ -234,6 +261,14 @@ async def create_speech(
 ) -> StreamingResponse:
     """OpenAI-compatible audio speech (TTS) endpoint.
 
+    Billed on the characters of ``input`` at a rate priced per character, or
+    one request at a rate priced per request. A model with no rate is refused
+    under ``require_pricing``. The body is audio, so the settled cost rides
+    the response headers: ``Otari-Cost-USD`` and ``Otari-Pricing-Source``, the
+    ``cost_usd`` and ``pricing_source`` other responses carry on ``usage``, and
+    ``Otari-Usage-Unit`` and ``Otari-Usage-Units`` for the meter billed and
+    its count.
+
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
@@ -255,9 +290,10 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
-    # Speech is exempt from require_pricing. The characters spoken are known
-    # before the call, so they are held at a per-character rate, or one request
-    # at a per-request one; a speech result reports nothing more to settle on.
+    # The characters spoken are known before the call, so they are held at a
+    # per-character rate, or one request at a per-request one; a speech result
+    # reports nothing more to settle on, which is why a token rate prices it
+    # nothing and ``require_pricing`` refuses it as it refuses a model with no rate.
     characters = len(request.input)
     billing = speech_billing(characters)
 
@@ -278,6 +314,7 @@ async def create_speech(
         request_params=request.model_fields_set,
         lookup_pricing=True,
         estimate=estimate,
+        enforce_require_pricing=True,
         relabel=False,
         billing=billing,
     )
@@ -287,5 +324,5 @@ async def create_speech(
     return StreamingResponse(
         content=iter([outcome.result]),
         media_type=content_type,
-        headers=outcome.headers,
+        headers={**outcome.headers, **speech_cost_headers(pricing=outcome.pricing, charge=outcome.charge)},
     )

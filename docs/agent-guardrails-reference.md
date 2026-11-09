@@ -1,9 +1,6 @@
 # Agent Guardrails reference
 
-The guardrail file schema, the five gate types, what each harness can see at
-each event, and the `otari hook` and `otari guardrails` commands. The
-[Agent Guardrails guide](agent-guardrails.md) covers installation and first
-use, and explains why the moments work the way they do.
+The guardrail file schema, the five gate types, what each harness can see at each event, and the `otari hook` and `otari guardrails` commands. The [Agent Guardrails guide](agent-guardrails.md) covers installation and first use, and explains why the moments work the way they do.
 
 Contents:
 
@@ -44,8 +41,7 @@ gates:
     message: Force-pushing is not allowed; use --force-with-lease if you must.
 ```
 
-This is `.otari/guardrails.yml`, or one file of a guardrail split across
-several; both parse identically.
+This is `.otari/guardrails.yml`, or one file of a guardrail split across several; both parse identically.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -66,32 +62,15 @@ Every gate has these fields, plus the fields of its [type](#gate-types):
 | `priority` | no | `judge` and `verifier` only; see [`priority`](#priority-on-the-two-gate-types-that-are-capped). |
 | `accept_warnings` | no | Validation warning codes this gate accepts; see [`accept_warnings`](#accept_warnings-on-any-gate). |
 
-Without `message`, each gate type falls back to a line of its own (`A path this
-gate forbids was matched.`), so write one where it says something the gate's
-other fields do not: the mitigation to apply instead, or the doc section the
-rule came from. On a `judge` gate that usually means leaving it out, because
-the `rubric` already states the rule and the model's own reasoning supplies the
-specifics; a message that adds the mitigation still earns its place, as in the
-`no-narrative-comments` example under
-[`priority`](#priority-on-the-two-gate-types-that-are-capped).
+Without `message`, each gate type falls back to a line of its own (`A path this gate forbids was matched.`), so write one where it says something the gate's other fields do not: the mitigation to apply instead, or the doc section the rule came from. On a `judge` gate that usually means leaving it out, because the `rubric` already states the rule and the model's own reasoning supplies the specifics; a message that adds the mitigation still earns its place, as in the `no-narrative-comments` example under [`priority`](#priority-on-the-two-gate-types-that-are-capped).
 
-Parsing is strict: duplicate keys, unknown fields, and an unsupported
-`schema_version` or gate `type` all fail rather than being ignored. A policy
-the parser could not fully understand never evaluates as "no gates". When
-`otari hook` cannot parse a guardrail it fails open: it enforces none of that
-guardrail's gates, `required` ones included, and writes one line to stderr,
-which Claude Code shows only in debug mode. Run `otari guardrails validate`
-after every edit.
+Parsing is strict: duplicate keys, unknown fields, and an unsupported `schema_version` or gate `type` all fail rather than being ignored. A policy the parser could not fully understand never evaluates as "no gates". When `otari hook` cannot parse a guardrail it fails open: it enforces none of that guardrail's gates, `required` ones included, and writes one line to stderr, which Claude Code shows only in debug mode. Run `otari guardrails validate` after every edit.
 
 ### `priority`, on the two gate types that are capped
 
-A `judge` gate and a `verifier` gate may declare an integer `priority`
-(default `0`). It matters only when more of them apply to one Stop event than
-`otari hook` will run: the run keeps the highest priorities, and gates sharing
-a value keep the order they were declared in.
+A `judge` gate and a `verifier` gate may declare an integer `priority` (default `0`). It matters only when more of them apply to one Stop event than `otari hook` will run: the run keeps the highest priorities, and gates sharing a value keep the order they were declared in.
 
-Nothing else reads it. A `path`, `command` or `command_if_changed` gate always
-runs, and declaring `priority` on one is an error.
+Nothing else reads it. A `path`, `command` or `command_if_changed` gate always runs, and declaring `priority` on one is an error.
 
 ```yaml
   - id: no-narrative-comments
@@ -105,11 +84,7 @@ runs, and declaring `priority` on one is an error.
 
 ### `accept_warnings`, on any gate
 
-Some `otari guardrails validate` warnings describe a design that is intended. A
-gate may name the codes of those warnings in an optional `accept_warnings`
-list. `validate` then prints each such warning as `accepted`, and `--strict`
-does not count it. The codes are listed under
-[Validation errors and warnings](#validation-errors-and-warnings).
+Some `otari guardrails validate` warnings describe a design that is intended. A gate may name the codes of those warnings in an optional `accept_warnings` list. `validate` then prints each such warning as `accepted`, and `--strict` does not count it. The codes are listed under [Validation errors and warnings](#validation-errors-and-warnings).
 
 ```yaml
   - id: no-agent-edited-policy
@@ -120,73 +95,33 @@ does not count it. The codes are listed under
     accept_warnings: [shell-write-unseen]
 ```
 
-- An acceptance covers every warning of that kind on the gate, not one glob or
-  phrase.
-- An unknown code is an error, and so is a code the gate's type can never draw.
-  A code the gate does not draw now is not reported.
-- `judge-gate-cap` and `verifier-gate-cap` are about the guardrail as a whole:
-  each is accepted only when every gate it names as skipped accepts it. Which
-  gates are skipped follows the cap, `priority` and then declaration order, so a
-  lower `--max-judges`, a new gate or a changed priority can skip a gate that
-  does not accept the warning. Name the cap code on every gate of that type to
-  keep the acceptance stable. A gate inside the cap runs, so the code has no
-  effect there.
+- An acceptance covers every warning of that kind on the gate, not one glob or phrase.
+- An unknown code is an error, and so is a code the gate's type can never draw. A code the gate does not draw now is not reported.
+- `judge-gate-cap` and `verifier-gate-cap` are about the guardrail as a whole: each is accepted only when every gate it names as skipped accepts it. Which gates are skipped follows the cap, `priority` and then declaration order, so a lower `--max-judges`, a new gate or a changed priority can skip a gate that does not accept the warning. Name the cap code on every gate of that type to keep the acceptance stable. A gate inside the cap runs, so the code has no effect there.
 
 ## Composing several files
 
-`otari hook` reads `.otari/guardrails.yml` and every `.yml` and `.yaml` file
-under `.otari/guardrails/`, nested ones included, then `~/.otari/guardrails.yml`
-and every file under `~/.otari/guardrails/`, and composes them into one
-guardrail. A single `guardrails.yml` meets all of these rules on its own.
+`otari hook` reads `.otari/guardrails.yml` and every `.yml` and `.yaml` file under `.otari/guardrails/`, nested ones included, then `~/.otari/guardrails.yml` and every file under `~/.otari/guardrails/`, and composes them into one guardrail. A single `guardrails.yml` meets all of these rules on its own.
 
-- **Every file parses on its own.** Each carries its own `schema_version`,
-  `policy` block and `gates` list, so a file can be dropped in or lifted out
-  unchanged.
+- **Every file parses on its own.** Each carries its own `schema_version`, `policy` block and `gates` list, so a file can be dropped in or lifted out unchanged.
 - **Every file declares the same `schema_version`.**
-- **A gate id is unique across the whole set.** A collision is an error naming
-  both files, never last-one-wins. `otari guardrails validate` composes by
-  default so that it finds this.
-- **Composition fails if any file fails.** One unparseable file means none of
-  that side's gates, not a partial set, and `otari hook` fails open with a line
-  on stderr naming the file.
-- **Order is not contract.** Files compose in repo-relative path order, and
-  that order is only a tiebreak. Which `judge` and `verifier` gates survive
-  their per-run caps is decided by `priority` on the gate, so numeric filename
-  prefixes do nothing.
-- **Limits are per file**: each file may be at most 256 KiB, so a file legal on
-  its own stays legal wherever it is dropped. The set is limited to 64 files. A
-  set past that limit does not compose at all, so `otari guardrails generate`
-  refuses to write a file that would take it there.
-- **A failing gate names its file** when the guardrail is built from more than
-  one, so there is one place to go and edit.
+- **A gate id is unique across the whole set.** A collision is an error naming both files, never last-one-wins. `otari guardrails validate` composes by default so that it finds this.
+- **Composition fails if any file fails.** One unparseable file means none of that side's gates, not a partial set, and `otari hook` fails open with a line on stderr naming the file.
+- **Order is not contract.** Files compose in repo-relative path order, and that order is only a tiebreak. Which `judge` and `verifier` gates survive their per-run caps is decided by `priority` on the gate, so numeric filename prefixes do nothing.
+- **Limits are per file**: each file may be at most 256 KiB, so a file legal on its own stays legal wherever it is dropped. The set is limited to 64 files. A set past that limit does not compose at all, so `otari guardrails generate` refuses to write a file that would take it there.
+- **A failing gate names its file** when the guardrail is built from more than one, so there is one place to go and edit.
 
-Files under `~/.otari/` are one person's own, and compose with these
-differences:
+Files under `~/.otari/` are one person's own, and compose with these differences:
 
-- Every gate ID from `~/.otari/` gains a `user:` prefix, so `no-force-push` there
-  is `user:no-force-push` in every message and in `otari guardrails validate`.
-  A repository gate can use the same unprefixed ID without a clash. A
-  repository gate whose ID itself starts with `user:` can still clash, and the
-  clash is an error that names both files.
-- When a gate from `~/.otari/` fails, the message shows its `user:` ID, and,
-  when more than one file composes, its file, for example
-  `[~/.otari/guardrails/git-safety.yml]`.
-- A repository cannot turn them off. When the combined set cannot load,
-  because of a clash, a broken file, or too many files, the hook enforces the
-  `~/.otari/` gates alone, and says that the repository's gates are off each
-  time it reports anything. When the `~/.otari/` files are the broken ones, it
-  enforces the repository's gates alone. Only when neither side loads does it
-  enforce no gate.
-- A repository checked out at your home directory owns `~/.otari/` itself, so
-  its files are read once, as the repository's.
-- `otari guardrails validate` includes them unless given `--repo-only`, and
-  `otari guardrails check` never reads them.
+- Every gate ID from `~/.otari/` gains a `user:` prefix, so `no-force-push` there is `user:no-force-push` in every message and in `otari guardrails validate`. A repository gate can use the same unprefixed ID without a clash. A repository gate whose ID itself starts with `user:` can still clash, and the clash is an error that names both files.
+- When a gate from `~/.otari/` fails, the message shows its `user:` ID, and, when more than one file composes, its file, for example `[~/.otari/guardrails/git-safety.yml]`.
+- A repository's guardrail files cannot turn them off. Only the hook's own registration can, with `otari hook setup --repo-only`, and a repository that commits its `.claude/settings.json` could already have removed the hook entry outright. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces the `~/.otari/` gates alone, and says that the repository's gates are off each time it reports anything. When the `~/.otari/` files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
+- A repository checked out at your home directory owns `~/.otari/` itself, so its files are read once, as the repository's.
+- `otari guardrails validate` includes them unless given `--repo-only`, and `otari guardrails check` never reads them. `otari hook --repo-only` leaves them out the same way, for a repository whose conventions differ from yours; `otari hook setup --repo-only` writes that flag into the registration.
 
 ## When a gate runs: `runs`
 
-Every gate declares a non-empty `runs` list. Each entry is
-`<event>.<evidence>`: the left half is the harness hook the gate runs at, the
-right half is what it can see there.
+Every gate declares a non-empty `runs` list. Each entry is `<event>.<evidence>`: the left half is the harness hook the gate runs at, the right half is what it can see there.
 
 | entry | runs at | sees | can it refuse the action? | is it complete? |
 |---|---|---|---|---|
@@ -197,11 +132,7 @@ right half is what it can see there.
 | `stop.session` | after the turn | the working tree plus the session's own transcript | no | yes |
 | `stop.verifier` | after the turn | a repo-local verifier script's exit code | no | whatever the script checks |
 
-No entry sees a path a shell command is about to touch: before the command runs
-there is only its text. A `path` gate catches `echo x >> CHANGELOG.md` at
-`stop.working_tree`, after the file changed, and a shell read at no moment at
-all. The guide explains the consequences under
-[Why a write rule names both moments](agent-guardrails.md#why-a-write-rule-names-both-moments).
+No entry sees a path a shell command is about to touch: before the command runs there is only its text. A `path` gate catches `echo x >> CHANGELOG.md` at `stop.working_tree`, after the file changed, and a shell read at no moment at all. The guide explains the consequences under [Why a write rule names both moments](agent-guardrails.md#why-a-write-rule-names-both-moments).
 
 Each gate type accepts only certain entries:
 
@@ -213,17 +144,13 @@ Each gate type accepts only certain entries:
 | `judge` | `stop.session` |
 | `verifier` | `stop.verifier` |
 
-Four of the five have exactly one legal value, and must still write it, so a
-reader always knows when a gate runs. A wrong value is a parse error that names
-the legal set.
+Four of the five have exactly one legal value, and must still write it, so a reader always knows when a gate runs. A wrong value is a parse error that names the legal set.
 
 ## Gate types
 
 ### `path`
 
-Fails when a path in scope matches one of `forbidden`'s globs. `*` matches
-within one path segment; `**` crosses segment boundaries, and must consume at
-least one segment.
+Fails when a path in scope matches one of `forbidden`'s globs. `*` matches within one path segment; `**` crosses segment boundaries, and must consume at least one segment.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -247,28 +174,18 @@ This is the only gate type with a choice of `runs`:
 | `[stop.working_tree]` | The finished state is judged, and the write itself goes through. |
 | `[pre_tool_use.read_target]` | The `Read` tool is refused; see [Refusing a read](#refusing-a-read). |
 
-Evidence is the path list `otari hook` collected, together with the moment it
-was read at. A path list carrying no moment is refused rather than guessed at.
-A rename counts as its destination path. Broader symlink, monorepo and rename
-semantics are not built.
+Evidence is the path list `otari hook` collected, together with the moment it was read at. A path list carrying no moment is refused rather than guessed at. A rename counts as its destination path. Broader symlink, monorepo and rename semantics are not built.
 
-Each target is matched as two repo-relative candidates, and the gate fires when
-either matches:
+Each target is matched as two repo-relative candidates, and the gate fires when either matches:
 
-- the **lexical** path, with `.` and `..` collapsed and links left alone, which
-  is the name the glob was written against;
+- the **lexical** path, with `.` and `..` collapsed and links left alone, which is the name the glob was written against;
 - the **resolved** path, links followed, which is the file actually reached.
 
-So `.env`, `./.env`, `/abs/path/.env`, `web/../.env`, a `.env` that is a link
-out of the repository, and an innocuous name linked to `.env` all reach a gate
-forbidding `.env`. A candidate that lands outside the repository is dropped,
-and the other is still checked.
+So `.env`, `./.env`, `/abs/path/.env`, `web/../.env`, a `.env` that is a link out of the repository, and an innocuous name linked to `.env` all reach a gate forbidding `.env`. A candidate that lands outside the repository is dropped, and the other is still checked.
 
 #### Refusing a read
 
-`pre_tool_use.read_target` puts the same `forbidden` globs in front of the
-`Read` tool. A match refuses the call, so the file's contents never enter the
-transcript.
+`pre_tool_use.read_target` puts the same `forbidden` globs in front of the `Read` tool. A match refuses the call, so the file's contents never enter the transcript.
 
 ```yaml
   - id: no-secret-reads
@@ -283,18 +200,11 @@ transcript.
 
 `required` is allowed here. What it does not cover:
 
-- **`Grep` and `Glob` are not gated.** They return matching lines and file
-  names rather than whole contents, and grepping for one line is the
-  mitigation a read gate's message should recommend.
-- **A shell read is invisible**: `cat .env`, `less .env`, `head -5 .env` and
-  anything a script does internally go through `Bash`, which declares no path,
-  and nothing catches them afterwards. Pair the gate with a
-  [`command`](#command) gate.
-- **Codex has no read tool**, so this source is never collected there. Its
-  reads go through the shell, where they are `pre_tool_use.command` evidence.
+- **`Grep` and `Glob` are not gated.** They return matching lines and file names rather than whole contents, so they are a way past a read gate rather than a safe alternative to one: a match on a `.env` line spelled `KEY=secret` returns the value. A read gate's message should not recommend them. Where a secret path matters, pair the read gate with a [`command`](#command) gate naming the path, which is what the starter policy ships. That pair covers the read tool and the shell. `Grep` and `Glob` remain uncovered, because no gate source sees them.
+- **A shell read is invisible**: `cat .env`, `less .env`, `head -5 .env` and anything a script does internally go through `Bash`, which declares no path, and nothing catches them afterwards. Pair the gate with a [`command`](#command) gate.
+- **Codex has no read tool**, so this source is never collected there. Its reads go through the shell, where they are `pre_tool_use.command` evidence.
 
-`otari hook setup` adds `Read` to the registered `PreToolUse` matcher exactly
-when the guardrail has a gate that names this source.
+`otari hook setup` adds `Read` to the registered `PreToolUse` matcher exactly when the guardrail has a gate that names this source.
 
 What a `command` gate catches of shell reads, measured:
 
@@ -309,57 +219,30 @@ What a `command` gate catches of shell reads, measured:
 | `python3 -c "print(open('.env').read())"` | no |
 | `while read l; do echo $l; done < .env` | no |
 
-A bare `.env` phrase does not close the first miss: a one-token phrase matches
-that token anywhere in a command, so it would also refuse
-`grep -n SECRET .env`.
+A bare `.env` phrase does not close the first miss: a one-token phrase matches that token anywhere in a command, so it would also refuse `grep -n SECRET .env`.
 
 ### `command`
 
-Fails when a command in scope matches one of `forbidden`'s phrases, such as
-`"git push --force"`.
+Fails when a command in scope matches one of `forbidden`'s phrases, such as `"git push --force"`.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `forbidden` | yes | Shell phrases. |
 
-Evidence is the command a `Bash` tool call is about to run (`call` scope).
-Matching is token-based, not a substring check:
+Evidence is the command a `Bash` tool call is about to run (`call` scope). Matching is token-based, not a substring check:
 
-- A phrase's words must appear in order and unbroken within one segment of the
-  command. Segments are separated by `&&`, `;`, `|`, `||`, `&`, a subshell's
-  parentheses, and an unquoted newline, with or without whitespace around them
-  (`cd web;npm install`, `(npm install)`). An `&` inside a redirect (`2>&1`,
-  `&>out`) is not a separator. So `npm` does not match inside `pnpm`, and
-  `git push --force` does not match `git push --force-with-lease`.
-- A phrase matches a token run in any position, so `forbidden: ["npm"]` also
-  refuses `grep -rn npm web/`.
-- The first word of a segment is compared by path basename in both directions:
-  `npm install` catches `/usr/bin/npm install` and
-  `./node_modules/.bin/npm install`, and a phrase `./scripts/release.sh` still
-  catches that exact path. A prefix command is not followed:
-  `sudo /usr/bin/npm install` is not caught by `npm install`.
-- Comments are stripped first, at the word boundaries Bash uses, so
-  `ls;# npm install` matches nothing.
-- A heredoc body and its terminator line are stripped, so a commit message
-  passed as `git commit -F - <<'MSG'` can name a forbidden phrase. A `<<` whose
-  terminator line never appears opens no body, and neither does an unquoted
-  heredoc with a body line ending in a backslash; the lines after it are still
-  checked. A `<<` inside arithmetic (`$((1<<2))`), a parameter expansion, a
-  subscript or a compound array assignment is a shift and opens no body.
-- A command that cannot be tokenized as shell (an unbalanced quote) falls back
-  to a whitespace split. That still catches a phrase spelled as bare words, and
-  can report one that appears only inside what would have been a quoted
-  argument.
+- A phrase's words must appear in order and unbroken within one segment of the command. Segments are separated by `&&`, `;`, `|`, `||`, `&`, a subshell's parentheses, and an unquoted newline, with or without whitespace around them (`cd web;npm install`, `(npm install)`). An `&` inside a redirect (`2>&1`, `&>out`) is not a separator. So `npm` does not match inside `pnpm`, and `git push --force` does not match `git push --force-with-lease`.
+- A phrase matches a token run in any position, so `forbidden: ["npm"]` also refuses `grep -rn npm web/`.
+- The first word of a segment is compared by path basename in both directions: `npm install` catches `/usr/bin/npm install` and `./node_modules/.bin/npm install`, and a phrase `./scripts/release.sh` still catches that exact path. A prefix command is not followed: `sudo /usr/bin/npm install` is not caught by `npm install`.
+- Comments are stripped first, at the word boundaries Bash uses, so `ls;# npm install` matches nothing. The `)` that closes a command or process substitution does not end its word, so in `echo $(ls)#; npm install` the `#` is ordinary text and `npm install` is still checked.
+- A heredoc body and its terminator line are stripped, so a commit message passed as `git commit -F - <<'MSG'` can name a forbidden phrase. A `<<` whose terminator line never appears opens no body, and neither does an unquoted heredoc with a body line ending in a backslash; the lines after it are still checked. A `<<` inside arithmetic (`$((1<<2))`), a parameter expansion, a subscript or a compound array assignment is a shift and opens no body.
+- A command that cannot be tokenized as shell (an unbalanced quote) falls back to a whitespace split. That still catches a phrase spelled as bare words, and can report one that appears only inside what would have been a quoted argument.
 
-It sees only the literal text of one tool call, not what a script or program
-that command invokes does: `./deploy.sh` is one opaque token even if the script
-runs `git push --force`, and `bash <<'EOF'` with a forbidden command in its body
-passes. It catches mistakes by a cooperative agent and is not a sandbox.
+It sees only the literal text of one tool call, not what a script or program that command invokes does: `./deploy.sh` is one opaque token even if the script runs `git push --force`, and `bash <<'EOF'` with a forbidden command in its body passes. It catches mistakes by a cooperative agent and is not a sandbox.
 
 ### `command_if_changed`
 
-Fails when a changed path matches one of `when_changed`'s globs but no command
-in scope matches one of `require`'s phrases.
+Fails when a changed path matches one of `when_changed`'s globs but no command in scope matches one of `require`'s phrases.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -367,35 +250,27 @@ in scope matches one of `require`'s phrases.
 | `require` | yes | Phrases, matched the way `command` matches them. Any one entry satisfies the gate. |
 
 ```yaml
-  - id: openapi-changed-needs-postman
+  - id: openapi-changed-needs-generator
     type: command_if_changed
     runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
-    require: ["make postman"]
+    require: ["scripts/generate_openapi.py"]
     message: >-
-      docs/public/openapi.json changed; regenerate it with
-      scripts/generate_openapi.py, then run `make postman` to keep the
-      Postman collection in sync (see AGENTS.md, "Generated Artifacts").
+      docs/public/openapi.json is generated. Run
+      `uv run python scripts/generate_openapi.py` rather than editing the
+      spec by hand (see AGENTS.md, "Generated Artifacts").
 ```
 
-- A required command that appears only inside a heredoc body does not satisfy
-  `require`.
-- Both a changed-path list and a command list must have been collected; either
-  missing resolves `unknown`.
-- It resolves only against `session`-scoped commands, which is a `Stop` event.
-  At a `PreToolUse` call (`call` scope) it resolves `not_applicable`, because
-  the required command cannot yet have run in response to an edit that has not
-  happened.
-- Under `session` scope, an empty command list resolves `fail`: a session that
-  changed a matched path and ran no command did not run the required one.
-- A command that ran before the session's last edit-tool call does not count;
-  see [How the harness integrations collect evidence](#how-the-harness-integrations-collect-evidence).
+- A required command that appears only inside a heredoc body does not satisfy `require`.
+- Both a changed-path list and a command list must have been collected; either missing resolves `unknown`.
+- It resolves only against `session`-scoped commands, which is a `Stop` event. At a `PreToolUse` call (`call` scope) it resolves `not_applicable`, because the required command cannot yet have run in response to an edit that has not happened.
+- Under `session` scope, an empty command list resolves `fail`: a session that changed a matched path and ran no command did not run the required one.
+- A command that ran before the session's last edit-tool call does not count; see [How the harness integrations collect evidence](#how-the-harness-integrations-collect-evidence).
 
 ### `judge`
 
-A rubric evaluated by a model instead of a mechanical match. Runs on `Stop`
-only.
+A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -404,10 +279,7 @@ only.
 | `judge_cli` | no | A string or ordered list of CLIs that may make this gate's call: `claude`, `codex`. See [Choosing a judge CLI](#choosing-a-judge-cli). |
 | `priority` | no | Integer, default `0`. |
 
-`enforcement` must be `advisory`; `required` is rejected at parse time. A
-model's verdict is not reproducible the way a match is, and the diff and
-transcript it reads can be shaped by an attacker into a `pass` it should not
-give. As advisory, a compromised verdict can at worst suppress a warning.
+`enforcement` must be `advisory`; `required` is rejected at parse time. A model's verdict is not reproducible the way a match is, and the diff and transcript it reads can be shaped by an attacker into a `pass` it should not give. As advisory, a compromised verdict can at worst suppress a warning.
 
 ```yaml
   - id: follows-error-handling-pattern
@@ -419,19 +291,9 @@ give. As advisory, a compromised verdict can at worst suppress a warning.
     judge_cli: [claude, codex]
 ```
 
-**The call.** For each applicable gate, `otari hook` sends the resolved CLI a
-prompt over stdin built from the `rubric`, the diff, and the assistant's own
-text replies from the session transcript (never tool calls or tool results),
-and requires exactly one JSON object back:
-`{"outcome": "pass" or "fail", "reasoning": "..."}`. The call is billed to
-whatever account that CLI is signed into, not through Otari. It runs in
-`~/.otari/judge-workdir/`, not the repository being judged, and that directory
-is not a repository, so the call does not trigger the repository's own hooks
-and an `otari hook` entry there evaluates nothing.
+**The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. The call is billed to whatever account that CLI is signed into, not through Otari. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing.
 
-**The diff** is `git diff HEAD` plus every untracked file the ignore rules do
-not exclude, each appended as a `new file` hunk. Bytes that are not valid
-UTF-8 are replaced.
+**The diff** is `git diff HEAD` plus every untracked file the ignore rules do not exclude, each appended as a `new file` hunk. Bytes that are not valid UTF-8 are replaced.
 
 | Limit | Value |
 | --- | --- |
@@ -444,39 +306,17 @@ UTF-8 are replaced.
 | Gates running at once | 8, shared with verifier gates |
 | Total time for every judge call and retry in one event | 480 seconds |
 
-- A binary untracked file is named with its content omitted. A symlink is
-  rendered as its link text, and its target is never opened. A file that cannot
-  be read is named with its content omitted.
-- When the untracked files cannot be listed, or `git diff HEAD` fails (no `HEAD`
-  yet, a timeout, no `git`), the gate reports `error` without a model call.
-- A gate past the cap resolves `not_run`, and its line in `systemMessage` names
-  the cap and how to raise it. `otari hook` given an invalid cap runs the
-  default and says so in `systemMessage`; `validate` and `check` refuse it.
-- A gate whose turn comes after the 480-second budget is spent reports `error`
-  without a call. The budget leaves margin under Claude Code's default 600-second
-  command-hook timeout, past which Claude Code kills the hook and discards its
-  output, so no gate at all is evaluated for that event. Raising the cap does
-  not raise the budget, so with slow judges a high cap leaves the last gates
-  reporting `error`.
-- To raise the cap for one repository, set `OTARI_HOOK_MAX_JUDGES` in the
-  environment the harness runs the hook in, such as the `env` block of the
-  repository's `.claude/settings.json`.
+- A binary untracked file is named with its content omitted. A symlink is rendered as its link text, and its target is never opened. A file that cannot be read is named with its content omitted.
+- When the untracked files cannot be listed, or `git diff HEAD` fails (no `HEAD` yet, a timeout, no `git`), the gate reports `error` without a model call.
+- A gate past the cap resolves `not_run`, and its line in `systemMessage` names the cap and how to raise it. `otari hook` given an invalid cap runs the default and says so in `systemMessage`; `validate` and `check` refuse it.
+- A gate whose turn comes after the 480-second budget is spent reports `error` without a call. The budget leaves margin under Claude Code's default 600-second command-hook timeout, past which Claude Code kills the hook and discards its output, so no gate at all is evaluated for that event. Raising the cap does not raise the budget, so with slow judges a high cap leaves the last gates reporting `error`.
+- To raise the cap for one repository, set `OTARI_HOOK_MAX_JUDGES` in the environment the harness runs the hook in, such as the `env` block of the repository's `.claude/settings.json`.
 
-**Errors.** No candidate CLI on `PATH`, a timeout, a launch failure, a NUL byte
-in the prompt, a nonzero exit, or output that is not the one JSON object all
-give `outcome: "error"`, with the failure detail as `reasoning`. With `claude`
-only, a rejection for a prompt that is too long is retried once with the
-transcript dropped, before reporting `error`; `codex` gets no retry.
+**Errors.** No candidate CLI on `PATH`, a timeout, a launch failure, a NUL byte in the prompt, a nonzero exit, or output that is not the one JSON object all give `outcome: "error"`, with the failure detail as `reasoning`. With `claude` only, a rejection for a prompt that is too long is retried once with the transcript dropped, before reporting `error`; `codex` gets no retry.
 
-**Dry run.** `--judge-dry-run` or `OTARI_HOOK_JUDGE_DRY_RUN` does everything up
-to the model call (parsing, `when_changed` filtering, diff and transcript
-collection, CLI resolution) and then reports `error` with a `reasoning` naming
-the CLIs that would have been tried and an estimate of the prompt's size, at
-about four characters per token.
+**Dry run.** `--judge-dry-run` or `OTARI_HOOK_JUDGE_DRY_RUN` does everything up to the model call (parsing, `when_changed` filtering, diff and transcript collection, CLI resolution) and then reports `error` with a `reasoning` naming the CLIs that would have been tried and an estimate of the prompt's size, at about four characters per token.
 
-**Audit log.** Every judge call, dry run or not, appends a line per gate to
-`~/.otari/judge-calls.log`, once as `outcome: invoking` and again when it
-resolves. The log never holds the rubric, diff, transcript or model output.
+**Audit log.** Every judge call, dry run or not, appends a line per gate to `~/.otari/judge-calls.log`, once as `outcome: invoking` and again when it resolves. The log never holds the rubric, diff, transcript or model output.
 
 #### Choosing a judge CLI
 
@@ -484,29 +324,20 @@ Precedence, most specific first:
 
 1. The gate's own `judge_cli`.
 2. `--judge-cli` or `OTARI_HOOK_JUDGE_CLI`.
-3. For `otari hook`, the CLI `--harness` implies: `claude-code` uses `claude`,
-   `codex` uses `codex`. For `otari guardrails check`, `claude`.
+3. For `otari hook`, the CLI `--harness` implies: `claude-code` uses `claude`, `codex` uses `codex`. For `otari guardrails check`, `claude`.
 
-The resulting list is tried in order, and the first entry found on `PATH` is
-used. When none is found, the error names every candidate tried.
+The resulting list is tried in order, and the first entry found on `PATH` is used. When none is found, the error names every candidate tried.
 
 | CLI | Invocation | Default model |
 | --- | --- | --- |
 | `claude` | `claude -p --model <model> --tools "" --strict-mcp-config` | `claude-haiku-4-5-20251001` |
 | `codex` | `codex exec - [--model <model>] --sandbox read-only --ask-for-approval never --skip-git-repo-check --ephemeral --color never` | none: `--model` is passed only when given, so the account's own default applies |
 
-`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for either.
-With `claude`, every built-in tool and MCP server is disabled for the call, and
-their definitions are left out of the prompt. Codex has no equivalent flag, so
-`--sandbox read-only` and `--ask-for-approval never` bound what an attempted
-tool call can do, not whether the model attempts one. `--ephemeral` keeps the
-call from leaving a rollout file that a later `Stop` event could mistake for
-session evidence.
+`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for either. With `claude`, every built-in tool and MCP server is disabled for the call, and their definitions are left out of the prompt. Codex has no equivalent flag, so `--sandbox read-only` and `--ask-for-approval never` bound what an attempted tool call can do, not whether the model attempts one. `--ephemeral` keeps the call from leaving a rollout file that a later `Stop` event could mistake for session evidence.
 
 ### `verifier`
 
-A gate whose verdict comes from a script's exit status. Runs on `Stop` only.
-Unlike `judge`, it may be `required`.
+A gate whose verdict comes from a script's exit status. Runs on `Stop` only. Unlike `judge`, it may be `required`.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -526,19 +357,9 @@ Unlike `judge`, it may be `required`.
       markers before finishing.
 ```
 
-**Exit codes**: `0` is `pass`, `1` is `fail`, and anything else (another code,
-a crash, a script that cannot run) is `error`. Stdout, capped at 4,096
-characters, becomes the result's detail whatever the outcome; stderr is not
-read.
+**Exit codes**: `0` is `pass`, `1` is `fail`, and anything else (another code, a crash, a script that cannot run) is `error`. Stdout, capped at 4,096 characters, becomes the result's detail whatever the outcome; stderr is not read.
 
-**How it runs.** The resolved script is executed directly, with no shell and no
-interpreter wrapper, with the repository root as its working directory, and
-with the `PATH` the `otari hook` process inherited, which need not include any
-virtualenv. Its shebang decides what runs it. A Python script with no
-third-party dependency should run under whatever `python3` that `PATH` finds,
-which on macOS can be 3.9; one that needs a dependency can use a
-`#!/usr/bin/env -S uv run --script` shebang with the dependency declared inline
-(PEP 723), which needs only `uv` on `PATH`.
+**How it runs.** The resolved script is executed directly, with no shell and no interpreter wrapper, with the repository root as its working directory, and with the `PATH` the `otari hook` process inherited, which need not include any virtualenv. Its shebang decides what runs it. A Python script with no third-party dependency should run under whatever `python3` that `PATH` finds, which on macOS can be 3.9; one that needs a dependency can use a `#!/usr/bin/env -S uv run --script` shebang with the dependency declared inline (PEP 723), which needs only `uv` on `PATH`.
 
 | Limit | Value |
 | --- | --- |
@@ -547,47 +368,21 @@ which on macOS can be 3.9; one that needs a dependency can use a
 | Total time for every verifier in one event | 60 seconds |
 | Gates running at once | 8, shared with judge gates |
 
-A gate that has not started when the 60-second budget is spent reports `error`
-without running. Because verifiers run concurrently against one working tree,
-a verifier should only read it: one that writes a fixed temporary path or
-mutates the tree (`git stash`) can race another.
+A gate that has not started when the 60-second budget is spent reports `error` without running. Because verifiers run concurrently against one working tree, a verifier should only read it: one that writes a fixed temporary path or mutates the tree (`git stash`) can race another.
 
 **Where the script may live.**
 
-- A repository's verifier must resolve inside the repository with every symlink
-  followed.
-- A verifier in a file under `~/.otari/` must be inside `~/.otari/verifiers/`; a
-  path that leaves it through `..` is refused. The script may be a symlink, for
-  example into a dotfiles checkout. The target runs only when it is a regular
-  file the user owns and that group and others cannot write, and the same rule
-  applies to a script that is not a link, so a group-writable script is refused
-  until `chmod go-w` fixes it. Only the target file is checked, not the
-  directories above it. A failed check names the file the link leads to,
-  including a missing one. On a platform without POSIX file ownership
-  (Windows), the target must instead resolve inside `~/.otari/verifiers/`.
-- `otari guardrails validate` applies the same rules, and reports the same
-  result.
+- A repository's verifier must resolve inside the repository with every symlink followed.
+- A verifier in a file under `~/.otari/` must be inside `~/.otari/verifiers/`; a path that leaves it through `..` is refused. The script may be a symlink, for example into a dotfiles checkout. The target runs only when it is a regular file the user owns and that group and others cannot write, and the same rule applies to a script that is not a link, so a group-writable script is refused until `chmod go-w` fixes it. Only the target file is checked, not the directories above it. A failed check names the file the link leads to, including a missing one. On a platform without POSIX file ownership (Windows), the target must instead resolve inside `~/.otari/verifiers/`.
+- `otari guardrails validate` applies the same rules, and reports the same result.
 
-**Trust.** A verifier is not sandboxed. A script checked into the repository and
-named by its own guardrail has the same trust as a Makefile target or a
-pre-commit hook. Nothing requires the verifier to predate the change under
-check, so a new verifier can be used in the change that introduces it. The
-consequence is that a guardrail and a verifier arriving together in a branch
-you check out to review run on the next `Stop` event without you deciding to
-run anything from it (issue #1442). Sharing a verifier across repositories is
-not supported: a verifier is always a path inside the repository, or inside
-`~/.otari/verifiers/`.
+**Trust.** A verifier is not sandboxed. A script checked into the repository and named by its own guardrail has the same trust as a Makefile target or a pre-commit hook. Nothing requires the verifier to predate the change under check, so a new verifier can be used in the change that introduces it. The consequence is that a guardrail and a verifier arriving together in a branch you check out to review run on the next `Stop` event without you deciding to run anything from it (issue #1442). Sharing a verifier across repositories is not supported: a verifier is always a path inside the repository, or inside `~/.otari/verifiers/`.
 
-Otari's own repository has two examples:
-`.otari/verifiers/no-conflict-markers.sh`, which uses `git grep` so it behaves
-the same wherever `git` runs, and `.otari/verifiers/no-stranded-docblocks.py`,
-which scans only the files `git status --porcelain` reports changed.
+Otari's own repository has two examples: `.otari/verifiers/no-conflict-markers.sh`, which uses `git grep` so it behaves the same wherever `git` runs, and `.otari/verifiers/no-stranded-docblocks.py`, which scans only the files `git status --porcelain` reports changed.
 
 ## Evidence and outcomes
 
-A gate resolves against the evidence its moment produced. The difference
-between evidence collected and found empty, and evidence never collected, is
-load-bearing throughout.
+A gate resolves against the evidence its moment produced. The difference between evidence collected and found empty, and evidence never collected, is load-bearing throughout.
 
 | Evidence | What it is |
 | --- | --- |
@@ -596,11 +391,7 @@ load-bearing throughout.
 | judge verdicts | One `pass`, `fail` or `error` per `judge` gate, from the model call `otari hook` made for it. A gate past the judge gate cap gets `not_run` instead, and no model call. |
 | verifier verdicts | One `pass`, `fail` or `error` per `verifier` gate, from the script's exit status: 0, 1, and anything else respectively. |
 
-An empty list is not a missing one. Evidence collected and found empty resolves
-its gates `not_applicable`: there was nothing to check. Evidence never collected
-at this moment resolves them `unknown`, which a `required` gate treats as a
-block. A `PreToolUse` call collects no judge or verifier verdicts at all,
-rather than an empty set.
+An empty list is not a missing one. Evidence collected and found empty resolves its gates `not_applicable`: there was nothing to check. Evidence never collected at this moment resolves them `unknown`, which a `required` gate treats as a block. A `PreToolUse` call collects no judge or verifier verdicts at all, rather than an empty set.
 
 A gate resolves to one of six outcomes:
 
@@ -613,79 +404,38 @@ A gate resolves to one of six outcomes:
 | `error` | The gate's own model call or verifier script could not produce a verdict. |
 | `not_run` | The gate was skipped, having fallen past a per-event cap. |
 
-The turn is blocked when a `required` gate's outcome is anything but `pass` or
-`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can
-never block, since its `enforcement` is always `advisory`; a `verifier` gate
-can, since it may be `required`.
+The turn is blocked when a `required` gate's outcome is anything but `pass` or `not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never block, since its `enforcement` is always `advisory`; a `verifier` gate can, since it may be `required`.
 
 ### Who hears an advisory finding
 
-A blocked turn reaches the agent: `otari hook` exits 2, and the harness feeds
-its stderr to the model, which is how a `required` gate gets the change
-reverted rather than merely noted. Exit 0 has no such channel, so an advisory
-finding is written to `systemMessage`, which the harness shows the person.
+A blocked turn reaches the agent: `otari hook` exits 2, and the harness feeds its stderr to the model, which is how a `required` gate gets the change reverted rather than merely noted. Exit 0 has no such channel, so an advisory finding is written to `systemMessage`, which the harness shows the person.
 
-A `judge` gate is the exception, and takes both. It cannot be `required`, so
-without a second channel its finding would be visible to everyone except the
-agent that could act on it. Its finding is therefore also sent as the `Stop`
-event's `additionalContext`, which lands in the transcript for the model to see
-on the next turn without blocking this one. The gate's `message` and the
-judge's `reasoning` both travel.
+A `judge` gate is the exception, and takes both. It cannot be `required`, so without a second channel its finding would be visible to everyone except the agent that could act on it. Its finding is therefore also sent as the `Stop` event's `additionalContext`, which lands in the transcript for the model to see on the next turn without blocking this one. The gate's `message` and the judge's `reasoning` both travel.
 
-Only a `fail` crosses over. A judge gate reporting `error`, `not_run` or
-`unknown` evaluated no rubric, so it reaches the person on `systemMessage`
-alone, like any other gate that could not resolve.
+Only a `fail` crosses over. A judge gate reporting `error`, `not_run` or `unknown` evaluated no rubric, so it reaches the person on `systemMessage` alone, like any other gate that could not resolve.
 
-A deterministic gate written `advisory` keeps `systemMessage` alone: its author
-could have written `required`.
+A deterministic gate written `advisory` keeps `systemMessage` alone: its author could have written `required`.
 
 ## How the harness integrations collect evidence
 
-`otari hook` reads the harness's hook payload on stdin and collects the evidence
-that one event can produce. The harness passes its own `hook_event_name` in the
-payload, so one callback serves both events.
+`otari hook` reads the harness's hook payload on stdin and collects the evidence that one event can produce. The harness passes its own `hook_event_name` in the payload, so one callback serves both events.
 
-**On `PreToolUse`**, `otari hook` reads the tool call's own arguments before
-they execute. An `Edit`/`Write`/`NotebookEdit` call yields a target path; a
-`Read` call yields a read target; a `Bash` call yields its command, in `call`
-scope. A single call yields only the evidence of its own kind, so a `command`
-gate resolves `not_applicable`, not `pass`, on an edit call.
+**On `PreToolUse`**, `otari hook` reads the tool call's own arguments before they execute. An `Edit`/`Write`/`NotebookEdit` call yields a target path; a `Read` call yields a read target; a `Bash` call yields its command, in `call` scope. A single call yields only the evidence of its own kind, so a `command` gate resolves `not_applicable`, not `pass`, on an edit call.
 
-**On `Stop`**, `otari hook` collects two kinds of evidence itself, because
-Claude Code's Stop payload carries neither directly:
+**On `Stop`**, `otari hook` collects two kinds of evidence itself, because Claude Code's Stop payload carries neither directly:
 
-- Changed paths, from `git status --porcelain`, which covers anything a `Bash`
-  call wrote.
-- Commands, in `session` scope, from the session transcript at
-  `transcript_path`: every `Bash` tool call (`message.content[]` blocks with
-  `type: "tool_use"` and `name: "Bash"`), skipping records marked
-  `isSidechain: true` (a subagent's turn). A command that ran before the
-  session's last `Edit`/`Write`/`NotebookEdit` call is dropped, so a command
-  must have run after the final edit to satisfy `command_if_changed`. A `Bash`
-  call does not move that cutoff, even one that wrote to the tree, since the
-  required command is often the writer itself. If the transcript cannot be
-  read, no command evidence is collected (not an empty list), and a gate that
-  needs it resolves `unknown`.
+- Changed paths, from `git status --porcelain`, which covers anything a `Bash` call wrote.
+- Commands, in `session` scope, from the session transcript at `transcript_path`: every `Bash` tool call (`message.content[]` blocks with `type: "tool_use"` and `name: "Bash"`), skipping records marked `isSidechain: true` (a subagent's turn). A command that ran before the session's last `Edit`/`Write`/`NotebookEdit` call is dropped, so a command must have run after the final edit to satisfy `command_if_changed`. A `Bash` call does not move that cutoff, even one that wrote to the tree, since the required command is often the writer itself. If the transcript cannot be read, no command evidence is collected (not an empty list), and a gate that needs it resolves `unknown`.
 
-`command` gates do not evaluate against the session list. A forbidden command
-is judged at the `PreToolUse` call about to run it, and `otari hook setup` puts
-`Bash` in the matcher whenever the guardrail has a `command` gate.
+`command` gates do not evaluate against the session list. A forbidden command is judged at the `PreToolUse` call about to run it, and `otari hook setup` puts `Bash` in the matcher whenever the guardrail has a `command` gate.
 
 `judge` and `verifier` gates run on `Stop` only.
 
-**A blocking `Stop` gate has a finite budget.** Claude Code overrides a `Stop`
-hook after it blocks eight times in a row without progress, and ends the turn
-with a warning; `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises the limit. `otari hook`
-keeps blocking when Claude Code sets `stop_hook_active`, and on a repeat block
-says that the budget is running out, so the remaining attempts go to fixing the
-gate or telling the user why it cannot be fixed.
+**A blocking `Stop` gate has a finite budget.** Claude Code overrides a `Stop` hook after it blocks eight times in a row without progress, and ends the turn with a warning; `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises the limit. `otari hook` keeps blocking when Claude Code sets `stop_hook_active`, and on a repeat block says that the budget is running out, so the remaining attempts go to fixing the gate or telling the user why it cannot be fixed.
 
 ## Registering it by hand
 
-`otari hook setup` writes a pair of hook blocks into
-`.claude/settings.local.json`, naming the `otari` binary it was invoked through,
-one for `PreToolUse` and one for `Stop`. `.claude/settings.json` is the place
-for them where the whole team should get them.
+`otari hook setup` writes a pair of hook blocks into `.claude/settings.local.json`, naming the `otari` binary it was invoked through, one for `PreToolUse` and one for `Stop`. `.claude/settings.json` is the place for them where the whole team should get them.
 
 ```json
 {
@@ -715,30 +465,16 @@ for them where the whole team should get them.
 }
 ```
 
-- The `PreToolUse` matcher always holds the edit tools, adds `Bash` when the
-  guardrail has a `command` gate, and adds `Read` when a `path` gate names
-  `pre_tool_use.read_target`. A wider matcher is harmless: a gate that did not
-  ask for a moment always passes there.
+- The `PreToolUse` matcher always holds the edit tools, adds `Bash` when the guardrail has a `command` gate, and adds `Read` when a `path` gate names `pre_tool_use.read_target`. A wider matcher is harmless: a gate that did not ask for a moment always passes there.
 - `Stop` carries no matcher and is registered unconditionally.
-- Re-running `setup` updates both entries in place and leaves every other hook
-  and permission untouched.
-- The path is absolute because the hook subprocess does not inherit an
-  activated shell's `PATH`. A standalone install's stable link (Homebrew's
-  `/opt/homebrew/bin/otari`) survives upgrades. A per-project venv records that
-  venv's own `otari`, and a reinstalled or relocated venv leaves the old entry
-  unrecognized rather than updated.
+- Re-running `setup` updates both entries in place and leaves every other hook and permission untouched.
+- The path is absolute because the hook subprocess does not inherit an activated shell's `PATH`. A standalone install's stable link (Homebrew's `/opt/homebrew/bin/otari`) survives upgrades. A per-project venv records that venv's own `otari`, and a reinstalled or relocated venv leaves the old entry unrecognized rather than updated.
 - `.claude/settings.local.json` is personal and is best left gitignored.
-- The same entries in `~/.claude/settings.json` run the hook in every
-  repository, which is how gates in `~/.otari/` apply everywhere. `setup` does
-  not write that file. A repository that also registers the hook can then run
-  it twice for each event.
+- The same entries in Claude Code's user settings file run the hook in every repository, which is how gates in `~/.otari/` apply everywhere. That file is `~/.claude/settings.json`, or `settings.json` in the directory `CLAUDE_CONFIG_DIR` names where that variable is set. `setup` does not write that file. A repository that also registers the hook can then run it twice for each event.
 
 ## Registering it for Codex
 
-`otari hook setup --harness codex` writes the same pair of hook blocks into
-`.codex/hooks.json`, naming `otari hook --harness codex`. The file is personal,
-like `.claude/settings.local.json`. Codex runs a project's hooks only once they
-are accepted with `/hooks`.
+`otari hook setup --harness codex` writes the same pair of hook blocks into `.codex/hooks.json`, naming `otari hook --harness codex`. The file is personal, like `.claude/settings.local.json`. Codex runs a project's hooks only once they are accepted with `/hooks`.
 
 ```json
 {
@@ -756,31 +492,22 @@ are accepted with `/hooks`.
 }
 ```
 
-- `apply_patch` carries no `file_path`: the patch arrives as
-  `tool_input.command`, and the paths it touches (one call can touch several)
-  are read from its `*** Add/Update/Delete File: <path>` header lines.
+- `apply_patch` carries no `file_path`: the patch arrives as `tool_input.command`, and the paths it touches (one call can touch several) are read from its `*** Add/Update/Delete File: <path>` header lines.
 - The shell tool dispatches as `Bash`.
-- Codex's **Code Mode** wraps any number of shell and `apply_patch` calls in one
-  JS snippet under a tool named `code_mode_exec`, for which Codex's docs give
-  `exec` as a matcher alias; the matcher names both. That snippet is checked as
-  one command, so a `command` gate finds a forbidden phrase anywhere in it.
-- Code Mode does not dispatch `PreToolUse` for the shell and `apply_patch` calls
-  it wraps (openai/codex#23411, open upstream), so a session running through
-  Code Mode is checked at `Stop` only: by `git status` and by a scan of Codex's
-  rollout JSONL transcript.
+- Codex's **Code Mode** wraps any number of shell and `apply_patch` calls in one JS snippet under a tool named `code_mode_exec`, for which Codex's docs give `exec` as a matcher alias; the matcher names both. That snippet is checked as one command, so a `command` gate finds a forbidden phrase anywhere in it.
+- Code Mode does not dispatch `PreToolUse` for the shell and `apply_patch` calls it wraps (openai/codex#23411, open upstream), so a session running through Code Mode is checked at `Stop` only: by `git status` and by a scan of Codex's rollout JSONL transcript.
 - Codex has no read tool, so `pre_tool_use.read_target` is never collected.
 
 ## Command-line reference
 
 ### `otari hook`
 
-The callback a harness invokes, with its hook payload on stdin. Run at a
-terminal, it prints its help instead. It exits 2 to block, with the reason on
-stderr, and 0 otherwise, with any notice in `systemMessage`.
+The callback a harness invokes, with its hook payload on stdin. Run at a terminal, it prints its help instead. It exits 2 to block, with the reason on stderr, and 0 otherwise, with any notice in `systemMessage`.
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `--harness` | | `claude-code` | `claude-code` or `codex`: the integration sending the callback. |
+| `--repo-only` | | off | Enforce this repository's guardrail alone, leaving out your own in `~/.otari/`. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
@@ -789,57 +516,40 @@ stderr, and 0 otherwise, with any notice in `systemMessage`.
 | | `OTARI_HOOK_REPORT_CONTENT` | off | `1` also reports the command or paths a check read, and each gate's own detail. |
 | | `OTARI_HOOK_REPORT` | on | `off` turns reporting off. |
 
-`--api-key`, `--url` and `--config` are accepted and ignored, so a hook
-registered by an older `otari hook setup` keeps working; re-running `setup`
-removes them.
+`--api-key`, `--url` and `--config` are accepted and ignored, so a hook registered by an older `otari hook setup` keeps working; re-running `setup` removes them.
 
 ### What `otari hook` reports
 
-With `OTARI_URL` set, each check sends one span per gate that applied to the
-agent's session, by the session id the harness gives the hook. It names the
-gate, its type, whether it came from the repository or from `~/.otari/`, the
-outcome, whether it blocked, the moment it ran at, a fingerprint of the
-guardrail, and on a tool call the call's id. It never carries a gate's message
-or the paths and commands the gate read, unless `OTARI_HOOK_REPORT_CONTENT=1`.
+With `OTARI_URL` set, each check sends one span per gate that applied to the agent's session, by the session id the harness gives the hook. It names the gate, its type, whether it came from the repository or from `~/.otari/`, the outcome, whether it blocked, the moment it ran at, a fingerprint of the guardrail, and on a tool call the call's id. It never carries a gate's message or the paths and commands the gate read, unless `OTARI_HOOK_REPORT_CONTENT=1`.
 
-What each gate is and says goes separately, once per version of the guardrail,
-to the server `OTARI_URL` names: its id, type, enforcement, when it runs,
-whether it is yours or the repository's, and its `message`. The server keeps it.
+What each gate is and says goes separately, once per version of the guardrail, to the server `OTARI_URL` names: its id, type, enforcement, when it runs, whether it is yours or the repository's, and its `message`. The server keeps it.
 
-A gate's span covers the time it took. A judge or verifier gate is timed by its
-own run; any other gate, from when `otari hook` started, since what it waits on
-is the hook starting and reading the evidence. A judge gate run with `claude`
-also carries the model it ran on and the tokens it used. Otari books them as the
-session's usage, under the source `otari-hook`, and prices them like the
-session's own requests (see [Agent traces](traces.md#claude-code-without-routing)).
-A judge run with Codex carries no usage yet.
+A gate's span covers the time it took. A judge or verifier gate is timed by its own run; any other gate, from when `otari hook` started, since what it waits on is the hook starting and reading the evidence. A judge gate run with `claude` also carries the model it ran on and the tokens it used. Otari books them as the session's usage, under the source `otari-hook`, and prices them like the session's own requests (see [Agent traces](traces.md#claude-code-without-routing)). A judge run with Codex carries no usage yet.
 
-A report is written to `~/.otari/outbox/`, under the server and key it is for,
-and a separate process sends it with that same key. One the server cannot take
-yet, a rejected key included, waits there for the next check, for up to a day.
-The API key is read from the environment when it is sent and never written to
-the outbox.
+A report is written to `~/.otari/outbox/`, under the server and key it is for, and a separate process sends it with that same key. One the server cannot take yet, a rejected key included, waits there for the next check, for up to a day. The API key is read from the environment when it is sent and never written to the outbox.
 
-Without `OTARI_URL`, a harness's own OpenTelemetry trace export
-(`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers)
-is used instead.
+Without `OTARI_URL`, a harness's own OpenTelemetry trace export (`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers) is used instead.
 
 ### `otari hook setup`
 
-Registers the hook in the current Git repository; refuses outside one. When the
-repository has no guardrail, it offers to write a starter
-`.otari/guardrails.yml`.
+Registers the hook in the current Git repository; refuses outside one. When the repository has no guardrail, it offers to write a starter `.otari/guardrails.yml`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
+| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+
+Re-running `setup` rewrites the registered command in place, matching an existing entry by the executable's name and `hook` alone, so an entry naming otari on `PATH` and one naming an install path are the same registration. A flag added to the settings file by hand does not survive a re-run: pass `--repo-only` to `setup` instead.
+
+A `PreToolUse` matcher covers every command in its entry. Where an entry holds otari's command beside another hook's, `setup` leaves that entry's matcher alone and moves otari's command to an entry of its own, so narrowing the matcher cannot stop the other hook from seeing a tool call.
+
+`setup` rewrites every entry in the event that runs otari hook, not only the first. Claude Code runs every entry whose matcher matches, so one left behind would keep enforcing what the others no longer do.
+
+On claude-code, `setup --repo-only` also warns when Claude Code's user settings file registers the hook for every repository without the flag, since that entry still enforces the user's gates here. That file is `~/.claude/settings.json`, or `settings.json` under the directory `CLAUDE_CONFIG_DIR` names where that variable is set. Adding the flag there turns those gates off in every repository that entry covers, so the warning names removing it and registering per repository as the alternative.
 
 ### `otari guardrails validate`
 
-Checks the composed guardrail without running it, and dry-runs it against
-commands and paths. Requires a Git repository. Contacts nothing and calls no
-model. Exits 1 on an error, or on a warning not covered by `accept_warnings`
-with `--strict`; a gate firing in a dry run does not change the exit status.
+Checks the composed guardrail without running it, and dry-runs it against commands and paths. Requires a Git repository. Contacts nothing and calls no model. Exits 1 on an error, or on a warning not covered by `accept_warnings` with `--strict`; a gate firing in a dry run does not change the exit status.
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
@@ -850,34 +560,17 @@ with `--strict`; a gate firing in a dry run does not change the exit status.
 | `--strict` | | off | Exit non-zero on a warning too. |
 | `--max-judges <n>` | `OTARI_HOOK_MAX_JUDGES` | `5` | The judge gate cap to check against, from 1 to 20. Give it the value the hook runs with. |
 
-Composing everything is what finds a gate id declared in two files and a judge
-gate total no one file shows. The output lists which gates come from
-`~/.otari/` and which from the repository.
+Composing everything is what finds a gate id declared in two files and a judge gate total no one file shows. The output lists which gates come from `~/.otari/` and which from the repository.
 
 #### Validation errors and warnings
 
-An **error** is a gate that cannot do its job, whatever the session does.
-Everything the parser refuses (an unsupported `schema_version`, an unknown gate
-`type` or field, a duplicate key or gate id, a `judge` gate declared
-`required`, an illegal `runs` value for its type) is reported as an error, and
-so are these:
+An **error** is a gate that cannot do its job, whatever the session does. Everything the parser refuses (an unsupported `schema_version`, an unknown gate `type` or field, a duplicate key or gate id, a `judge` gate declared `required`, an illegal `runs` value for its type) is reported as an error, and so are these:
 
-- A `verifier` gate whose script is missing, is not executable, or resolves
-  outside where it may live (see [`verifier`](#verifier)). The script is
-  inspected, never run.
-- A glob with an empty, `.` or `..` path segment, which covers a leading `/`
-  and a leading `./`. A repo-relative path never has one, so the pattern
-  can never match any path.
-- A phrase carrying a shell separator (`&&`, `||`, `;`, `|`, `&`, `(`, `)`).
-  A phrase is matched within one segment, so it never matches, not even the
-  command it was copied from. On a `command` gate that is silent
-  non-enforcement; split the `forbidden` list. On `require`, nothing can
-  satisfy the gate, so a `required` one blocks every turn that touches a
-  matching path; give each required command a gate of its own, since splitting
-  `require` means any one entry satisfies it.
+- A `verifier` gate whose script is missing, is not executable, or resolves outside where it may live (see [`verifier`](#verifier)). The script is inspected, never run.
+- A glob with an empty, `.` or `..` path segment, which covers a leading `/` and a leading `./`. A repo-relative path never has one, so the pattern can never match any path.
+- A phrase carrying a shell separator (`&&`, `||`, `;`, `|`, `&`, `(`, `)`). A phrase is matched within one segment, so it never matches, not even the command it was copied from. On a `command` gate that is silent non-enforcement; split the `forbidden` list. On `require`, nothing can satisfy the gate, so a `required` one blocks every turn that touches a matching path; give each required command a gate of its own, since splitting `require` means any one entry satisfies it.
 
-A **warning** is a gate that parses, runs, and may not mean what its author
-intended. None blocks on its own, because each has a legitimate exception.
+A **warning** is a gate that parses, runs, and may not mean what its author intended. None blocks on its own, because each has a legitimate exception.
 
 | Code | Drawn by | Meaning |
 | --- | --- | --- |
@@ -892,14 +585,7 @@ intended. None blocks on its own, because each has a legitimate exception.
 
 #### Dry-run output
 
-`--command` and `--path` are each evaluated at every moment a real session
-would offer them, with the evidence `otari hook` collects there: one
-`PreToolUse` block per command or path, then one `Stop` block with all of them
-together. A path is spelled the way each moment spells it, which differs only
-for a symlink: a `PreToolUse` edit target is resolved, while a `Stop` path is
-the tracked name `git status` reports. A repository reached through a directory
-symlink (every macOS temp path) is normalized without following the file's own
-link.
+`--command` and `--path` are each evaluated at every moment a real session would offer them, with the evidence `otari hook` collects there: one `PreToolUse` block per command or path, then one `Stop` block with all of them together. A path is spelled the way each moment spells it, which differs only for a symlink: a `PreToolUse` edit target is resolved, while a `Stop` path is the tracked name `git status` reports. A repository reached through a directory symlink (every macOS temp path) is normalized without following the file's own link.
 
 | Label | Meaning |
 | --- | --- |
@@ -911,8 +597,7 @@ link.
 
 ### `otari guardrails check`
 
-Runs the repository's gates against a change, such as a pull request. Requires
-a Git repository. Never reads `~/.otari/`.
+Runs the repository's gates against a change, such as a pull request. Requires a Git repository. Never reads `~/.otari/`.
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
@@ -924,9 +609,7 @@ a Git repository. Never reads `~/.otari/`.
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | `claude` | Comma-separated, ordered judge CLIs to try. A gate's `judge_cli` overrides it. |
 | `--max-judges <n>` | `OTARI_HOOK_MAX_JUDGES` | `5` | Judge gates run, from 1 to 20. |
 
-Without `--head`, the change includes untracked files. Every gate sees the
-paths the change touches as `stop.working_tree` evidence; a deleted path counts
-as changed, and a rename counts as both of its paths.
+Without `--head`, the change includes untracked files. Every gate sees the paths the change touches as `stop.working_tree` evidence; a deleted path counts as changed, and a rename counts as both of its paths.
 
 | Type | In a check |
 | --- | --- |
@@ -936,14 +619,11 @@ as changed, and a rename counts as both of its paths.
 | `command` | Cannot run. It needs the command a tool call is about to run. |
 | `command_if_changed` | Cannot run. It needs the commands a session ran. |
 
-It exits 1 when a `required` gate fails, errors or gets no result. A gate the
-change gives nothing to run against is reported as unable to run, and does not
-change the exit status. A `judge` finding never changes the exit status.
+It exits 1 when a `required` gate fails, errors or gets no result. A gate the change gives nothing to run against is reported as unable to run, and does not change the exit status. A `judge` finding never changes the exit status.
 
 ### `otari guardrails generate`
 
-Proposes gates from the repository's AGENTS.md, or CLAUDE.md where that is the
-only doc. Requires a Git repository.
+Proposes gates from the repository's AGENTS.md, or CLAUDE.md where that is the only doc. Requires a Git repository.
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
@@ -952,33 +632,15 @@ only doc. Requires a Git repository.
 | `--cli` | `OTARI_GUARDRAILS_GENERATE_CLI` | `claude`, then `codex` | Comma-separated, ordered CLIs to try; the first found on `PATH` is used. |
 | `--model` | `OTARI_GUARDRAILS_GENERATE_MODEL` | the CLI's own default | Model for the one generation call. |
 
-- It names the resolved CLI and asks for confirmation before sending the doc.
-  The generation call times out after 300 seconds.
-- Proposals are shown one at a time, the screen cleared between each, numbered
-  "N of total", with a single-keypress `[y]es/[n]o/[e]dit/[q]uit` prompt. With
-  no controlling terminal (piped stdin, a CI runner) it reads an
-  Enter-terminated line instead.
-- A proposal whose `id` is already declared anywhere in the composed guardrail
-  is skipped without asking, naming the file that has it.
-- Every accepted gate, edited or not, is parsed before it is written, so an
-  unknown field, an invalid glob or a `judge` gate proposed as `required` is
-  refused in the terminal.
-- It only appends. The new gate is inserted as text into the file's `gates:`
-  list at the column its items already use, so existing gates and comments are
-  untouched, and nothing is written unless the result parses. A file that does
-  not exist yet gets a `schema_version` and `policy` header around the first
-  accepted gate.
+- It names the resolved CLI and asks for confirmation before sending the doc. The generation call times out after 300 seconds.
+- Proposals are shown one at a time, the screen cleared between each, numbered "N of total", with a single-keypress `[y]es/[n]o/[e]dit/[q]uit` prompt. With no controlling terminal (piped stdin, a CI runner) it reads an Enter-terminated line instead.
+- A proposal whose `id` is already declared anywhere in the composed guardrail is skipped without asking, naming the file that has it.
+- Every accepted gate, edited or not, is parsed before it is written, so an unknown field, an invalid glob or a `judge` gate proposed as `required` is refused in the terminal.
+- It only appends. The new gate is inserted as text into the file's `gates:` list at the column its items already use, so existing gates and comments are untouched, and nothing is written unless the result parses. A file that does not exist yet gets a `schema_version` and `policy` header around the first accepted gate.
 - It refuses to create a file that would take the set past 64 files.
-- It is not a sync: a rerun proposes from scratch and asks about every
-  candidate, including ones a prior run declined.
+- It is not a sync: a rerun proposes from scratch and asks about every candidate, including ones a prior run declined.
 
 ## Upgrade notes
 
-- **Every gate needs `runs`.** A guardrail written before the field existed no
-  longer parses, and because `otari hook` fails open on a guardrail it cannot
-  parse, it enforces none of that file's gates. Run `otari guardrails validate`
-  after upgrading; the error names the legal values for each gate's type.
-- **`.otari-guardrails.yml` at the repository root is not read.** A repository
-  still carrying it enforces no gates from it. Move the file to
-  `.otari/guardrails.yml` unchanged. `otari hook` reports this on every event
-  until it moves.
+- **Every gate needs `runs`.** A guardrail written before the field existed no longer parses, and because `otari hook` fails open on a guardrail it cannot parse, it enforces none of that file's gates. Run `otari guardrails validate` after upgrading; the error names the legal values for each gate's type.
+- **`.otari-guardrails.yml` at the repository root is not read.** A repository still carrying it enforces no gates from it. Move the file to `.otari/guardrails.yml` unchanged. `otari hook` reports this on every event until it moves.

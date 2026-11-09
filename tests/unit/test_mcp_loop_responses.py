@@ -126,6 +126,8 @@ def _response(
     status: str = "completed",
     input_tokens: int = 1,
     output_tokens: int = 1,
+    cached_tokens: int = 0,
+    reasoning_tokens: int = 0,
 ) -> Response:
     """Build a minimal Response. Many required fields are filled with neutral defaults."""
     return Response(
@@ -140,9 +142,9 @@ def _response(
         tools=[],
         usage=ResponseUsage(
             input_tokens=input_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            input_tokens_details=InputTokensDetails(cached_tokens=cached_tokens),
             output_tokens=output_tokens,
-            output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=reasoning_tokens),
             total_tokens=input_tokens + output_tokens,
         ),
         error=None,
@@ -384,8 +386,14 @@ async def test_loop_replays_and_returns_compaction_from_hidden_iteration(
 async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
         [
-            _response(output=[_function_call("c1", "fetch_url", "{}")], input_tokens=10, output_tokens=2),
-            _response(output=[], status="completed", input_tokens=12, output_tokens=3),
+            _response(
+                output=[_function_call("c1", "fetch_url", "{}")],
+                input_tokens=10,
+                output_tokens=2,
+                cached_tokens=6,
+                reasoning_tokens=1,
+            ),
+            _response(output=[], input_tokens=12, output_tokens=3, cached_tokens=9, reasoning_tokens=2),
         ]
     )
 
@@ -401,7 +409,9 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     )
     assert out.usage is not None
     assert out.usage.input_tokens == 22
+    assert out.usage.input_tokens_details.cached_tokens == 15
     assert out.usage.output_tokens == 5
+    assert out.usage.output_tokens_details.reasoning_tokens == 3
     assert out.usage.total_tokens == 27
 
 
@@ -821,14 +831,18 @@ _TERMINAL_EVENT_TYPES = {
 }
 
 
-def _response_terminal(status: str, *, output_tokens: int, seq: int = 0) -> ResponseStreamEvent:
-    """The event a response of ``status`` ends with, reporting ``output_tokens``."""
+def _response_terminal(
+    status: str, *, output_tokens: int, seq: int = 0, input_tokens: int = 1, cached_tokens: int = 0
+) -> ResponseStreamEvent:
+    """The event a response of ``status`` ends with, reporting that usage."""
     event_class = _TERMINAL_EVENT_TYPES[status]
     return cast(
         ResponseStreamEvent,
         event_class(
             type=cast(Any, f"response.{status}"),
-            response=_response(status=status, output_tokens=output_tokens),
+            response=_response(
+                status=status, input_tokens=input_tokens, cached_tokens=cached_tokens, output_tokens=output_tokens
+            ),
             sequence_number=seq,
         ),
     )
@@ -1182,6 +1196,44 @@ async def test_stream_counts_earlier_rounds_output_on_a_final_round_that_ended_u
 
     assert events[-1].type == f"response.{status}"
     assert cast(Any, events[-1]).response.usage.output_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_stream_counts_every_rounds_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The final event is the stream's only usage report, so it carries every round's input, not the last round's."""
+    fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, fc),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _response_terminal("completed", input_tokens=2000, cached_tokens=1800, output_tokens=5),
+            ),
+            _async_iter(
+                _text_delta("msg_1", 0, "done"),
+                _response_terminal("completed", input_tokens=2100, cached_tokens=2000, output_tokens=3),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    usage = cast(Any, events[-1]).response.usage
+    assert usage.input_tokens == 4100
+    assert usage.input_tokens_details.cached_tokens == 3800
+    assert usage.total_tokens == 4108
 
 
 @pytest.mark.asyncio

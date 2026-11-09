@@ -26,9 +26,15 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
+from gateway.repositories.users_repository import (
+    UserFilter,
+    count_users,
+    in_organization,
+    lock_live_users,
+    page_users,
+)
 from gateway.services.budgets import budget_window
-from gateway.services.model_access import validate_allowed_models, validate_allowed_tools
+from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
 
 router = APIRouter(
@@ -438,12 +444,16 @@ async def delete_user(
     # and the telemetry FK's SET NULL never fires here regardless of its setting.
     await erase_user_records(request, storage, traces, user_id)
 
+    # After the erasure, which commits, so the lock is held by the transaction that removes the user's grants and
+    # marks them deleted: a grant to this user committing meanwhile waits for it and is then refused.
+    await lock_live_users(db, [user_id])
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
+    await revoke_user_mcp_grants(db, user_id)
     user.deleted_at = datetime.now(UTC)
 
     try:

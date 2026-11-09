@@ -118,8 +118,8 @@ class GuardrailResult:
     def flagged(self) -> bool:
         """A guardrail flags the input when it explicitly reports ``valid=False``.
 
-        ``valid is None`` (guardrail returned no verdict) is treated as *not
-        flagged* — we don't block on an inconclusive result.
+        ``valid is None`` is no verdict rather than a flag; ``on_unavailable``
+        decides whether the request may go on without one.
         """
         return self.valid is False
 
@@ -302,6 +302,7 @@ async def run_input_guardrails(
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
     in_process: Mapping[str, InProcessGuardrail | None] | None = None,
+    allow_no_verdict: bool = False,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
 
@@ -367,6 +368,10 @@ async def run_input_guardrails(
       (``valid=None``) and the request proceeds; we don't 502 a request the
       caller explicitly asked us not to enforce.
 
+    A check that runs and answers no verdict (``valid=None``) was not evaluated
+    either, so it takes the same paths. ``allow_no_verdict`` returns that answer
+    instead, for a caller that runs a check only to show what the service says.
+
     Returns:
         A :class:`GuardrailVerdict` aggregating every input guardrail's result.
 
@@ -425,6 +430,7 @@ async def run_input_guardrails(
     results: list[GuardrailResult] = []
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
         for cfg in input_guardrails:
+            fails_closed = cfg.mode == "block" and cfg.on_unavailable == "block"
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
                 if (unsafe_url := unsafe.get(cfg.profile)) is not None:
@@ -451,7 +457,7 @@ async def run_input_guardrails(
                         credential=credentials.get(cfg.profile),
                     )
             except GuardrailsNotReachableError as exc:
-                if cfg.mode == "block" and cfg.on_unavailable == "block":
+                if fails_closed:
                     raise  # fail closed: an enforcing guardrail must not be skipped
                 # The reason belongs here and nowhere else: the fail-closed arm
                 # above hands its message to `apply_input_guardrails`, which logs
@@ -476,6 +482,11 @@ async def run_input_guardrails(
                     )
                 )
                 continue
+            if result.valid is None and fails_closed and not allow_no_verdict:
+                raise GuardrailsNotReachableError(
+                    f"guardrail profile {cfg.profile!r} returned no verdict",
+                    public_detail=_unevaluated_detail(cfg.profile),
+                )
             if result.flagged:
                 logger.info(
                     "guardrail flagged input: profile=%s mode=%s score=%s",

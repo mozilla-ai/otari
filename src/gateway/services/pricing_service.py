@@ -1192,7 +1192,9 @@ def _first_tool_rate(
                 rate_key, flat_request_cost(deployment[form]), "deployment", old_key=_is_old_key(rate_key, form[0])
             )
     if model_search_rate is not None and any(is_provider_web_search_key(key) for key in lookup.rate_keys):
-        return ToolRate(lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source)
+        return ToolRate(
+            lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source, rules=model_search_rate.rules
+        )
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
             list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None
@@ -1215,6 +1217,15 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     sense: it cannot bill the request either.
     """
     return require_pricing and not has_completion_meter(pricing)
+
+
+def unbillable_rate_detail(model: str, *, unit: str, bills: str) -> str:
+    """The 402 body for a model whose rate is in a unit the endpoint cannot bill on: the unit, and what it bills."""
+    return (
+        f"Model '{model}' is priced per {unit}, which this request cannot be billed on, and require_pricing is on, "
+        f"so it cannot be served. This endpoint bills {bills} (POST {API_ROOT}/pricing, or the pricing section "
+        "of config.yml)."
+    )
 
 
 def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:

@@ -69,10 +69,27 @@ def _snapshot(engine: Engine) -> dict[str, dict[str, Any]]:
                     constraint["name"]: tuple(constraint["column_names"])
                     for constraint in inspector.get_unique_constraints(table)
                 },
+                "foreign_keys": {
+                    fk["name"]: (
+                        tuple(fk["constrained_columns"]),
+                        fk["referred_table"],
+                        fk["options"].get("ondelete"),
+                    )
+                    for fk in inspector.get_foreign_keys(table)
+                },
             }
             for table in inspector.get_table_names()
             if table not in _IGNORED_TABLES
         }
+
+
+def _declared_foreign_key_names(table: str) -> list[str]:
+    """The foreign key names a model sets itself rather than leaving to the database."""
+    return [
+        str(constraint.name)
+        for constraint in Base.metadata.tables[table].foreign_key_constraints
+        if constraint.name is not None
+    ]
 
 
 @pytest.fixture
@@ -103,7 +120,7 @@ def metadata_built_url(postgres_url: str) -> Generator[str]:
 
 
 def test_the_migration_chain_and_the_models_agree(postgres_url: str, metadata_built_url: str) -> None:
-    """Every table, column and index is the same whichever way the schema is built.
+    """Every table, column, index and foreign key is the same whichever way the schema is built.
 
     A failure here names the drift directly. "migrated only" means the models
     stopped describing something the chain creates; "models only" means a
@@ -145,3 +162,15 @@ def test_the_migration_chain_and_the_models_agree(postgres_url: str, metadata_bu
         assert migrated_uniques == from_models[table]["uniques"], (
             f"{table}: unique constraints disagree between the migration chain and the models"
         )
+        # Many migrations name a foreign key the model leaves to the database, so
+        # names are compared only where the model declares one; the definitions
+        # are compared everywhere.
+        migrated_fks = migrated[table]["foreign_keys"]
+        model_fks = from_models[table]["foreign_keys"]
+        assert sorted(migrated_fks.values()) == sorted(model_fks.values()), (
+            f"{table}: foreign keys disagree between the migration chain and the models"
+        )
+        for name in _declared_foreign_key_names(table):
+            assert migrated_fks.get(name) == model_fks[name], (
+                f"{table}: the models name foreign key {name!r}, the migration chain does not"
+            )

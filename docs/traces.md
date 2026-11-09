@@ -69,12 +69,17 @@ Otari never guesses that two requests belong together from their content.
 | A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
-| An OTLP span's Otari label | `otari.session_label` on an exported span | `otlp` |
+| An OTLP span's Otari label | `otari.user_session_label`, or else `otari.session_label`, on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
 client's requests, send one of the signals above. An exported span that names
-none of the OTLP attributes is grouped by its OTel trace instead, and when
-it names more than one, the first in the table wins.
+none of the OTLP attributes is in the session of its nearest ancestor that
+names one, failing that in the first session another span of its OTel trace
+names, and failing that is grouped by its OTel trace. Instrumentation usually
+names the conversation on the root span alone, so this keeps the calls under it
+in its session. Only spans of the same export are seen: a span whose trace's
+session arrived in an earlier export is grouped by its OTel trace. When a span
+names more than one of the attributes, the first in the table wins.
 
 A harness's own id and an OTLP session id name one session when they are the
 same id, so a Claude Code session routed through Otari and the spans exported
@@ -151,7 +156,10 @@ without a name.
   and **completed** otherwise. A routing attempt that failed and was recovered by
   a fallback does not fail its turn.
 - **Tools the gateway runs** (web search, web fetch, code execution, MCP tools)
-  are timed as they run.
+  are timed as they run. That includes a tool a client runs through
+  `POST /api/v1/mcp/execute`, whose span also names the access rule that
+  allowed it, or refused it, in which case the span is blocked (see
+  [Caller-orchestrated MCP](mcp.md#execution)).
 - **Tools the client runs** (a shell, a file read in a coding agent) are
   recorded from the request that carries their result: the tool's name, whether
   it returned an error, and when the result arrived. Their start is when the step before
@@ -180,7 +188,19 @@ within the limits under [Settings](trace-storage.md#settings), on the agent trac
 user, including its own `invoke_agent` and `execute_tool` spans, with the span
 tree it sent. Its sessions are grouped by the OTLP attributes in
 [What makes a session](#what-makes-a-session). Span names and attribute values are kept only when they are
-identifier-shaped. A span's `gen_ai.response.finish_reasons` array is kept as
+identifier-shaped.
+
+Each LLM call a span reports is priced by the usage ledger (see
+[Importing external usage](external-usage.md#opentelemetry)), and the session
+counts that cost, shown on the call's span. When two instrumentations in one
+process both report a call, such as the Claude SDK's own tracing beside
+OpenLLMetry, both spans are kept, but the call is one usage row and its cost
+counts once in the session's totals. When both spans come in the same export,
+its tokens count once too, read off the span that reports more of them. Two
+spans are one call when they carry the same `gen_ai.response.id`; a span that
+carries none is a call of its own.
+
+A span's `gen_ai.response.finish_reasons` array is kept as
 one value, its reasons joined by a comma: `stop,length`. The read API returns
 each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
 with, in lowercase hex, so it can be joined back to the same trace in another

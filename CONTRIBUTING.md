@@ -142,13 +142,11 @@ make test        # unit + integration
 
 Run a single test: `uv run pytest tests/unit/test_gateway_cli.py -v`
 
-If you changed any API routes or schemas, regenerate both generated artifacts and commit them:
+If you changed any API routes or schemas, regenerate the generated artifact and commit it:
 
 ```bash
 uv run python scripts/generate_openapi.py
-uv run python scripts/generate_postman.py
 make openapi-check
-make postman-check
 ```
 
 ## Dependencies

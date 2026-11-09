@@ -207,6 +207,20 @@ describe("WorkspaceDetailPage", () => {
     expect(removed?.url).toContain("default-openai")
   })
 
+  it("holds the per-provider add row for a caller who cannot manage the workspace", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+    })
+    renderPage()
+
+    await screen.findByText("Per-provider defaults")
+    expect(
+      await screen.findByRole("button", { name: / Provider$/ }),
+    ).toBeDisabled()
+    expect(screen.getByRole("button", { name: / Budget$/ })).toBeDisabled()
+  })
+
   it("withholds the default-budget controls from a non-operator", async () => {
     const requests = mockApi({
       context: organizationContext({ deployment_operator: false }),

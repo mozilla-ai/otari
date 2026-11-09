@@ -1,4 +1,5 @@
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { AvatarCard } from "@/features/account/avatar/AvatarCard"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
 import { ProfileCard } from "@/features/account/ProfileCard"
@@ -27,6 +28,7 @@ export function AccountPage() {
         Settings page.
       </PageIntro>
       <ProfileCard />
+      <AvatarCard />
       <PasswordCard />
       {/* Absent where the deployment turned passkeys off: the card would ask
           routes that are not there. A deployment that merely has not set them

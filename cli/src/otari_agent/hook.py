@@ -27,6 +27,7 @@ from typing import Any, Literal, NamedTuple, cast
 import click
 import yaml
 
+from otari_agent.claude_code_paths import claude_user_settings_path
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.definitions import GateDefinition, bounded, definition_digest
 from otari_agent.domain.evaluators import matched_changed_paths
@@ -383,11 +384,13 @@ def _hook_discover_guardrail_files(root: Path) -> list[Path]:
     return files
 
 
-def _hook_guardrail_files(root: Path) -> list[GuardrailFile]:
+def _hook_guardrail_files(root: Path, *, repo_only: bool = False) -> list[GuardrailFile]:
     """Every guardrail file the hook composes in this repo: the repo's own, then the user's in `~/.otari/`.
 
     A repo file that links to one of the user's files is read once, as the user's, so the repo cannot turn it off.
     A repo checked out at the home directory owns `~/.otari/`, so its files are the repo's.
+    `repo_only` returns the repo's own files alone, for a person turning their own rules off in this one repo.
+    The user's files are still discovered, because a repo file that links to one is theirs and goes with them.
     """
     repo_paths = _hook_discover_guardrail_files(root)
     try:
@@ -398,10 +401,12 @@ def _hook_guardrail_files(root: Path) -> list[GuardrailFile]:
         home_is_repo = True
     user_paths = [] if home_is_repo else _hook_discover_guardrail_files(home)
     user_targets = {path.resolve() for path in user_paths}
-    return [
-        *(GuardrailFile(path, GuardrailOrigin.REPO) for path in repo_paths if path.resolve() not in user_targets),
-        *(GuardrailFile(path, GuardrailOrigin.USER) for path in user_paths),
+    repo_files = [
+        GuardrailFile(path, GuardrailOrigin.REPO) for path in repo_paths if path.resolve() not in user_targets
     ]
+    if repo_only:
+        return repo_files
+    return [*repo_files, *(GuardrailFile(path, GuardrailOrigin.USER) for path in user_paths)]
 
 
 def _guardrail_file_origin(path: Path, root: Path) -> GuardrailOrigin:
@@ -496,13 +501,13 @@ def _compose_guardrail(sources: list[PolicyFile], policy_id: str) -> PolicySpec:
     return compose_policy(sources, policy_id=policy_id)
 
 
-def _hook_guardrail_spec(root: Path) -> PolicySpec | None:
-    """The gates the hook enforces in this repo, the user's own included, or None when none load.
+def _hook_guardrail_spec(root: Path, *, repo_only: bool = False) -> PolicySpec | None:
+    """The gates the hook enforces in this repo, the user's own included unless `repo_only`, or None when none load.
 
     It reports no load error, so it suits a caller that only reads the gates.
     When the combined set does not load, it returns the side the hook falls back to.
     """
-    files = _hook_guardrail_files(root)
+    files = _hook_guardrail_files(root, repo_only=repo_only)
     if not files:
         return None
     try:
@@ -667,9 +672,9 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     Only an edit tool moves that cutoff. A `Bash` call can write to the tree
     too, and the transcript never says which ones did, so a cutoff that
     guessed would cost more than the gap it closes: the command these gates
-    require is frequently the writer itself (`make postman` writes the
-    collection its own gate asks for), and counting it would leave those
-    gates unsatisfiable.
+    require is frequently the writer itself (`scripts/generate_openapi.py`
+    writes the spec its own gate asks for), and counting it would leave
+    those gates unsatisfiable.
 
     Returns None only when the transcript itself cannot be read (missing,
     permissions, not a file): the same fail-open sentinel
@@ -2304,6 +2309,12 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     show_default=True,
     help="Agent integration sending this callback.",
 )
+@click.option(
+    "--repo-only",
+    is_flag=True,
+    default=False,
+    help=f"Enforce this repo's guardrail alone, leaving out your own in {GuardrailOrigin.USER.directory}.",
+)
 # Accepted and ignored, not rejected. A hook registered by an older `otari
 # hook setup` still passes `--api-key <value>` on every tool call, and Click
 # exits 2 on an option it does not know, which both supported harnesses read
@@ -2365,6 +2376,7 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
 def hook(
     ctx: click.Context,
     harness: str,
+    repo_only: bool,
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
@@ -2375,8 +2387,15 @@ def hook(
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
     status), and checks it in process against this repository's guardrail.
-    The user's own guardrail in `~/.otari/` composes with it.
+    The user's own guardrail in `~/.otari/` composes with it, unless
+    `--repo-only` leaves it out.
     No server and no credential are involved. See docs/agent-guardrails.md.
+
+    `--repo-only` is for a person whose own rules do not suit one repository.
+    It means what it does on `otari guardrails validate`, so a dry run there
+    agrees with this. Pass it to `otari hook setup` rather than editing the
+    settings file: a later `setup` run rewrites the registered command, so a
+    flag added by hand does not survive one.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
@@ -2423,7 +2442,7 @@ def hook(
     if root is None:
         return
 
-    guardrail_files = _hook_guardrail_files(root)
+    guardrail_files = _hook_guardrail_files(root, repo_only=repo_only)
     if not guardrail_files:
         # Silence is right for a repo that never had a guardrail, and wrong for
         # one whose guardrail this build stopped finding; see
@@ -2841,13 +2860,19 @@ def _policy_header(repo_name: str) -> str:
 
 
 def _starter_gates_yaml(repo_name: str) -> str:
-    """A two-gate starter policy, chosen to teach `runs` rather than to be useful.
+    """A four-gate starter policy, chosen to teach `runs` rather than to be useful.
 
     One gate of each shape a `runs` value can take: a command gate, which can
     only ever refuse a call before it happens, and a path gate naming both
     moments, which is what most real rules want. Between them a reader sees
     that the field is a real choice and that the two halves of an entry say
     different things.
+
+    The last two are a read gate and the command gate it needs beside it. A
+    read gate on its own sees the harness's read tool and nothing a shell
+    command reads, which `otari guardrails validate` warns about, so shipping
+    the read gate alone would hand every new repository a warning instead of
+    the pattern that answers it.
     """
     return _policy_header(repo_name) + (
         "  - id: no-force-push\n"
@@ -2867,16 +2892,59 @@ def _starter_gates_yaml(repo_name: str) -> str:
         #
         # A path nothing legitimately generates, on purpose. A gate over a
         # generated file warns on the very command that regenerates it, which
-        # is the trap this repo's own policy documents twice (see the
-        # postman-collection and pyproject gates in
-        # .otari/guardrails/generated-artifacts.yml).
+        # is the trap this repo's own policy documents (see the pyproject
+        # gate in .otari/guardrails/generated-artifacts.yml).
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "    enforcement: advisory\n"
         '    forbidden: [".env", "**/.env"]\n'
         "    message: >-\n"
         "      A .env file holds secrets and does not belong in the repo.\n"
         "      Keep it untracked and out of commits.\n"
+        "\n"
+        "  - id: no-reading-env-file\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.read_target]\n"
+        "    enforcement: advisory\n"
+        '    forbidden: [".env", "**/.env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not read one.\n"
+        "\n"
+        "  - id: no-shell-access-to-env-file\n"
+        "    type: command\n"
+        # The pair the read gate above needs. A read gate sees the harness's
+        # read tool and nothing a shell command reads, and unlike a write
+        # nothing catches that afterwards, so the shell side is a gate of its
+        # own or it is not covered at all.
+        #
+        # One bare token rather than a list of readers, because a phrase's
+        # words must appear unbroken: `head .env` would miss `head -5 .env`,
+        # and the readers are unbounded anyway (`awk`, `xxd`, `source`,
+        # `python -c`). Naming the path catches every one of them, at the
+        # cost of also firing on a command that only mentions it.
+        "    runs: [pre_tool_use.command]\n"
+        "    enforcement: advisory\n"
+        "    accept_warnings: [single-token-phrase]\n"
+        '    forbidden: [".env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not name one in a shell command:\n"
+        "      a shell read is invisible to the read gate and can print the\n"
+        "      value into the transcript.\n"
     )
+
+
+def _otari_hook_argv(command: str) -> list[str] | None:
+    """A registered hook command's argv when it runs `otari hook`, else None.
+
+    The executable is matched by name, so an entry naming otari on `PATH` and one naming an
+    install path are both recognized as the same registration.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if len(argv) >= 2 and Path(argv[0]).stem == "otari" and argv[1] == "hook":
+        return argv
+    return None
 
 
 def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher: str | None = None) -> bool:
@@ -2886,12 +2954,17 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     is not tool-scoped, `Stop` being the one this integration registers:
     Claude Code's own Stop hooks carry no `matcher`, unlike `PreToolUse`'s.
 
-    Returns True if a new entry was appended, False if an existing one was
-    found (by its command already starting with this same otari binary
-    invoked as "hook", whatever flags it had) and updated in place instead of
-    duplicated. Every other key in the file, including other hooks and
-    permissions, other events, and any sibling hook command under the same
-    matcher, is preserved untouched.
+    Returns True if a new entry was appended, False if otari hook was already
+    registered here, whatever flags or executable path that entry named, and
+    those registrations were reused. Every otari hook item in the event is
+    rewritten, not just the first, because Claude Code runs every entry whose
+    matcher matches and one left behind would keep enforcing what the others
+    no longer do. An entry holding sibling hook commands keeps its own matcher
+    and otari's hook item moves to an entry of its own, because a matcher
+    covers every command in its entry and narrowing one here would narrow it
+    for the siblings too. Only that item's `command` is written, so another
+    field on it survives either way. Every other key in the file, including
+    other hooks and permissions and other events, is preserved untouched.
     """
     if settings_path.is_file():
         try:
@@ -2909,28 +2982,35 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     entries = hooks_section.setdefault(event, [])
     if not isinstance(entries, list):
         raise click.ClickException(f'{settings_path}\'s "hooks.{event}" must be a JSON array.')
-    otari_hook_prefix = command.split(" --", 1)[0]  # "<path> hook", before any flags
+
+    def entry_for(hook_item: dict[str, object]) -> dict[str, object]:
+        new_entry: dict[str, object] = {"hooks": [hook_item]}
+        return {"matcher": matcher, **new_entry} if matcher is not None else new_entry
 
     updated = False
+    split_items: list[dict[str, object]] = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             continue
-        for hook_item in entry["hooks"]:
+        # Reversed, because splitting pops the item this index names.
+        for index in reversed(range(len(entry["hooks"]))):
+            hook_item = entry["hooks"][index]
             existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
-            if isinstance(existing_command, str) and existing_command.startswith(otari_hook_prefix):
+            if not isinstance(existing_command, str) or _otari_hook_argv(existing_command) is None:
+                continue
+            if matcher is not None and len(entry["hooks"]) > 1:
+                split_item = entry["hooks"].pop(index)
+                split_item["command"] = command
+                split_items.append(split_item)
+            else:
                 if matcher is not None:
                     entry["matcher"] = matcher
                 hook_item["command"] = command
-                updated = True
-                break
-        if updated:
-            break
+            updated = True
 
+    entries.extend(entry_for(item) for item in split_items)
     if not updated:
-        new_entry: dict[str, object] = {"hooks": [{"type": "command", "command": command}]}
-        if matcher is not None:
-            new_entry = {"matcher": matcher, **new_entry}
-        entries.append(new_entry)
+        entries.append(entry_for({"type": "command", "command": command}))
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
@@ -2962,6 +3042,36 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
+def _hook_global_registration_without_repo_only() -> Path | None:
+    """Claude Code's user settings file, if it registers otari hook there without `--repo-only`.
+
+    That registration runs in every repository on this machine, so it would still enforce the
+    person's own gates in a repository whose own entry just turned them off.
+    """
+    settings_path = claude_user_settings_path()
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(settings, dict):
+        return None
+    hooks_section = settings.get("hooks")
+    if not isinstance(hooks_section, dict):
+        return None
+    for entries in hooks_section.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for hook_item in entry["hooks"]:
+                command = hook_item.get("command") if isinstance(hook_item, dict) else None
+                argv = _otari_hook_argv(command) if isinstance(command, str) else None
+                if argv is not None and "--repo-only" not in argv:
+                    return settings_path
+    return None
+
+
 @hook.command(name="setup")
 @click.option(
     "--harness",
@@ -2970,7 +3080,16 @@ _HOOK_SETUP_BY_HARNESS = {
     show_default=True,
     help="Agent integration to configure.",
 )
-def hook_setup(harness: str) -> None:
+@click.option(
+    "--repo-only",
+    is_flag=True,
+    default=False,
+    help=(
+        "Register the hook to enforce this repo's guardrail alone, leaving out your own in "
+        f"{GuardrailOrigin.USER.directory}."
+    ),
+)
+def hook_setup(harness: str, repo_only: bool) -> None:
     """Register otari hook in this repository, in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
@@ -2982,6 +3101,13 @@ def hook_setup(harness: str) -> None:
     (whether it needs to cover the shell tool, the read tool, or both) from
     whatever gates the guardrail turns out to have; Stop needs no matcher;
     see docs/agent-guardrails.md for why both are registered unconditionally.
+
+    `--repo-only` writes that flag into the registered command, so the hook
+    enforces this repo's guardrail alone here. The matcher is then picked from
+    the repo's own gates, because a matcher widened for a gate the hook will
+    not run invokes it on every such tool call for nothing. On claude-code, it
+    also warns when `~/.claude/settings.json` registers the hook for every
+    repository without the flag, since that registration still runs here.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -2999,7 +3125,7 @@ def hook_setup(harness: str) -> None:
             starter.parent.mkdir(parents=True, exist_ok=True)
             starter.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
             click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
-        elif _hook_guardrail_spec(root) is not None:
+        elif not repo_only and _hook_guardrail_spec(root) is not None:
             click.echo(
                 f"Skipping. otari hook will still be registered below and will check your own gates in "
                 f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
@@ -3012,7 +3138,7 @@ def hook_setup(harness: str) -> None:
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
-    needs = _guardrail_matcher_needs(_hook_guardrail_spec(root))
+    needs = _guardrail_matcher_needs(_hook_guardrail_spec(root, repo_only=repo_only))
     matcher_parts = [setup.edit_matcher]
     if needs.read and setup.read_matcher is not None:
         matcher_parts.append(setup.read_matcher)
@@ -3022,7 +3148,10 @@ def hook_setup(harness: str) -> None:
 
     # No credential, and no prompt for one: `otari hook` evaluates the
     # guardrail in process and has nothing to authenticate against.
-    command = shlex.join([_otari_binary_path(), "hook", "--harness", harness])
+    argv = [_otari_binary_path(), "hook", "--harness", harness]
+    if repo_only:
+        argv.append("--repo-only")
+    command = shlex.join(argv)
 
     settings_path = root / setup.settings_dir / setup.settings_name
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
@@ -3046,6 +3175,16 @@ def hook_setup(harness: str) -> None:
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
+
+    if repo_only and harness == "claude-code":
+        global_settings_path = _hook_global_registration_without_repo_only()
+        if global_settings_path is not None:
+            click.echo(
+                f"{global_settings_path} also registers otari hook without --repo-only, so it still "
+                "enforces your own gates here. Adding the flag there turns them off in every repository "
+                "that entry covers, so to keep them elsewhere remove that entry and register the hook "
+                "per repository instead."
+            )
 
 
 # otari's own doc, checked first; CLAUDE.md is a one-line @AGENTS.md import in
@@ -3958,7 +4097,7 @@ def guardrails_validate(
             )
         files = [GuardrailFile(guardrail_file_option, _guardrail_file_origin(guardrail_file_option, root))]
     else:
-        files = [file for file in _hook_guardrail_files(root) if not repo_only or file.origin is GuardrailOrigin.REPO]
+        files = _hook_guardrail_files(root, repo_only=repo_only)
         if not files:
             where = "" if repo_only else f", and nothing in {GuardrailOrigin.USER.directory}"
             raise click.ClickException(

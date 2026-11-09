@@ -490,6 +490,39 @@ def test_user_exceeded_budget_allowed_on_free_model(
     assert response.status_code != 403
 
 
+def test_user_exceeded_budget_blocked_on_a_free_model_whose_rules_price_the_request(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    budget_id = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    client.post(
+        f"{API_ROOT}/users", json={"user_id": "test-user-budget", "budget_id": budget_id}, headers=master_key_header
+    )
+    always = {"date": {"gte": "2000-01-01"}}
+    created = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "rates": {
+                "text": {"input": {"price": 0, "overrides": [{"when": always, "price": 5}]}, "output": {"price": 0}}
+            },
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o-mini", "messages": test_messages, "user": "test-user-budget"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403, response.text
+
+
 def test_user_exceeded_budget_blocked_on_unknown_pricing(
     client: TestClient,
     master_key_header: dict[str, str],

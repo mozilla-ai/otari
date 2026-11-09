@@ -282,6 +282,22 @@ describe("WorkspacesPage", () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
+  it("names a workspace with no default budget as having none", async () => {
+    mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+
+    expect(
+      screen.getByRole("button", { name: /Default member budget/ }),
+    ).toHaveTextContent("No default")
+  })
+
   it("guards a chosen default budget on the way out, with nothing typed", async () => {
     // The guard reads one snapshot of the whole draft, so it sees the fields
     // nobody remembered to list. It used to read the name and the description

@@ -19,6 +19,8 @@ track usage.
 [Launch blog](https://blog.mozilla.ai/otari-own-your-ai-stack/) ·
 [Discord](https://discord.gg/ZfZPfTdtSe)
 
+English · [简体中文](README.zh-CN.md)
+
 </div>
 
 > [!NOTE]
@@ -44,7 +46,7 @@ Run Otari with your own database and provider keys.
 - Provider credentials stay behind the gateway
 - Revocable API keys with user, workspace, and model scope
 - Budget checks before spend and usage records after settlement
-- Local routing policies for failover, weighting, and learned selection
+- Local routing policies for failover, conditional selection, traffic splitting, and spill-over past a rate limit
 - Optional code execution, web search, MCP, inference guardrails, and file understanding
 
 ## Quickstart

@@ -203,6 +203,45 @@ def test_a_comment_after_a_metacharacter_is_still_a_comment() -> None:
         assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(ls)#; npm install",
+        "echo $(ls)#x; npm install",
+        "echo a$(ls)b#; npm install",
+        "cat <(ls)#; npm install",
+        "tee >(cat)#; npm install",
+        "diff <(ls) <(ls)#; npm install",
+        "echo $( (ls) )#; npm install",
+        "echo $(echo $((1)))#; npm install",
+        "echo $(f() { :; }; f)#; npm install",
+        "echo $(cat <<'EOF'\nx\nEOF\n)#; npm install",
+        "echo $(#c\nls)#; npm install",
+        "echo $(echo $(ls)#)#; npm install",
+    ],
+)
+def test_a_hash_right_after_a_substitution_is_not_a_comment(command: str) -> None:
+    """Bash reads `$(...)`, `<(...)` and `>(...)` as part of the word around them, so `$(ls)#` is one word and
+    the command after it runs. Reading that `#` as a comment hid the command from the gate.
+    """
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(ls) # npm install",
+        "cat <(ls) #; npm install",
+        "(ls)#; npm install",
+        "echo $( (ls)#; npm install\n)",
+        "echo ${x:-$(ls)} # npm install",
+    ],
+)
+def test_a_comment_after_a_substitution_or_a_subshell_is_still_a_comment(command: str) -> None:
+    """A `#` after whitespace, or after the `)` that closes a subshell, starts a comment, in a substitution too."""
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
 # --- _command_segments / _contains_subsequence: direct unit coverage -------
 
 

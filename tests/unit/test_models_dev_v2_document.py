@@ -347,3 +347,21 @@ def test_v2_is_tried_before_v1() -> None:
     v2, v1 = (source.url for source in MODELS_DEV_SOURCES)
     assert v2 == "https://models.dev/experimental/v2.0/api.json?type=all"
     assert v1 == "https://models.dev/api.json"
+
+
+def test_a_rule_on_a_condition_not_known_here_is_kept_named_once_and_is_not_damage() -> None:
+    """A condition key models.dev adds is reported; the rule is kept, and skipped when a price is read."""
+    lunar = {"when": {"all": [{"moon_phase": {"equals": "full"}}, {"service_tier": {"equals": "flex"}}]}, "price": 9}
+    cost = {
+        "text": {"input": {"price": 1, "overrides": [lunar]}},
+        "multipliers": [{"when": {"tide": {"gt": 1}}, "factor": 2}],
+    }
+    catalog = parse_catalog_v2({"p": {"models": {"a": {"cost": cost}, "b": {"cost": cost}}}})
+
+    assert catalog.issues == ModelsDevIssues(models=2, unknown_conditions=("moon_phase", "tide"))
+    assert catalog.refusal() is None
+    assert catalog.issues.describe().endswith("price rule conditions not known here: moon_phase, tide")
+    pricing = catalog.providers["p"].models["a"].pricing
+    assert pricing is not None
+    assert len(pricing.modalities["text"].input.overrides) == 1  # type: ignore[union-attr]
+    assert len(pricing.multipliers) == 1

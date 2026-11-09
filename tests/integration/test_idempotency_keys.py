@@ -413,6 +413,7 @@ def test_a_blocked_user_is_not_given_the_stored_response(
     retried = _post_chat(client, headers, provider)
 
     assert retried.status_code == 403, retried.text
+    assert retried.json()["detail"] == f"User '{_USER}' is blocked"
     assert IDEMPOTENT_REPLAYED_HEADER not in retried.headers
 
 

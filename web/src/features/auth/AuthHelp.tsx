@@ -1,6 +1,8 @@
 import { Link } from "@heroui/react"
 import { Button } from "@/design-system/actions/Button"
 import { Popover } from "@/design-system/overlays/Popover"
+import { welcomeGuideLink } from "@/shared/helpers/docs"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { PublicAuthLink } from "./PublicAuthLayout"
 
 /**
@@ -14,6 +16,10 @@ import { PublicAuthLink } from "./PublicAuthLayout"
  * beside the password box itself, so this popover carries it only for the
  * master-key box, where there is no password field to put it next to.
  *
+ * The guide link goes to the deployment's documentation where it configures
+ * `docs_url` (see `welcomeGuideLink`). The "master key" link in the note stays
+ * on `/welcome`: the master-key box is only offered where the gateway serves it.
+ *
  * The trigger is a `Button` because a popover trigger has to be a react-aria
  * pressable, and reads as the text link beside it because both call sites put it
  * in an `.otari-auth-actions` row (`globals.css`). Outside one of those rows it
@@ -26,6 +32,7 @@ export function AuthHelp({
   offersRecovery: boolean
   credential?: "password" | "master-key"
 }) {
+  const { href, label, target, rel } = welcomeGuideLink(useDeployment())
   return (
     <Popover
       label="Help"
@@ -44,10 +51,12 @@ export function AuthHelp({
           </PublicAuthLink>
         ) : null}
         <Link
-          href="/welcome"
+          href={href}
+          target={target}
+          rel={rel}
           className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
         >
-          Open the welcome guide
+          {label}
         </Link>
         {credential ? (
           <p className="border-t border-border pt-3 text-caption">

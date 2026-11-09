@@ -103,6 +103,16 @@ image tagged `latest` and the short SHA, with `OTARI_VERSION` set to the commit
 SHA. These are not releases; only a published GitHub Release produces a
 semver-tagged image.
 
+Every push to `main` that touches `docs/` or the site build likewise runs
+`otari-docs.yml`, which builds the GitBook site from that commit and commits it
+to the `gitbook-docs-preview` branch, which a preview site syncs from, so the
+next release's docs can be read before it ships. Links between the preview's
+spaces go to the `GITBOOK_PREVIEW_SITE_URL` repository variable, or to
+`https://docs.otari.ai` when it is unset; the repository is public, so that
+variable must not hold a share link. The preview's API pages render from the
+spec registered as `otari-openapi-spec-preview`, read from
+`gitbook-docs-preview`'s `api/openapi.json`, so they show `main`'s API.
+
 ### Changelog visibility
 
 `CHANGELOG.md` and the GitHub Release body are generated from the Conventional

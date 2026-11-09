@@ -12,13 +12,16 @@ attached files and tools behave is in
 
 ## Test a single model
 
+![The Playground in Single mode, with the prompt box, the Tools menu and the model picker.](assets/screenshots/playground-single.png)
+
 1. From your workspace, open **Playground**.
 2. Make sure **Single** is selected.
 3. Choose a model from the dropdown below the prompt box.
 4. Enter your prompt, or pick one of the suggested **Starting points**.
 5. Optionally, open **Tools** to add web search, code execution or MCP servers
    to the request, and attach files with the paperclip or by dropping them on
-   the page.
+   the page. Only the MCP servers your
+   [access rules](control-access-to-an-mcp-server.md) let you reach are listed.
 6. Press Enter or click the Send button.
 7. Review the model's response and its usage and performance information.
 
