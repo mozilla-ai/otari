@@ -568,6 +568,7 @@ class ErrorKind(Enum):
     NOT_FOUND = auto()
     PERMISSION = auto()
     RATE_LIMIT = auto()
+    REQUEST_TOO_LARGE = auto()
 
 
 # An error flattened into an ``HTTPException`` no longer carries its kind, so a
@@ -577,7 +578,7 @@ _STATUS_ERROR_KINDS = {
     status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
     status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
     status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
-    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.INVALID_REQUEST,
+    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
     status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
 }
 
