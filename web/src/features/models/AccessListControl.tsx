@@ -25,8 +25,7 @@ export interface AccessOption {
   id: string
   // What the operator sees in the dropdown.
   label: string
-  // A muted second line naming what the label leaves out, such as the stored
-  // selector. Searched and read out with the label.
+  // A muted second line, searched and read out with the label.
   hint?: string
 }
 
@@ -37,7 +36,6 @@ export interface AccessListCopy {
   // The notice under "block", after "Blocked from ".
   blocked: ReactNode
   pickPrompt: string
-  // The picker's visible name when there is one catalog.
   inputLabel?: string
   placeholder?: string
 }
@@ -55,12 +53,9 @@ export interface AccessPicker {
   loadingMessage: string
 }
 
-// The shell both the model and the tool access-lists share; each wrapper builds
-// its own catalog and copy, and says what is still loading. One ``catalog`` is
-// picked in a MultiSelect, where picked entries stay listed and checked and the
-// chips sit below a field that never moves. ``pickers`` gives the list several
-// comboboxes instead, each over its own catalog, every one adding to the same
-// list of entries.
+// The shell the model and tool access-lists share. One ``catalog`` is picked in
+// a MultiSelect; ``pickers`` gives several comboboxes instead, each over its own
+// catalog, all adding to the same list of entries.
 export function AccessListControl({
   initial,
   onChange,
@@ -151,7 +146,9 @@ export function AccessListControl({
           value={entries}
           onChange={pick}
           description={
-            hint ?? (entries.length === 0 ? copy.pickPrompt : undefined)
+            [hint, entries.length === 0 ? copy.pickPrompt : null]
+              .filter(Boolean)
+              .join(" ") || undefined
           }
           searchPlaceholder={copy.placeholder}
           emptyMessage={loadingMessage ?? hint ?? undefined}

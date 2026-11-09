@@ -28,6 +28,7 @@ function mockApi({
   hosted = [] as string[],
   aliases = [] as { name: string; target: string }[],
   providerKeys = [] as ReturnType<typeof orgProviderKey>[],
+  providerKeysStatus = 200,
 } = {}) {
   const urls: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -37,6 +38,9 @@ function mockApi({
       return json(aliases)
     }
     if (url.includes(`${API_ROOT}/organizations/me/provider-keys?`)) {
+      if (providerKeysStatus !== 200) {
+        return json({ detail: "nope" }, providerKeysStatus)
+      }
       return json({ data: providerKeys, count: providerKeys.length })
     }
     if (url.endsWith(`${API_ROOT}/organizations/me`)) {
@@ -66,14 +70,17 @@ function mockApi({
   return urls
 }
 
-function renderControl() {
+// `{}` renders a control with no list of its own ("any model").
+function renderControl(
+  { initial }: { initial?: string[] } = { initial: ["byok-openai:gpt-4o"] },
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   const onChange = vi.fn()
   render(
     <QueryClientProvider client={client}>
-      <ModelScopeControl initial={["byok-openai:gpt-4o"]} onChange={onChange} />
+      <ModelScopeControl initial={initial} onChange={onChange} />
     </QueryClientProvider>,
   )
   return onChange
@@ -272,6 +279,96 @@ describe("ModelScopeControl", () => {
     expect(
       await screen.findAllByRole("option", { name: /^All OpenAI models/ }),
     ).toHaveLength(1)
+  })
+
+  it("offers no wildcard for a key reached by its own slug", async () => {
+    mockApi({
+      models: ["mzai:llama-4"],
+      providerKeys: [
+        orgProviderKey({
+          provider: "openai",
+          slug: "my-vllm",
+          api_base: "http://vllm.internal/v1",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderControl()
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+      "a",
+    )
+    expect(
+      await screen.findByRole("option", { name: /^All Mozilla AI models/ }),
+    ).toBeInTheDocument()
+    // Not under its slug, which allowed_models refuses, nor under its
+    // provider, which would grant the provider's other keys instead.
+    expect(
+      screen.queryByRole("option", { name: /my-vllm/ }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: /^All OpenAI models/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not offer a key this deployment cannot decrypt", async () => {
+    mockApi({
+      models: ["mzai:llama-4"],
+      providerKeys: [orgProviderKey({ provider: "mistral", usable: false })],
+    })
+    const user = userEvent.setup()
+    renderControl()
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+      "a",
+    )
+    expect(
+      await screen.findByRole("option", { name: /^All Mozilla AI models/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: /Mistral/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("names the provider on a model two providers serve, chip included", async () => {
+    mockApi({ models: ["byok-openai:gpt-4o", "openai:gpt-4o"] })
+    const user = userEvent.setup()
+    renderControl()
+
+    expect(await screen.findByText("gpt-4o · byok-openai")).toBeInTheDocument()
+    await user.click(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+    )
+    expect(
+      await screen.findByRole("option", { name: "gpt-4o · OpenAI" }),
+    ).toBeInTheDocument()
+  })
+
+  it("reports a failed provider-key read rather than an empty catalog", async () => {
+    mockApi({ providerKeysStatus: 500 })
+    renderControl()
+
+    expect(
+      await screen.findByText(/Could not load the model catalog/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/No providers or models discovered yet/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps asking for a pick while saying the read failed", async () => {
+    mockApi({ modelsStatus: 500 })
+    const user = userEvent.setup()
+    renderControl({})
+
+    await user.click(screen.getByRole("button", { name: "Only selected" }))
+    expect(
+      await screen.findByText(
+        /Could not load the model catalog\. Reload to try again\. Pick at least one model/,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("does not ask a plain member for the provider keys", async () => {
