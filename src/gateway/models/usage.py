@@ -176,12 +176,12 @@ class UsageLog(Base):
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
     # Who ended a stream before it completed: "provider" (the upstream dropped it or
-    # failed mid-stream) or "client" (the caller disconnected). Null for every other
+    # failed after the first chunk) or "client" (the caller disconnected). Null for every other
     # row, and for rows written before the column existed: null reads as "not cut".
     # It lets a stream cut by the provider be listed for a refund or a report without
     # substring-matching ``error_message``. A provider-cut row is an "error" and may carry
     # estimated tokens and cost, billed under ``stream_missing_usage_policy`` "estimate".
-    stream_cut_by: Mapped[str | None] = mapped_column(String(16))
+    stream_cut_by: Mapped[StreamCutBy | None] = mapped_column(String(16))
 
     # Routing attribution. All nullable: a request that named a plain model was not
     # routed through a policy, and null reads correctly as exactly that.

@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.core.sql import utc_iso
 from gateway.models.money import as_float
-from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, StreamCutBy, UsageLog
 
 # The meter namespace inside ``UsageLog.billing_meters``. Tool meters are nested
 # under one reserved key rather than sitting flat next to the token meters:
@@ -249,7 +249,7 @@ class UsageEntry(BaseModel):
     attempt_count: int | None = None
     request_group_id: str | None = None
     # Who ended a stream before it completed, "provider" or "client"; null for any other row.
-    stream_cut_by: str | None = None
+    stream_cut_by: StreamCutBy | None = None
 
     @classmethod
     def from_model(

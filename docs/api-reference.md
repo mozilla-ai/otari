@@ -362,10 +362,16 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   way under `estimate`: the reported input tokens, or an estimate of the
   request, plus an estimate of the text already streamed, never a projected
   full answer. The row stays an `error` with its error message, so it counts
-  in the error totals, and its estimated cost counts in spend.
-- A stream cut before it completed records who ended it in `stream_cut_by`:
-  `provider` when the upstream dropped it or failed, `client` when the caller
-  disconnected. The field is null on any row whose stream was not cut.
+  in the error totals, and its estimated cost counts in spend. A stream the
+  client abandoned after the provider reported only its input tokens is
+  topped up the same way, so leaving early never costs less than the output
+  already received.
+- When a usage row is written for a stream cut before it completed,
+  `stream_cut_by` records who ended it: `provider` when the upstream dropped
+  it or failed after it started answering, `client` when the caller
+  disconnected. A provider failure before the first chunk is an ordinary
+  error, and a client disconnect that writes no row (above) records nothing.
+  The field is null on any row whose stream was not cut.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:

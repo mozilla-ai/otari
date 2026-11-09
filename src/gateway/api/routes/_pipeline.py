@@ -6265,8 +6265,10 @@ def build_streaming_response(
             # that spend. This is also where the streaming tool-iteration cap
             # lands, since the cap is raised inside the generator.
             await _charge(logged, expects_cost=billed_usage is not None)
-            if failed_cost := logged.cost:
-                await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(billed_usage))
+            # Tokens settle even at no cost, so a free model's tokens still reach the token ceiling.
+            failed_tokens = _settled_tokens(billed_usage)
+            if logged.cost or failed_tokens:
+                await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=failed_tokens)
             else:
                 await refund_reservation(db, reservation)
 
@@ -6286,6 +6288,7 @@ def build_streaming_response(
             prompt_chars=prompt_chars,
             streamed_chars=streamed_chars,
             reported_usage=reported_usage,
+            usage_is_final=usage_is_final,
             has_tool_work=tool_tally is not None and not tool_tally.is_empty(),
         )
         if rate_limit_grant is not None:
@@ -6321,8 +6324,9 @@ def build_streaming_response(
                 deployment_paid=deployment_paid,
             )
             await _charge(logged, expects_cost=row.usage is not None)
-            if abandoned_cost := logged.cost:
-                await reconcile_reservation(db, reservation, abandoned_cost, actual_tokens=_settled_tokens(row.usage))
+            abandoned_tokens = _settled_tokens(row.usage)
+            if logged.cost or abandoned_tokens:
+                await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=abandoned_tokens)
                 return
         await refund_reservation(db, reservation)
 

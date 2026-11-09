@@ -25446,6 +25446,10 @@
           "stream_cut_by": {
             "anyOf": [
               {
+                "enum": [
+                  "provider",
+                  "client"
+                ],
                 "type": "string"
               },
               {
@@ -52812,7 +52816,7 @@
     },
     "/api/v1/usage/requests/{request_id}": {
       "get": {
-        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage and ran no gateway tools writes a row only under the ``estimate`` policy,\nbilled on an estimate; otherwise it writes none, so its id stays 404.",
+        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that failed, including one the provider\ncut, always writes an error row. A stream the client abandoned before the\nprovider reported usage, with no gateway tool work, writes a row only under\nthe ``estimate`` policy, billed on an estimate; otherwise it writes none, so\nits id stays 404.",
         "operationId": "usage-get_request_settlement",
         "parameters": [
           {

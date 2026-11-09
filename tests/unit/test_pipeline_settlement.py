@@ -40,6 +40,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import HTTPException, Response
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
@@ -59,6 +60,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import GatewayUsage, cache_read_tokens_of
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
     WebAccessToolNotAuthorizedError,
@@ -296,10 +298,17 @@ class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
     def __init__(
-        self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False, broken: bool = False
+        self,
+        pricing_source: PriceSource | None = "deployment",
+        *,
+        per_request: bool = False,
+        broken: bool = False,
+        row_cost: Decimal = Decimal("0.25"),
     ) -> None:
         self.pricing_source = pricing_source
         self.per_request = per_request
+        # What a row with usage costs; zero is a free model's row.
+        self.row_cost = row_cost
         # Every usage write raises, as one whose rate lookup failed does.
         self.broken = broken
         self.reconciled: list[float] = []
@@ -322,7 +331,7 @@ class _Settlement:
                 return LoggedUsage(Decimal(kwargs["cost_override"]), None)
             if self.per_request and kwargs.get("error") is None:
                 return LoggedUsage(Decimal("0.005"), self.pricing_source)
-            return LoggedUsage(Decimal("0.25"), self.pricing_source) if usage else LoggedUsage(None, None)
+            return LoggedUsage(self.row_cost, self.pricing_source) if usage else LoggedUsage(None, None)
 
         async def fake_log_usage(**kwargs: Any) -> Decimal | None:
             return (await fake_record_usage(**kwargs)).cost
@@ -836,9 +845,8 @@ def test_usage_is_final_on_the_event_that_ends_it_and_not_on_the_one_that_starts
     [
         (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "allow_free", 40),
         (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "fail", 40),
-        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "estimate", None),
     ],
-    ids=["allow_free", "fail", "request-size-unknown"],
+    ids=["allow_free", "fail"],
 )
 async def test_a_provider_cut_that_owes_no_estimate_is_still_attributed_to_the_provider(
     monkeypatch: pytest.MonkeyPatch,
@@ -876,6 +884,62 @@ async def test_a_failure_that_is_not_a_provider_cut_is_not_attributed_or_estimat
     assert logged["usage_override"] is None
 
 
+@pytest.mark.asyncio
+async def test_a_provider_cut_of_unknown_request_size_still_bills_the_streamed_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool loop passes no request size; the output the client received is still owed."""
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), prompt_chars=None)
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (0, 4, 4)
+    assert logged["stream_cut_by"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_a_free_models_cut_settles_its_tokens_instead_of_refunding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row that costs nothing still has tokens for the token ceiling to count."""
+    settlement = _Settlement(row_cost=Decimal(0))
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in _TWO_TEXT_CHUNKS:
+            yield chunk
+        raise streaming.IncompleteStreamError(2)
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy="estimate"), prompt_chars=40))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal(0)]
+    assert settlement.settled_tokens == [14]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [TimeoutError("tool call timed out"), sqlalchemy_exc.TimeoutError("QueuePool limit reached")],
+    ids=["asyncio-timeout", "database-pool-timeout"],
+)
+async def test_a_gateway_side_timeout_is_not_a_provider_cut(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, exc)
+
+    (logged,) = settlement.logged
+    assert logged["stream_cut_by"] is None
+    assert logged["usage_override"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_provider_read_timeout_is_a_provider_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, httpx.ReadTimeout("provider went quiet"))
+
+    (logged,) = settlement.logged
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["usage_override"] is not None
+
+
 def test_a_provider_cut_row_is_an_error_and_a_client_abandon_is_incomplete() -> None:
     assert pipeline._row_status(error="dropped", attribution=None) == "error"
     assert pipeline._row_status(error=None, attribution=None, incomplete=True) == "incomplete"
@@ -902,6 +966,37 @@ def test_settle_cut_stream_never_raises_the_reported_output() -> None:
     usage = settle(400, unreported_prompt)
     assert usage is not None
     assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
+
+
+def test_settle_cut_stream_estimates_an_unreported_prompt_even_when_the_output_is_covered() -> None:
+    """A provider that counts output per chunk and the prompt only at the end has not reported the prompt."""
+    output_only = CompletionUsage(prompt_tokens=0, completion_tokens=50, total_tokens=50)
+
+    usage = settle_cut_stream(
+        policy="estimate", prompt_chars=40, streamed_chars=8, reported_usage=output_only, usage_is_final=False
+    )
+
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 50, 60)
+
+
+def test_settle_cut_stream_keeps_a_prompt_served_entirely_from_the_cache() -> None:
+    """Anthropic reports input_tokens=0 when cache reads cover the prompt; those are billed on their own."""
+    cached = GatewayUsage(
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        cache_read_tokens=50_000,
+        cache_tokens_in_prompt=False,
+    )
+
+    usage = settle_cut_stream(
+        policy="estimate", prompt_chars=200_000, streamed_chars=400, reported_usage=cached, usage_is_final=False
+    )
+
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (0, 100, 100)
+    assert cache_read_tokens_of(usage) == 50_000
 
 
 @pytest.mark.asyncio
@@ -3072,7 +3167,13 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
 
 
 def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
-    args: dict[str, Any] = {"policy": "estimate", "prompt_chars": 400, "streamed_chars": 10, "has_tool_work": False}
+    args: dict[str, Any] = {
+        "policy": "estimate",
+        "prompt_chars": 400,
+        "streamed_chars": 10,
+        "has_tool_work": False,
+        "usage_is_final": True,
+    }
     estimated = settle_abandoned_stream(**args, reported_usage=None)
     assert estimated is not None
     assert (estimated.incomplete, estimated.error) == (True, None)
@@ -3087,3 +3188,24 @@ def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
     ignored = {**args, "policy": "ignore"}
     assert settle_abandoned_stream(**ignored, reported_usage=None) is None
     assert settle_abandoned_stream(**{**ignored, "has_tool_work": True}, reported_usage=None) is not None
+
+
+def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_provider_cut() -> None:
+    """Leaving an Anthropic stream before message_delta must not make its output free."""
+    started = CompletionUsage(prompt_tokens=120, completion_tokens=0, total_tokens=120)
+    args: dict[str, Any] = {"prompt_chars": 400, "streamed_chars": 8_000, "has_tool_work": False}
+
+    topped = settle_abandoned_stream(**args, policy="estimate", reported_usage=started, usage_is_final=False)
+    assert topped is not None and topped.usage is not None
+    assert (topped.usage.prompt_tokens, topped.usage.completion_tokens, topped.usage.total_tokens) == (120, 2000, 2120)
+    assert (topped.incomplete, topped.error) == (False, "client disconnected before the stream completed")
+
+    cut = settle_cut_stream(
+        policy="estimate", prompt_chars=400, streamed_chars=8_000, reported_usage=started, usage_is_final=False
+    )
+    assert cut == topped.usage
+
+    final = settle_abandoned_stream(**args, policy="estimate", reported_usage=started, usage_is_final=True)
+    assert final is not None and final.usage == started
+    unestimated = settle_abandoned_stream(**args, policy="allow_free", reported_usage=started, usage_is_final=False)
+    assert unestimated is not None and unestimated.usage == started

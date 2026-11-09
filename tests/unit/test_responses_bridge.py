@@ -467,10 +467,11 @@ async def test_chunks_that_stop_short_of_a_finish_reason_are_a_cut_stream() -> N
 
 
 @pytest.mark.asyncio
-async def test_a_stream_with_no_chunks_still_completes() -> None:
+async def test_a_stream_with_no_chunks_announces_nothing() -> None:
+    """An empty upstream yields no events, so the stream fails as an empty chat stream does, not as a success."""
     events = await _stream({}, [])
 
-    assert events[-1].type == "response.completed"
+    assert events == []
 
 
 @pytest.mark.asyncio
