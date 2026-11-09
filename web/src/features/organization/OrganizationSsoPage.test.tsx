@@ -17,6 +17,7 @@ import {
   oidcConnectionDomain,
   organizationContext,
   organizationSso,
+  organizationSsoEnforcement,
   organizationSsoPreflight,
   organizationSsoPreflightMember,
 } from "@/tests/fixtures"
@@ -41,6 +42,8 @@ interface MockOpts {
   preflight?: OrganizationSsoPreflight
   /** What the preflight answers, so a test can drive the page without a report. */
   preflightResponse?: () => Response
+  /** What a read of the settings answers, so a test can move the served policy under the form. */
+  ssoResponse?: () => Response
   /** What a save answers, so a test can drive the refusal path. */
   save?: () => Response
   /** What setting enforcement answers, so a test can drive each of its refusals. */
@@ -62,6 +65,7 @@ function mockApi(opts: MockOpts = {}) {
     })
 
     if (url.includes("/sso/test")) {
+      if (opts.ssoResponse) return opts.ssoResponse()
       return jsonResponse(served)
     }
     if (url.includes("/sso/preflight")) {
@@ -81,7 +85,10 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse(undefined, 204)
     }
     if (url.includes("/sso")) {
-      if (method === "GET") return jsonResponse(served)
+      if (method === "GET") {
+        if (opts.ssoResponse) return opts.ssoResponse()
+        return jsonResponse(served)
+      }
       if (method === "PUT") {
         if (opts.save) return opts.save()
         // The served connection reflects the write, so a page that re-reads after saving sees the
@@ -535,6 +542,79 @@ describe("OrganizationSsoPage", () => {
     expect(
       screen.getByRole("button", { name: "Save enforcement" }),
     ).toBeDisabled()
+  })
+
+  it("follows a policy another administrator changed, while nothing is half-filled", async () => {
+    // The connection test refetches the settings, which is the refresh an administrator presses.
+    let enforced = false
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      ssoResponse: () =>
+        jsonResponse(
+          organizationSso({
+            connection: oidcConnection(),
+            enforcement: organizationSsoEnforcement({ required: enforced }),
+          }),
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    const box = await screen.findByRole("checkbox", {
+      name: "Require sign-in through this connection",
+    })
+    expect(box).not.toBeChecked()
+
+    enforced = true
+    await user.click(
+      screen.getByRole("button", { name: "Refresh from provider" }),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", {
+          name: "Require sign-in through this connection",
+        }),
+      ).toBeChecked()
+    })
+  })
+
+  it("leaves an edit in progress alone when the served policy moves", async () => {
+    let moved = false
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      ssoResponse: () =>
+        jsonResponse(
+          organizationSso({
+            connection: oidcConnection(),
+            enforcement: organizationSsoEnforcement({
+              break_glass_waived: moved,
+            }),
+          }),
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    const box = await screen.findByRole("checkbox", {
+      name: "Require sign-in through this connection",
+    })
+    await user.click(box)
+    expect(box).toBeChecked()
+
+    // The server moves a different field, so adopting it would reset the box just ticked.
+    moved = true
+    await user.click(
+      screen.getByRole("button", { name: "Refresh from provider" }),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", {
+          name: "Require sign-in through this connection",
+        }),
+      ).toBeChecked()
+    })
   })
 
   it("says what a save did, because the form looks unchanged otherwise", async () => {

@@ -406,6 +406,29 @@ function EnforcementSection({
   const [breakGlassWaived, setBreakGlassWaived] = useState(
     enforcement.break_glass_waived,
   )
+  // What the server said when these controls were last filled from it. A save sends what the
+  // controls hold, so a policy another administrator changed in the meantime would be overwritten
+  // by values that never saw it.
+  const [seen, setSeen] = useState(enforcement)
+  const untouched =
+    required === seen.required &&
+    breakGlassUserId === (seen.break_glass_user_id ?? "") &&
+    breakGlassWaived === seen.break_glass_waived
+  // Compared by value, not identity: a refetch hands back an equal policy as a new object, and
+  // comparing references would adopt it on every one of them.
+  const servedMoved =
+    enforcement.required !== seen.required ||
+    (enforcement.break_glass_user_id ?? "") !==
+      (seen.break_glass_user_id ?? "") ||
+    enforcement.break_glass_waived !== seen.break_glass_waived
+  if (servedMoved && untouched) {
+    // Adopted while nothing is half-filled, so a refreshed policy shows rather than waits, and an
+    // edit in progress is never discarded under the person making it.
+    setSeen(enforcement)
+    setRequired(enforcement.required)
+    setBreakGlassUserId(enforcement.break_glass_user_id ?? "")
+    setBreakGlassWaived(enforcement.break_glass_waived)
+  }
 
   const chosenOwner = candidates.find(
     (owner) => owner.user_id === breakGlassUserId,
