@@ -8,7 +8,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.models.inference import IdempotencyState
-from gateway.services.inference import IdempotentRequest, InferenceService, StillInFlight
+from gateway.services.inference import BlockedCaller, IdempotentRequest, InferenceService, StillInFlight
 from gateway.services.inference._idempotency import _CHANGES_BEFORE_CONFLICT
 from gateway.services.secret_box import generate_secret_key
 
@@ -102,3 +102,23 @@ async def test_a_retry_of_a_running_request_is_answered_at_once() -> None:
 
     assert isinstance(outcome, StillInFlight)
     keys.find.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_end_user_is_refused_with_its_external_id() -> None:
+    """The route names a service key's end user as the request did, so the refusal carries its external_id."""
+    keys = MagicMock()
+    keys.get_caller = AsyncMock(return_value=MagicMock(blocked=True, external_id="alice"))
+    keys.insert_claim = AsyncMock()
+    service = InferenceService(
+        _NoUnitOfWork(),  # type: ignore[arg-type]
+        MagicMock(idempotency=keys),
+        GatewayConfig(),
+        country_limited_providers=AsyncMock(return_value=[]),
+    )
+    request = IdempotentRequest(scope="key:k", key="k", request_hash="0" * 64, user_id="eu_1", api_key_id="k")
+
+    outcome = await asyncio.wait_for(service.admit(request), timeout=1)
+
+    assert outcome == BlockedCaller(external_id="alice")
+    keys.insert_claim.assert_not_awaited()

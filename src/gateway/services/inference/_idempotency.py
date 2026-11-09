@@ -153,6 +153,8 @@ class UnknownCaller:
 class BlockedCaller:
     """The user the key would be claimed for is blocked, so is given nothing, not even a stored response."""
 
+    external_id: str | None = None
+
 
 Admission = Claimed | Replay | KeyReused | StillInFlight | UnknownCaller | BlockedCaller
 
@@ -269,7 +271,7 @@ class InferenceService:
         if caller is None:
             return UnknownCaller()
         if caller.blocked:
-            return BlockedCaller()
+            return BlockedCaller(external_id=caller.external_id)
         for _ in range(_CHANGES_BEFORE_CONFLICT):
             async with self._uow:
                 outcome = await self._try_admit(request)
