@@ -745,19 +745,25 @@ class _ConcurrentKms:
     has two.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, *, together: int | None = None) -> None:
         self._inner = inner
         self._lock = threading.Lock()
         self._in_flight = 0
         self.most_in_flight = 0
         self.describes = 0
+        # Holds each call until ``together`` are in flight, failing rather than
+        # hanging when a read issues its calls in turn and they never all arrive.
+        self._together = threading.Barrier(together, timeout=5) if together else None
 
     def _run(self, method: Any, **kwargs: Any) -> Any:
         with self._lock:
             self._in_flight += 1
             self.most_in_flight = max(self.most_in_flight, self._in_flight)
         try:
-            time.sleep(0.02)
+            if self._together is not None:
+                self._together.wait()
+            else:
+                time.sleep(0.02)
             return method(**kwargs)
         finally:
             with self._lock:
@@ -781,7 +787,7 @@ async def test_a_read_takes_one_round_trip_however_many_keys_are_listed(kms: Any
         _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
     )
     previous = tuple(_new_kms_key(kms) for _ in range(4))
-    counting = _ConcurrentKms(kms)
+    counting = _ConcurrentKms(kms, together=len(previous) + 2)
     reader = SpanContent(_kms_keyring(counting, current, previous=previous))
 
     assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
@@ -823,10 +829,12 @@ async def test_a_cancelled_reader_leaves_the_key_resolution_open_to_the_next(kms
         _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
     )
     blocked = asyncio.Event()
+    loop = asyncio.get_running_loop()
     inner = kms.describe_key
 
     def hold(**kwargs: Any) -> Any:
-        blocked.set()
+        # On a worker thread, and an asyncio event is set only from its own loop.
+        loop.call_soon_threadsafe(blocked.set)
         time.sleep(0.2)
         return inner(**kwargs)
 
