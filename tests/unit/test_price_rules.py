@@ -58,6 +58,12 @@ def _on(when: dict[str, Any], price: float = 9) -> dict[str, Any]:
         ({"generate_audio": {"equals": False}}, {"generate_audio": True}, False),
         ({"region": {"in": ["us", "eu"]}}, {"region": "US"}, True),
         ({"not": {"region": {"equals": "global"}}}, {"region": "global"}, False),
+        ({"context": {"equals": 200_000}}, {"context": 200_000}, True),
+        ({"duration": {"equals": 5}}, {"duration": Decimal("5.0")}, True),
+        ({"duration": {"in": [4, 5.5]}}, {"duration": Decimal("5.50")}, True),
+        ({"input_video": {"equals": 1}}, {"input_video": True}, False),
+        ({"context": {"equals": True}}, {"context": 1}, False),
+        ({"context": {"gt": "100"}}, {"context": 200}, False),
     ],
 )
 def test_a_condition_holds_by_its_operator(when: dict[str, Any], facts: dict[str, Any], applies: bool) -> None:
@@ -106,10 +112,17 @@ def test_a_rule_naming_a_key_no_fact_answers_is_skipped(when: dict[str, Any]) ->
         {"service_tier": {"in": "flex"}},
         {"all": {"service_tier": {"equals": "flex"}}},
         "flex",
+        {"service_tier": {"equals": ["flex"]}},
+        {"context": {"gt": True}},
+        {"context": {"gt": None}},
+        {"context": {"min_items": -1}},
+        {"context": {"min_items": True}},
     ],
 )
 def test_a_rule_whose_condition_cannot_be_read_is_skipped(when: Any) -> None:
-    assert _input_price(_on(when), service_tier="flex") == 1
+    # Negating a skipped rule is still skipped, which a rule read as false is not.
+    assert _input_price(_on(when), service_tier="flex", context=5) == 1
+    assert _input_price(_on({"not": when}), service_tier="flex", context=5) == 1
 
 
 def test_all_any_and_not_combine() -> None:
@@ -315,6 +328,18 @@ def test_a_cache_price_names_only_the_rules_that_changed_it() -> None:
     rules = resolve_rates(document, PriceFacts(context=101, service_tier="priority")).rules
 
     assert rules == {"text.input": (long,), "text.input.cache.write": (long,), "text.input.cache.read": (tier,)}
+
+
+def test_a_rule_read_from_a_stored_block_is_named_as_written() -> None:
+    long = {"context": {"gt": Decimal("100")}, "duration": {"lte": Decimal("2.5")}}
+    document = {"text": {"input": _text(1, overrides=[{"when": long, "price": 2}])}}
+
+    rules = resolve_rates(document, PriceFacts(context=101, duration=2)).rules
+
+    assert rules == {"text.input": ({"context": {"gt": 100}, "duration": {"lte": 2.5}},)}
+    ((named,),) = rules.values()
+    assert type(named["context"]["gt"]) is int
+    assert type(named["duration"]["lte"]) is float
 
 
 def test_resolving_leaves_the_block_it_read_unchanged() -> None:
