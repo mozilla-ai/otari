@@ -42,9 +42,12 @@ that carries none is filled in.
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
-`UnsupportedParameterError` rather than being dropped. `SHARED_PARAMETERS` lists the shared
-parameters, so a host can tell them from native options, and `shared_parameter_problems` says which
-values `search` refuses, so a host can check them before the call.
+`UnsupportedParameterError` rather than being dropped. An adapter that refuses a value of an
+option before the request, such as SearXNG's `method` or Perplexity's `search_type`, raises
+`UnsupportedValueError`, a `ValueError` too, whose message names the allowed values.
+`SHARED_PARAMETERS` lists the shared parameters, so a host can tell them from native options, and
+`shared_parameter_problems` says which values `search` refuses, so a host can check them before the
+call.
 
 ## What comes back
 
@@ -241,7 +244,9 @@ Native options, under Perplexity's own names: `search_type` (`web` or `fast`, th
 `search_after_date_filter`, `search_before_date_filter`, `last_updated_after_filter` and
 `last_updated_before_filter`, as `MM/DD/YYYY`. Perplexity refuses a recency filter, `time_range`
 included, together with `search_after_date_filter` or `search_before_date_filter`. Its `people`
-search type is not offered. Perplexity reports no cost.
+search type is not offered: Perplexity runs it, so the adapter refuses any `search_type` but `web`
+and `fast` with `UnsupportedValueError`. An option passed as `None` is left out of the request, as if not
+passed, so `search_type=None` searches at Perplexity's default, `web`. Perplexity reports no cost.
 
 Perplexity signals every failure with an HTTP status and an `error` object. Any status from 400
 raises `ProviderError`, tagged with `error.type` (`invalid_api_key`, `invalid_request`,

@@ -54,6 +54,16 @@ def test_a_provider_bug_exits_1_without_the_query(capsys: pytest.CaptureFixture[
     assert "sentinel-query" not in captured.err
 
 
+def test_a_value_an_option_does_not_take_exits_1_naming_the_allowed_ones(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    assert main(["perplexity", "sentinel-query", "-o", "search_type=people"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "error: perplexity takes search_type web or fast"
+    assert "sentinel-query" not in captured.err
+
+
 def test_an_unknown_option_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["fake", "q", "-o", "color=red"]) == 1
     assert "'color'" in capsys.readouterr().err

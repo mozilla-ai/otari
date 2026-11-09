@@ -8,7 +8,14 @@ from typing import Any
 import httpx
 import pytest
 
-from any_search import AnySearch, MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
+from any_search import (
+    AnySearch,
+    MissingCredentialError,
+    ProviderError,
+    SearchResult,
+    UnsupportedParameterError,
+    UnsupportedValueError,
+)
 from any_search._http import USER_AGENT
 from any_search.providers.perplexity import MAX_RESULTS
 
@@ -94,6 +101,15 @@ async def test_native_options_are_sent_as_given() -> None:
     }
     _, request = await _search(**options)
     assert json.loads(request.content) == {"query": QUERY, **options}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", ["people", "Fast"])
+async def test_a_search_type_the_adapter_does_not_offer_is_refused_before_the_request(search_type: str) -> None:
+    with pytest.raises(UnsupportedValueError, match="^perplexity takes search_type web or fast$") as refused:
+        await _search(search_type=search_type)
+    # A ValueError too, as a bad value is.
+    assert isinstance(refused.value, ValueError)
 
 
 @pytest.mark.asyncio

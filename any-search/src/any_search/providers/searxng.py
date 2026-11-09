@@ -57,7 +57,7 @@ from typing import Any
 import httpx
 
 from any_search._api import AnySearch
-from any_search._errors import ProviderError
+from any_search._errors import ProviderError, UnsupportedValueError
 from any_search._http import is_web_url
 from any_search._types import OptionSpec, ProviderMetadata, SearchError, SearchHit, SearchResult, TimeRange
 
@@ -152,7 +152,7 @@ class SearxngProvider(AnySearch):
         if method is None:
             method = _METHODS[0]
         if method not in _METHODS:
-            raise ValueError(f"method must be one of {', '.join(_METHODS)}")
+            raise UnsupportedValueError(self.METADATA.name, "method", list(_METHODS))
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/search"
         if method == "post":

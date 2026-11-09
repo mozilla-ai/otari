@@ -50,6 +50,19 @@ class UnsupportedParameterError(AnySearchError):
         super().__init__(f"{provider} does not take the option {parameter!r}")
 
 
+class UnsupportedValueError(AnySearchError, ValueError):
+    """A value a native option does not take, refused before the request; a ``ValueError`` too, as any bad value is.
+
+    The message names the allowed values, never the one passed.
+    """
+
+    def __init__(self, provider: str, parameter: str, allowed: list[str]) -> None:
+        self.provider = provider
+        self.parameter = parameter
+        self.allowed = allowed
+        super().__init__(f"{provider} takes {parameter} {' or '.join(allowed)}")
+
+
 class UnsupportedProviderError(AnySearchError):
     """A provider name this package does not serve."""
 
