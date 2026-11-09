@@ -17,7 +17,7 @@ import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 /** Stands in for a model when the deployment has none to name yet. */
 export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
 
-const DEFAULT_MESSAGE = "Hello"
+export const DEFAULT_MESSAGE = "Hello"
 
 /**
  * A string as a quoted literal, escaped.
@@ -31,7 +31,7 @@ const DEFAULT_MESSAGE = "Hello"
  *
  * The shell is a second layer and is handled by ``shellSingleQuoted`` below.
  */
-const literal = (value: string): string => JSON.stringify(value)
+export const literal = (value: string): string => JSON.stringify(value)
 
 /**
  * A word as one single-quoted shell argument.
@@ -43,7 +43,7 @@ const literal = (value: string): string => JSON.stringify(value)
  * quote, emit an escaped one, reopen), and it leaves a word without apostrophes
  * byte-identical, which is every word anyone will actually see.
  */
-const shellSingleQuoted = (word: string): string =>
+export const shellSingleQuoted = (word: string): string =>
   `'${word.replaceAll("'", `'\\''`)}'`
 
 export interface RequestSnippetInput {
@@ -77,6 +77,30 @@ export function buildCurlSnippet({
   ].join("\n")
 }
 
+/** A key spelled as a shell reference, `$OTARI_API_KEY`, naming its variable. */
+const ENV_REFERENCE = /^\$([A-Za-z_][A-Za-z0-9_]*)$/
+
+/**
+ * The key as a Python expression. A shell reference reads its environment
+ * variable, because Python would send `"$OTARI_API_KEY"` as it is; any other
+ * key is a string literal.
+ */
+export function pythonKey(apiKey: string): string {
+  const name = ENV_REFERENCE.exec(apiKey)?.[1]
+  return name ? `os.environ[${literal(name)}]` : literal(apiKey)
+}
+
+/** A Python program that imports `os` where `pythonKey` reads the environment. */
+export function pythonProgram(
+  apiKey: string,
+  stdlib: string[],
+  rest: string[],
+): string {
+  const modules = ENV_REFERENCE.test(apiKey) ? [...stdlib, "os"] : stdlib
+  const imports = [...modules].sort().map((module) => `import ${module}`)
+  return [...imports, ...(imports.length > 0 ? [""] : []), ...rest].join("\n")
+}
+
 /**
  * Python through the OpenAI client (`pip install openai`), pointed at the
  * gateway's `/api/v1`. It sends the key as `Authorization: Bearer`, which the
@@ -88,16 +112,20 @@ export function buildPythonSnippet({
   model = SNIPPET_MODEL_PLACEHOLDER,
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
-  return [
-    "from openai import OpenAI",
-    "",
-    `client = OpenAI(base_url=${literal(`${baseUrl}${API_ROOT}`)}, api_key="${apiKey}")`,
-    "resp = client.chat.completions.create(",
-    `    model=${literal(model)},`,
-    `    messages=[{"role": "user", "content": ${literal(message)}}],`,
-    ")",
-    "print(resp.choices[0].message.content)",
-  ].join("\n")
+  return pythonProgram(
+    apiKey,
+    [],
+    [
+      "from openai import OpenAI",
+      "",
+      `client = OpenAI(base_url=${literal(`${baseUrl}${API_ROOT}`)}, api_key=${pythonKey(apiKey)})`,
+      "resp = client.chat.completions.create(",
+      `    model=${literal(model)},`,
+      `    messages=[{"role": "user", "content": ${literal(message)}}],`,
+      ")",
+      "print(resp.choices[0].message.content)",
+    ],
+  )
 }
 
 /** TypeScript through the OpenAI client (`openai`), the same call the Python snippet makes. */
