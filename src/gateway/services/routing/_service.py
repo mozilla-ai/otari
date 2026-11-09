@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import catalog_models, offering_input_rate
 from gateway.services.model_access import workspace_serves_target
@@ -103,7 +104,13 @@ class RoutingService:
 
         ``serving_workspace_id`` keeps only the offerings a request billed to
         that workspace may call, and the models left with one.
+
+        Raises:
+            WorkspaceNotFoundError: ``serving_workspace_id`` is not one of
+                ``workspace_ids``, the workspaces the caller may see.
         """
+        if serving_workspace_id is not None and serving_workspace_id not in workspace_ids:
+            raise WorkspaceNotFoundError(serving_workspace_id)
         traffic = await self._usage.served_traffic(
             workspace_ids=workspace_ids, since=datetime.now(UTC) - FALLBACK_WINDOW
         )
