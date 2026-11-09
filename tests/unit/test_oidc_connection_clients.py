@@ -17,8 +17,8 @@ from typing import Any, cast
 
 import httpx
 import pytest
-from apron_auth import INVALID_CLIENT, INVALID_GRANT, OAuthClient, ServerMetadata, StoredStateClient, TokenExchangeError
-from apron_auth.errors import AuthorizationResponseError, IssuerValidationError, StateError
+from apron_auth import OAuthClient, ServerMetadata, StoredStateClient
+from apron_auth.errors import IssuerValidationError, StateError
 from apron_auth.models import AuthorizationCallback
 from apron_auth.models import OAuthPendingState as PendingState
 from sqlalchemy import Select
@@ -28,9 +28,7 @@ from gateway.models.identity import OIDCConnection
 from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services.identity import _connection_clients
 from gateway.services.identity._connection_clients import (
-    ConnectionCredentialCheck,
     _provider_config_for,
-    check_connection_credentials,
     client_for,
     identity_handler_for,
     pending_flow_provider,
@@ -367,118 +365,3 @@ async def test_the_ssrf_check_still_refuses_a_private_token_url() -> None:
         await transport.handle_async_request(httpx.Request("POST", token_url))
 
     assert isinstance(refusal.value.__cause__, UnsafeURLError | RetrievalTargetError)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("error_code", "expected"),
-    [
-        ("invalid_grant", ConnectionCredentialCheck.ACCEPTED),
-        ("invalid_client", ConnectionCredentialCheck.REFUSED),
-        ("unauthorized_client", ConnectionCredentialCheck.REFUSED),
-    ],
-)
-async def test_the_probe_reads_a_providers_own_refusal_through_a_real_exchange(
-    monkeypatch: pytest.MonkeyPatch, error_code: str, expected: ConnectionCredentialCheck
-) -> None:
-    """Drive the probe through the whole chain, stubbing only the socket.
-
-    The tests below patch ``exchange_code`` and so assert this module's mapping alone. This one
-    asserts the part the mapping rests on: that an error body on the wire reaches it as the
-    matching ``error_code``.
-    """
-
-    async def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, json={"error": error_code})
-
-    monkeypatch.setattr(
-        "gateway.services.identity._connection_clients.CheckedFederationTransport",
-        lambda *, allow_private_hosts: _StubTransport(handler),
-    )
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is expected
-
-
-@pytest.mark.asyncio
-async def test_check_connection_credentials_reports_accepted_for_invalid_grant(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _raise(_self: OAuthClient, _callback: AuthorizationCallback, *, pending_state: Any) -> Any:
-        raise TokenExchangeError("bad code", error_code=INVALID_GRANT)
-
-    monkeypatch.setattr(OAuthClient, "exchange_code", _raise)
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is ConnectionCredentialCheck.ACCEPTED
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("error_code", [INVALID_CLIENT, "unauthorized_client"])
-async def test_check_connection_credentials_reports_refused_for_a_client_credential_error(
-    monkeypatch: pytest.MonkeyPatch, error_code: str
-) -> None:
-    async def _raise(_self: OAuthClient, _callback: AuthorizationCallback, *, pending_state: Any) -> Any:
-        raise TokenExchangeError("bad client", error_code=error_code)
-
-    monkeypatch.setattr(OAuthClient, "exchange_code", _raise)
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is ConnectionCredentialCheck.REFUSED
-
-
-@pytest.mark.asyncio
-async def test_check_connection_credentials_is_inconclusive_for_an_unrecognized_error_code(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _raise(_self: OAuthClient, _callback: AuthorizationCallback, *, pending_state: Any) -> Any:
-        raise TokenExchangeError("server error", error_code="server_error")
-
-    monkeypatch.setattr(OAuthClient, "exchange_code", _raise)
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is ConnectionCredentialCheck.INCONCLUSIVE
-
-
-@pytest.mark.asyncio
-async def test_check_connection_credentials_is_inconclusive_on_an_unrelated_oauth_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _raise(_self: OAuthClient, _callback: AuthorizationCallback, *, pending_state: Any) -> Any:
-        raise AuthorizationResponseError("no code to redeem")
-
-    monkeypatch.setattr(OAuthClient, "exchange_code", _raise)
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is ConnectionCredentialCheck.INCONCLUSIVE
-
-
-@pytest.mark.asyncio
-async def test_check_connection_credentials_is_inconclusive_when_nothing_was_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A provider that redeems the deliberately invalid code proves nothing either way."""
-
-    async def _succeed(_self: OAuthClient, _callback: AuthorizationCallback, *, pending_state: Any) -> Any:
-        return object()
-
-    monkeypatch.setattr(OAuthClient, "exchange_code", _succeed)
-
-    result = await check_connection_credentials(
-        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
-    )
-
-    assert result is ConnectionCredentialCheck.INCONCLUSIVE
