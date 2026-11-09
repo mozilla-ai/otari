@@ -243,14 +243,17 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=req-1`,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
     })
-    const never = "Otari never keeps what a request sent or got back."
 
-    expect(await within(peek).findByText(never)).toBeInTheDocument()
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a model call sent or got back.",
+      ),
+    ).toBeInTheDocument()
     expect(
       within(peek).queryByRole("link", { name: /How to keep it/ }),
     ).not.toBeInTheDocument()
@@ -272,7 +275,9 @@ describe("SessionsPage", () => {
       within(peek).getByRole("button", { name: /Request \(req-1\)/ }),
     )
 
-    expect(within(peek).getByText(never)).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Its prompt is not shown."),
+    ).toBeInTheDocument()
     expect(within(peek).queryByText("No input or output")).toBeNull()
   })
 
@@ -302,7 +307,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        "Otari never keeps what a request sent or got back.",
+        "Otari never keeps what a model call sent or got back.",
       ),
     ).toBeInTheDocument()
 

@@ -531,13 +531,14 @@ describe("toTrace", () => {
             span_id: "prompt-1",
             operation: "interaction",
             origin: "otlp",
+            opens_turn: true,
           }),
           traceSpan({ span_id: "req-1" }),
           traceSpan({ span_id: "llm-1", parent_span_id: "req-1", kind: "llm" }),
           tool("bash-1", "Bash"),
           tool("read-1", "Read"),
           tool("fetch-1", "WebFetch"),
-          // Read off a request the gateway routed, which never carries content.
+          // Read off a request the gateway routed, which keeps its arguments.
           tool("routed-1", "Bash", "gateway"),
           traceSpan({
             span_id: "gate-1",
@@ -581,19 +582,42 @@ describe("toTrace", () => {
       docsHref: docs,
     })
     expect(byId.get("req-1")?.noInput).toEqual({
-      sentence: "Otari never keeps what a request sent or got back.",
+      sentence: "A request that continues a turn keeps nothing of its own.",
     })
     expect(byId.get("llm-1")?.noInput).toEqual({
-      sentence: "Otari never keeps what a request sent or got back.",
+      sentence: "Otari never keeps what a model call sent or got back.",
     })
     expect(byId.get("fetch-1")?.noInput).toEqual({
       sentence: "Otari keeps no content for this tool.",
     })
     expect(byId.get("routed-1")?.noInput).toEqual({
-      sentence: "Otari keeps no content for this tool.",
+      sentence: "Its arguments are not shown.",
+      docsHref: docs,
     })
     expect(byId.get("mcp-1")?.noInput).toEqual({
       sentence: "Otari keeps no content for this kind of span.",
+    })
+  })
+
+  it("links how to keep a routed request's prompt and its tool calls' arguments", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    const docs =
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about"
+
+    expect(byId.get("req-1")?.noInput).toEqual({
+      sentence: "Its prompt is not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("call-toolu_1")?.noInput).toEqual({
+      sentence: "Its arguments are not shown.",
+      docsHref: docs,
+    })
+    expect(byId.get("req-2")?.noInput).toEqual({
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    })
+    expect(byId.get("llm-2")?.noInput).toEqual({
+      sentence: "Otari never keeps what a model call sent or got back.",
     })
   })
 

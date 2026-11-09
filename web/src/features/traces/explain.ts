@@ -46,12 +46,13 @@ const TOOL_KEEPS: Record<string, string> = {
   Write: "file path",
 }
 
-// Only what an instrumented agent exports can be kept, never what the gateway
-// reads off a request it routed.
+// A step that opens a turn can keep its prompt, routed or exported. A routed
+// request can keep each tool call's arguments; an exported tool only a command
+// or file path, and an exported gate what it checked.
 function notShown(span: TraceSpan): string | undefined {
-  if (span.origin !== "otlp") return undefined
-  if (span.kind === "step" && span.operation === "interaction")
-    return "Its prompt is not shown."
+  if (span.kind === "step" && span.opens_turn) return "Its prompt is not shown."
+  if (span.origin === "gateway")
+    return span.kind === "tool" ? "Its arguments are not shown." : undefined
   const kept = span.kind === "tool" ? TOOL_KEEPS[span.tool_name ?? ""] : null
   if (kept) return `Its ${kept} is not shown.`
   if (gateVerdict(span)) return "What the gate checked is not shown."
@@ -61,8 +62,14 @@ function notShown(span: TraceSpan): string | undefined {
 export function noInput(span: TraceSpan): NoInput {
   const sentence = notShown(span)
   if (sentence) return { sentence, docsHref: KEEPING_CONTENT }
-  if (span.kind === "llm" || span.kind === "step")
-    return { sentence: "Otari never keeps what a request sent or got back." }
+  if (span.kind === "llm")
+    return {
+      sentence: "Otari never keeps what a model call sent or got back.",
+    }
+  if (span.kind === "step")
+    return {
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    }
   if (span.kind === "tool")
     return { sentence: "Otari keeps no content for this tool." }
   return { sentence: "Otari keeps no content for this kind of span." }
