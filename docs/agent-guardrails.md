@@ -71,7 +71,7 @@ The first three are mechanical: a glob or phrase match, with no model and no sub
 
 ## Registering the hook
 
-Run `otari hook setup` from inside the repository being guarded. It requires a Git repository: it refuses outside one, and `git status` is where the `Stop` event's evidence comes from.
+Run `otari hook setup` from inside the repository being guarded. For Claude Code and Codex it requires a Git repository: it refuses outside one, and `git status` is where the `Stop` event's evidence comes from. `--harness pi` installs an extension rather than writing a settings file, so it also runs outside one.
 
 ### Claude Code
 
@@ -96,6 +96,27 @@ The same pair of entries, written to `.codex/hooks.json` and naming `otari hook 
 Then accept them: Codex does not run a project's hooks until they are accepted. Start Codex in the repository and run `/hooks`, which lists what the project declares and asks for approval. Until then the file exists and nothing fires. This is per developer and per repository: a teammate who clones the repository and runs `otari hook setup --harness codex` accepts them separately.
 
 The Codex integration is newer and less exercised than the Claude Code one; see [Registering it for Codex](agent-guardrails-reference.md#registering-it-for-codex) for what it cannot see.
+
+### pi
+
+pi is wired by the pi-otari extension, not by a settings file:
+
+```bash
+otari hook setup --harness pi
+```
+
+installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
+writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
+not on `PATH` it prints those install instructions instead. If `pi list` already
+shows the extension it says so; otherwise it asks before installing. Inside a Git
+repository it also offers the same starter `.otari/guardrails.yml` as the other
+harnesses; outside one it installs the extension only. The extension
+calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
+`edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
+path is an edit target, a `read` path is a read target, and a `bash` command is
+a command. On `Stop` the extension sends the session's commands as
+`bash_commands`; pi's session file is never parsed. Exit codes and output are
+the same as for Claude Code.
 
 ## Writing a gate
 
@@ -258,7 +279,7 @@ Reporting never slows a check or changes its verdict. To also send the command o
 otari guardrails generate
 ```
 
-1. Confirm the model CLI it names (`claude -p` or `codex exec`) before it sends the doc anywhere.
+1. Confirm the model CLI it names (`claude -p`, `codex exec` or `pi -p`) before it sends the doc anywhere.
 2. Walk the proposals one at a time, answering `y`, `n`, `e` (edit) or `q`. Only accepted gates are written, each parsed first, so an invalid field is reported in the terminal.
 3. Run `otari guardrails validate` on the result.
 
