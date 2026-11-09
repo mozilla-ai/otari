@@ -766,6 +766,44 @@ async def test_undated_config_pricing_adds_a_version_when_the_rate_changes(async
     assert [version.input_price_per_million for version in versions] == [Decimal(30), Decimal(35)]
 
 
+def _undated_rates_config(audio_input_price: float) -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-4": PricingConfig.model_validate(
+                {
+                    "rates": {
+                        "text": {"input": {"price": 30, "unit": "token"}, "output": {"price": 60, "unit": "token"}},
+                        "audio": {"input": {"price": audio_input_price, "unit": "token"}},
+                    }
+                }
+            )
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_undated_config_rates_block_is_seeded_once_across_restarts(async_db: AsyncSession) -> None:
+    """An unchanged ``rates`` block adds no row on a restart."""
+    config = _undated_rates_config(100.0)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    assert len(await _config_versions(async_db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_undated_config_rates_block_change_no_column_holds_adds_a_version(async_db: AsyncSession) -> None:
+    """A rate only the ``rates`` block carries still takes effect on the next start."""
+    await initialize_pricing_from_config(_undated_rates_config(100.0), async_db, _pricing(async_db))
+    await initialize_pricing_from_config(_undated_rates_config(120.0), async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert [version.rates["audio"]["input"]["price"] for version in versions] == [Decimal(100), Decimal(120)]
+
+
 @pytest.mark.asyncio
 async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncSession) -> None:
     """Test that log_usage falls back to legacy slash format when colon format is absent."""

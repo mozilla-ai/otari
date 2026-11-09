@@ -134,7 +134,7 @@ class DeploymentPricingService:
         for field in _RATE_FIELDS:
             if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
                 return False
-        if (stored.unit or "tokens") != (default.unit or "tokens"):
+        if (stored.unit or "token") != (default.unit or "token"):
             return False
         return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
