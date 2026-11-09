@@ -1,6 +1,7 @@
 """Web search on the libraries: the in-loop default, the resolver, the in-loop backend, and the direct endpoints."""
 
 from gateway.services.tools._web_search._backend import WebSearchBackend
+from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 from gateway.services.tools._web_search._default import (
     in_loop_default,
     search_default_to_pin,
@@ -70,6 +71,7 @@ __all__ = [
     "in_loop_search_for",
     "page_budget_chars",
     "pick_direct_fetch_instance",
+    "refused_cost_tier",
     "organization_key_search_instance",
     "pick_direct_search_instance",
     "resolve_direct_fetch",

@@ -590,6 +590,19 @@ def test_the_lenient_load_warns_with_names_and_never_values(caplog: pytest.LogCa
         assert value not in logged
 
 
+def test_a_tool_whose_cost_tier_the_provider_refuses_is_logged_as_not_running(caplog: pytest.LogCaptureFixture) -> None:
+    config = GatewayConfig(
+        search_tools={"cheap": {"provider": "fake", "options": {"depth": "Basic"}}},
+        fetch_tools={"reader": {"provider": "fake", "options": {"depth": "deep"}}},
+    )
+    logged = _warnings(caplog, config)
+    assert "search_tools.cheap does not run: fake does not take the value of its option 'depth'" in logged
+    assert "fetch_tools.reader does not run: fake does not take the value of its option 'depth'" in logged
+    assert "Basic" not in logged
+    assert "deep" not in logged
+    assert in_loop_default(config) is None
+
+
 # --------------------------------------------------------------------------- #
 # Fetch for enrichment, and defaults or fetch_tools that name nothing
 # --------------------------------------------------------------------------- #
@@ -662,7 +675,7 @@ def test_the_warning_names_the_instances_a_default_may_name(caplog: pytest.LogCa
 def test_the_warning_with_no_usable_instance_says_so(caplog: pytest.LogCaptureFixture) -> None:
     config = _with_stored(GatewayConfig(), local=_RETIRED, other=_RETIRED)
     logged = _warnings(caplog, config)
-    assert "None of them is on a provider the in-loop tool can use yet" in logged
+    assert "None of them can run" in logged
     assert "Set web_search_default_tool to one of" not in logged
 
 
