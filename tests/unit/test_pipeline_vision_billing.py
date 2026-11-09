@@ -187,6 +187,8 @@ async def test_vision_side_call_billed_on_successful_setup(monkeypatch: pytest.M
 
     assert ctx.user_id == "user-1"
     assert len(recorder.usage_logged) == 1
+    # Its clock rules are read when the request started, not when the row is written.
+    assert recorder.usage_logged[0]["request_facts"].at == ctx.price_facts.at is not None
     assert recorder.reconciled == [0.01]
     assert recorder.refunded == 0
 

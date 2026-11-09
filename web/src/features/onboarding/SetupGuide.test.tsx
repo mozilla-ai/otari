@@ -154,6 +154,19 @@ function snippet(tab: string): HTMLElement {
   return screen.getByRole("region", { name: `${tab} code` })
 }
 
+/** Asks the sheet for its key, which it never mints on its own. */
+async function createKey(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Create API key" }),
+  )
+}
+
+function mintCalls(fetchMock: ReturnType<typeof mockApi>) {
+  return fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes("/activation/key"),
+  )
+}
+
 describe("SetupGuide", () => {
   beforeEach(() => {
     resetSetupConfetti()
@@ -201,17 +214,13 @@ describe("SetupGuide", () => {
     })
   })
 
-  it("hands over the key under StrictMode's double-invoked effects", async () => {
-    // The bug this pins shipped and was found by hand: the mint fires once
-    // across both invocations, so an "ignore a late result" flag scoped to the
-    // first invocation discarded the only request in flight and the second
-    // declined to replace it. The key minted, arrived, and was dropped, leaving
-    // the sheet on "Creating your API key…" forever.
-    //
-    // Only StrictMode double-invokes, so a production build never showed it and
-    // neither did this suite, which renders without one. This is the one test
-    // that does.
+  it("mints nothing until somebody asks, then once", async () => {
+    // Opening the sheet is not a request for a credential: a workspace whose
+    // guide was skipped before the press keeps no key nobody asked for (#3000).
+    // StrictMode, because its double-invoked effects are what would turn an
+    // effect-driven mint into two.
     const fetchMock = mockApi()
+    const user = userEvent.setup()
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -227,38 +236,16 @@ describe("SetupGuide", () => {
       </StrictMode>,
     )
 
+    await screen.findByRole("button", { name: "Create API key" })
+    expect(screen.queryByLabelText("Your API key")).toBeNull()
+    expect(mintCalls(fetchMock)).toHaveLength(0)
+
+    await createKey(user)
     expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.queryByText("Creating your API key…")).toBeNull()
-    })
-    // And exactly one key was minted, not one per invocation.
-    const mints = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes("/activation/key"),
-    )
-    expect(mints).toHaveLength(1)
+    expect(mintCalls(fetchMock)).toHaveLength(1)
   })
 
-  it("mints the key as the sheet opens, and only once", async () => {
-    // The sheet is the press: it takes the whole screen and exists to hand a
-    // key over, so asking for one more click before showing it is a step with
-    // nothing behind it. Once, though: a re-render must not rotate the key an
-    // operator is in the middle of copying.
-    const fetchMock = mockApi()
-    await renderGuide()
-
-    await screen.findByRole("heading", { name: "Send your first request" })
-    await waitFor(() => {
-      expect(screen.getByLabelText("Your API key")).toBeInTheDocument()
-    })
-    await waitFor(() => {
-      const mints = fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes("/activation/key"),
-      )
-      expect(mints).toHaveLength(1)
-    })
-  })
-
-  it("says the key is being made rather than showing an empty concealed field", async () => {
+  it("holds the control pending rather than showing an empty concealed field", async () => {
     // Every credential field here conceals, so an empty one would show the same
     // run of bullets a real key does and invite a copy that yields nothing.
     let release: (() => void) | undefined
@@ -271,9 +258,13 @@ describe("SetupGuide", () => {
       if (String(input).includes("/activation/key")) await held
       return real?.(input, init) as Promise<Response>
     })
+    const user = userEvent.setup()
     await renderGuide()
 
-    expect(await screen.findByText("Creating your API key…")).toBeVisible()
+    await createKey(user)
+    expect(
+      screen.getByRole("button", { name: "Create API key" }),
+    ).toHaveAttribute("data-pending", "true")
     expect(screen.queryByLabelText("Your API key")).toBeNull()
 
     release?.()
@@ -292,9 +283,10 @@ describe("SetupGuide", () => {
       }
       return real?.(input, init) as Promise<Response>
     })
+    const user = userEvent.setup()
     await renderGuide()
 
-    await screen.findByRole("heading", { name: "Send your first request" })
+    await createKey(user)
     await waitFor(() => {
       expect(screen.queryByText(/Copy this key now/)).toBeNull()
     })
@@ -306,6 +298,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       CONCEALED_KEY,
@@ -329,6 +322,7 @@ describe("SetupGuide", () => {
     mockApi({ hasFingerprint: false })
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       "••••••••••••••••",
@@ -341,6 +335,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     await user.click(
       await screen.findByRole("button", { name: "Copy Your API key" }),
@@ -355,6 +350,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
     await screen.findByLabelText("Your API key")
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
@@ -381,6 +377,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
     await screen.findByLabelText("Your API key")
     for (const label of ["Agent", "cURL", "Python", "TypeScript"]) {
       await user.click(screen.getByRole("button", { name: label }))
@@ -408,6 +405,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     // The agent prompt is the default, and names the environment variable
     // rather than carrying the key.
@@ -565,6 +563,7 @@ describe("SetupGuide", () => {
     const api = mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     await user.click(
       await screen.findByRole("button", { name: "Show Your API key" }),
@@ -579,6 +578,7 @@ describe("SetupGuide", () => {
     await user.click(
       await screen.findByRole("button", { name: "switch to Research" }),
     )
+    await createKey(user)
 
     // The other workspace's sheet, with the other workspace's key: concealed
     // again, because the reveal belonged to the key that is gone.
@@ -606,6 +606,37 @@ describe("SetupGuide", () => {
     )
     expect(dismissed).toBeDefined()
     expect(dismissed?.[1]?.method).toBe("POST")
+    // Skipped before asking, so no key was left behind.
+    expect(mintCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it("retires the guide on the way to a page a guidance link names", async () => {
+    // Offered once: leaving for another page is not a pause, or the sheet would
+    // come back on the next workspace switch or page load.
+    const fetchMock = mockApi({
+      activation: workspaceActivation({
+        status: "failed",
+        latest_attempt: activationAttempt({
+          status: "failed",
+          error_category: "policy",
+        }),
+      }),
+    })
+    const user = userEvent.setup()
+    await renderGuide()
+
+    await user.click(await screen.findByRole("link", { name: "Open budgets" }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("/activation/dismiss"),
+        ),
+      ).toBe(true)
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
   })
 
   it("offers Skip without a temporary close control", async () => {

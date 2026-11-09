@@ -159,6 +159,22 @@ class OrganizationMemberRepository(
         result = await self.db.execute(statement)
         return result.scalars().first()
 
+    async def active_with_roles(
+        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], roles: Collection[str]
+    ) -> set[uuid.UUID]:
+        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query."""
+        if not user_ids or not roles:
+            return set()
+        result = await self.db.execute(
+            select(col(OrganizationMember.user_id)).where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+                col(OrganizationMember.status) == "active",
+                col(OrganizationMember.role).in_(list(roles)),
+            )
+        )
+        return set(result.scalars().all())
+
     async def first_active_organization_ids(
         self,
         user_ids: Collection[uuid.UUID],

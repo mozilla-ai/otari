@@ -348,6 +348,18 @@ def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migra
     monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
 
 
+@pytest.fixture(autouse=True)
+def _no_relocated_claude_config_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide a ``CLAUDE_CONFIG_DIR`` the developer's own shell exports.
+
+    NOTE: The variable moves Claude Code's settings and session history off the
+    home directory, so a fake home does not hide them and a test asserting the
+    default location would read the developer's real files. A test that wants
+    the variable set does so itself.
+    """
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+
+
 @pytest.fixture
 def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """An empty home directory, so neither a test nor a subprocess it runs reads the developer's own files."""

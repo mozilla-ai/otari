@@ -14,6 +14,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { MemberAvatar } from "@/features/account/avatar/MemberAvatar"
 import {
   asMembershipRole,
   MEMBERSHIP_ROLE_OPTIONS,
@@ -186,6 +187,7 @@ export function WorkspaceMembersPanel({
               key={member.id}
               className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-alt px-3 py-2"
             >
+              <MemberAvatar userId={member.user_id} />
               <span className="text-body">
                 {nameByUserId.get(member.user_id) ??
                   `Identity ${member.user_id.slice(0, 8)}`}

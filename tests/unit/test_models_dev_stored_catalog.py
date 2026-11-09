@@ -108,3 +108,16 @@ def test_a_bundled_price_snapshot_with_its_meta_reads_without_the_meta() -> None
 def test_a_stored_catalog_this_gateway_cannot_read_is_refused(document: object) -> None:
     with pytest.raises(ValueError, match="stored models.dev catalog"):
         read_catalog_document(document)
+
+
+def test_a_stored_catalog_keeps_the_conditions_it_does_not_know() -> None:
+    rule = {"when": {"tide": {"gt": 1}}, "factor": 2}
+    catalog = parse_catalog_v2(
+        {"p": {"models": {"m": {"cost": {"text": {"input": {"price": 1}}, "multipliers": [rule]}}}}}
+    )
+    assert catalog.issues.unknown_conditions == ("tide",)
+
+    document = _stored(catalog)
+
+    assert document["issues"] == {"models": 1, "unknown_conditions": ["tide"]}
+    assert read_catalog_document(document) == catalog

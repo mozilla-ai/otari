@@ -98,7 +98,9 @@ class _Servers:
     async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
         raise AssertionError("the stateless routes resolve one server")
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         self.asked.append((workspace_id, server_id))
         await asyncio.sleep(self.delay_s)
         return self.server
@@ -257,7 +259,8 @@ def test_the_total_deadline_includes_mcp_discovery(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
+    # Room for authentication and the access lookup, so the deadline expires in discovery, not before it.
+    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.5)
     session.delay_s = 10
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)

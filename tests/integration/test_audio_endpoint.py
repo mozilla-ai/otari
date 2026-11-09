@@ -11,7 +11,13 @@ from fastapi.testclient import TestClient
 from openai.types.audio.transcription import UsageDuration
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import (
+    API_ROOT,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
+)
 from gateway.core.database import release_session
 from gateway.services.pricing_service import (
     configure_default_pricing,
@@ -582,6 +588,11 @@ def test_speech_billing_meters_tracked_with_pricing(
             headers=api_key_header,
         )
     assert resp.status_code == 200
+    # The body is audio, so the settled cost rides the headers.
+    assert resp.headers[COST_USD_HEADER] == "0.000004"
+    assert resp.headers[PRICING_SOURCE_HEADER] == "deployment"
+    assert resp.headers[USAGE_UNIT_HEADER] == "requests"
+    assert resp.headers[USAGE_UNITS_HEADER] == "1"
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
@@ -597,12 +608,51 @@ def test_speech_billing_meters_tracked_with_pricing(
     ]
 
 
+def test_speech_at_a_character_rate_names_the_characters_billed_on_the_headers(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """The headers say what the usage row says: twelve characters at $15 per million."""
+    resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:tts-1",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 0.0,
+            "unit": "character",
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200, resp.text
+
+    with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
+        resp = client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello, world", "voice": "alloy"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.content == FAKE_AUDIO_BYTES
+    assert resp.headers[COST_USD_HEADER] == "0.000180"
+    assert resp.headers[PRICING_SOURCE_HEADER] == "deployment"
+    assert resp.headers[USAGE_UNIT_HEADER] == "characters"
+    assert resp.headers[USAGE_UNITS_HEADER] == "12"
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["cost"] == pytest.approx(0.00018)
+    assert latest["billing_meters"] == {"characters": 12}
+
+
 def test_speech_unpriced_records_no_charge_lines(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced speech model is recorded with no cost: unknown, not free."""
+    """An unpriced speech model is recorded with no cost, unknown rather than free: there is no cost to report."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -610,6 +660,9 @@ def test_speech_unpriced_records_no_charge_lines(
             headers=api_key_header,
         )
     assert resp.status_code == 200
+    assert COST_USD_HEADER not in resp.headers
+    assert PRICING_SOURCE_HEADER not in resp.headers
+    assert USAGE_UNIT_HEADER not in resp.headers
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header

@@ -160,8 +160,8 @@ class OrganizationGuardrailCreate(BaseModel):
     # A body that would actually be accepted, which the derived one is not: the
     # generator fills every string with "string", and this schema refuses that
     # for `url` (`CreateSearchToolRequest` carries one for the same reason).
-    # Generated samples reach a reader through the OpenAPI spec and the Postman
-    # collection, so an example that fails validation teaches the wrong shape.
+    # Generated samples reach a reader through the OpenAPI spec, so an example
+    # that fails validation teaches the wrong shape.
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -205,7 +205,7 @@ class OrganizationGuardrailCreate(BaseModel):
     )
     on_unavailable: Literal["block", "monitor"] = Field(
         default="block",
-        description="What a block-mode entry does when the guardrails service cannot be reached at all",
+        description="What a block-mode entry does when the guardrails service cannot be reached or gives no verdict",
     )
     validate_kwargs: dict[str, Any] | None = Field(
         default=None,
@@ -919,8 +919,9 @@ class OrganizationGuardrailService:
 
         The endpoint, credential and safety check a request would use, but run
         as ``block`` with ``on_unavailable="block"`` whatever is stored, so a
-        failure is reported rather than recorded as inconclusive. Works on a
-        paused mandate too: pausing stops it running, not being checked.
+        failure is reported rather than recorded as inconclusive. An answer with
+        no verdict comes back as it is. Works on a paused mandate too: pausing
+        stops it running, not being checked.
         """
         organization_id = await self._manageable_organization_id(user)
         guardrail = await self._get_or_404(organization_id, guardrail_id)
@@ -949,6 +950,7 @@ class OrganizationGuardrailService:
                 request.text,
                 default_url=default_url,
                 credentials={profile: credential} if credential else None,
+                allow_no_verdict=True,
             )
         except UnsafeURLError as exc:
             raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc

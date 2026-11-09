@@ -2,9 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](public/openapi.json) and
-[Postman collection](public/otari.postman_collection.json). Those generated
-artifacts are the source of truth for paths, parameters, and schemas.
+[OpenAPI specification](public/openapi.json), the source of truth for paths,
+parameters, and schemas.
 
 ## Base URL
 
@@ -166,6 +165,18 @@ costs less than half a micro-dollar, such as a few tokens of a cheap embedding
 model, is recorded, debited and reported as `"0.000000"`. The usage row and
 the inline field always agree, and `pricing_source` still says the request was
 priced.
+
+Speech (`/audio/speech`) answers with audio bytes, so its cost rides the
+response headers instead: `Otari-Cost-USD` and `Otari-Pricing-Source` carry
+the same two values, under the same rule (both when the request was priced,
+neither when it was not), and `Otari-Usage-Unit` and `Otari-Usage-Units` name
+the meter the request was billed on and the count billed: the characters of
+`input` at a rate priced per character, or one request at a rate priced per
+request. The two usage headers are absent when nothing was billed, which is
+what a zero rate settles. A speech model with no rate is refused with `402`
+`pricing_required` under `require_pricing`, as the other priced endpoints are;
+see [Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit)
+for which rates price it.
 
 ### Who runs a built-in tool
 
@@ -346,6 +357,21 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
   estimate from the request and the text streamed so far: tokens only, with
   no per-request charge.
+- A stream the provider cut after it started answering, with no usage
+  reported or only the input tokens (an Anthropic stream), is billed the same
+  way under `estimate`: the reported input tokens, or an estimate of the
+  request, plus an estimate of the text already streamed, never a projected
+  full answer. The row stays an `error` with its error message, so it counts
+  in the error totals, and its estimated cost counts in spend. A stream the
+  client abandoned after the provider reported only its input tokens is
+  topped up the same way, so leaving early never costs less than the output
+  already received.
+- When a usage row is written for a stream cut before it completed,
+  `stream_cut_by` records who ended it: `provider` when the upstream dropped
+  it or failed after it started answering, `client` when the caller
+  disconnected. A provider failure before the first chunk is an ordinary
+  error, and a client disconnect that writes no row (above) records nothing.
+  The field is null on any row whose stream was not cut.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -595,7 +621,10 @@ the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
 the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. The access check reads the key's `allowed_tools`, else its user's,
+and provider. Where there is no tool to pick (the deployment configures none, or
+several and no default), a call that names none still runs on the organization
+key, as the tool `web_search` on the key's provider, with a 30 second timeout.
+The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`. With neither set, it follows the key's model access,
 or its user's when the key has none: unrestricted model access runs every search
 tool, and restricted model access runs only a tool named by its deprecated
@@ -661,7 +690,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | Situation | Status | `Otari-Error-Code` |
 |---|---|---|
 | No credentials, or a key that is not valid | 401 | |
-| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool named is not configured, or the call names none and there is no tool to pick (none configured, or several with no default) nor an organization search key to stand in | 400 | |
 | The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
 | A `provider_options` key the provider does not take from a request | 400 | |
 | `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
@@ -1090,7 +1119,7 @@ Anthropic answers it, whose message names each failing field.
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
-| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
+| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions, and Responses translated from a chat completion) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
@@ -1153,9 +1182,10 @@ provider with its own Responses API, a stream is finished once the provider send
 `response.completed`, `response.incomplete` or `response.failed`, and one that
 closes before them ends the same way. A Responses stream Otari
 [translates from a chat completion](#responses-on-providers-without-a-responses-api)
-always ends in `response.completed`, or in `response.incomplete` when the
-provider stopped for length or a content filter, so one the provider cut short
-is not caught and closes as a success. The error event's message is the `detail` the same failure would carry as an HTTP
+ends in `response.completed`, or in `response.incomplete` when the
+provider stopped for length or a content filter, once a chunk reports its
+`finish_reason`, as on Chat Completions. One that closes without any ends in
+the same error event. The error event's message is the `detail` the same failure would carry as an HTTP
 error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed
@@ -1172,6 +1202,7 @@ Bedrock's, or an upstream `504`), and `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
+`GET /api/v1/mcp/servers` lists the enabled stored servers the key can reach,
 `GET /api/v1/mcp/servers/{mcp_server_id}/tools` lists the tools a stored MCP
 server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
 runs one exact caller-authorized call and returns the server's native MCP

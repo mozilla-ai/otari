@@ -309,15 +309,18 @@ class VideoGenerationRequest(BaseModel):
     prompt: str
     # An hour is far above any provider's longest video, and keeps the estimate's arithmetic in range.
     seconds: int | None = Field(default=None, ge=1, le=3600)
-    size: str | None = None
-    resolution: str | None = None
-    aspect_ratio: str | None = None
+    # A job's record keeps the resolution and aspect ratio in columns 64 characters wide.
+    size: str | None = Field(default=None, max_length=64)
+    resolution: str | None = Field(default=None, max_length=64)
+    aspect_ratio: str | None = Field(default=None, max_length=64)
     seed: int | None = None
     negative_prompt: str | None = None
     reference_images: list[str] | None = None
     reference_audios: list[str] | None = None
+    reference_videos: list[str] | None = None
     first_frame: str | None = None
     last_frame: str | None = None
+    generate_audio: bool | None = None
     user: str | None = None
 
 

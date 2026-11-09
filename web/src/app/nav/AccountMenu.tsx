@@ -88,54 +88,15 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // "Signed in": naming nobody is the honest answer, and it is what the trigger
 // showed before the first paint anyway. A caller with no organization, whom
 // the context answers with a 404, is named from the profile read instead.
+//
+// The mark beside the name is the person's avatar: see
+// `overlayAccountBadge`.
 function sessionIdentity(caller: OrganizationContext["caller"]): {
   name: string
-  initials: string
 } {
-  const named = caller?.full_name?.trim()
-  if (named) {
-    return { name: named, initials: initialsFor(named) }
+  return {
+    name: caller?.full_name?.trim() || caller?.email?.trim() || "Signed in",
   }
-  const addressed = caller?.email?.trim()
-  if (addressed) {
-    // An address has no words to take initials from, so its local part stands
-    // in, and that part is split on its own punctuation as well: an address
-    // spells a name with dots where a name uses spaces, so `ada.lovelace@…`
-    // initials as AL. A name is split on spaces alone, because the same
-    // punctuation means something else in one: `Ada Lovelace-Byron` is two
-    // names, and splitting the hyphen would initial her as AB.
-    return {
-      name: addressed,
-      initials: initialsFor(localPart(addressed), true),
-    }
-  }
-  return { name: "Signed in", initials: "··" }
-}
-
-/** The part of an address that names a person, which is the part before the host. */
-function localPart(email: string): string {
-  return email.split("@")[0] ?? email
-}
-
-// Two letters, taken the way an avatar takes them: the first letter of the
-// first and last word, and the first two letters of a source that is one word.
-//
-// Counted in characters rather than in the code units `[0]` and `slice` count,
-// because a name outside the basic plane (an extension-B CJK character, an
-// emoji) is two units per character: indexing one takes half a surrogate pair
-// and the avatar draws the replacement mark instead of the letter.
-function initialsFor(source: string, splitPunctuation = false): string {
-  const words = source
-    .split(splitPunctuation ? /[\s._-]+/ : /\s+/)
-    .filter(Boolean)
-  if (words.length === 0) {
-    return "··"
-  }
-  const first = Array.from(words[0])
-  const last = Array.from(words[words.length - 1])
-  const letters =
-    words.length > 1 ? `${first[0]}${last[0]}` : first.slice(0, 2).join("")
-  return letters.toUpperCase()
 }
 
 function MenuItem({
@@ -364,7 +325,7 @@ export function AccountMenu({
           expandedJustify: "start",
         })}
       >
-        <AccountBadge initials={identity.initials} />
+        <AccountBadge />
         {isCollapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">

@@ -45,7 +45,11 @@ from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
     CONVERSATION_HEADER,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
     TAGS_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
 )
@@ -1439,6 +1443,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Otari-Region",
                 *_SDK_CORS_HEADERS,
             ],
+            # A speech response carries its cost on headers, which a browser on
+            # another origin reads only when they are exposed.
+            expose_headers=[COST_USD_HEADER, PRICING_SOURCE_HEADER, USAGE_UNIT_HEADER, USAGE_UNITS_HEADER],
         )
 
     # Tracks what the gateway is serving right now, so the activity log can show

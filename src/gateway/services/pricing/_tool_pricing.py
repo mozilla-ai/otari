@@ -13,10 +13,11 @@ deployment's cost, down to zero.
 
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from gateway.core.metered_pricing import quantize_cost
 from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.services.pricing._price_rules import NO_FACTS, Condition, PriceFacts, apply_rules
 from gateway.services.pricing._slot_pricing import search_rate
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -45,6 +46,8 @@ class ToolRate(NamedTuple):
     #: True when an instance's rate is stored under its old model-kind
     #: ``<provider>:<instance>`` key, the second spelling of its own.
     old_key: bool = False
+    #: The conditions that changed the price, where it is a model's own search price.
+    rules: tuple[Condition, ...] = ()
 
 
 class ModelSearchRate(NamedTuple):
@@ -52,17 +55,24 @@ class ModelSearchRate(NamedTuple):
 
     unit_rate: Decimal
     source: PriceSource
+    #: The conditions of the rules the request met that changed the price.
+    rules: tuple[Condition, ...] = ()
 
 
-def model_search_rate(rate: ModelPricing | None, source: PriceSource) -> ModelSearchRate | None:
-    """The per-search rate ``rate``'s block gives, or ``None`` when it prices no web search.
+def model_search_rate(
+    rate: ModelPricing | None, source: PriceSource, *, facts: PriceFacts = NO_FACTS
+) -> ModelSearchRate | None:
+    """The per-search rate ``rate``'s block gives at the rules ``facts`` meet, or ``None`` when it prices no web search.
 
     The catalog prices a provider's search beside the model, per thousand
     searches, so a search the provider ran is priced from the model's own rate
     where the operator priced no ``<provider>:web_search`` row.
     """
-    found = search_rate(rate)
-    return None if found is None else ModelSearchRate(found.cost(1), source)
+    if rate is None:
+        return None
+    applied = apply_rules(rate, facts)
+    found = search_rate(applied.rate)
+    return None if found is None else ModelSearchRate(found.cost(1), source, applied.rules.get("web_search", ()))
 
 
 class ToolRateLookup(NamedTuple):
@@ -96,7 +106,7 @@ class ToolCharges(NamedTuple):
     """
 
     total: Decimal
-    lines: list[dict[str, float | int | str]]
+    lines: list[dict[str, Any]]
     unit_rates: dict[str, Decimal]
     unpriced: list[UnpricedToolLabel]
     deployment_paid_total: Decimal
@@ -154,6 +164,7 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     # label with different rate keys still settle as one line, and a line says
     # whether the organization's funds were charged for it.
     by_label: dict[tuple[str, str, bool], tuple[int, Decimal]] = {}
+    rules: dict[tuple[str, str, bool], list[Condition]] = {}
     unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
@@ -165,6 +176,10 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         line = (entry.tool, label, _deployment_paid(entry))
         units, label_cost = by_label.get(line, (0, Decimal(0)))
         by_label[line] = (units + entry.calls, label_cost + cost)
+        if rate is not None and entry.unreported_calls > 0:
+            found = rules.setdefault(line, [])
+            seen = list(found)
+            found.extend(rule for rule in rate.rules if rule not in seen)
         if lookup is not None and lookup.rate_keys and rate is None:
             first = lookup.rate_keys[0]
             previous = unpriced.get((entry.tool, label, first))
@@ -174,8 +189,10 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
 
     # ``float`` for the JSON charge line; the returned total that settles the
     # row stays Decimal.
-    lines: list[dict[str, float | int | str]] = [
-        {
+    lines: list[dict[str, Any]] = []
+    for key, (units, cost) in sorted(by_label.items()):
+        tool, label, paid = key
+        charge_line: dict[str, Any] = {
             "meter": f"{tool}_calls",
             "label": label,
             "units": units,
@@ -183,8 +200,9 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
             "cost": float(cost),
             "deployment_paid": paid,
         }
-        for (tool, label, paid), (units, cost) in sorted(by_label.items())
-    ]
+        if rules.get(key):
+            charge_line["rules"] = [dict(rule) for rule in rules[key]]
+        lines.append(charge_line)
     by_tool: dict[str, tuple[int, Decimal]] = {}
     for (tool, _label, _paid), (units, cost) in by_label.items():
         tool_units, tool_cost = by_tool.get(tool, (0, Decimal(0)))

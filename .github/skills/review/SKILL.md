@@ -39,10 +39,9 @@ description: Review a pull request or diff for this repository against otari's p
 Check these on every review; each has broken a PR here before.
 
 - **Generated artifacts.** Touching a route, schema, or even a route docstring makes
-  `docs/public/openapi.json` and the Postman collection stale, and both must be
-  regenerated and committed (`uv run python scripts/generate_openapi.py`, then
-  `make postman`). The one `openapi-spec` CI job runs `make openapi-check` and
-  `make postman-check`, so a PR that regenerates only the spec still fails.
+  `docs/public/openapi.json` stale, and it must be regenerated and committed
+  (`uv run python scripts/generate_openapi.py`). The `openapi-spec` CI job runs
+  `make openapi-check`.
 - **Dashboard generated files.** The bundle (`src/gateway/static/dashboard/`) is *not*
   committed, so a `web/src` change leaves nothing to commit there. Two things under `web/`
   are committed and drift-checked, and a PR that changes them and not the artifact fails CI:

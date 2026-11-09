@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.core.sql import utc_iso
 from gateway.models.money import as_float
-from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, StreamCutBy, UsageLog
 
 # The meter namespace inside ``UsageLog.billing_meters``. Tool meters are nested
 # under one reserved key rather than sitting flat next to the token meters:
@@ -53,7 +53,9 @@ class TokenChargeLine(_OpenShape):
 
     ``rate_per_million`` is the discriminator: its presence (rather than
     ``unit_rate``) is what tells a reader, and a renderer, which unit convention
-    applies. See ``gateway.services.pricing_service``.
+    applies. See ``gateway.services.pricing_service``. A line whose price an
+    override or a multiplier changed also carries ``rules``: each one's
+    condition, in the order they applied.
     """
 
     meter: str = Field(description="What was metered, e.g. 'input' or 'cache_read'.")
@@ -66,7 +68,8 @@ class UnitChargeLine(_OpenShape):
     """A charge line billed per call, for gateway-run tools and per-request routes.
 
     ``unit_rate`` is the discriminator, in the same sense as
-    :class:`TokenChargeLine`'s ``rate_per_million``.
+    :class:`TokenChargeLine`'s ``rate_per_million``. A line whose price an
+    override or a multiplier changed also carries ``rules``, as a token line does.
     """
 
     meter: str = Field(description="What was metered, e.g. 'request' or 'web_search_calls'.")
@@ -245,6 +248,8 @@ class UsageEntry(BaseModel):
     attempt_position: int | None = None
     attempt_count: int | None = None
     request_group_id: str | None = None
+    # Who ended a stream before it completed, "provider" or "client"; null for any other row.
+    stream_cut_by: StreamCutBy | None = None
 
     @classmethod
     def from_model(
@@ -289,6 +294,7 @@ class UsageEntry(BaseModel):
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
             request_group_id=log.request_group_id,
+            stream_cut_by=log.stream_cut_by,
         )
 
 

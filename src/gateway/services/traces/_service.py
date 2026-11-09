@@ -33,7 +33,7 @@ from gateway.models.traces import (
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SealItem, SpanContent
-from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, trace_view
+from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, counted_once, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
@@ -695,6 +695,7 @@ def _key(trace: TraceWrite) -> TraceKey:
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
+    calls = counted_once(llm)
     errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],
@@ -706,8 +707,8 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
         # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
         # An MCP tool's too, a transport failure included; a failed MCP connection is not a tool's and does.
         failing_errors=sum(1 for span in errors if span.kind != "tool"),
-        input_tokens=sum(span.input_tokens or 0 for span in llm),
-        output_tokens=sum(span.output_tokens or 0 for span in llm),
+        input_tokens=sum(span.input_tokens or 0 for span in calls),
+        output_tokens=sum(span.output_tokens or 0 for span in calls),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
         earliest=min(earliest for earliest, _ in moments),
         latest=max(latest for _, latest in moments),

@@ -19,6 +19,36 @@ class WorkspaceMcpServerNotFoundError(TenancyNotFoundError):
         super().__init__(f"MCP server {mcp_server_id} not found")
 
 
+class WorkspaceMcpServerAccessDeniedError(WorkspaceMcpServerNotFoundError):
+    """A stored server the caller's access list grants nothing on.
+
+    Answered exactly as an unknown server, which is why it is one; it carries the server and the rule that
+    decided, for a trace to record what the caller could not be told.
+    """
+
+    def __init__(self, mcp_server_id: object, *, name: str, decided_by: str):
+        super().__init__(mcp_server_id)
+        self.mcp_server_id = mcp_server_id
+        self.name = name
+        self.decided_by = decided_by
+
+
+class WorkspaceMcpServerGrantNotFoundError(TenancyNotFoundError):
+    def __init__(self, grant_id: object):
+        super().__init__(f"MCP server grant {grant_id} not found")
+
+
+class WorkspaceMcpServerKeyNotFoundError(TenancyNotFoundError):
+    """A key looked up for its access to a workspace's servers is not a key of that workspace."""
+
+    def __init__(self, api_key_id: str):
+        super().__init__(f"Key '{api_key_id}' is not a key of this workspace")
+
+
+class WorkspaceMcpServerGrantSubjectError(TenancyValidationError):
+    """A grant names a key or user outside the server's workspace, or would pass a server's grant cap."""
+
+
 class WorkspaceMcpServerAlreadyExistsError(TenancyConflictError):
     """A workspace already has an MCP server under this name.
 

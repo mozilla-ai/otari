@@ -64,7 +64,8 @@ class GuardrailConfig(BaseModel):
     with a 403 and never call the provider when the guardrail flags it."""
 
     on_unavailable: Literal["block", "monitor"] = "block"
-    """What to do when the guardrails service cannot be reached at all, as
+    """What to do when the check cannot be evaluated: the guardrails service
+    cannot be reached, or it answers with no verdict (``valid: null``), as
     opposed to reachable-and-flagging. Only meaningful with ``mode="block"``,
     since a ``monitor`` guardrail already fails open.
 

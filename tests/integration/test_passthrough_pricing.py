@@ -132,6 +132,36 @@ def test_a_megapixel_rate_prices_nothing_an_image_of_no_stated_size(
     _settled(client, master_key_header, 0.0)
 
 
+_LARGE = {"resolution": {"equals": "2048x2048"}}
+
+
+@pytest.mark.parametrize(("size", "each", "rules"), [("2048x2048", "0.08", [[_LARGE]]), ("1024x1024", "0.04", [None])])
+def test_an_image_is_held_and_settled_at_the_price_its_size_meets(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    size: str,
+    each: str,
+    rules: list[Any],
+) -> None:
+    _price_rates(
+        client,
+        master_key_header,
+        "openai:dall-e-3",
+        {"image": {"output": {"price": 0.04, "unit": "image", "overrides": [{"when": _LARGE, "price": 0.08}]}}},
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(2), n=2, size=size)
+
+    assert response.status_code == 200, response.text
+    assert held == [2 * Decimal(each)]
+    row = _row(db_session_factory)
+    assert row.cost == 2 * Decimal(each)
+    assert [line.get("rules") for line in row.pricing_breakdown or []] == rules
+
+
 def _speak(client: TestClient, headers: dict[str, str], text: str) -> Any:
     with patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")):
         return client.post(
@@ -153,6 +183,10 @@ def test_a_character_rate_holds_and_settles_the_characters_spoken(
 
     assert response.status_code == 200, response.text
     assert held == [Decimal("0.000165")]
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Pricing-Source"] == "deployment"
+    assert response.headers["Otari-Usage-Unit"] == "characters"
+    assert response.headers["Otari-Usage-Units"] == "11"
     row = _row(db_session_factory)
     assert row.cost == Decimal("0.000165")
     assert row.billing_meters == {"characters": 11}
@@ -388,6 +422,61 @@ def test_require_pricing_refuses_a_measured_unit_the_request_cannot_measure(stri
     response = _generate(strict_client, headers, _images(1), n=1, size="1024x1024")
     assert response.status_code == 200, response.text
     _settled(strict_client, master, 0.052429)
+
+
+def test_require_pricing_refuses_an_unpriced_speech_model(strict_client: TestClient) -> None:
+    """Speech is no longer served without a rate: an unpriced model is refused before the provider is called."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    assert response.headers["Otari-Error-Code"] == "pricing_required"
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_refuses_a_token_rate_on_speech(strict_client: TestClient) -> None:
+    """The audio reports no tokens, so a token rate would settle unpriced; it is refused instead."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="token", rate=0.6)
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Model 'openai:tts-1' is priced per token, which this request cannot be billed on")
+    assert "price it per character or per request" in detail
+    assert "No pricing is configured" not in detail
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_admits_a_character_rate_on_speech(strict_client: TestClient) -> None:
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="character", rate=15.0)
+    headers = _user_key(strict_client, master)
+
+    response = _speak(strict_client, headers, "Hello world")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    _settled(strict_client, master, 0.000165)
 
 
 def test_require_pricing_admits_a_rate_the_endpoint_can_settle(strict_client: TestClient) -> None:

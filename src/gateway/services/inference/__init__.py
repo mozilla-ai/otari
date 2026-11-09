@@ -49,6 +49,7 @@ from gateway.services.inference._messages_responses_bridge import (
     usage_unreported,
     with_responses_instance,
 )
+from gateway.services.inference._passthrough_responses import speech_cost_headers
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
     IMAGES_BILLING,
@@ -89,6 +90,7 @@ from gateway.services.inference._upstream_errors import (
     is_model_unavailable_error,
     is_provider_billing_error,
     is_provider_credential_rejection,
+    is_provider_cut,
     is_retry_futile,
     is_upstream_connect_failure,
     is_upstream_request_fault,
@@ -173,6 +175,7 @@ __all__ = [
     "image_usage",
     "moderation_usage",
     "speech_billing",
+    "speech_cost_headers",
     "speech_usage",
     "rerank_usage",
     "resolve_decision_provider",
@@ -197,6 +200,7 @@ __all__ = [
     "is_model_unavailable_error",
     "is_provider_billing_error",
     "is_provider_credential_rejection",
+    "is_provider_cut",
     "is_retry_futile",
     "is_upstream_connect_failure",
     "is_upstream_request_fault",

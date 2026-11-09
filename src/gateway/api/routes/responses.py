@@ -72,6 +72,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.providers import aresponses
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
@@ -206,7 +207,7 @@ def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dic
 
 
 def _usage_to_completion_usage(
-    usage: ResponseUsage | OpenResponsesUsage | None,
+    usage: ResponseUsage | OpenResponsesUsage | None, *, service_tier: str | None = None
 ) -> CompletionUsage | None:
     if usage is None:
         return None
@@ -219,7 +220,14 @@ def _usage_to_completion_usage(
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
+        service_tier=service_tier,
     )
+
+
+def _served_tier(response: Any) -> str | None:
+    """The tier a response says it was served at, or ``None`` where it says none."""
+    tier = getattr(response, "service_tier", None)
+    return tier if isinstance(tier, str) else None
 
 
 def _ends_a_response(chunk: Any) -> bool:
@@ -277,8 +285,9 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # The chat-completions bridge emits a terminal event whatever its upstream
-        # sent, so this catches a cut native stream and not a cut bridged one.
+        # A cut native stream ends without a terminal event. The chat-completions
+        # bridge raises on a stream that never reported a finish_reason, so a cut
+        # bridged one reaches the error path too.
         return _ends_a_response
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
@@ -296,11 +305,11 @@ class _ResponsesAdapter:
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
         if response_obj and getattr(response_obj, "usage", None):
-            return _usage_to_completion_usage(response_obj.usage)
+            return _usage_to_completion_usage(response_obj.usage, service_tier=_served_tier(response_obj))
         return None
 
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
-        return _usage_to_completion_usage(getattr(result, "usage", None))
+        return _usage_to_completion_usage(getattr(result, "usage", None), service_tier=_served_tier(result))
 
     def attach_cost(
         self,
@@ -491,6 +500,7 @@ async def create_response(
             model=request_body.model,
             user_id_from_request=request_body.user,
             safety_identifier=request_body.safety_identifier,
+            price_facts=PriceFacts(service_tier=request_body.service_tier),
             estimate_prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,

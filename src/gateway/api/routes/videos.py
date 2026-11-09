@@ -20,6 +20,7 @@ even where the provider keeps no job to look up, as DeepInfra does.
 """
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -55,7 +56,7 @@ from gateway.schemas.inference import (
 )
 from gateway.services.inference import VIDEO_BILLING, DeploymentCharge, VideoJobService
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing import estimate_video_cost, video_rate
+from gateway.services.pricing import PriceFacts, estimate_video_cost, video_rate
 from gateway.services.provider_kwargs import ResolvedProvider
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
@@ -160,6 +161,19 @@ async def create_video(
             headers=error_headers(PRICING_REQUIRED),
         )
 
+    # A provider takes a size where it takes no resolution; a price's rules name either as the resolution.
+    resolution = request.resolution or request.size
+    # A job is billed at the rules of the time it started, which a render inside the start call outlasts.
+    started = datetime.now(UTC)
+    input_video = bool(request.reference_videos)
+    facts = PriceFacts(
+        resolution=resolution,
+        aspect_ratio=request.aspect_ratio,
+        duration=estimated_seconds,
+        at=started,
+        input_video=input_video,
+        generate_audio=request.generate_audio,
+    )
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
@@ -172,7 +186,7 @@ async def create_video(
         user=request.user,
         call_provider=call_provider,
         request_params=request.model_fields_set,
-        estimate=lambda pricing: estimate_video_cost(pricing, estimated_seconds),
+        estimate=lambda pricing: estimate_video_cost(pricing, estimated_seconds, facts=facts),
         billing=VIDEO_BILLING,
         refuse_model=refuse_model,
         refuse_unpriced=refuse_unpriced,
@@ -189,6 +203,11 @@ async def create_video(
             workspace_id=outcome.workspace_id,
             seconds=request.seconds,
             counts_toward_budget=api_key is None or not api_key.exclude_from_budget,
+            resolution=resolution,
+            aspect_ratio=request.aspect_ratio,
+            input_video=input_video,
+            generate_audio=request.generate_audio,
+            created_at=started,
         )
     except DATABASE_ERRORS as exc:
         raise database_error("Recording the video job", exc) from exc

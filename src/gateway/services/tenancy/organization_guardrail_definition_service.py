@@ -138,9 +138,8 @@ class OrganizationGuardrailDefinitionCreate(BaseModel):
     # A body the server would actually accept, which the derived one is not: the
     # generator fills every string with "string", and ``guardrail_name`` has to
     # name a guardrail the catalog lists. A sample that fails validation teaches
-    # the wrong shape, and it reaches a reader through the OpenAPI spec and the
-    # Postman collection (`OrganizationGuardrailCreate` carries one for the same
-    # reason).
+    # the wrong shape, and it reaches a reader through the OpenAPI spec
+    # (`OrganizationGuardrailCreate` carries one for the same reason).
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

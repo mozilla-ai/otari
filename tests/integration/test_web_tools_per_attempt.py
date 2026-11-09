@@ -623,7 +623,7 @@ def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
 class _McpPool:
     """An MCP pool whose one server exposes a tool no built-in is named."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
         return None
 
     async def __aenter__(self) -> _McpPool:
@@ -755,7 +755,7 @@ def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_
 class _ShadowingMcpPool:
     """An MCP pool whose one server exposes a tool named ``web_search``."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
         return None
 
     async def __aenter__(self) -> _ShadowingMcpPool:
