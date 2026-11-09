@@ -373,7 +373,14 @@ menu, and is listed only for a deployment operator.
   key's dialog on the organization's Providers page. See
   [Zero data retention](#zero-data-retention).
 - **Models** carry a serving switch and a price, set per million tokens or per
-  1,000 requests or images; a model nothing prices arrives switched off.
+  1,000 requests or images; a model nothing prices arrives switched off. Tabs
+  above the table show one kind of model at a time, and a price in a unit other
+  than tokens names that unit on hover (beside the amount on a phone), as on
+  the organization's Providers page
+  (see
+  [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models)). The kind
+  comes from models.dev, and `GET /api/v1/hosted-providers/{provider}/models`
+  takes it as `type`.
 - **Refresh models** asks one provider again. **Update catalog** fetches the
   latest models.dev prices and then asks every provider what it lists, showing
   the price changes and each provider's new models before applying them (see
