@@ -4,11 +4,17 @@ import {
   type AccessListCopy,
   type AccessOption,
 } from "@/features/models/AccessListControl"
-import { providerInstanceOf } from "@/features/models/modelKey"
+import { providerInstanceOf, providerModelId } from "@/features/models/modelKey"
+import { canManage } from "@/features/organization/roles"
 import { useModels } from "@/shared/api/models"
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+  useOrgProviderKeys,
+} from "@/shared/api/organizations"
 import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 // The control is reused for two layers of the same allow-list grammar: a user's
 // default and a key's (narrower) override. The wording differs between them, so
@@ -33,18 +39,17 @@ export function ModelScopeControl({
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
   const providers = useDeploymentProviderNames(isSettled && isOperator)
+  // Owner/admin-only, like the operator read above.
+  const context = useOrganizationContext()
+  const orgKeys = useOrgProviderKeys(canManage(context.data))
   const aliases = useAliases()
 
-  // The pickable catalog: a wildcard per provider instance, every model, and
-  // each alias resolved to its target. It comes from GET /models, which is
-  // scoped to the caller's organization (its own providers and the deployment's
-  // managed models), not from the operator-only discovery or provider-config
-  // reads, which an organization admin cannot see. Deduped by value, so an alias
-  // whose target is already listed does not appear twice. Every stored entry is
-  // a canonical selector the backend will accept, so names that resolve through
-  // no instance are left out. An operator also gets a wildcard for every
-  // configured provider, which covers one whose models GET /models cannot list
-  // (discovery failed or unsupported, nothing priced).
+  // A wildcard per provider instance, every model, and each alias resolved to
+  // its target, deduped by value. GET /models, scoped to the caller's
+  // organization, lists nothing for a provider it cannot read or a key nobody
+  // refreshed, so the operator's configured providers and an owner's or admin's
+  // usable keys each add a wildcard. Every entry is a selector the backend
+  // accepts, named for a reader.
   const catalog = useMemo<AccessOption[]>(() => {
     const ids = (models.data?.data ?? [])
       .map((model) => model.id)
@@ -53,39 +58,67 @@ export function ModelScopeControl({
     const instances = [
       ...new Set([
         ...providers,
+        // A key with a slug is reached as `<slug>:<model>`, which allowed_models
+        // refuses to store, so it adds no wildcard.
+        ...(orgKeys.data ?? [])
+          .filter((key) => !key.archived_at && key.usable && !key.slug)
+          .map((key) => key.provider),
         ...ids.map((id) => providerInstanceOf(id) as string),
       ]),
     ].sort((a, b) => a.localeCompare(b))
+    const providerOf = (id: string) =>
+      providerDisplayName(providerInstanceOf(id) ?? "")
     const candidates: AccessOption[] = [
       ...instances.map((instance) => ({
         id: `${instance}:*`,
-        label: `${instance}:*  ·  all ${instance} models`,
+        label: `All ${providerDisplayName(instance)} models`,
+        hint: `${instance}:* · includes models added later`,
       })),
-      ...ids.map((id) => ({ id, label: id })),
+      ...ids.map((id) => ({
+        id,
+        label: providerModelId(id),
+        hint: providerOf(id),
+      })),
       ...(aliases.data ?? []).map((alias) => ({
         id: alias.target,
-        label: `${alias.name}  ·  alias`,
+        label: alias.name,
+        hint: `Alias for ${providerModelId(alias.target)} · ${providerOf(alias.target)}`,
       })),
     ]
     // First label wins, so a model keeps its own name over the alias that
     // resolves to it.
     const seen = new Set<string>()
-    return candidates.filter((option) => {
+    const unique = candidates.filter((option) => {
       if (!option.id || seen.has(option.id)) return false
       seen.add(option.id)
       return true
     })
-  }, [models.data, providers, aliases.data])
+    // A chip shows the label alone, so a shared label names its provider.
+    const shared = new Set(
+      unique
+        .map((option) => option.label)
+        .filter((label, index, labels) => labels.indexOf(label) !== index),
+    )
+    return unique.map((option) => {
+      if (!shared.has(option.label) || option.id.endsWith(":*")) return option
+      const provider = providerOf(option.id)
+      return {
+        id: option.id,
+        label: `${option.label} · ${provider}`,
+        hint: option.hint === provider ? undefined : option.hint,
+      }
+    })
+  }, [models.data, providers, orgKeys.data, aliases.data])
 
-  // A failed read and an empty one both leave little or nothing to pick; only
-  // the second means there is nothing to configure. A failed read is said even
-  // when aliases or provider wildcards still fill the list, which is then
-  // incomplete.
-  const catalogHint = models.isError
-    ? "Could not load the model catalog. Reload to try again."
-    : !models.isPending && catalog.length === 0
-      ? "No providers or models discovered yet. Configure a provider first, then scope this key."
-      : null
+  // A failed read is said even when what did load fills the list, which is then
+  // incomplete. `isLoading`: a key read a plain member never makes stays pending.
+  const isReading = models.isPending || context.isPending || orgKeys.isLoading
+  const catalogHint =
+    models.isError || orgKeys.isError
+      ? "Could not load the model catalog. Reload to try again."
+      : !isReading && catalog.length === 0
+        ? "No providers or models discovered yet. Add a provider first."
+        : null
 
   const copy: AccessListCopy = {
     inherit: anyLabel,
@@ -96,8 +129,8 @@ export function ModelScopeControl({
         <strong>every</strong> model until you change this access.
       </>
     ),
-    pickPrompt: "Pick at least one model below, or choose “Block all”.",
-    inputLabel: "Add a model",
+    pickPrompt: "Pick at least one model, or choose “Block all”.",
+    inputLabel: "Allowed models",
     placeholder: "Search providers, models, aliases…",
   }
 
@@ -113,10 +146,7 @@ export function ModelScopeControl({
       copy={copy}
       catalog={catalog}
       hint={catalogHint}
-      loadingMessage={
-        catalog.length === 0 ? "Loading the model catalog…" : null
-      }
-      showPicker={catalog.length > 0 || models.isPending}
+      loadingMessage={isReading ? "Loading the model catalog…" : null}
     />
   )
 }
