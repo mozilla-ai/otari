@@ -148,6 +148,13 @@ file ([Overrides and multipliers](configuration.md#overrides-and-multipliers)). 
 tells apart two offerings on one provider, such as Bedrock's regional inference
 profiles. "Use this model" opens a drawer beside the table with the request to
 copy, sent to the gateway's pick or to a provider pinned by its selector. The
+request is for the route that offering is served on (its `endpoints`), in cURL
+and in Python: an embeddings request for an embedding model, a speech request
+for a speech model. Where the offering is served on more than one route, the
+drawer lets you choose one, and the first is the default. Where no route is
+known, it shows the chat request and says so. The `/decisions` and
+`/systemone` routes take a `decision_providers` selector, so the drawer links to
+[Decisions](api-reference.md#decisions) instead of showing a request. The
 page is read-only; an organization's own rate is set on Providers > Inference, which an
 offering on one of that organization's keys links to. An offering the
 deployment supplies the credential for says so instead, because its rate is the
