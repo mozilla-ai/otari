@@ -122,6 +122,14 @@ def test_describe_marks_operator_only_options_and_the_test_tier(capsys: pytest.C
     assert "Operator only: a host lets only its operator set it" in out
 
 
+def test_describe_marks_a_cost_tier_and_whether_the_cost_is_reported(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("fake", capsys)
+    assert "Cost: not reported" in out
+    assert '  depth (string, cost tier), default "basic"' in out
+    assert "Cost tier: the provider bills a call at a price of its own for each value." in out
+    assert "Cost: reported with each search" in _describe("exa", capsys)
+
+
 def test_describe_says_when_the_key_and_the_query_travel_in_the_url(capsys: pytest.CaptureFixture[str]) -> None:
     out = _describe("mojeek", capsys)
     assert "API key: required, from MOJEEK_API_KEY" in out

@@ -62,9 +62,17 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
 query or the key travels in the URL, the provider's `tier` (`production` or `test`), its
-`max_results`, and its native options as `OptionSpec`s (`name`, `type`, `enum`, `default`,
-`description` and `operator_only`, for an option only a deployment's operator should set; the
-library accepts it from anyone, and enforcing that is the host's job).
+`max_results`, whether it `reports_cost`, and its native options as `OptionSpec`s (`name`,
+`type`, `enum`, `default`, `description`, `operator_only`, for an option only a deployment's
+operator should set, and `cost_tier`, for the option whose values are the provider's cost tiers;
+the library accepts both from anyone, and acting on them is the host's job).
+
+A provider's cost tiers are the values of one option for which its pricing lists a price per call
+of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
+`default` is the tier the provider uses when the option is not sent. The metadata records no
+amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
+that bills searches at a price per call for a provider that does not report its cost can let only
+whoever set that price choose the tier.
 
 ## Logging
 
@@ -326,6 +334,7 @@ network or a monkeypatch:
 | `in_body_error` | Answer with no hits and this tag as `SearchResult.error`. |
 | `leak_query` | Raise a `RuntimeError` whose message carries the query, as a careless adapter might, so a host can prove it never passes exception text on. |
 | `account` | Echoed in `raw`. Operator-only, so a host can exercise that rule. |
+| `depth` | `basic` or `advanced`, echoed in `raw`. A cost tier, so a host can exercise its rule for cost tiers. |
 
 `raw` echoes the request, the query left out, so a test can see what reached the provider.
 

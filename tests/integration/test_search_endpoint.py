@@ -566,6 +566,15 @@ def test_an_operator_only_option_is_refused_from_a_request(client: TestClient, a
     assert "account" in resp.json()["detail"]
 
 
+def test_a_cost_tier_is_refused_from_a_request_where_the_provider_reports_no_cost(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    payload = {**SEARCH_PAYLOAD, "provider_options": {"depth": "advanced"}}
+    resp = client.post(f"{API_ROOT}/search/fake-search", json=payload, headers=api_key_header)
+    assert resp.status_code == 400
+    assert "option 'depth' is set only by the deployment" in resp.json()["detail"]
+
+
 def test_provider_options_reach_the_provider_over_the_tools_own(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:

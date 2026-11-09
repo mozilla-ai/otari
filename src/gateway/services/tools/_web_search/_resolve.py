@@ -602,7 +602,7 @@ def _layered(
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
     if not checked:
         return {**instance_options, **credential_options, **workspace, **request}
-    operator_only = _operator_only(kind, provider)
+    operator_only = configuration_only_options(_metadata(kind, provider))
     if refused := _tenant_problems(kind, provider, request, operator_only):
         key, problem = next(iter(refused.items()))
         raise WebSearchOptionRefusedError(key, problem)
@@ -625,13 +625,28 @@ def _layered(
     }
 
 
-def _operator_only(kind: ToolKind, provider: str) -> frozenset[str]:
-    metadata = (
+def _metadata(kind: ToolKind, provider: str) -> any_search.ProviderMetadata | any_fetch.ProviderMetadata:
+    return (
         any_search.AnySearch.get_provider_metadata(provider)
         if kind == "search"
         else any_fetch.AnyFetch.get_provider_metadata(provider)
     )
-    return frozenset(option.name for option in metadata.options if option.operator_only)
+
+
+def configuration_only_options(metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata) -> frozenset[str]:
+    """The provider's options that only a tool's configuration sets, never a workspace or a request.
+
+    They are the options its library marks operator-only, and its cost tier
+    when the provider does not report what a call cost: the tool is priced for
+    the tier its configuration picks, so a request that picked another would
+    be billed at the wrong price. A cost tier stays open where the provider
+    reports the cost, since that cost is what the call is billed.
+    """
+    return frozenset(
+        option.name
+        for option in metadata.options
+        if option.operator_only or (option.cost_tier and not metadata.reports_cost)
+    )
 
 
 def _tenant_problems(

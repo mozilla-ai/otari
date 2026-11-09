@@ -462,6 +462,7 @@ def test_search_catalog_serves_the_library_metadata(
     assert exa["max_results"] == metadata.max_results
     assert exa["query_in_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
+    assert exa["reports_cost"] is True
     assert exa["instances"] == ["from-file"]
     # Fetch's own fields stay null on a search entry, and no environment key is reported.
     assert exa["max_urls_per_call"] is None

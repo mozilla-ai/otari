@@ -21,7 +21,10 @@ context and calls the adapter.
    the source of truth. Fill `METADATA`: the endpoint and method, where the key travels, whether
    a key or a base URL is required, the default base URL and the variable the provider's SDK
    reads it from, if any, the limits, and the native options under the provider's own names and
-   enums. Note the pricing, with the date you read it, in the module's docstring.
+   enums. Note the pricing, with the date you read it, in the module's docstring. When the
+   provider charges a call one of a few prices chosen by an option, mark that option `cost_tier`,
+   with the tiers as its `enum` and the provider's own as its `default`; set `reports_cost` when
+   its answer says what each call cost. Record no amount in the metadata.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:

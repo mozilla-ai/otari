@@ -68,6 +68,7 @@ class ExaProvider(AnySearch):
         max_results=MAX_RESULTS,
         query_in_url=False,
         key_in_url=False,
+        reports_cost=True,
         options=[
             OptionSpec(
                 name="type",
