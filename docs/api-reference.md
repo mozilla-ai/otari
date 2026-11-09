@@ -202,7 +202,7 @@ apply to its type is left out:
 |---|---|
 | `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
 | `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
-| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, and an MCP call that returned a tool error, are `failed`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code (which never reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |

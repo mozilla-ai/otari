@@ -23,6 +23,7 @@ from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
 from gateway.services.code_execution import ContainerLease
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
+    EMPTY_CODE_TEXT,
     SandboxBackend,
     SandboxNotReachableError,
     SandboxSessionGoneError,
@@ -1752,4 +1753,30 @@ async def test_a_call_the_budget_cannot_hold_never_reaches_the_sandbox() -> None
     backend._exec_tool = never  # type: ignore[method-assign,assignment]
 
     assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"}) == TOOL_BUDGET_EXCEEDED_TEXT
+    assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{"code": ""}, {"code": "  \n\t "}, {}, {"code": None}])
+async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict[str, Any]) -> None:
+    """An empty program would exit 0 and read as a run that worked (#2954)."""
+
+    class _Admit:
+        async def admit(self, _call: Any) -> bool:
+            raise AssertionError("a call with no code reached budget admission")
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Admit()
+    backend = _sandbox(tally=tally)
+    backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
+
+    async def never(_code: str) -> Any:
+        raise AssertionError("the sandbox ran a call with no code")
+
+    backend._exec_tool = never  # type: ignore[method-assign,assignment]
+
+    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, arguments) == EMPTY_CODE_TEXT
+    [execution] = backend.take_executions()
+    assert execution.result is None
+    assert execution.invalid_input is True
     assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}

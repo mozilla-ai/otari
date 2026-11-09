@@ -2032,3 +2032,15 @@ def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> N
 
     assert entry["status"] == "failed"
     assert "stdout" not in entry
+
+
+def test_a_code_execution_with_no_code_is_reported_failed() -> None:
+    from types import SimpleNamespace
+
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {"code": ""})
+    pool = SimpleNamespace(take_executions=lambda: [CodeExecution(code="", result=None, invalid_input=True)])
+
+    [entry] = CHAT_CODE_EXECUTION.ran(call, cast(Any, pool))
+
+    assert entry["status"] == "failed"
+    assert "exit_code" not in entry
