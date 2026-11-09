@@ -1032,10 +1032,7 @@ async def reserve_budget(
         )
         raise _budget_exceeded(
             refusal_detail(
-                user_subject(
-                    user_id,
-                    external_id=refused_on.external_id if refused_on is not None else user.external_id,
-                ),
+                user_subject(user_id, external_id=user.external_id),
                 blocked,
                 new_request=new_request,
                 reserved_output_tokens=reserved_output_tokens,

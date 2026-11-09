@@ -231,6 +231,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
     settle_abandoned_stream,
+    user_subject,
 )
 from gateway.services.catalog import metadata_entry, not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
@@ -2709,8 +2710,11 @@ async def _admit_idempotent(
             )
         case UnknownCaller():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
-        case BlockedCaller():
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"User '{user_id}' is blocked")
+        case BlockedCaller(external_id=external_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{user_subject(user_id, external_id=external_id)} is blocked",
+            )
 
 
 async def _budget_minute_limits(
