@@ -240,7 +240,7 @@ async def initialize_pricing_from_config(
             rates=None if pricing_config.rates is None else pricing_config.rates.document(),
             origin="config",
         )
-        current = in_force.get(model_key)
+        current = None if pricing_config.effective_at else in_force.get(model_key)
         if (
             current is not None
             and DeploymentPricingService.rates_match(current, new_pricing)
