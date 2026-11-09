@@ -13,6 +13,7 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { AuthMethodRow } from "./AuthProviderButtons"
 import {
   forgetRememberedCompany,
+  type RememberedCompany,
   readRememberedCompany,
 } from "./rememberedCompany"
 import { leaveForSsoConnection } from "./ssoRoundTrip"
@@ -32,7 +33,7 @@ const AUTHENTICATION_METHOD = "sso"
  */
 export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
   const { recordEvent } = useTelemetry()
-  const [remembered, setRemembered] = useState<string | null>(() =>
+  const [remembered, setRemembered] = useState<RememberedCompany | null>(() =>
     readRememberedCompany(),
   )
   const [isOpen, setIsOpen] = useState(false)
@@ -48,11 +49,12 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
     setEmail("")
   }
 
-  const beginSignIn = async (slug: string) => {
+  const beginSignIn = async (slug: string, organizationName: string) => {
     setIsPending(true)
     setError(null)
     try {
       const started = await leaveForSsoConnection(slug, {
+        organizationName,
         returnHash: window.location.hash,
       })
       if (!started.isOk) {
@@ -110,7 +112,7 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
         setNotFound(true)
         return
       }
-      await beginSignIn(looked.slug)
+      await beginSignIn(looked.slug, looked.organizationName)
     } catch (caught) {
       setIsPending(false)
       setError(caught)
@@ -135,17 +137,20 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
         <div className="flex flex-col gap-3">
           <p className="text-body">
             Continue signing in with{" "}
-            <span className="font-medium text-foreground">{remembered}</span>.
+            <span className="font-medium text-foreground">
+              {remembered.name}
+            </span>
+            .
           </p>
           <Button
             type="button"
             variant="primary"
             fullWidth
             isDisabled={isDisabled || isPending}
-            onPress={() => void beginSignIn(remembered)}
+            onPress={() => void beginSignIn(remembered.slug, remembered.name)}
             className="h-11"
           >
-            {isPending ? "Continuing…" : `Continue with ${remembered}`}
+            {isPending ? "Continuing…" : `Continue with ${remembered.name}`}
           </Button>
           <Button
             type="button"

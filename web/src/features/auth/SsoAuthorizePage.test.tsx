@@ -59,14 +59,19 @@ afterEach(() => {
 })
 
 describe("SsoAuthorizePage", () => {
-  it("names the organization and offers a control rather than leaving on its own", () => {
+  it("offers a control rather than leaving on its own, naming no identifier", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
     renderPage("acme")
 
-    expect(screen.getByText("acme")).toBeInTheDocument()
+    expect(screen.queryByText("acme")).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Continue with acme" }),
+      screen.getByText(
+        "This link signs you in through your company’s own provider.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Continue to your provider" }),
     ).toBeInTheDocument()
     // Nothing starts before the control is pressed.
     expect(fetchMock).not.toHaveBeenCalled()
@@ -82,7 +87,9 @@ describe("SsoAuthorizePage", () => {
     renderPage("acme")
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Continue with acme" }))
+    await user.click(
+      screen.getByRole("button", { name: "Continue to your provider" }),
+    )
 
     await waitFor(() =>
       expect(assign).toHaveBeenCalledWith(
@@ -101,7 +108,7 @@ describe("SsoAuthorizePage", () => {
     const user = userEvent.setup()
 
     await user.click(
-      screen.getByRole("button", { name: "Continue with no-such-org" }),
+      screen.getByRole("button", { name: "Continue to your provider" }),
     )
 
     expect(

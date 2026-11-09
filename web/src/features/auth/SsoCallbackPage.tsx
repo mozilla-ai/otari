@@ -126,7 +126,10 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
           recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
             authentication_method: AUTHENTICATION_METHOD,
           })
-          rememberCompany(stored.slug)
+          rememberCompany({
+            name: stored.organizationName ?? stored.slug,
+            slug: stored.slug,
+          })
           login()
           if (result.passwordRemoved) {
             setPasswordRemoved({ returnHash })

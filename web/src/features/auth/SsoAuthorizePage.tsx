@@ -76,8 +76,7 @@ export function SsoAuthorizePage({ slug }: { slug: string }) {
     >
       <div className="flex flex-col gap-3">
         <p className="text-center text-body">
-          Continue signing in with{" "}
-          <span className="font-medium text-foreground">{slug}</span>.
+          This link signs you in through your company&rsquo;s own provider.
         </p>
         <Button
           type="button"
@@ -87,7 +86,7 @@ export function SsoAuthorizePage({ slug }: { slug: string }) {
           onPress={() => void start()}
           className="h-11"
         >
-          {isPending ? "Continuing…" : `Continue with ${slug}`}
+          {isPending ? "Continuing…" : "Continue to your provider"}
         </Button>
       </div>
     </PublicAuthLayout>

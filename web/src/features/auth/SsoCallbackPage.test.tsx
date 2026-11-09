@@ -20,6 +20,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 
 const STATE_KEY = "otari.sso.state"
 const SLUG_KEY = "otari.sso.slug"
+const NAME_KEY = "otari.sso.name"
 const TERMS_KEY = "otari.sso.terms-accepted"
 const RETURN_KEY = "otari.sso.return-hash"
 const COMPANY_KEY = "otari.dashboard.rememberedCompany"
@@ -80,6 +81,7 @@ describe("SsoCallbackPage", () => {
   it("spends the code for a session when the state matches the one this tab stored, and remembers the company", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     window.sessionStorage.setItem(SLUG_KEY, "acme")
+    window.sessionStorage.setItem(NAME_KEY, "Acme")
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(sessionBody()))
@@ -94,7 +96,9 @@ describe("SsoCallbackPage", () => {
       state: "the-state",
       terms_accepted: false,
     })
-    expect(window.localStorage.getItem(COMPANY_KEY)).toBe("acme")
+    expect(
+      JSON.parse(window.localStorage.getItem(COMPANY_KEY) ?? "null"),
+    ).toEqual({ name: "Acme", slug: "acme" })
     await waitFor(() =>
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
         authentication_method: "sso",

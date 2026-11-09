@@ -93,7 +93,10 @@ describe("SsoEntry", () => {
   })
 
   it("names the remembered company and skips the address step", async () => {
-    window.localStorage.setItem("otari.dashboard.rememberedCompany", "acme")
+    window.localStorage.setItem(
+      "otari.dashboard.rememberedCompany",
+      JSON.stringify({ name: "Acme", slug: "acme" }),
+    )
     renderEntry()
     const user = userEvent.setup()
 
@@ -103,7 +106,7 @@ describe("SsoEntry", () => {
 
     expect(screen.queryByLabelText("Work email")).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Continue with acme" }),
+      screen.getByRole("button", { name: "Continue with Acme" }),
     ).toBeInTheDocument()
   })
 
@@ -162,7 +165,10 @@ describe("SsoEntry", () => {
   })
 
   it("falls back to the address step when a remembered company's connection is gone", async () => {
-    window.localStorage.setItem("otari.dashboard.rememberedCompany", "acme")
+    window.localStorage.setItem(
+      "otari.dashboard.rememberedCompany",
+      JSON.stringify({ name: "Acme", slug: "acme" }),
+    )
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ detail: "Not available." }, 404),
     )
@@ -172,7 +178,7 @@ describe("SsoEntry", () => {
     await user.click(
       screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
     )
-    await user.click(screen.getByRole("button", { name: "Continue with acme" }))
+    await user.click(screen.getByRole("button", { name: "Continue with Acme" }))
 
     expect(
       await screen.findByText(

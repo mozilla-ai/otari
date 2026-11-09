@@ -165,7 +165,7 @@ describe("PublicAuthPage: a direct link to an organization's own connection", ()
       screen.getByRole("heading", { name: "Sign in with your company" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Continue with acme" }),
+      screen.getByRole("button", { name: "Continue to your provider" }),
     ).toBeInTheDocument()
   })
 })
