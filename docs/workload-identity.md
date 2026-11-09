@@ -19,9 +19,10 @@ to start.
 
 ## How a token is checked
 
-When `federation_issuers` is empty (the default), every credential is checked
-as an API key; a [member's rule](#rules-on-a-members-own-key) is checked only in
-the token exchange. Once it lists an issuer, a credential shaped like a signed
+When `federation_issuers` is empty (the default), a credential is checked as an
+API key, or, with `federation_member_rules` on, as an access token from the
+token exchange; a [member's rule](#rules-on-a-members-own-key) itself is
+checked only in the exchange. Once it lists an issuer, a credential shaped like a signed
 JWT is checked as an identity token:
 
 1. Its issuer (`iss`) must be one of `federation_issuers`, compared exactly.

@@ -2,8 +2,8 @@
 
 Frontier models read PDFs, office documents, and images natively; many local
 and open-source models are text-only. When a request attaches a file to a model
-that cannot read it, Otari extracts the file to text (and captions images)
-before the model sees the request. It decides per attachment, and does only the
+that cannot read it, Otari extracts the file to text (and handles images as
+[`vision_strategy`](#configuration) says) before the model sees the request. It decides per attachment, and does only the
 work the target model needs.
 
 ## Uploading a file
@@ -130,7 +130,8 @@ sandbox session's working directory, so the code the model writes can open it.
   marker the model is given carries the name the file actually has.
 - An Anthropic `container_upload` block
   (`{"type": "container_upload", "file_id": "..."}`) is for the sandbox only:
-  the model is told the file is there and never sees its contents. A request
+  the model is told the file is there and is not sent its contents, though
+  code it runs can read the file and return them. A request
   that runs no code execution at all reads it as a document.
 - A `document`, `file`, or `input_file` block with a `file_id` is both shown to
   the model (extracted or passed through as usual) and seeded.
@@ -275,8 +276,10 @@ message's `images` as well.
 `files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
 default, the latter also bounded by `files_max_bytes`) apply once per source:
 one call may store that many files from Otari's own sandbox, and one request
-may copy that many from a provider's. A file past either is named without an id
-rather than stored. Only a file that actually lands spends from an allowance. A
+may copy that many from a provider's. Only the first `files_output_max_files`
+files a sandbox produced are considered, and one past either limit is named
+without an id rather than stored. A provider's file spends from an allowance
+only once it lands; one that does not keeps its provider ID, as above. A
 produced file is streamed from the sandbox into the store and never held whole.
 
 > The reference `otari-sandbox-container` leaves the result block's

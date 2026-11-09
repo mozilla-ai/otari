@@ -297,8 +297,8 @@ MCP client beta, Otari still runs the call but omits these activity blocks.
 
 The blocks report execution only: Otari runs the call, feeds the result back to
 the model, and returns one logical Messages stream. It strips the blocks from
-history echoed on later turns and never includes the server URL, authorization
-token, or headers. Chat Completions and Responses streams do not carry this
+history echoed on later turns and adds no server URL, authorization token, or
+headers to them, though a result carries whatever the tool returned. Chat Completions and Responses streams do not carry this
 activity.
 
 ## Caller-orchestrated MCP

@@ -58,8 +58,8 @@ What happens next depends on `mode`
 
 - In `block` mode, a flagged request is refused with `403` and
   `guardrail_violation`.
-- In `monitor` mode, the request is served and the verdict comes back in the
-  `Otari-Guardrails` response header
+- In `monitor` mode, the request is served and, on a non-streaming response,
+  the verdict comes back in the `Otari-Guardrails` response header
   ([Reading the header](guardrails-reference.md#reading-the-otari-guardrails-header)).
 
 `on_unavailable` decides what happens when the check cannot run; see
@@ -123,7 +123,8 @@ the API:
 
 2. Check that `build_state` in the response is `built`
    ([Telling whether a definition is running](guardrails-reference.md#telling-whether-a-definition-is-running)).
-   A mistyped credential saves fine and then shows `failed`.
+   `built` means it was constructed, not that the vendor accepts its
+   credential, so test it before mandating it.
 3. Create a mandate whose `definition_id` is the definition's id, with no `url`.
 
 A definition's `name` is only how the organization recognizes it; the same

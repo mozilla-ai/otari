@@ -29,7 +29,7 @@ Only organization owners and admins can add, edit, or delete guardrails.
 
 ## Mandate a guardrail
 
-Each guardrail can be applied across the entire organization or to specific workspaces. You can configure it to either **block requests** or **monitor them** without blocking. Once mandated, the guardrail will run on every request from the selected workspaces.
+Each guardrail can be applied across the entire organization or to specific workspaces. You can configure it to either **block requests** or **monitor them** without blocking. Once mandated, the guardrail will run on every chat completions, messages and responses request from the selected workspaces. Embeddings and other endpoints are not checked.
 
 1. In **Guardrails**, click **Mandate a guardrail**.
 2. Choose whether you want to use a guardrail configured from the catalog or your own guardrail service.
@@ -44,7 +44,7 @@ Each guardrail can be applied across the entire organization or to specific work
 
 Before applying a guardrail, you can test how it evaluates specific content. Enter the text you want to check, and the guardrail will process it just as it would a real request. Nothing entered during the test is saved. To test a guardrail:
 
-1. In **Guardrails**, click Test on the guardrail you want to test.
+1. In **Guardrails**, click Test on the guardrail you want to test. A guardrail from your own service is tested from its mandate's row, once mandated.
 2. Enter the text you want to check against the guardrail.
 3. Optionally, fill in any other fields the guardrail takes, such as a model output for checks that evaluate responses.
 4. Click Run test to see how the guardrail evaluates the content.

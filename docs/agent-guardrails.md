@@ -10,7 +10,7 @@ runs them from the agent's own hook system. It needs no gateway, no account and 
 credential, unless you choose to [report its checks to Otari](#reporting-to-otari).
 
 These are not [Inference Guardrails](guardrails.md), which check what a model is
-asked and what it answers. This page walks through setting Agent Guardrails up;
+asked before the provider is called. This page walks through setting Agent Guardrails up;
 every field, gate type, option and limit is in the
 [Agent Guardrails reference](agent-guardrails-reference.md).
 
@@ -259,7 +259,9 @@ To run it on every pull request:
    credential. Run it from the base branch's workflow (`pull_request_target` on
    GitHub), fetch the pull request as Git objects only, and pass
    `--base <base> --head <head>`, so no pull request code runs next to the
-   credential.
+   credential. Codex still sees the diff with its tools in a read-only sandbox,
+   which can read files, so on untrusted diffs prefer `claude -p` or run Codex
+   where no credential is readable.
 4. Make the `path` and `verifier` job a required check, and review changes to it
    and its verifier scripts, since that job runs the pull request's code.
 
@@ -282,9 +284,9 @@ export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
   (see [Importing external usage](external-usage.md#enforcement-boundary)), so
   reporting works on a gateway you run, not on otari.ai today.
 - **Claude Code** does not pass these variables to its hooks; set them in the
-  `env` block of its settings, as
+  `env` block of `~/.claude/settings.json`, as
   [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
-  shows.
+  shows. Keep the key out of project settings files you commit.
 - **The server sees your gates**, including their messages and your own gates in
   `~/.otari/`. Point `OTARI_URL` only at a server you trust with them. It keeps
   up to 1,000 versions of the guardrail per workspace; past that, gates show by
@@ -418,8 +420,9 @@ python scripts/bump.py
 
 Nothing before the command runs says what it will write. `stop.working_tree`
 covers that: at the end of the turn it checks the same globs against
-`git status --porcelain`, which sees the file whatever wrote it. It cannot prevent
-the write, so the turn is blocked and the change has to be reverted.
+`git status --porcelain`, which sees the file whatever wrote it, except an
+ignored file or a change already committed in the turn. It cannot prevent the
+write, so the turn is blocked and the change has to be reverted.
 
 A `command` gate can refuse the spellings it names, but not what a script does
 inside. It catches mistakes by a cooperative agent; it is not a security boundary.

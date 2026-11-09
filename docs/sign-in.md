@@ -9,7 +9,8 @@ sign-in needs no setup; passkeys and Google or GitHub sign-in do.
 1. Set `public_base_url`, which sets the origin and relying-party ID.
 2. Only when passkeys must be bound to a parent domain, set `webauthn_rp_id`.
 3. Where an edge serves the dashboard on a different host from the gateway, set
-   `webauthn_rp_id` to a parent domain of both, and list the dashboard origin in
+   `webauthn_rp_id` to the dashboard's host or a parent of it, and list the
+   dashboard origin (and the gateway's, if passkeys are used there too) in
    `webauthn_allowed_origins`. The ID is not derived from `ui_base_url`, so
    without this the ceremony fails in the browser and nothing is logged
    ([#1134](https://github.com/mozilla-ai/otari/issues/1134)).

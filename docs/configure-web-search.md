@@ -17,6 +17,8 @@ To configure web search for a workspace:
 7. Use **Allowed domains** to restrict searches and fetched content to specific websites.
 8. Use **Blocked domains** to prevent searches and fetches from accessing specific websites.
 
+The domain lists apply to the search and fetch Otari runs, not to direct searches or to a provider's own tools running on the provider; see [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
+
 ![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/configure-web-search.png)
 
 Workspace settings can make the deployment-level web search policy more restrictive, but they **cannot override it to allow access that has been blocked at the deployment level**.

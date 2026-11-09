@@ -19,7 +19,7 @@ If you need the runtime in your own infrastructure instead, read the [Self-hoste
 
 ## How it works
 
-Your workspace is the control plane. It holds your provider connections, model access, API keys, and usage data. Your application sends requests to `https://api.otari.ai/api/v1` with a workspace API key and a model ID, in the OpenAI, Anthropic, or Gemini format, and Otari routes each one to any of 40+ supported providers.
+Your workspace is the control plane. It holds your provider connections, model access, API keys, and usage data. Your application sends requests to `https://api.otari.ai/api/v1` (`https://eu.api.otari.ai/api/v1` for an account in the EU) with a workspace API key and a model ID, in the OpenAI, Anthropic, or Gemini format, and Otari routes each one to any of 40+ supported providers.
 
 This lets you keep application integrations consistent while managing model access centrally.
 

@@ -124,8 +124,9 @@ Write the model as Otari spells it, `provider:model`, such as
 on `anthropic:claude-sonnet-4-6` and `mistral:mistral-large-latest`.
 
 A routing policy or alias name works too, such as
-`OtariModel("support-agent")`. Otari then picks the model and falls back to the
-next one on failure, so your code does not change when the policy does. See
+`OtariModel("support-agent")`, so your code does not change when the policy
+does. An alias names one model; a policy with fallbacks moves to the next model
+on a retryable failure. See
 [Model format](models.md#model-format),
 [Listing available models](models.md#listing-available-models) and
 [Routing](routing.md).
