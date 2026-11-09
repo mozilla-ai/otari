@@ -14,11 +14,11 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.identity import OIDCConnection
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, OrganizationDomain, User
+from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
 from gateway.repositories.identity import IdentityRepositories
-from gateway.repositories.tenancy import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
+from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
 from gateway.services.tenancy import OrganizationService
 
@@ -79,7 +79,7 @@ class OIDCConnectionService:
         repositories: IdentityRepositories,
         *,
         organizations: OrganizationService,
-        domains: OrganizationDomainRepository,
+        domains: ClaimedDomains,
         allow_private_hosts: bool,
     ) -> None:
         self._uow = uow
@@ -106,7 +106,7 @@ class OIDCConnectionService:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
                 return None
-            domains = await self._domains.list_by_organization(organization.id)
+            domains = await self._domains.for_organization(organization.id)
             return self._to_public(connection, domains)
 
     async def save_for_user(self, *, user: User, request: OIDCConnectionRequest) -> OIDCConnectionPublic:
@@ -148,7 +148,7 @@ class OIDCConnectionService:
                 )
             else:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
-            domains = await self._domains.list_by_organization(organization.id)
+            domains = await self._domains.for_organization(organization.id)
             return self._to_public(connection, domains)
 
     async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
@@ -184,7 +184,7 @@ class OIDCConnectionService:
             current.discovery_document = discovered.document
             current.discovered_at = discovered.discovered_at
             self._connections.stage(current)
-            domains = await self._domains.list_by_organization(organization.id)
+            domains = await self._domains.for_organization(organization.id)
             return self._to_public(current, domains)
 
     async def delete_for_user(self, *, user: User) -> None:
@@ -299,7 +299,7 @@ class OIDCConnectionService:
         self._connections.stage(connection)
 
     @staticmethod
-    def _to_public(connection: OIDCConnection, domains: list[OrganizationDomain]) -> OIDCConnectionPublic:
+    def _to_public(connection: OIDCConnection, domains: list[ClaimedDomain]) -> OIDCConnectionPublic:
         return OIDCConnectionPublic(
             id=connection.id,
             issuer=connection.issuer,
