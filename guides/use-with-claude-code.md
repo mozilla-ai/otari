@@ -203,7 +203,7 @@ key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
 travels in a header. The plugin is active
 from then on, in that session and every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.40.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.41.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 Once it is installed, each spawn leaves a dim line in the transcript naming the
@@ -344,7 +344,8 @@ idempotency, and pricing behavior.
 
 The exporter above carries sessions that run after it is configured. Everything
 Claude Code did before that is already on disk, one JSONL transcript per session
-under `~/.claude/projects`. `otari import claude-code` reads those transcripts and
+under `~/.claude/projects`, or under the directory `CLAUDE_CONFIG_DIR` names
+where you set that variable. `otari import claude-code` reads those transcripts and
 posts them to the same import endpoint, so it has the same limit: it works on a
 gateway you run, with a budget-exempt key or the master key, and not on otari.ai
 today. The command installs on its own, without the server:

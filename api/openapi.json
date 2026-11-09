@@ -127,7 +127,7 @@
         "type": "object"
       },
       "ActivationApiKeyPublic": {
-        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
+        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, on the press that asked for it, and never stored in\nplaintext, like every other key this gateway mints.",
         "properties": {
           "key": {
             "title": "Key",
@@ -3719,7 +3719,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "description": "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -3772,6 +3772,28 @@
             },
             "title": "Price Sources",
             "type": "array"
+          },
+          "price_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.",
+            "title": "Price Unit"
           },
           "provider_count": {
             "title": "Provider Count",
@@ -3995,7 +4017,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "description": "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -4041,6 +4063,28 @@
             },
             "title": "Price Sources",
             "type": "array"
+          },
+          "price_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the cheapest prices are per: the unit every priced offering is priced in. Null where no offering is priced, or where offerings are priced in different units, which leaves both null.",
+            "title": "Price Unit"
           },
           "provider_count": {
             "title": "Provider Count",
@@ -10503,7 +10547,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -10602,6 +10646,30 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
           },
           "unit": {
             "anyOf": [
@@ -10728,7 +10796,7 @@
         "type": "object"
       },
       "HostedModelsPublic": {
-        "description": "A page of one hosted provider's offered models, and how many there are in total.",
+        "description": "A page of one hosted provider's offered models, and how many there are in total.\n\n``count`` is the total of the kind asked for, and ``type_counts`` how many\nof each kind the provider offers, ``unknown`` for a model of no known kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -10740,6 +10808,13 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Type Counts",
+            "type": "object"
           }
         },
         "required": [
@@ -13126,6 +13201,17 @@
             ],
             "title": "Guardrails"
           },
+          "inference_geo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inference Geo"
+          },
           "max_tokens": {
             "title": "Max Tokens",
             "type": "integer"
@@ -13836,6 +13922,17 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, web_search, and the overrides and multipliers that change a price when a condition holds. The fields above are its text view. Null where the stored block cannot be read."
+          },
           "unit": {
             "default": "token",
             "enum": [
@@ -14485,7 +14582,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one. ``type``\nis the kind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -14582,6 +14679,30 @@
             ],
             "title": "Pricing Id"
           },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
           "unit": {
             "default": "token",
             "enum": [
@@ -14635,7 +14756,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelsPublic": {
-        "description": "One page of a key's offered models, and how many there are in total.",
+        "description": "One page of a key's offered models, and how many there are in total.\n\n``count`` is the total of the kind asked for, and ``type_counts`` how many\nof each kind the key offers, ``unknown`` for a model of no known kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -14647,6 +14768,13 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Type Counts",
+            "type": "object"
           }
         },
         "required": [
@@ -15748,7 +15876,7 @@
           },
           "on_unavailable": {
             "default": "block",
-            "description": "What a block-mode entry does when the guardrails service cannot be reached at all",
+            "description": "What a block-mode entry does when the guardrails service cannot be reached or gives no verdict",
             "enum": [
               "block",
               "monitor"
@@ -16562,8 +16690,6 @@
           }
         },
         "required": [
-          "input_price_per_million",
-          "output_price_per_million",
           "model_key"
         ],
         "title": "OrganizationModelPricingCreate",
@@ -16788,8 +16914,6 @@
           }
         },
         "required": [
-          "input_price_per_million",
-          "output_price_per_million",
           "effective_from"
         ],
         "title": "OrganizationModelPricingUpdate",
@@ -18538,7 +18662,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+            "description": "Which writer set this row: config, api, seed or migration. Null before origins were recorded.",
             "title": "Origin"
           },
           "output_price_per_million": {
@@ -21215,6 +21339,12 @@
       "SearchProviderOptionSchema": {
         "description": "One native option a provider accepts, under the provider's own name.",
         "properties": {
+          "cost_tier": {
+            "default": false,
+            "description": "True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.",
+            "title": "Cost Tier",
+            "type": "boolean"
+          },
           "default": {
             "description": "The value the provider uses when the option is not set.",
             "title": "Default"
@@ -21245,7 +21375,7 @@
           },
           "operator_only": {
             "default": false,
-            "description": "True when only an instance or a credential may set it, never a workspace or a request.",
+            "description": "True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.",
             "title": "Operator Only",
             "type": "boolean"
           },
@@ -21407,6 +21537,12 @@
             ],
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
+          },
+          "reports_cost": {
+            "default": false,
+            "description": "True when the provider's answer says what each call cost, which is then what the call is billed.",
+            "title": "Reports Cost",
+            "type": "boolean"
           },
           "reports_final_url": {
             "anyOf": [
@@ -22893,7 +23029,7 @@
       },
       "TokenChargeLine": {
         "additionalProperties": true,
-        "description": "A charge line billed per million tokens.\n\n``rate_per_million`` is the discriminator: its presence (rather than\n``unit_rate``) is what tells a reader, and a renderer, which unit convention\napplies. See ``gateway.services.pricing_service``.",
+        "description": "A charge line billed per million tokens.\n\n``rate_per_million`` is the discriminator: its presence (rather than\n``unit_rate``) is what tells a reader, and a renderer, which unit convention\napplies. See ``gateway.services.pricing_service``. A line whose price an\noverride or a multiplier changed also carries ``rules``: each one's\ncondition, in the order they applied.",
         "properties": {
           "cost": {
             "description": "USD charged for this line.",
@@ -23660,7 +23796,7 @@
       },
       "UnitChargeLine": {
         "additionalProperties": true,
-        "description": "A charge line billed per call, for gateway-run tools and per-request routes.\n\n``unit_rate`` is the discriminator, in the same sense as\n:class:`TokenChargeLine`'s ``rate_per_million``.",
+        "description": "A charge line billed per call, for gateway-run tools and per-request routes.\n\n``unit_rate`` is the discriminator, in the same sense as\n:class:`TokenChargeLine`'s ``rate_per_million``. A line whose price an\noverride or a multiplier changed also carries ``rules``, as a token line does.",
         "properties": {
           "cost": {
             "description": "USD charged for this line.",
@@ -25432,6 +25568,21 @@
             ],
             "title": "Status Code"
           },
+          "stream_cut_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "provider",
+                  "client"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Cut By"
+          },
           "tags": {
             "anyOf": [
               {
@@ -26713,6 +26864,7 @@
           "aspect_ratio": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -26731,6 +26883,17 @@
               }
             ],
             "title": "First Frame"
+          },
+          "generate_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generate Audio"
           },
           "last_frame": {
             "anyOf": [
@@ -26790,9 +26953,24 @@
             ],
             "title": "Reference Images"
           },
+          "reference_videos": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Videos"
+          },
           "resolution": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -26828,6 +27006,7 @@
           "size": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -29470,7 +29649,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.40.0"
+    "version": "0.41.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -32638,7 +32817,7 @@
             }
           },
           {
-            "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+            "description": "Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match.",
             "in": "query",
             "name": "max_input",
             "required": false,
@@ -32652,7 +32831,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+              "description": "Maximum cheapest input price per million tokens; unpriced models, and models priced in another unit, do not match.",
               "title": "Max Input"
             }
           },
@@ -35390,6 +35569,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only models of this kind; `unknown` for those no source names a kind for",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "embedding",
+                    "image",
+                    "speech",
+                    "transcription",
+                    "rerank",
+                    "moderation",
+                    "video",
+                    "decision",
+                    "realtime",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "const": "unknown",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models of this kind; `unknown` for those no source names a kind for",
+              "title": "Type"
             }
           }
         ],
@@ -38226,6 +38440,25 @@
               "description": "Only the models this provider instance serves, described as served there.",
               "title": "Provider"
             }
+          },
+          {
+            "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
           }
         ],
         "responses": {
@@ -38941,6 +39174,27 @@
       "get": {
         "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them before automatic selection reorders it, each with\nits input price for this organization and who runs the built-in tools on it,\nbeside its traffic: how many requests a backup served, and how many named one\noffering or a policy instead, by API key and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
+        "parameters": [
+          {
+            "description": "Only the offerings a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the offerings a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -38951,6 +39205,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -41931,6 +42195,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only models of this kind; `unknown` for those no source names a kind for",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "embedding",
+                    "image",
+                    "speech",
+                    "transcription",
+                    "rerank",
+                    "moderation",
+                    "video",
+                    "decision",
+                    "realtime",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "const": "unknown",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models of this kind; `unknown` for those no source names a kind for",
+              "title": "Type"
             }
           }
         ],
@@ -52762,7 +53061,7 @@
     },
     "/api/v1/usage/requests/{request_id}": {
       "get": {
-        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that failed, including one the provider\ncut, always writes an error row. A stream the client abandoned before the\nprovider reported usage, with no gateway tool work, writes a row only under\nthe ``estimate`` policy, billed on an estimate; otherwise it writes none, so\nits id stays 404.",
         "operationId": "usage-get_request_settlement",
         "parameters": [
           {

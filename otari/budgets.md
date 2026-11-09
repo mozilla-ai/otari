@@ -87,7 +87,9 @@ estimate prices the request's output token limit (`max_tokens`, or
 `max_output_tokens` on responses; a deployment default, 1024 tokens unless
 changed, when it sets none), and where the model charges for output the refusal names that
 figure, so a lower limit may let the request fit. A
-budget already at its cap is refused as `has exceeded budget limit`.
+budget already at its cap is refused as `has exceeded budget limit`. On a
+service key, the refusal names the end user as the request did
+(`End user 'alice'`), not by Otari's internal id.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
@@ -96,6 +98,12 @@ it can measure before the call: image generation the images asked for at the
 `size` asked for, speech the characters of its input, moderations one request,
 and transcription nothing, because the audio's length is not read here
 ([Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit)).
+Every hold is priced at the rules of the model's price the request meets
+before the call: its estimated context, the tier it asks for, an image's size
+and a video's resolution, and the time it starts. Settlement prices the call
+at the rules it met, the tier the provider reports serving it at included, so
+a request that asks for one tier and is served at a dearer one can settle
+above its hold ([Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers)).
 
 ### Per-minute limits
 

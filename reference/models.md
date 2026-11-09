@@ -230,6 +230,20 @@ rows at all, and that is not the same as offering none: it means the key is
 unnarrowed and reaches whatever its provider serves. Offering none, which is
 every model switched off, serves nothing.
 
+The Providers page lists a key's models one kind at a time: tabs above the
+table name each kind the key offers (Text, Image, Video, Embeddings and so on)
+with how many models it has, and **All** shows every kind. The kind comes from
+models.dev, and a model it does not know is under **Unknown**. The columns are
+the same on every tab. A token price is per million tokens. A price in another
+unit is shown under the side it bills, so an image price, or a video model's
+per-second price, is under **Output**, and hovering it names what it prices and
+its unit ("Video output, $0.045/second"). A per-second price on any other kind
+of model is audio, shown on the side it is stored on. On a phone, which cannot
+hover, the unit is shown beside the amount. The list endpoint,
+`GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
+kind as `type` (`unknown` included), returns each model's `type`, and counts
+every kind in `type_counts` whichever one it returns.
+
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
 pricing data has not caught up with cannot be billed at nothing. With
@@ -350,6 +364,11 @@ folds it by model the same way, so `nebius:zai-org/GLM-5.3` and
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
 the size that matters rather than at their base rate.
+A model's minimum compares only prices in one unit. `price_unit` names it
+(`token`, `image`, `second`, and so on), and the minimum is per million of it.
+Where one offering bills per token and another per image, no number compares
+the two, so `price_unit` and both minimums are null; the model's offerings
+still carry their own prices.
 `GET /api/v1/catalog/models/{id}` lists every offering of one model the caller may
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
@@ -369,6 +388,13 @@ provider's id, else the model family (`claude`, `nemotron`). A dated build, a si
 reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
+
+An offering's `pricing` gives the per-million rates and their `unit`, and
+`pricing.rates` gives the whole price as a models.dev cost block: each
+modality's input and output price in its own unit, the web search price, and
+the overrides and multipliers that change a price when a condition holds (see
+[Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers)).
+`GET /api/v1/models` carries the same field.
 
 Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
@@ -416,6 +442,10 @@ models.dev has no entry for the offering, its download is v1, which has no
 from the model's `type`. The list repeats what models.dev says, so a model it
 gives the wrong protocol shows the wrong route until models.dev is corrected.
 
+The dashboard's "Use this model" drawer reads this list. It shows the request
+for the route of the offering that answers, and offers a choice where the list
+has more than one ([Models and Routing](https://docs.otari.ai/guides/dashboard/dashboard#models-and-routing)).
+
 ### Browsing the grouped catalog
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
@@ -426,12 +456,16 @@ and `limit` select a page. `count` is the number of matching models before pagin
 Repeat `provider`, `vendor` or `type` to match any selected value. An empty `vendor`
 selects models whose vendor is unknown, and `type` never matches a model of
 unknown kind. A model's `type` is the kind most of its offerings give (see
-`type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
+`type` above); a tie goes to the vendor's own provider. The Models page's
+**Model kind** filter sets `type`, from the kinds in `facets.types`, and each
+model on the page names its kind. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
 `zero_data_retention`, and `released_within_days`. Release windows end today in
-UTC and exclude unknown and future dates. A price ceiling excludes models with
-no known input rate. `zero_data_retention=true` keeps the models at least one
+UTC and exclude unknown and future dates. `max_input` is a price per million
+tokens, so it excludes models with no known input rate and models priced in
+another unit. `pricing=priced` keeps every model with a priced offering,
+whatever its unit. `zero_data_retention=true` keeps the models at least one
 offering declared zero data retention serves.
 
 Each offering carries `zero_data_retention`, and each model lists the providers
@@ -444,7 +478,9 @@ sets the parameter.
 
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;
-names and catalog ids break ties so pages have a stable order.
+names and catalog ids break ties so pages have a stable order. A price sort
+compares a price only with prices in its unit: models priced per token come
+first, then each other unit's models in turn.
 
 Request `include_facets=true` to receive the provider, vendor and type choices from
 the complete authorized catalog, whatever the filters match, so a filter that

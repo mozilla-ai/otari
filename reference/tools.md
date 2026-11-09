@@ -302,7 +302,9 @@ budget carry what the provider will charge. They are priced at the operator's
 the model's own rate carries, per 1,000 searches, which the catalog gives a
 model whose provider searches (Anthropic's is $10 per 1,000) and a `rates`
 block can set ([Every price in its unit](https://docs.otari.ai/self-hosting/configuration#every-price-in-its-unit-rates)),
-else, with `default_pricing` on, at the provider's list price. An
+else, with `default_pricing` on, at the provider's list price. The model's own
+price applies its rules, a tier multiplier included
+([Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers)). An
 organization's override prices them as it prices the call's tokens, so a
 search on the organization's own provider key takes its override. With
 none of these, the searches stay on the row at no cost. Searches across the rounds
@@ -734,7 +736,9 @@ is unacceptable.
 
 A fetch instance, under `fetch_tools` (see [Search tools](https://docs.otari.ai/self-hosting/configuration#search-tools)),
 names a provider for `otari_web_fetch`, for [`POST /api/v1/fetch`](#direct-fetch)
-and for enriching search results.
+and for enriching search results. A fetch provider's cost tier is set only by
+the tool's configuration where the provider reports no cost, as
+[Search providers](#search-providers) says for a search provider's.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results, so setting it moves enrichment too. A workspace
 whose organization has a [fetch key](#organization-search-keys) runs both on
@@ -1043,6 +1047,18 @@ The request, the response and the errors are in the
 A search instance serves direct search and, as the [in-loop default](#web-search),
 the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 [Pricing a gateway-run tool](#pricing-a-gateway-run-tool) says.
+
+Some providers charge each search or fetch at one of a few prices, chosen by an
+option: the provider's cost tiers. Where the provider does not report what a
+call cost, only the tool's configuration sets that option, in a tool's `options`
+or in an [organization key](#organization-search-keys)'s: a request that sets it
+is refused with a 400, and a workspace's `provider_options` that set it are left
+out with a warning. So a tool's calls run at the tier its price was set for, and
+an organization key's at the tier its owners and admins chose for their own
+account. To offer more than one tier, configure one tool for each, at its own
+price. `GET /api/v1/search-tools/providers` marks such an option `cost_tier`, and
+`operator_only` while it is set only this way; `?kind=fetch` lists the fetch
+providers'.
 
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no

@@ -17,6 +17,8 @@ on code execution when the deployment has no sandbox.
 4. Under **Who runs provider code tools**, choose whether a provider's own code
    tool or Otari's sandbox runs the code.
 
+![A workspace's Code execution page, with the switch and who runs provider code tools.](assets/screenshots/configure-code-execution.png)
+
 The other fields of the policy, such as the iteration cap, the execution timeout
 and the sandbox image, are set through the API.
 

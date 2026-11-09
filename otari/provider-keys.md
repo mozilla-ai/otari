@@ -20,7 +20,7 @@ which keys a workspace can use.
 
 ## Add a provider key
 
-1. Open **Organization** and select **Providers**.
+1. Open **Organization**, then **Providers**, then **Inference**.
 2. Click **Add provider key**.
 3. Select the **Provider**.
 4. Enter a **Name** that tells several keys for the same provider apart, such
@@ -59,8 +59,8 @@ endpoint instead.
 ## Set a default key per provider
 
 If the organization has several keys for one provider, mark one as the default
-so workspaces inherit it: on **Providers**, click the **star icon** next to the
-key. How a workspace picks among several keys is in
+so workspaces inherit it: on **Inference**, click **Make default provider** (the
+star icon) on the key. How a workspace picks among several keys is in
 [Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys).
 
 ## Control workspace access
@@ -93,8 +93,12 @@ providers declared to keep no prompts or completions
 a request is refused with `403` on an organization key or a hosted provider
 that is not declared, and on any provider configured in `config.yml` or
 endpoint the workspace or its users registered, neither of which can be
-declared. The rows it blocks say so, and **Models** lists only
-declared offerings for the workspace.
+declared. The rows it blocks say so, and nothing the workspace shows names an
+undeclared source: **Models**, the **Playground**'s model list, the model
+pickers and automatic fallbacks on **Routing**, an API key's model access and
+the setup guide's example all list only declared offerings. An API key in the
+workspace is listed only those by `GET /api/v1/models` and
+`GET /api/v1/catalog/models` too.
 
 A new workspace starts with every row as the organization decides, so a
 workspace only differs from its organization where an admin changed it.
@@ -108,9 +112,11 @@ Add the replacement before removing the old key. Keys are resolved at request
 time, so your applications' API keys need no change.
 
 1. Create a new key in the provider's dashboard. Do not revoke the old one yet.
-2. In **Organization**, then **Providers**, click **Add provider key**, select
+2. In **Organization**, then **Providers**, then **Inference**, click **Add
+   provider key**, select
    the same provider, give it a distinct name, and paste the new key.
-3. Make the new key the provider's default with its **star icon**.
+3. Make the new key the provider's default with **Make default provider** (its
+   star icon).
 4. For each workspace that pins the old key, open its **Providers** tab and select
    **Always use this key** in the new key's menu (**⋯**). A workspace keeps
    using a pinned key after the organization default changes.

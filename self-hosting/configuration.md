@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.40.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.41.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.40.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.41.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -904,8 +904,18 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
-precedence. Rates and settled costs use decimal arithmetic and costs are rounded
+Each start writes the config file's prices to the database. An entry with no
+`effective_at` adds a version only when its rates differ from the version in
+force, whoever set that version, so an unchanged file adds nothing, and a start
+puts the file's rate back over one set since through `/api/v1/pricing` or the
+dashboard. To keep a rate set there, remove the model's entry from this file or
+give it the same rate. An entry with `effective_at` adds its version once, and a
+version already stored at that instant is kept. An entry for a model of a
+[hosted provider](hosted-providers.md) is skipped with a warning, because this
+file prices only the `providers:` and `decision_providers:` instances and the
+tools it declares: price a hosted provider's model through the pricing API or
+the Hosted providers page.
+Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
 A stored price change, made through the API, the dashboard or a catalog update,
@@ -1013,8 +1023,12 @@ provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
 Each stored rate also carries its `unit` (one of the units under
-[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin` (`config` or `api`), so a rate the config file re-seeds on
-every restart is distinguishable from one set in the dashboard.
+[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin`:
+`config` for a rate from this file, `api` for one set through the pricing API or
+the dashboard, `seed` for one a catalog update copied from models.dev for a
+model a hosted provider serves, and `migration` for one an upgrade wrote. It is
+null on a rate stored before origins were recorded. A catalog update moves only
+a `seed` rate.
 
 ### A public catalog
 
@@ -1103,8 +1117,77 @@ pricing:
         output: {price: 0.4, unit: second}
 ```
 
-The `overrides` and `multipliers` a block holds are stored and not yet
-applied: the base price is read.
+The `overrides` and `multipliers` a block holds apply to each request
+([Overrides and multipliers](#overrides-and-multipliers)).
+
+### Overrides and multipliers
+
+A price in a `rates` block can change with the request. An override on an
+`input`, an `output` or the `web_search` price replaces the prices it names
+when its condition holds. A multiplier beside the modalities scales the prices
+it names when its condition holds. Otari applies them in the order models.dev
+states, to every modality and to `web_search` alike:
+
+1. Each override whose condition the request meets merges over its price, in
+   order, field by field: an override that names only a cache read price keeps
+   the base cache write price, and a later override wins over an earlier one.
+2. Then each multiplier whose condition the request meets scales the prices it
+   names. A number `factor` scales every price of the block, the cache, the
+   reasoning and the `web_search` prices included. An object scales only the
+   prices on the paths it names: `{text: 2}` scales every text price, and
+   `{text: {output: 2}}` only the text output price.
+
+```yaml
+pricing:
+  openai:gpt-5:
+    rates:
+      text:
+        input:
+          price: 1.25
+          overrides:
+            - when: {context: {gt: 272000}}
+              price: 2.5
+        output: {price: 10}
+      multipliers:
+        - when: {service_tier: {equals: flex}}
+          factor: 0.5
+```
+
+A condition holds when the request's value for each key it names meets that
+key's operator: `equals`, `in`, `gt`, `gte`, `lt`, `lte` or `min_items`, and
+`all`, `any` and `not` combine conditions. `equals` and `in` compare text
+without regard to case. `gt` and the other comparisons order text as written,
+which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
+
+| Condition | Its value |
+|---|---|
+| `context` | The request's billable input in tokens: the estimate before the call, what the provider reports after it |
+| `service_tier` | The tier the request asks for, before the call. After it, the tier the provider reports serving the call at; a response that names no tier settles at the price that names none |
+| `resolution` | An image's `size`, or a video's `resolution`, else its `size` |
+| `region` | The region a Messages request names in `inference_geo`, before the call. After it, the region the provider reports running the call in; Anthropic reports it, including for a request that names none and runs in the workspace's default. Unknown where the provider reports none, so a rule on it is skipped |
+| `quality`, `style` | An image's `quality` and `style` |
+| `aspect_ratio` | A video's `aspect_ratio` |
+| `duration` | A video's length in seconds |
+| `date`, `utc_days`, `utc_hours` | When the request started, in UTC: a video job's start, a batch's creation, an imported event's own time |
+| `input_video` | Whether a video request names `reference_videos`. Unknown for an imported event or a video job started before Otari kept it, so a rule on it is skipped |
+| `generate_audio` | A video request's `generate_audio`. Unknown when the request leaves it to the provider's default, so a rule on it is skipped |
+| `websocket` | False: Otari sends nothing over a websocket. Unknown for an imported event, so a rule on it is skipped |
+
+A rule whose condition names any other key, such as `mode` or `thinking`, is
+skipped, as models.dev's schema says, and the base price applies. A key Otari
+answers that the request gives no value for is a condition that does not hold,
+so `{service_tier: {equals: priority}}` does not hold for a request that names
+no tier, and `{not: {service_tier: {equals: priority}}}` does. A models.dev
+override on context with `gt` starts above its bound. A tier given in
+`pricing_tiers` is written as an override with `gte`, so it starts at its
+`min_input_tokens`.
+
+This file and the pricing API refuse a rule whose condition names a key or an
+operator models.dev does not list, or gives an operator an operand it cannot
+take, so a typo is never a rule that silently never matches. A block read back
+from a row is shown as stored. Each charge line of a usage row names, under
+`rules`, the condition of each rule that changed the price it bills at, in the
+order they applied.
 
 ### Each endpoint in its unit
 
@@ -1127,7 +1210,7 @@ as a price per image, and a token price is never read as a price per request.
 | Audio transcription | `audio` input | The length the provider reports, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
 | Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
 | Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
-| Videos | `video` output | The seconds the job reports | `second` per second ([Videos](https://docs.otari.ai/reference#videos)) |
+| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is recorded with no cost, which is unknown rather than free | `second` per second ([Videos](https://docs.otari.ai/reference#videos)) |
 
 A `token` rate is read as tokens on every endpoint. An endpoint that reports no
 tokens (a `dall-e-3` image, a moderation) is unpriced at a token rate: the row
@@ -1143,10 +1226,10 @@ moderations are exempt: they are served, and their row carries no cost. A
 missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
-`tokens`, `requests` and `images`, are still read for one release, in this file
-and on the pricing API, and read as `token`, `request` and `image`: a rate sent
-as `unit: requests` is stored and served as `unit: request`. The next release
-refuses the old names; see [Upgrading](#upgrading).
+`tokens`, `requests` and `images`, are still read, in this file and on the
+pricing API, as `token`, `request` and `image`: a rate sent as
+`unit: requests` is stored and served as `unit: request`. A later release will
+refuse the old names; see [Upgrading](#upgrading).
 
 The catalog prices each slot in its unit, so a catalog price reaches every
 endpoint: `whisper-1` is priced per minute of audio and `tts-1` per character
@@ -1667,40 +1750,47 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.40.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.41.0/ARCHITECTURE.md) for the extension
 boundary.
 
-## Product feedback
+## Contacting the Otari team
 
-Signed-in dashboard users can choose **Feedback**, beside Documentation in the
-top bar (in the account menu on a phone), to send a message to the Otari team.
-The team receives it privately in Slack. By default only the message is sent:
-no email, screenshot, page URL, account identifier, deployment identifier, or
-usage history is attached. Someone whose account has an email also sees a box
-under the message, **Share _their address_ so the team can reply**. Ticked, the
-gateway adds the signed-in account's email, never an address from the request,
-and only when it is the address the form showed: a page left open while another
-tab signed in as someone else shares nothing. The Slack post shows it as the
-address to reply to. The box starts unticked every time the form opens, and an
-account without an email is not offered it. Opening the form, typing, and
-canceling make no outbound request.
+When `feedback_enabled` is on, signed-in dashboard users can choose **Contact**,
+beside Documentation in the top bar (in the account menu on a phone), to send a
+message to the Otari team. It is off by default, so a self-hosted deployment
+shows no Contact entry unless its operator turns it on. otari.ai turns it on.
 
-The gateway forwards the message to
-`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
-browser's cookies, authorization, referrer, or IP headers. Network peers still
-see connection metadata, so this is private feedback, not anonymous feedback.
-Keep request-body capture disabled for the feedback endpoint in any additional
-logging or tracing you configure.
+Someone whose account has an email the team can reply to sees, under the
+message, that by sending they agree the team can reply to that address about
+this message only. The
+gateway sends the signed-in account's own email with the message, never an
+address from the request, and only when it is the address the form showed: a
+page that showed an address, left open while another tab signed in as someone
+else, is refused and asked to reload. An account without an email, or with one
+the team could not reply to, is shown no such line and its message goes without
+an address to reply to. No screenshot, page URL,
+deployment identifier, or usage history is attached. Opening the form, typing,
+and canceling make no outbound request.
 
-Feedback is on by default. To turn it off, set `feedback_enabled: false` in
-YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. This setting is visible in Settings but
-cannot be changed there at runtime.
+On a self-hosted deployment, the gateway forwards the message and that address
+to `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers, or the account's
+identifier. Network peers still see connection metadata, so this is private,
+not anonymous. Keep request-body capture disabled for the feedback endpoint in
+any additional logging or tracing you configure. On otari.ai, the message is
+emailed to the support team with the account's email as the address to reply
+to, and the team is notified in Slack with the message and the account's user
+ID, never its email.
+
+To turn Contact on, set `feedback_enabled: true` in YAML or
+`OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
+and the Contact entry is hidden. This setting is visible in Settings but cannot
+be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.
 
-Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+Message text accepts up to 4,000 Unicode code points. The gateway waits up to
 10 seconds for the receiver and does not retry automatically. An unconfirmed
 submission stays in the form until the person retries or explicitly discards
 it. Drafts are held only in memory and disappear on page reload. A manual retry
@@ -1709,11 +1799,11 @@ after an unconfirmed delivery can produce a duplicate.
 ## Upgrading
 
 - **Price unit names.** A stored rate's `unit` is singular (`token`, `request`,
-  `image`). The migration renames every stored rate on the first start of this
-  release, and the old names are still read for one release. Upgrade every
-  instance together: an instance still running the previous release reads a
-  renamed rate as a unit it does not know, so it refuses a priced request on it
-  under `require_pricing`.
+  `image`) since v0.38.0. Its migration renames every stored rate on the first
+  start, and the old names are still read. Upgrade every instance from an
+  earlier release together: an instance still running one reads a renamed rate
+  as a unit it does not know, so it refuses a priced request on it under
+  `require_pricing`.
 - **Image rates.** An `image` rate is USD per million images. A rate written in
   `config.yml` as raw USD per image (for example `0.04`) bills a millionth of
   what it meant; multiply it by 1,000,000.
@@ -1721,3 +1811,7 @@ after an unconfirmed delivery can produce a duplicate.
   digest of each declared entry writes every entry once, as if each had changed.
 - **`providers:` entries and the Deployment providers page.** See
   [Upgrading](hosted-providers.md#upgrading).
+- **Contact is off by default.** A deployment that left `feedback_enabled`
+  unset no longer shows the Feedback entry, now named Contact. Set
+  `feedback_enabled: true` to keep offering it; see
+  [Contacting the Otari team](#contacting-the-otari-team).

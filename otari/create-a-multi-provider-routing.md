@@ -51,7 +51,7 @@ to use.
 
 ## 1. Add your provider keys
 
-1. Click **Organization**, then select **Providers**.
+1. Click **Organization**, then **Providers**, then **Inference**.
 2. Click **Add provider key**, select **OpenAI**, give the key a name, paste
    it, and save it.
 3. Do the same for **Anthropic**.
@@ -88,8 +88,13 @@ one or more real models.
    - **Spill over at rate limits**: move to the next model when one is full.
    - **Tier down on budget**: switch to a cheaper model once the budget fills
      up.
+
+   ![The first step of Create policy, asking what the policy is for, with Fallback selected.](assets/screenshots/routing-policy-kind.png)
+
 3. Name it `production-chat`, choose an OpenAI model as the **Main model**, add
    an Anthropic model under **If unavailable, use**, and save it.
+
+![The New fallback dialog: production-chat, served by an OpenAI model with an Anthropic backup.](assets/screenshots/routing-policy-fallback.png)
 
 Otari tries the main model first. When it fails before its answer starts, from
 an outage, a rate limit, a rejected key or an error, Otari moves on to the next
@@ -135,18 +140,19 @@ To see the fallback work, break the main model on purpose, for the test
 workspace only. Every workspace that follows the organization uses its OpenAI
 key, so do not break that one:
 
-1. In **Organization**, then **Providers**, add an OpenAI key with an invalid
+1. In **Organization**, then **Providers**, then **Inference**, add an OpenAI key with an invalid
    value, named `fallback-test`.
-2. Edit the test workspace and select **Always use this key** for
-   `fallback-test`. Other workspaces keep the organization's key.
+2. Pin the test workspace to `fallback-test`, as in
+   [Control which keys a workspace uses](manage-provider-keys.md#control-which-keys-a-workspace-uses).
+   Other workspaces keep the organization's key.
 3. Send the same request again.
 
 It still succeeds. This time `Otari-Fallback` is `true` and `Otari-Model` names
 the Anthropic model: OpenAI refused the key, and Otari moved on to the backup.
 The **Requests** tab records both attempts.
 
-When you are done, set the test workspace back to **Follow the organization**
-and remove the `fallback-test` key.
+When you are done, remove the `fallback-test` key, and the test workspace
+follows the organization's key again.
 
 ## A good first production setup
 

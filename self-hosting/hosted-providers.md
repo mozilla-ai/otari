@@ -31,8 +31,8 @@ A request no rung serves is refused with `424` and the code
 Where an organization holds several keys for one provider, a workspace uses
 the key it set to "Always use this key", otherwise the organization's default
 for the provider (the star on the Providers page; clicking a filled star
-removes it), otherwise the organization's oldest key. A key a workspace set to
-"Never use this key" is passed over at every step. A key with its own API base
+removes it), otherwise the organization's oldest key. A key a workspace turned
+off is passed over at every step. A key with its own API base
 URL is not one of the provider's keys here: requests name it by its own prefix
 (see [Add a key for your own endpoint](https://docs.otari.ai/learn/provider-keys#add-a-key-for-your-own-endpoint)),
 so it serves every workspace that has not turned it off.
@@ -372,8 +372,20 @@ menu, and is listed only for a deployment operator.
   provider declared so carries a badge saying it. The same box is on each
   key's dialog on the organization's Providers page. See
   [Zero data retention](#zero-data-retention).
-- **Models** carry a serving switch and a price, set per million tokens or per
-  1,000 requests or images; a model nothing prices arrives switched off.
+- **Models** carry a serving switch and a price, set in tokens, requests,
+  images, megapixels, characters, minutes of audio or web searches, as on
+  [Entering a rate](https://docs.otari.ai/guides/dashboard/dashboard#entering-a-rate); a model nothing prices
+  arrives switched off. A model priced per second of video cannot be repriced
+  here: send its price to `POST /api/v1/pricing` as a `rates` block
+  ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)).
+  Tabs
+  above the table show one kind of model at a time, and a price in a unit other
+  than tokens names that unit on hover (beside the amount on a phone), as on
+  the organization's Providers page
+  (see
+  [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models)). The kind
+  comes from models.dev, and `GET /api/v1/hosted-providers/{provider}/models`
+  takes it as `type`.
 - **Refresh models** asks one provider again. **Update catalog** fetches the
   latest models.dev prices and then asks every provider what it lists, showing
   the price changes and each provider's new models before applying them (see
