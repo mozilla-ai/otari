@@ -27,8 +27,9 @@ export function BreakGlassLog() {
       <div className="flex flex-col gap-2 py-3">
         <ErrorBanner error={log.error} />
         {log.isError && !log.data ? null : log.isPending && !log.data ? (
+          // The height of the one line an empty log shows, which is the usual answer.
           <Skeleton
-            className="h-16 w-full"
+            className="h-5 w-2/3"
             ariaLabel="Loading the break-glass openings"
           />
         ) : items.length === 0 ? (
