@@ -517,6 +517,17 @@ def _render_content_block(block: Any) -> str:
     if btype in ("resource", "embedded_resource", "embeddedresource"):
         resource = getattr(block, "resource", None)
         uri = getattr(resource, "uri", None) if resource else None
+        resource_text = getattr(resource, "text", None)
+        if isinstance(resource_text, str):
+            return f"[resource uri={uri or '?'}]\n{resource_text}"
+        blob = getattr(resource, "blob", None)
+        if isinstance(blob, str):
+            mime = (
+                getattr(resource, "mimeType", None)
+                or getattr(resource, "mime_type", None)
+                or "application/octet-stream"
+            )
+            return f"[resource uri={uri or '?'} type={mime} bytes_b64={len(blob)}]"
         return f"[resource uri={uri or '?'}]"
     return f"[content type={btype}]"
 

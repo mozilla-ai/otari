@@ -14,12 +14,12 @@ import anyio
 import httpx2
 import pytest
 from mcp.shared._httpx_utils import request_within_origin
-from mcp.types import CallToolResult, TextContent
+from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource, TextContent, TextResourceContents
 
 from conftest import TaskGroupMcpTransport
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.models.mcp import McpServerConfig
-from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin_bound_http_client
+from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin_bound_http_client, _result_text
 
 
 @pytest.mark.asyncio
@@ -354,6 +354,38 @@ async def test_call_tool_result_extraction_returns_native_mcp_result() -> None:
     assert returned.structured_content == {"issue": 791}
     assert returned.is_error is True
     session.call_tool.assert_awaited_once_with("lookup", {"id": 791})
+
+
+def test_an_embedded_text_resource_reaches_the_model_with_its_text() -> None:
+    """GitHub MCP's get_file_contents returns the file as an embedded resource (#2995)."""
+    result = CallToolResult(
+        content=[
+            TextContent(type="text", text="successfully downloaded text file"),
+            EmbeddedResource(
+                type="resource",
+                resource=TextResourceContents(
+                    uri="repo://o/r/contents/a.py", mimeType="text/x-python", text="def f():\n    pass\n"
+                ),
+            ),
+        ]
+    )
+
+    assert _result_text(result) == (
+        "successfully downloaded text file\n[resource uri=repo://o/r/contents/a.py]\ndef f():\n    pass\n"
+    )
+
+
+def test_an_embedded_blob_resource_is_summarized_not_decoded() -> None:
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(uri="repo://o/r/contents/a.png", mimeType="image/png", blob="iVBORw0K"),
+            )
+        ]
+    )
+
+    assert _result_text(result) == "[resource uri=repo://o/r/contents/a.png type=image/png bytes_b64=8]"
 
 
 # --------------------------------------------------------------------------- #
