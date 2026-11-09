@@ -157,6 +157,16 @@ describe("OrganizationSsoPage", () => {
     expect(requests.some((request) => request.url.includes("/sso"))).toBe(false)
   })
 
+  it("says what to configure when there is no address to register", async () => {
+    mockApi({ sso: organizationSso({ connection: null, redirect_uri: null }) })
+    renderPage(<OrganizationSsoPage />)
+
+    expect(
+      await screen.findByText(/no public address configured/),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Redirect URI")).not.toBeInTheDocument()
+  })
+
   it("saves a new connection with the fields entered", async () => {
     const requests = mockApi({ sso: organizationSso({ connection: null }) })
     const user = userEvent.setup()
@@ -171,7 +181,9 @@ describe("OrganizationSsoPage", () => {
       "https://login.acme.example",
     )
     await user.type(screen.getByLabelText("Client ID"), "acme-dashboard")
-    await user.type(screen.getByLabelText("Client secret"), "s3cr3t")
+    // At least eight characters, which is what the gateway requires: a shorter
+    // one is refused there, so a test using it proves nothing about a save.
+    await user.type(screen.getByLabelText("Client secret"), "s3cr3t-98")
     await user.click(screen.getByRole("button", { name: "Add connection" }))
 
     await waitFor(() => {
@@ -186,9 +198,14 @@ describe("OrganizationSsoPage", () => {
       display_name: "Acme Okta",
       issuer: "https://login.acme.example",
       client_id: "acme-dashboard",
-      client_secret: "s3cr3t",
+      client_secret: "s3cr3t-98",
       default_role: "member",
       enabled: true,
+    })
+    // The form closes only on a save the gateway accepted, so this is what
+    // separates a create from a request that was merely sent.
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Client secret")).not.toBeInTheDocument()
     })
   })
 

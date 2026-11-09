@@ -175,10 +175,11 @@ class OIDCConnectionPublic(BaseModel):
 class OrganizationSsoPublic(BaseModel):
     """An organization's own OIDC connection, and what to register at the provider."""
 
-    redirect_uri: str = Field(
+    redirect_uri: str | None = Field(
         description=(
-            "This deployment's fixed callback path. Register it at the identity provider, "
-            "whether or not a connection is saved yet."
+            "The absolute callback address to register at the identity provider, whether or not a "
+            "connection is saved yet. Null where this deployment has no public address of its own "
+            "configured, because there is no address to register until it has one."
         )
     )
     connection: OIDCConnectionPublic | None = Field(

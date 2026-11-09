@@ -832,6 +832,10 @@ function invalidateOrganizationDomains(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_DOMAINS] })
+  // The SSO settings name the domains that admit sign-in, so a domain removed,
+  // paused or newly proven leaves that read describing admission it no longer
+  // grants until it is asked again.
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
 }
 
 export function useCreateOrganizationDomain() {
@@ -893,9 +897,10 @@ export function useDeleteOrganizationDomain() {
 // sign-in methods. `redirect_uri` is served alongside the connection, so the
 // one read also tells an admin what to register before saving anything.
 //
-// There is no partial update: saving replaces the whole connection, so the
-// client secret is required on every save, including one that changes nothing
-// else about it.
+// Saving replaces the whole connection. The client secret is the one field that
+// may be left out, and only where the issuer and the client ID are both
+// unchanged: the stored secret is then kept, and any other edit is refused
+// without one, because a secret belongs to the client it was issued for.
 
 export function useOrganizationSso(enabled = true) {
   return useQuery({

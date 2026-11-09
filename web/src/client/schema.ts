@@ -16296,9 +16296,9 @@ export interface components {
             connection: components["schemas"]["OIDCConnectionPublic"] | null;
             /**
              * Redirect Uri
-             * @description This deployment's fixed callback path. Register it at the identity provider, whether or not a connection is saved yet.
+             * @description The absolute callback address to register at the identity provider, whether or not a connection is saved yet. Null where this deployment has no public address of its own configured, because there is no address to register until it has one.
              */
-            redirect_uri: string;
+            redirect_uri: string | null;
         };
         /**
          * OutputShape

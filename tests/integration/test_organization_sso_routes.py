@@ -7,7 +7,7 @@ including the `redirect_uri` the route adds over the service's own schema.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,7 +16,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.identity import OIDCConnection
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
@@ -29,6 +29,8 @@ from gateway.models.tenancy import (
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+
+from .conftest import build_test_client
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/sso"
 _ISSUER = "https://login.example.com"
@@ -177,10 +179,44 @@ def test_the_response_names_the_redirect_uri_to_register(
 
     assert response.status_code == status.HTTP_200_OK, response.text
     body = response.json()
-    # No connection is saved yet, and the redirect URI is still present: it is
-    # what an administrator registers at the provider before the first save.
+    # This client configures no public address, so there is no absolute address to
+    # register. A path is not registerable at any provider, so the field is null
+    # rather than carrying one.
     assert body["connection"] is None
-    assert body["redirect_uri"] == "/auth/sso/callback"
+    assert body["redirect_uri"] is None
+
+
+@pytest.fixture
+def addressed_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    """A client whose deployment has a public address, which is where the redirect URI comes from."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        public_base_url="https://otari.example",
+    )
+    yield from build_test_client(config)
+
+
+def test_the_redirect_uri_is_the_deployments_own_address_where_it_has_one(
+    addressed_client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """Asserted on a client of its own, because the address comes from config rather than a row."""
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-addressed")
+        owner_token = _identity(
+            session, email="owner@acme-addressed.test", organization_id=organization.id, role="owner"
+        )
+    finally:
+        session.close()
+
+    response = _call(addressed_client, owner_token, "GET", _ENDPOINT)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["redirect_uri"] == "https://otari.example/auth/sso/callback"
 
 
 def test_the_response_lists_each_verified_domain_and_its_expiry(

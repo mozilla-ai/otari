@@ -17505,9 +17505,16 @@
             "description": "The organization's own connection, or null until one is saved."
           },
           "redirect_uri": {
-            "description": "This deployment's fixed callback path. Register it at the identity provider, whether or not a connection is saved yet.",
-            "title": "Redirect Uri",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The absolute callback address to register at the identity provider, whether or not a connection is saved yet. Null where this deployment has no public address of its own configured, because there is no address to register until it has one.",
+            "title": "Redirect Uri"
           }
         },
         "required": [

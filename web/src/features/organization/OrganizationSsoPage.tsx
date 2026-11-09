@@ -348,11 +348,14 @@ export function OrganizationSsoPage() {
             <div className="flex flex-col gap-1">
               <h2 className="text-title">Provider setup</h2>
               <p className="text-caption">
-                Register this redirect URI with your identity provider before
-                saving a connection below. It does not change afterward.
+                {sso.data.redirect_uri === null
+                  ? "This deployment has no public address configured, so there is no redirect URI to register yet. Set public_base_url to the address people visit, then restart."
+                  : "Register this redirect URI with your identity provider before saving a connection below. It does not change afterward."}
               </p>
             </div>
-            <CopyField label="Redirect URI" value={sso.data.redirect_uri} />
+            {sso.data.redirect_uri !== null ? (
+              <CopyField label="Redirect URI" value={sso.data.redirect_uri} />
+            ) : null}
           </Section>
 
           {connection ? (

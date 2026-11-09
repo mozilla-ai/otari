@@ -30,7 +30,11 @@ router = APIRouter(
 
 
 def _settings(config: GatewayConfig, connection: OIDCConnectionPublic | None) -> OrganizationSsoPublic:
-    return OrganizationSsoPublic(redirect_uri=_oauth_redirect_uri(config, "sso"), connection=connection)
+    # A deployment with no public address of its own builds a path rather than an address, which no
+    # provider accepts, so there is nothing to register and the caller is told that rather than
+    # handed a value that cannot work.
+    registerable = _oauth_redirect_uri(config, "sso") if config.public_base_url else None
+    return OrganizationSsoPublic(redirect_uri=registerable, connection=connection)
 
 
 @router.get("")
