@@ -32,9 +32,10 @@ def has_span_on_models(
 def holding_content(workspace_id: uuid.UUID, limit: int) -> Select[uuid.UUID, str, str]:
     """The keys of up to ``limit`` of the workspace's spans that still hold content.
 
-    NOTE: ``ix_trace_spans_workspace_sealed`` is partial on the same predicate and
-    serves this. Narrowing the predicate any further than that index drops it, and
-    clearing a workspace's content then scans every span it has already cleared.
+    NOTE: ``ix_trace_spans_workspace_sealed`` is partial on ``content_sealed IS NOT
+    NULL`` and serves this only while the query implies that predicate. Loosening or
+    changing it drops the index, and clearing a workspace's content then scans every
+    span it has already cleared.
     """
     return (
         select(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id)

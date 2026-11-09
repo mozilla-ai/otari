@@ -52,8 +52,6 @@ export interface Observation {
   output?: unknown
   /** Why there is no input, for a span or turn that has none. */
   noInput?: NoInput
-  /** The span holds content this reader may not open, so none of it is here. */
-  contentPrivate?: boolean
   metadata?: Record<string, string>
   /** A guardrail gate's check: what the gate is, what it decided and what it read. */
   gate?: GateCheck

@@ -405,7 +405,6 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         name: spanLabel(span),
         input,
         output: spanOutput(span),
-        contentPrivate: span.content_private,
         // A gate can read its evidence off a sibling gate of the same check.
         noInput: span.content_private
           ? PRIVATE_NO_INPUT

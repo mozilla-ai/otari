@@ -121,11 +121,12 @@ export function SessionContent({
  *
  * Drawn by whatever has something to say rather than by the caller: a wrapper
  * around a null child still draws its own border, and an ordinary session says
- * nothing at all.
+ * nothing at all. Capped and scrolled on its own, because an owner's share list
+ * grows with every read and would otherwise take the panes' height.
  */
 function Band({ children }: { children: ReactNode }) {
   return (
-    <div className="flex shrink-0 flex-col gap-3 border-b border-border px-4 py-3">
+    <div className="flex max-h-[40%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border px-4 py-3">
       {children}
     </div>
   )

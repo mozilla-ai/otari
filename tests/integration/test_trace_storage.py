@@ -25,7 +25,7 @@ from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.api.deps import is_workspace_member, workspaces_keeping_content_for
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.tenancy import User as TenancyUser
@@ -1074,7 +1074,7 @@ async def test_content_is_kept_only_where_the_workspace_switch_is_still_on(
     assert await is_workspace_member(async_db, workspace_id, str(person.id))
 
 
-async def test_forgetting_erasures_goes_a_batch_at_a_time(
+async def test_forgetting_erasures_commits_each_batch_before_taking_the_next(
     store: TraceService,
     tenants: tuple[uuid.UUID, uuid.UUID],
     async_db: AsyncSession,
@@ -1088,13 +1088,30 @@ async def test_forgetting_erasures_goes_a_batch_at_a_time(
     async_db.add_all([User(user_id=user) for user in users])
     await async_db.commit()
     for user in users:
-        await store.write((_write(workspace, f"s-{user}", _span("tool-1"), user_id=user),))
+        await store.write((_write(workspace, f"s-{user}", _span("tool-1", kind="tool"), user_id=user),))
 
-    forgotten = await store.expire_erasures(now=datetime.now(UTC))
+    ended = 0
+    real_exit = UnitOfWork.__aexit__
 
-    # Every user the batch loop reached, across more blocks than one.
-    assert forgotten >= len(users)
-    assert await store.expire_erasures(now=datetime.now(UTC)) == 0
+    async def counting_exit(self: UnitOfWork, *exc: Any) -> Any:
+        nonlocal ended
+        ended += 1
+        return await real_exit(self, *exc)
+
+    blocks_seen: list[int] = []
+    real_forget = UserBarrierRepository.forget_erased_before
+
+    async def recording_forget(self: UserBarrierRepository, cutoff: datetime, *, limit: int) -> int:
+        blocks_seen.append(ended)
+        return await real_forget(self, cutoff, limit=limit)
+
+    monkeypatch.setattr(UnitOfWork, "__aexit__", counting_exit)
+    monkeypatch.setattr(UserBarrierRepository, "forget_erased_before", recording_forget)
+
+    assert await store.expire_erasures(now=datetime.now(UTC)) == len(users)
+    # Three batches of at most two, each after the previous one's block ended.
+    assert len(blocks_seen) == 3
+    assert blocks_seen == sorted(set(blocks_seen))
 
 
 async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(
@@ -1136,6 +1153,43 @@ async def test_a_write_taken_in_longer_ago_than_any_write_is_held_is_refused_who
     result = await store.write((old, recent))
 
     assert (result.accepted, result.rejected) == (1, 1)
+
+
+class _SwitchedOff(_Members):
+    """Every user is still a member, of a workspace that no longer keeps content."""
+
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+        return set()
+
+
+async def test_content_is_not_stored_where_the_workspace_stopped_keeping_it_before_the_write(
+    test_config: GatewayConfig,
+    clean_database: None,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write asks which sessions may keep content, not only who is a member, as it stores."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    init_db(test_config)
+    try:
+        async with create_unit_of_work() as uow:
+            store = TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _SwitchedOff(),
+                _no_window,
+            )
+            result = await store.write(
+                (_write(workspace, "s-off", _span("tool-1", kind="tool", content={"prompt": "x"})),)
+            )
+    finally:
+        await dispose_db()
+
+    assert result.accepted == 1
+    assert await _sealed_of(async_db, "s-off") is None
 
 
 async def test_content_is_not_stored_for_a_user_who_left_the_workspace_before_the_write(

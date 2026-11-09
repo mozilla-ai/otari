@@ -186,6 +186,8 @@ describe("SessionsPage", () => {
     // hidden. The notice is the session's, not the picked span's, so neither it
     // nor the controls in it may sit inside that pane.
     expect(control.closest(".hidden")).toBeNull()
+    // Capped and scrolled, so a long share list cannot take the panes' height.
+    expect(control.closest(".overflow-y-auto")).not.toBeNull()
   })
 
   it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
