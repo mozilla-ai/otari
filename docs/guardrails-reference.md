@@ -41,9 +41,9 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 
 ## Reading the `Otari-Guardrails` header
 
-A served non-streaming request carries one entry per input guardrail, and a
-streamed response carries the same header. A `block` guardrail refuses a flagged
-request before any bytes are sent.
+When input guardrail results are available, both non-streamed and streamed
+responses carry one header entry per result. When no guardrails apply, the header
+is absent. A `block` guardrail refuses a flagged request before any bytes are sent.
 
 ```json
 [{"profile": "prompt-injection", "mode": "monitor", "valid": null, "score": null, "status": "unavailable", "reason": "not_configured"}]
