@@ -545,3 +545,39 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
     assert resp.status_code == 200, resp.text
     assert resp.json()["text"] == "The page's text."
     assert seen == []
+
+
+def test_a_service_key_bills_fetch_to_the_end_user_it_names(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``user`` on a service key's fetch names an end user, created on the budget the key gives it."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"request_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-fetch",
+            "user_id": "mlpa-fetch",
+            "is_service_key": True,
+            "end_user_budget_id": budget["budget_id"],
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    body = {**PAYLOAD, "user": "fxa-123:fetch"}
+
+    first = client.post(f"{API_ROOT}/fetch/fake-fetch", json=body, headers=headers)
+    second = client.post(f"{API_ROOT}/fetch/fake-fetch", json=body, headers=headers)
+    other = client.post(f"{API_ROOT}/fetch/fake-fetch", json={**PAYLOAD, "user": "fxa-456:fetch"}, headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert first.headers["Otari-End-User-Budget"] == budget["budget_id"]
+    # The end user's own one-request budget refuses its second fetch, not the key's.
+    assert second.status_code == 403, second.text
+    assert other.status_code == 200, other.text
+    users = client.get(f"{API_ROOT}/users", params={"parent_user_id": "mlpa-fetch"}, headers=master_key_header).json()
+    end_user = next(user for user in users if user["external_id"] == "fxa-123:fetch")
+    assert end_user["budget_id"] == budget["budget_id"]
+    assert len(_fetch_rows(client, master_key_header, end_user["user_id"])) >= 1
