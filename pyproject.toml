@@ -100,6 +100,11 @@ dependencies = [
     "sqlmodel>=0.0.24",
     "uvicorn[standard]>=0.54.0",
     "opentelemetry-proto>=1.39.1",
+    # Reads an uploaded audio file's length, which bills a transcription priced
+    # per minute or per second when its model reports tokens and no duration.
+    # Pure Python with no dependencies of its own, so it parses the file in
+    # process rather than through a binary such as ffmpeg.
+    "tinytag>=2.3.2",
     "webauthn>=2.5.0",
 ]
 

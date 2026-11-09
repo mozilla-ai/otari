@@ -90,21 +90,31 @@ def image_usage(result: ImagesResponse, *, size: str | None = None) -> ReportedU
     )
 
 
-def transcription_usage(result: Transcription) -> ReportedUsage:
-    """One request, the audio's length where the provider reports it, and the tokens a token-billed model reports."""
+def _audio_quantities(seconds: Decimal) -> Quantities:
+    return {"second": seconds, "minute": seconds / _SECONDS_PER_MINUTE}
+
+
+def transcription_usage(result: Transcription, *, measured_seconds: Decimal | None = None) -> ReportedUsage:
+    """One request, the audio's length, and the tokens a token-billed model reports.
+
+    The length is the provider's where it reports one, else ``measured_seconds``,
+    what the upload measured, so a rate per minute or per second prices a model
+    that reports only tokens.
+    """
     units = {"requests": 1}
     usage = result.usage
-    if usage is None:
-        return ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0, units=units)
-    if usage.type == "duration":
-        seconds = Decimal(str(usage.seconds))
-        quantities: dict[PriceUnit, int | Decimal] = {"second": seconds, "minute": seconds / _SECONDS_PER_MINUTE}
+    if usage is not None and usage.type == "duration":
+        quantities = _audio_quantities(Decimal(str(usage.seconds)))
         return ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0, units=units, quantities=quantities)
+    measured = {} if measured_seconds is None else _audio_quantities(measured_seconds)
+    if usage is None:
+        return ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0, units=units, quantities=measured)
     return ReportedUsage(
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
         units=units,
+        quantities=measured,
     )
 
 
@@ -178,16 +188,25 @@ def speech_billing(characters: int) -> PassthroughBilling:
     )
 
 
+def transcription_billing(measured_seconds: Callable[[], Decimal | None]) -> PassthroughBilling:
+    """How a transcription is billed: per request, per token, or per minute or second of the audio.
+
+    ``measured_seconds`` gives the upload's own length once the call has
+    returned, which prices a model that reports tokens and no duration at a
+    rate per minute or per second.
+    """
+    return PassthroughBilling(
+        report=lambda result: transcription_usage(result, measured_seconds=measured_seconds()),
+        meter="requests",
+        reports_tokens=True,
+        slot=("audio", "input"),
+        measures=frozenset({"second", "minute"}),
+    )
+
+
 EMBEDDINGS_BILLING = PassthroughBilling(report=embedding_usage, meter=None, reports_tokens=True)
 RERANK_BILLING = PassthroughBilling(report=rerank_usage, meter="search_units", reports_tokens=True)
 IMAGES_BILLING = image_billing(None)
-TRANSCRIPTION_BILLING = PassthroughBilling(
-    report=transcription_usage,
-    meter="requests",
-    reports_tokens=True,
-    slot=("audio", "input"),
-    measures=frozenset({"second", "minute"}),
-)
 MODERATION_BILLING = PassthroughBilling(
     report=moderation_usage, meter="requests", reports_tokens=False, slot=("text", "input")
 )

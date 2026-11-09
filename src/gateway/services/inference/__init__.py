@@ -1,5 +1,6 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
+from gateway.services.inference._audio_length import audio_seconds
 from gateway.services.inference._client_country import (
     CountryDatabaseError,
     client_country,
@@ -55,7 +56,6 @@ from gateway.services.inference._passthrough_usage import (
     IMAGES_BILLING,
     MODERATION_BILLING,
     RERANK_BILLING,
-    TRANSCRIPTION_BILLING,
     VIDEO_BILLING,
     PassthroughBilling,
     ReportedUsage,
@@ -68,6 +68,7 @@ from gateway.services.inference._passthrough_usage import (
     rerank_usage,
     speech_billing,
     speech_usage,
+    transcription_billing,
     transcription_usage,
     video_usage,
 )
@@ -134,7 +135,6 @@ __all__ = [
     "REASONING_SIGNATURE_PREFIX",
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
-    "TRANSCRIPTION_BILLING",
     "VIDEO_BILLING",
     "PassthroughBilling",
     "Admission",
@@ -155,6 +155,7 @@ __all__ = [
     "UnidentifiedEndUserError",
     "UnknownCaller",
     "aresponses_via_chat_completions",
+    "audio_seconds",
     "bind_upstream_user",
     "call_messages",
     "call_responses",
@@ -193,6 +194,7 @@ __all__ = [
     "strip_gateway_minted_items",
     "upstream_user_identifier",
     "usage_unreported",
+    "transcription_billing",
     "transcription_usage",
     "video_usage",
     "uses_chat_completions_bridge",

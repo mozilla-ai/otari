@@ -1,5 +1,7 @@
 """Tests for the POST /api/v1/audio/transcriptions and POST /api/v1/audio/speech endpoints."""
 
+import io
+import wave
 from datetime import UTC, datetime
 from typing import Any, Never
 from unittest.mock import AsyncMock, patch
@@ -8,7 +10,7 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi import Request
 from fastapi.testclient import TestClient
-from openai.types.audio.transcription import UsageDuration
+from openai.types.audio.transcription import UsageDuration, UsageTokens
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import (
@@ -749,6 +751,95 @@ def test_a_transcription_is_priced_per_minute_from_the_catalog(
     assert latest["pricing_breakdown"] == [
         {"meter": "minutes", "units": 1.5, "unit": "minute", "unit_rate": 0.006, "cost": pytest.approx(0.009)}
     ]
+
+
+def _wav(seconds: int, *, rate: int = 8000) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(rate)
+        audio.writeframes(b"\x00\x00" * seconds * rate)
+    return buffer.getvalue()
+
+
+def test_a_per_minute_price_bills_the_uploads_length_when_the_model_reports_tokens(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A model that answers with tokens and no duration is billed for the length of the audio uploaded."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini-transcribe",
+            "rates": {"audio": {"input": {"price": 0.6, "unit": "minute"}}},
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    result = Transcription(
+        text="Hello", usage=UsageTokens(input_tokens=36, output_tokens=14, total_tokens=50, type="tokens")
+    )
+    with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=result):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("clip.wav", _wav(6), "audio/wav")},
+            data={"model": "openai:gpt-4o-mini-transcribe"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200, resp.text
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"endpoint": "/v1/audio/transcriptions", "status": "success"},
+        headers=master_key_header,
+    )
+    latest = usage_resp.json()[0]
+    # A tenth of a minute at $0.60 a minute.
+    assert latest["cost"] == pytest.approx(0.06)
+    assert latest["billing_meters"] == {"minutes": pytest.approx(0.1)}
+    assert (latest["prompt_tokens"], latest["completion_tokens"]) == (36, 14)
+
+
+def test_a_transcription_refused_before_dispatch_is_never_measured(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The upload's length is read only for a request that reaches the provider."""
+    with (
+        patch("gateway.api.routes.audio.audio_seconds") as measure,
+        patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock) as call,
+    ):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("clip.wav", _wav(6), "audio/wav")},
+            data={"model": "openai:whisper-1"},
+            headers=master_key_header,
+        )
+    assert resp.status_code == 400, resp.text
+    measure.assert_not_called()
+    call.assert_not_called()
+
+
+def test_a_file_over_the_upload_limit_is_refused_without_measuring_its_length(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """A file past the limit but inside the request's multipart allowance is never read for its length."""
+    with (
+        patch("gateway.api.routes.audio.audio_seconds") as measure,
+        patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock) as call,
+    ):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("big.wav", b"\0" * (25 * 1024 * 1024 + 1), "audio/wav")},
+            data={"model": "openai:whisper-1"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 413, resp.text
+    measure.assert_not_called()
+    call.assert_not_called()
 
 
 @pytest.mark.parametrize(("form", "expected_status"), [({"language": "en"}, 400), ({}, 502)])
