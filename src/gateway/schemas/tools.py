@@ -698,6 +698,13 @@ class CodeExecuteRequest(pydantic.BaseModel):
     )
     user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
 
+    @pydantic.field_validator("code")
+    @classmethod
+    def _code_is_not_blank(cls, code: str) -> str:
+        if not code.strip():
+            raise ValueError("code must contain something to run")
+        return code
+
 
 class CodeExecutionOutputFile(pydantic.BaseModel):
     """A file the code wrote, stored in the Files API."""
@@ -754,7 +761,9 @@ class OtariToolCall(pydantic.BaseModel):
     sources: list[OtariToolCallSource] | None = pydantic.Field(
         default=None, description="A completed search's results; empty when it found none."
     )
-    code: str | None = pydantic.Field(default=None, description="The code a code execution ran.")
+    code: str | None = pydantic.Field(
+        default=None, description="The code the model sent a code execution; a failed one may not have run."
+    )
     stdout: str | None = pydantic.Field(default=None, description="What an ended code execution printed.")
     stderr: str | None = pydantic.Field(default=None, description="What an ended code execution wrote to stderr.")
     exit_code: int | None = pydantic.Field(default=None, description="An ended code execution's exit status.")

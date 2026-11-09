@@ -29,7 +29,7 @@ from gateway.services.sandbox_backend import (
     SandboxSessionGoneError,
     SandboxUnavailableError,
 )
-from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
 
 
 class _MockTransport(httpx.AsyncBaseTransport):
@@ -1775,7 +1775,9 @@ async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict
 
     backend._exec_tool = never  # type: ignore[method-assign,assignment]
 
-    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, arguments) == EMPTY_CODE_TEXT
+    text = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, arguments)
+    assert text == EMPTY_CODE_TEXT
+    assert is_tool_error(text)
     [execution] = backend.take_executions()
     assert execution.result is None
     assert execution.invalid_input is True

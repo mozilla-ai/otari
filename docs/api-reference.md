@@ -206,7 +206,7 @@ apply to its type is left out:
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
-| `code` | The code a code execution ran. |
+| `code` | The code the model sent a code execution. A `failed` one may never have run. |
 | `stdout`, `stderr`, `exit_code` | What an ended code execution printed and its exit status, absent when the run never reached the sandbox. |
 | `file_ids` | The [Files API](files.md) IDs of the files a code execution produced. |
 | `server`, `name` | The MCP server and the tool the model called on it. |
