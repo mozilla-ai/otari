@@ -1863,3 +1863,9 @@ def test_a_stream_error_event_carries_the_providers_failure() -> None:
         "tag": "SERVICE_OVERLOADED",
         "retryable": True,
     }
+
+
+def test_a_413_status_stands_for_an_invalid_request_not_a_server_error() -> None:
+    from gateway.api.routes._pipeline import ErrorKind, error_kind_for_status
+
+    assert error_kind_for_status(413) is ErrorKind.INVALID_REQUEST

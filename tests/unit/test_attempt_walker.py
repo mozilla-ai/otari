@@ -24,9 +24,10 @@ from gateway.api.routes._attempts import (
     classify_local_attempt_error,
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
+    request_too_large_for_every_attempt_detail,
     walk_attempts,
 )
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of
+from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, REQUEST_TOO_LARGE, error_code_of
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -301,6 +302,18 @@ async def test_exhaustion_where_every_candidate_rejected_the_request_is_a_400_in
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == all_attempts_rejected_detail(2)
     assert error_code_of(exc_info.value.headers) == ALL_CANDIDATES_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_candidate_refused_the_request_as_too_large_is_a_413() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [_Rejection(413, "request too large for a"), _Rejection(413, "request too large for b")],
+        )
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == request_too_large_for_every_attempt_detail(2)
+    assert error_code_of(exc_info.value.headers) == REQUEST_TOO_LARGE
 
 
 @pytest.mark.asyncio
