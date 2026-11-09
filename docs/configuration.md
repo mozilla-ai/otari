@@ -1746,8 +1746,9 @@ beside Documentation in the top bar (in the account menu on a phone), to send a
 message to the Otari team. It is off by default, so a self-hosted deployment
 shows no Contact entry unless its operator turns it on. otari.ai turns it on.
 
-Someone whose account has an email sees, under the message, that by sending
-they agree the team can reply to that address about this message only. The
+Someone whose account has an email the team can reply to sees, under the
+message, that by sending they agree the team can reply to that address about
+this message only. The
 gateway sends the signed-in account's own email with the message, never an
 address from the request, and only when it is the address the form showed: a
 page that showed an address, left open while another tab signed in as someone
