@@ -24,6 +24,7 @@ from apron_auth.models import OAuthPendingState as PendingState
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.identity_exceptions import SsoNotAddressableError
 from gateway.models.identity import OIDCConnection
 from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services.identity import _connection_clients
@@ -288,6 +289,17 @@ def test_client_for_uses_the_memoized_handler() -> None:
     )
 
     assert client._identity_handler is handler
+
+
+def test_a_deployment_with_no_https_address_is_told_it_is_the_one_to_fix() -> None:
+    with pytest.raises(SsoNotAddressableError):
+        _connection_clients.client_for(
+            _connection(),
+            _metadata(),
+            db=cast("Any", None),
+            redirect_uri="http://otari.example/auth/sso/callback",
+            allow_private_hosts=False,
+        )
 
 
 def test_the_transport_factory_checks_and_bounds_every_url() -> None:

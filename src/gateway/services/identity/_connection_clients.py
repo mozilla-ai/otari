@@ -119,7 +119,10 @@ def client_for(
         config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
     except ConfigurationError as error:
         # The library holds the rule, RFC 8252, so its refusal is translated here rather than
-        # restated: a deployment with no https address of its own cannot be signed in to.
+        # restated: a deployment with no https address of its own cannot be signed in to. The
+        # provider's own addresses are held to the same rule by discovery, which refuses them there,
+        # so the metadata reaching this is already known to pass and the redirect URI is what is
+        # left to fail.
         raise SsoNotAddressableError from error
     handler = identity_handler_for(metadata, allow_private_hosts=allow_private_hosts)
     state_store = DatabaseStateStore(pending, oidc_flow_provider(connection.id))
