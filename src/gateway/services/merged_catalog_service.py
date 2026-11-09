@@ -764,8 +764,6 @@ class MergedCatalog:
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
     alias_targets: set[str] = field(default_factory=set)
     """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
-    requires_zero_data_retention: bool = False
-    """The workspace this was built for refuses every offering not declared zero data retention."""
 
 
 async def build_merged_catalog(
@@ -1032,6 +1030,16 @@ async def build_merged_catalog(
                 for target in named[mid]
             )
         }
+    # A workspace requiring zero data retention is refused every model on an
+    # undeclared provider, so none is listed, whichever reader built this.
+    if narrowing_workspace is not None and workspace_requires_zero_data_retention(narrowing_workspace):
+        merged = {
+            mid: obj
+            for mid, obj in merged.items()
+            if mid in aliases
+            or mid in dynamic_policies
+            or workspace_serves_target(config, narrowing_workspace, normalize_pricing_key(config, mid))
+        }
 
     for obj in merged.values():
         mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
@@ -1044,9 +1052,6 @@ async def build_merged_catalog(
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
         alias_targets=targets,
-        # Only a session naming a workspace asks for one workspace's view.
-        requires_zero_data_retention=session_identity is not None
-        and workspace_requires_zero_data_retention(workspace_id),
     )
 
 
@@ -1147,15 +1152,6 @@ class ZeroDataRetention:
         if served_on == "organization":
             return instance in self.organization
         return False
-
-
-def withholds_offering(merged: MergedCatalog, *, zero_data_retention: bool) -> bool:
-    """Whether an offering is left out of ``merged``'s grouped view for the workspace it was built for.
-
-    A workspace requiring zero data retention is shown no offering that is not
-    declared it, since dispatch refuses every one of them.
-    """
-    return merged.requires_zero_data_retention and not zero_data_retention
 
 
 async def viewer_zero_data_retention(

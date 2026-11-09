@@ -77,6 +77,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("mojeek", "error")),
         "in_body_error": Scenario(handler=_replay("mojeek", "in_body_error")),
     },
+    "perplexity": {
+        "normal": Scenario(handler=_replay("perplexity", "normal")),
+        "empty": Scenario(handler=_replay("perplexity", "empty")),
+        "error": Scenario(handler=_replay("perplexity", "error")),
+    },
     "searxng": {
         "normal": Scenario(handler=_replay("searxng", "normal")),
         "empty": Scenario(handler=_replay("searxng", "empty")),
@@ -176,6 +181,7 @@ async def test_a_normal_answer_fills_the_envelope(provider: str) -> None:
         assert isinstance(hit.title, str)
         assert isinstance(hit.snippet, str)
     assert (result.cost is None) == (result.cost_source == "none")
+    assert (result.cost_source == "reported") == AnySearch.get_provider_metadata(provider).reports_cost
     assert "raw=" not in repr(result)
     assert "raw=" not in repr(result.hits[0])
 

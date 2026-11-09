@@ -1,23 +1,28 @@
 """Tests for pricing configuration from config file."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from any_llm.types.completion import CompletionUsage
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_deployment_pricing_service
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.settings.pricing import PricingConfig
+from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.db import ModelPricing, get_db
 from gateway.main import create_app
 from gateway.models.usage import UsageLog
 from gateway.repositories.tools import SearchToolRepository
+from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_init_service import initialize_pricing_from_config
 
 from .conftest import build_async_session_override
 
@@ -710,6 +715,181 @@ def test_pricing_initialization_with_no_config(postgres_url: str, test_db: Sessi
             assert rows == [("fetch", "builtin_fetch", "migration")], "No pricing should be loaded when config is empty"
     finally:
         dispose_override()
+
+
+def _undated_pricing_config(input_price: float) -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-4": PricingConfig(
+                input_price_per_million=input_price,
+                output_price_per_million=60.0,
+                cache_read_price_per_million=3.0,
+                pricing_tiers=[PricingTierConfig(min_input_tokens=1000, input_price_per_million=40.0)],
+            )
+        },
+    )
+
+
+def _pricing(db: AsyncSession) -> DeploymentPricingService:
+    return build_deployment_pricing_service(UnitOfWork(db))
+
+
+async def _config_versions(db: AsyncSession) -> list[ModelPricing]:
+    result = await db.execute(
+        select(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4").order_by(ModelPricing.effective_at)
+    )
+    return list(result.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_is_seeded_once_across_restarts(async_db: AsyncSession) -> None:
+    """A pricing entry without effective_at adds no row on a restart that leaves it unchanged."""
+    config = _undated_pricing_config(30.0)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert len(versions) == 1
+    assert versions[0].origin == "config"
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_adds_a_version_when_the_rate_changes(async_db: AsyncSession) -> None:
+    """Editing the configured rate still takes effect on the next start."""
+    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db, _pricing(async_db))
+    await initialize_pricing_from_config(_undated_pricing_config(35.0), async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert [version.input_price_per_million for version in versions] == [Decimal(30), Decimal(35)]
+
+
+def _undated_rates_config(audio_input_price: float) -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-4": PricingConfig.model_validate(
+                {
+                    "rates": {
+                        "text": {"input": {"price": 30, "unit": "token"}, "output": {"price": 60, "unit": "token"}},
+                        "audio": {"input": {"price": audio_input_price, "unit": "token"}},
+                    }
+                }
+            )
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_restart_puts_an_undated_config_rate_back_over_a_rate_set_through_the_api(
+    async_db: AsyncSession,
+) -> None:
+    """The file's rate differs from the API's version in force, so the restart adds it again."""
+    config = _undated_pricing_config(30.0)
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await _pricing(async_db).write_rate(
+        "openai:gpt-4", input_price_per_million=25.0, output_price_per_million=50.0, cache_rates={}
+    )
+    await async_db.commit()
+    set_through_the_api = (await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC)))[
+        "openai:gpt-4"
+    ]
+    assert set_through_the_api.origin == "api"
+    assert set_through_the_api.input_price_per_million == Decimal(25)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    in_force = (await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC)))["openai:gpt-4"]
+    assert in_force.origin == "config"
+    assert in_force.input_price_per_million == Decimal(30)
+    assert in_force.output_price_per_million == Decimal(60)
+    assert in_force.cache_read_price_per_million == Decimal(3)
+    assert in_force.pricing_tiers == [{"min_input_tokens": 1000, "input_price_per_million": 40.0}]
+
+
+@pytest.mark.asyncio
+async def test_undated_config_rates_block_is_seeded_once_across_restarts(async_db: AsyncSession) -> None:
+    """An unchanged ``rates`` block adds no row on a restart."""
+    config = _undated_rates_config(100.0)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    assert len(await _config_versions(async_db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_undated_config_rates_block_change_no_column_holds_adds_a_version(async_db: AsyncSession) -> None:
+    """A rate only the ``rates`` block carries still takes effect on the next start."""
+    await initialize_pricing_from_config(_undated_rates_config(100.0), async_db, _pricing(async_db))
+    await initialize_pricing_from_config(_undated_rates_config(120.0), async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert [version.rates["audio"]["input"]["price"] for version in versions] == [Decimal(100), Decimal(120)]
+
+
+@pytest.mark.asyncio
+async def test_dated_config_pricing_is_not_skipped_for_an_undated_sibling(async_db: AsyncSession) -> None:
+    """A dated entry is written at its date even when an undated key for the same model holds its rates."""
+    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db, _pricing(async_db))
+    undated = _undated_pricing_config(30.0).pricing["openai:gpt-4"]
+    config = _undated_pricing_config(30.0).model_copy(
+        update={
+            "pricing": {
+                "openai:gpt-4": undated,
+                "openai/gpt-4": undated.model_copy(update={"effective_at": datetime(2025, 1, 1, tzinfo=UTC)}),
+            }
+        }
+    )
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert datetime(2025, 1, 1, tzinfo=UTC) in [version.effective_at for version in versions]
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_is_written_over_a_newer_dated_sibling(async_db: AsyncSession) -> None:
+    """An undated entry whose rates are in force still takes effect when a dated sibling added now overtakes it."""
+    undated = _undated_pricing_config(30.0).pricing["openai:gpt-4"]
+
+    def config_with(pricing: dict[str, PricingConfig]) -> GatewayConfig:
+        return _undated_pricing_config(30.0).model_copy(update={"pricing": pricing})
+
+    now = datetime.now(UTC)
+    two_days_ago = undated.model_copy(update={"effective_at": now - timedelta(days=2)})
+    await initialize_pricing_from_config(config_with({"openai:gpt-4": two_days_ago}), async_db, _pricing(async_db))
+    yesterday = undated.model_copy(update={"input_price_per_million": 25.0, "effective_at": now - timedelta(days=1)})
+
+    await initialize_pricing_from_config(
+        config_with({"openai:gpt-4": undated, "openai/gpt-4": yesterday}), async_db, _pricing(async_db)
+    )
+
+    current = await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC))
+    assert current["openai:gpt-4"].input_price_per_million == Decimal(30)
+
+
+def test_undated_config_pricing_boots_on_a_one_connection_pool(postgres_url: str, test_db: Session) -> None:
+    """Startup reads the version in force without waiting on the connection it already holds."""
+    config = _undated_pricing_config(30.0).model_copy(
+        update={
+            "database_url": postgres_url,
+            "host": "127.0.0.1",
+            "port": 8000,
+            "db_pool_size": 1,
+            "db_max_overflow": 0,
+            "db_pool_timeout": 2.0,
+        }
+    )
+    # The second start finds the bootstrap key and the version in force already stored.
+    for _ in range(2):
+        with TestClient(create_app(config)):
+            pass
+
+    assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "openai:gpt-4").count() == 1
 
 
 @pytest.mark.asyncio

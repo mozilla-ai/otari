@@ -25,6 +25,7 @@ from gateway.api.routes.messages import (
     _anthropic_error,
     _ensure_anthropic_error,
 )
+from gateway.core.error_codes import RefusalException, error_headers
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT
 
 
@@ -202,3 +203,21 @@ def test_an_upstream_timeout_error_event_keeps_its_type() -> None:
 )
 def test_any_other_mid_stream_failure_stays_the_generic_api_error(exc: BaseException) -> None:
     assert _ADAPTER.stream_error_payload(exc) == ANTHROPIC_STREAM_FORMAT.error_payload
+
+
+def test_a_refusals_fields_go_at_the_top_of_the_envelope() -> None:
+    refused = RefusalException(
+        status.HTTP_403_FORBIDDEN,
+        "End user 'alice' is blocked",
+        headers=error_headers("user_blocked"),
+        fields={"end_user": "alice"},
+    )
+
+    rendered = _ensure_anthropic_error(refused)
+
+    assert rendered.body == {
+        "type": "error",
+        "error": {"type": "permission_error", "message": "End user 'alice' is blocked"},
+        "end_user": "alice",
+    }
+    assert rendered.headers == {"Otari-Error-Code": "user_blocked"}

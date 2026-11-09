@@ -736,7 +736,9 @@ is unacceptable.
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
 names a provider for `otari_web_fetch`, for [`POST /api/v1/fetch`](#direct-fetch)
-and for enriching search results.
+and for enriching search results. A fetch provider's cost tier is set only by
+the tool's configuration where the provider reports no cost, as
+[Search providers](#search-providers) says for a search provider's.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results, so setting it moves enrichment too. A workspace
 whose organization has a [fetch key](#organization-search-keys) runs both on
@@ -1046,6 +1048,26 @@ A search instance serves direct search and, as the [in-loop default](#web-search
 the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 [Pricing a gateway-run tool](#pricing-a-gateway-run-tool) says.
 
+Some providers charge each search or fetch at one of a few prices, chosen by an
+option: the provider's cost tiers, such as Perplexity's `search_type`. Where the
+provider does not report what a call cost, only the tool's configuration sets
+that option, in a tool's `options` or in an
+[organization key](#organization-search-keys)'s: a request that sets it is
+refused with a 400, and a workspace's `provider_options` that set it are left
+out with a warning. So a tool's calls run at the tier its price was set for, and
+an organization key's at the tier its owners and admins chose for their own
+account. To offer more than one tier, configure one tool for each, at its own
+price. `GET /api/v1/search-tools/providers` marks such an option `cost_tier`, and
+`operator_only` while it is set only this way; `?kind=fetch` lists the fetch
+providers'.
+
+A tool whose cost tier has a value the provider does not take, such as
+Perplexity's `search_type: Fast`, does not run, and the startup log says so: a
+search on it answers 400 `Search tool '<name>' is not configured correctly.`, the in-loop
+tool does not take it as its default, its connection test is refused, and a
+fetch tool is left out, as if nothing named it. The dashboard and the API
+refuse such a value when a tool is saved.
+
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
@@ -1081,6 +1103,33 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
   your plan costs you. A search returns at most 10 results, the Startup plan's
   limit, whatever the plan, and its hits carry a snippet but no page text.
+- **Perplexity** (`perplexity`) needs an API key, read from the tool's `api_key`,
+  such as `${PERPLEXITY_API_KEY}`, the key Perplexity's models take too. It
+  reports no cost, so a search is billed at the tool's own rate (its
+  `price_per_call`, or a `search` price set on the dashboard's Web search page or
+  through the API); a price for one of Perplexity's models never prices it. Don't
+  name the tool after one of them, such as `sonar`: until a later release, a
+  tool's price is also read under `perplexity:<tool name>`, which would be that
+  model's. Perplexity's
+  [pricing](https://docs.perplexity.ai/getting-started/pricing), read 2026-11-09,
+  is per search, whatever the number of results or the page text asked for, at
+  one of two cost tiers chosen by `search_type`: $5 per 1,000 for `web`, the
+  default, and $1 per 1,000 for `fast`. To offer both, configure two tools:
+
+  ```yaml
+  search_tools:
+    perplexity:      {provider: perplexity, api_key: "${PERPLEXITY_API_KEY}", price_per_call: 0.005}
+    perplexity-fast: {provider: perplexity, api_key: "${PERPLEXITY_API_KEY}", price_per_call: 0.001, options: {search_type: fast}}
+  ```
+
+  A search returns at most 20 results, and its hits carry page text, the
+  passages Perplexity takes from each page (`max_tokens_per_page` sizes them), and
+  no snippet, so the in-loop tool reads no page for them. Perplexity's own
+  filters, such as `search_domain_filter`, `country` and `search_recency_filter`,
+  apply when a call passes them in `provider_options`; on direct search, the
+  request's top-level `search_domain_filter` and `country` are applied by Otari as
+  for every provider but Exa. Perplexity refuses a `time_range` or a
+  `search_recency_filter` together with a publication date filter.
 - **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
   `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
   header and the query in the request URL, which Otari keeps out of its logs. Set

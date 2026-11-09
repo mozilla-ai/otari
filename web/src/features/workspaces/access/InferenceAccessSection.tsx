@@ -68,9 +68,12 @@ function groupSummary(entries: readonly Entry[]): string {
 }
 
 /** Which row's scope is open, if any: a key by its id, or a hosted provider by its name. */
+// Tagged with the workspace it was opened in, so a dialog never outlives a
+// switch to another workspace, and a save still landing for the old one cannot
+// close a dialog opened in the new one.
 type OpenScope =
-  | { kind: "key"; id: string }
-  | { kind: "hosted"; provider: string }
+  | { kind: "key"; id: string; workspaceId: string }
+  | { kind: "hosted"; provider: string; workspaceId: string }
   | undefined
 
 /**
@@ -150,21 +153,34 @@ export function InferenceAccessSection({
     }
   }
 
+  // No dialog without the policy, in another workspace than it was opened in,
+  // or on a source the policy now blocks: each would save where the page says
+  // nothing may be changed.
+  const isOpenHere = open?.workspaceId === workspaceId && policy.data
+  const isUsable = (row: { zero_data_retention: boolean }) =>
+    !requiresZeroRetention || row.zero_data_retention
   const openKey =
-    open?.kind === "key"
-      ? keyRows.find((row) => row.org_provider_key_id === open.id)
+    open?.kind === "key" && isOpenHere
+      ? keyRows.find(
+          (row) => row.org_provider_key_id === open.id && isUsable(row),
+        )
       : undefined
   const openKeyRecord = openKey
     ? byId.get(openKey.org_provider_key_id)
     : undefined
   const openHosted =
-    open?.kind === "hosted"
-      ? hostedRows.find((row) => row.provider === open.provider)
+    open?.kind === "hosted" && isOpenHere
+      ? hostedRows.find(
+          (row) => row.provider === open.provider && isUsable(row),
+        )
       : undefined
 
+  // Held for the policy too: until it answers, no row knows it is blocked, and
+  // a key's model dialog would offer what the workspace refuses.
   const isLoading =
     (overrides.isPending && !overrides.data) ||
-    (hosted.isPending && !hosted.data)
+    (hosted.isPending && !hosted.data) ||
+    (policy.isPending && !policy.data)
 
   // One row per provider: a provider with several sources (two keys, or a key
   // and a hosted provider) folds them under a row that opens in place.
@@ -228,7 +244,7 @@ export function InferenceAccessSection({
             body: { is_default: next },
           })
         }
-        onOpenScope={() => setOpen({ kind: "key", id: entry.id })}
+        onOpenScope={() => setOpen({ kind: "key", id: entry.id, workspaceId })}
         // A refused write is shown by its mutation's own error, in the banner.
         onReset={() => resetKey(entry.row).catch(() => undefined)}
       />
@@ -248,7 +264,11 @@ export function InferenceAccessSection({
           })
         }
         onOpenScope={() =>
-          setOpen({ kind: "hosted", provider: entry.row.provider })
+          setOpen({
+            kind: "hosted",
+            provider: entry.row.provider,
+            workspaceId,
+          })
         }
         onReset={() =>
           resetHosted.mutate({ workspaceId, provider: entry.row.provider })
@@ -282,7 +302,7 @@ export function InferenceAccessSection({
             <Toggle
               label="Require zero data retention"
               isSelected={requiresZeroRetention}
-              isDisabled={!canManage || policy.isPending || setPolicy.isPending}
+              isDisabled={!canManage || !policy.data || setPolicy.isPending}
               onChange={(next) =>
                 setPolicy.mutate({
                   workspaceId,
@@ -295,6 +315,13 @@ export function InferenceAccessSection({
       </SettingsGroup>
       {isLoading ? (
         <span className="text-caption">Loading…</span>
+      ) : !policy.data ? (
+        // A failed read is not "not required": no row can say whether it is
+        // blocked, so none is offered until the policy can be read.
+        <span className="text-caption">
+          The providers are held until this workspace's data retention policy
+          can be read.
+        </span>
       ) : keyRows.length === 0 && hostedRows.length === 0 ? (
         <span className="text-caption">
           This organization holds no provider keys and the deployment hosts no
@@ -376,7 +403,7 @@ export function InferenceAccessSection({
           between writes, which must not remount the dialog mid-save. */}
       {openKey ? (
         <KeyModelsDialog
-          key={openKey.org_provider_key_id}
+          key={`${workspaceId}:${openKey.org_provider_key_id}`}
           workspaceId={workspaceId}
           keyId={openKey.org_provider_key_id}
           keyName={keyLabel(openKeyRecord, openKey.org_provider_key_id)}
@@ -389,19 +416,25 @@ export function InferenceAccessSection({
               knownProviders,
             )
           }
-          onClose={() => setOpen(undefined)}
+          onClose={() => setOpen(closeIn(workspaceId))}
         />
       ) : null}
       {openHosted ? (
         <HostedModelsDialog
-          key={openHosted.provider}
+          key={`${workspaceId}:${openHosted.provider}`}
           workspaceId={workspaceId}
           row={openHosted}
-          onClose={() => setOpen(undefined)}
+          onClose={() => setOpen(closeIn(workspaceId))}
         />
       ) : null}
     </div>
   )
+}
+
+/** Close the open dialog, unless it now belongs to another workspace. */
+function closeIn(workspaceId: string) {
+  return (open: OpenScope): OpenScope =>
+    open?.workspaceId === workspaceId ? undefined : open
 }
 
 /**

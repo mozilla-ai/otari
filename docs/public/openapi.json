@@ -18662,7 +18662,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+            "description": "Which writer set this row: config, api, seed or migration. Null before origins were recorded.",
             "title": "Origin"
           },
           "output_price_per_million": {
@@ -21339,6 +21339,12 @@
       "SearchProviderOptionSchema": {
         "description": "One native option a provider accepts, under the provider's own name.",
         "properties": {
+          "cost_tier": {
+            "default": false,
+            "description": "True when the option's values are the provider's cost tiers: the provider bills a call at a price of its own for each value. enum lists the tiers, and default is the one used when the option is unset.",
+            "title": "Cost Tier",
+            "type": "boolean"
+          },
           "default": {
             "description": "The value the provider uses when the option is not set.",
             "title": "Default"
@@ -21369,7 +21375,7 @@
           },
           "operator_only": {
             "default": false,
-            "description": "True when only an instance or a credential may set it, never a workspace or a request.",
+            "description": "True when only an instance or a credential may set it, never a workspace or a request: an option the provider's library marks so, or a cost tier of a provider that reports no cost.",
             "title": "Operator Only",
             "type": "boolean"
           },
@@ -21531,6 +21537,12 @@
             ],
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
+          },
+          "reports_cost": {
+            "default": false,
+            "description": "True when the provider's answer says what each call cost, which is then what the call is billed.",
+            "title": "Reports Cost",
+            "type": "boolean"
           },
           "reports_final_url": {
             "anyOf": [
@@ -38428,6 +38440,25 @@
               "description": "Only the models this provider instance serves, described as served there.",
               "title": "Provider"
             }
+          },
+          {
+            "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
           }
         ],
         "responses": {
@@ -39143,6 +39174,27 @@
       "get": {
         "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them before automatic selection reorders it, each with\nits input price for this organization and who runs the built-in tools on it,\nbeside its traffic: how many requests a backup served, and how many named one\noffering or a policy instead, by API key and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
+        "parameters": [
+          {
+            "description": "Only the offerings a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the offerings a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -39153,6 +39205,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

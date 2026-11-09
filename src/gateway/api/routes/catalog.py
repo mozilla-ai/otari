@@ -72,7 +72,6 @@ from gateway.services.merged_catalog_service import (
     viewer_organization,
     viewer_price,
     viewer_zero_data_retention,
-    withholds_offering,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import (
@@ -406,8 +405,6 @@ async def _group(
             hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
         )
         declared = zero_retention.declared(instance, credential.value)
-        if withholds_offering(merged, zero_data_retention=declared):
-            continue
         seeds.append(seed)
 
         pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)

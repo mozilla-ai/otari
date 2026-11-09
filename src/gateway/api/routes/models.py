@@ -1,5 +1,6 @@
 """OpenAI-compatible models listing endpoint with auto-discovery."""
 
+import uuid
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -197,6 +198,10 @@ async def list_models(
     provider: Annotated[
         str | None, Query(description="Only the models this provider instance serves, described as served there.")
     ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the models a request billed to this workspace may call."),
+    ] = None,
 ) -> ModelListResponse:
     """List all available models, one entry per model however many providers serve it.
 
@@ -210,7 +215,11 @@ async def list_models(
     `instance:model` selector still pins a request to one provider, and
     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
-    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
+    return ModelListResponse(
+        data=await _listing(
+            db, config, auth, session_identity, model_provider, provider=provider, workspace_id=workspace_id
+        )
+    )
 
 
 async def _listing(
@@ -221,6 +230,7 @@ async def _listing(
     model_provider: ModelProviderPort,
     *,
     provider: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[ModelObject]:
     # Alias targets are kept so a model's row is chosen among the offerings a
     # request by its catalog id tries; ``models_by_identity`` still hides them.
@@ -232,6 +242,7 @@ async def _listing(
         provider=provider,
         model_provider=model_provider,
         withhold_alias_targets=False,
+        workspace_id=workspace_id,
     )
     models = list(catalog.models.values())
     organization_id = await viewer_organization(db, auth, session_identity)

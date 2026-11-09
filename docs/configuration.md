@@ -910,8 +910,18 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
-precedence. Rates and settled costs use decimal arithmetic and costs are rounded
+Each start writes the config file's prices to the database. An entry with no
+`effective_at` adds a version only when its rates differ from the version in
+force, whoever set that version, so an unchanged file adds nothing, and a start
+puts the file's rate back over one set since through `/api/v1/pricing` or the
+dashboard. To keep a rate set there, remove the model's entry from this file or
+give it the same rate. An entry with `effective_at` adds its version once, and a
+version already stored at that instant is kept. An entry for a model of a
+[hosted provider](hosted-providers.md) is skipped with a warning, because this
+file prices only the `providers:` and `decision_providers:` instances and the
+tools it declares: price a hosted provider's model through the pricing API or
+the Hosted providers page.
+Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
 A stored price change, made through the API, the dashboard or a catalog update,
@@ -1019,8 +1029,12 @@ provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
 Each stored rate also carries its `unit` (one of the units under
-[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin` (`config` or `api`), so a rate the config file re-seeds on
-every restart is distinguishable from one set in the dashboard.
+[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin`:
+`config` for a rate from this file, `api` for one set through the pricing API or
+the dashboard, `seed` for one a catalog update copied from models.dev for a
+model a hosted provider serves, and `migration` for one an upgrade wrote. It is
+null on a rate stored before origins were recorded. A catalog update moves only
+a `seed` rate.
 
 ### A public catalog
 
@@ -1202,7 +1216,7 @@ as a price per image, and a token price is never read as a price per request.
 | Audio transcription | `audio` input | The length the provider reports, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
 | Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
 | Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
-| Videos | `video` output | The seconds the job reports | `second` per second ([Videos](api-reference.md#videos)) |
+| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is recorded with no cost, which is unknown rather than free | `second` per second ([Videos](api-reference.md#videos)) |
 
 A `token` rate is read as tokens on every endpoint. An endpoint that reports no
 tokens (a `dall-e-3` image, a moderation) is unpriced at a token rate: the row
@@ -1218,10 +1232,10 @@ moderations are exempt: they are served, and their row carries no cost. A
 missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
-`tokens`, `requests` and `images`, are still read for one release, in this file
-and on the pricing API, and read as `token`, `request` and `image`: a rate sent
-as `unit: requests` is stored and served as `unit: request`. The next release
-refuses the old names; see [Upgrading](#upgrading).
+`tokens`, `requests` and `images`, are still read, in this file and on the
+pricing API, as `token`, `request` and `image`: a rate sent as
+`unit: requests` is stored and served as `unit: request`. A later release will
+refuse the old names; see [Upgrading](#upgrading).
 
 The catalog prices each slot in its unit, so a catalog price reaches every
 endpoint: `whisper-1` is priced per minute of audio and `tts-1` per character
@@ -1791,11 +1805,11 @@ after an unconfirmed delivery can produce a duplicate.
 ## Upgrading
 
 - **Price unit names.** A stored rate's `unit` is singular (`token`, `request`,
-  `image`). The migration renames every stored rate on the first start of this
-  release, and the old names are still read for one release. Upgrade every
-  instance together: an instance still running the previous release reads a
-  renamed rate as a unit it does not know, so it refuses a priced request on it
-  under `require_pricing`.
+  `image`) since v0.38.0. Its migration renames every stored rate on the first
+  start, and the old names are still read. Upgrade every instance from an
+  earlier release together: an instance still running one reads a renamed rate
+  as a unit it does not know, so it refuses a priced request on it under
+  `require_pricing`.
 - **Image rates.** An `image` rate is USD per million images. A rate written in
   `config.yml` as raw USD per image (for example `0.04`) bills a millionth of
   what it meant; multiply it by 1,000,000.

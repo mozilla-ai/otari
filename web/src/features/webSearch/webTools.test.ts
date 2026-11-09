@@ -48,6 +48,7 @@ const option = (
   type,
   description: "",
   operator_only: false,
+  cost_tier: false,
   ...extra,
 })
 
@@ -58,6 +59,7 @@ const provider = (
   kind: "search",
   requires_api_key: true,
   requires_api_base: false,
+  reports_cost: false,
   tier: "production",
   instances: [],
   options: [

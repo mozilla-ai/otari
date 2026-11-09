@@ -7,7 +7,7 @@ network or a monkeypatch.
 
 import asyncio
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -49,6 +49,7 @@ class FakeOptions(BaseModel):
     in_body_error: str | None = None
     leak_query: bool = False
     account: str | None = None
+    depth: Literal["basic", "advanced"] = "basic"
 
 
 class FakeProvider(AnySearch):
@@ -98,6 +99,14 @@ class FakeProvider(AnySearch):
                 type="string",
                 operator_only=True,
                 description="An account name, echoed in raw. Operator-only, so a host can exercise that rule.",
+            ),
+            OptionSpec(
+                name="depth",
+                type="string",
+                enum=["basic", "advanced"],
+                default="basic",
+                cost_tier=True,
+                description="A cost tier, echoed in raw, so a host can exercise its rule for cost tiers.",
             ),
         ],
     )

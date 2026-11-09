@@ -91,7 +91,10 @@ export function usePlayground() {
 
   // The grouped catalog, not the flat `/models` listing; playgroundModels.ts
   // says why.
-  const catalog = useCatalog()
+  const catalog = useCatalog(
+    { limit: 1000, workspace_id: workspaceId },
+    !isLoadingWorkspace,
+  )
   const models = buildPlaygroundModels(catalog.data)
 
   const consent = usePlaygroundConsent()

@@ -22,6 +22,7 @@ import type {
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   HOSTED_CATALOG_UPDATE_PREVIEW,
   HOSTED_PROVIDER_AVAILABLE_MODELS,
@@ -63,6 +64,7 @@ function useInvalidateHosted() {
     void queryClient.invalidateQueries({ queryKey: [PRICING] })
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
     void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
   }
 }

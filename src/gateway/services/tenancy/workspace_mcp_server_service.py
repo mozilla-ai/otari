@@ -552,7 +552,7 @@ async def resolve_workspace_mcp_servers(
             McpServerConfig(
                 name=row.name,
                 url=row.url,
-                authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
+                authorization_token=_stored_token(row),
                 purpose_hint=row.purpose_hint,
                 allowed_tools=row.allowed_tools,
                 caller_tool_patterns=None if "*" in granted else granted,
@@ -614,7 +614,7 @@ async def resolve_workspace_mcp_server(
         id=row.id,
         name=row.name,
         url=row.url,
-        authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
+        authorization_token=_stored_token(row),
         enabled=row.enabled,
         everyone_tools=row.everyone_tools,
         read_tools=row.read_tools,
@@ -643,6 +643,15 @@ async def list_reachable_mcp_servers(
         for row in rows
         if access.patterns_for(row.id, row.everyone_tools, row.read_tools)
     ]
+
+
+async def _grant_or_404(
+    repository: WorkspaceMcpServerGrantRepository, server_id: uuid.UUID, grant_id: uuid.UUID
+) -> WorkspaceMcpServerGrant:
+    grant = await repository.get_on_server(server_id, grant_id)
+    if grant is None:
+        raise WorkspaceMcpServerGrantNotFoundError(grant_id)
+    return grant
 
 
 def _decide(
@@ -1069,9 +1078,7 @@ class WorkspaceMcpServerService:
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
         repository = WorkspaceMcpServerGrantRepository(self.db)
-        grant = await repository.get_on_server(server.id, grant_id)
-        if grant is None:
-            raise WorkspaceMcpServerGrantNotFoundError(grant_id)
+        grant = await _grant_or_404(repository, server.id, grant_id)
         await repository.set_tools(grant, request.tools)
         await self.db.commit()
         return await self._access_of(resolved_workspace_id, server)
@@ -1083,9 +1090,7 @@ class WorkspaceMcpServerService:
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
         repository = WorkspaceMcpServerGrantRepository(self.db)
-        grant = await repository.get_on_server(server.id, grant_id)
-        if grant is None:
-            raise WorkspaceMcpServerGrantNotFoundError(grant_id)
+        grant = await _grant_or_404(repository, server.id, grant_id)
         await repository.remove(grant)
         await self.db.commit()
         return await self._access_of(resolved_workspace_id, server)
@@ -1118,10 +1123,15 @@ class WorkspaceMcpServerService:
         self, workspace_id: uuid.UUID, api_key_id: str, server: WorkspaceMcpServer
     ) -> tuple[Literal["key", "user", "everyone"], uuid.UUID | None, list[str]]:
         """Which rule decides a key's access to a server: its grant, its owner's, or ``everyone_tools``."""
+        key = await self._key_in_workspace(workspace_id, api_key_id)
+        return _decide(key, server, await WorkspaceMcpServerGrantRepository(self.db).for_server(server.id))
+
+    async def _key_in_workspace(self, workspace_id: uuid.UUID, api_key_id: str) -> KeySummary:
+        """One key of the workspace, or :class:`WorkspaceMcpServerKeyNotFoundError` when it is not one."""
         found = await self._key_service().summaries_in_workspace(workspace_id, [api_key_id])
         if not found:
             raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
-        return _decide(found[0], server, await WorkspaceMcpServerGrantRepository(self.db).for_server(server.id))
+        return found[0]
 
     async def key_access(
         self, *, user: User, workspace_id: uuid.UUID, api_key_id: str
@@ -1132,10 +1142,7 @@ class WorkspaceMcpServerService:
             WorkspaceMcpServerKeyNotFoundError: the key is not of this workspace.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
-        found = await self._key_service().summaries_in_workspace(resolved_workspace_id, [api_key_id])
-        if not found:
-            raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
-        key = found[0]
+        key = await self._key_in_workspace(resolved_workspace_id, api_key_id)
         servers = (
             (
                 await self.db.execute(

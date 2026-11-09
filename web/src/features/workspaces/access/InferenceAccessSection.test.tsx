@@ -49,6 +49,8 @@ function mockApi(
     catalogRefusal?: { status: number; detail: string }
     /** Whether the workspace requires zero data retention. */
     requireZeroRetention?: boolean
+    /** A refusal for the workspace's provider policy. */
+    policyRefusal?: { status: number; detail: string }
   } = {},
 ) {
   const keys = opts.keys ?? [orgProviderKey()]
@@ -99,6 +101,12 @@ function mockApi(
     if (url.includes("/provider-policy")) {
       if (method !== "GET")
         return jsonResponse(init?.body ? JSON.parse(String(init.body)) : {})
+      if (opts.policyRefusal) {
+        return jsonResponse(
+          { detail: opts.policyRefusal.detail },
+          opts.policyRefusal.status,
+        )
+      }
       return jsonResponse({
         require_zero_data_retention: opts.requireZeroRetention ?? false,
       })
@@ -591,6 +599,28 @@ describe("InferenceAccessSection: zero data retention", () => {
     expect(
       screen.getByRole("switch", { name: "Require zero data retention" }),
     ).toBeChecked()
+  })
+
+  it("offers no source while the policy cannot be read", async () => {
+    // Unread is not "not required": a row offered now could be one the
+    // workspace refuses.
+    mockApi({
+      overrides: [workspaceProviderKeyOverride({ zero_data_retention: false })],
+      policyRefusal: { status: 500, detail: "policy unavailable" },
+    })
+    renderSection()
+
+    expect(
+      await screen.findByText(/held until this workspace's data retention/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("switch", {
+        name: "Use openai / Production in this workspace",
+      }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("switch", { name: "Require zero data retention" }),
+    ).toBeDisabled()
   })
 
   it("holds every control on a source it blocks, and none on a declared one", async () => {

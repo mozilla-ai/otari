@@ -37,7 +37,13 @@ from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
-from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail, user_subject
+from gateway.services.budgets._refusals import (
+    BlockedAxis,
+    blocked_on,
+    end_user_fields,
+    refusal_detail,
+    user_subject,
+)
 from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
@@ -333,16 +339,19 @@ def _blocked_axis(
     return BlockedAxis("budget")
 
 
-def _budget_exceeded(detail: str, blocked: BlockedAxis, *, budget_scope: str) -> HTTPException:
+def _budget_exceeded(
+    detail: str, blocked: BlockedAxis, *, budget_scope: str, fields: dict[str, str] | None = None
+) -> HTTPException:
     """The 403 for a budget with no room, with ``Retry-After`` when its window ending would let the request in."""
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=detail,
+    return error_codes.RefusalException(
+        status.HTTP_403_FORBIDDEN,
+        detail,
         headers=error_codes.error_headers(
             error_codes.BUDGET_EXCEEDED,
             budget_scope=budget_scope,
             retry_after=blocked.retry_after(datetime.now(UTC)),
         ),
+        fields=fields,
     )
 
 
@@ -886,10 +895,11 @@ async def reserve_budget(
             headers=error_codes.error_headers(error_codes.USER_NOT_FOUND),
         )
     if user.blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"{user_subject(user_id, external_id=user.external_id)} is blocked",
+        raise error_codes.RefusalException(
+            status.HTTP_403_FORBIDDEN,
+            f"{user_subject(user_id, external_id=user.external_id)} is blocked",
             headers=error_codes.error_headers(error_codes.USER_BLOCKED),
+            fields=end_user_fields(user.external_id),
         )
 
     # Budget-exempt request (e.g. a key flagged exclude_from_budget): the user is
@@ -1130,6 +1140,7 @@ async def reserve_budget(
             ),
             blocked,
             budget_scope="user",
+            fields=end_user_fields(user.external_id),
         )
 
     return await _held_handle(

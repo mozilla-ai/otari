@@ -181,10 +181,11 @@ function mockApi(
   })
 }
 
-function renderPage(ui: ReactElement, url = "/models/z-ai/glm-5.3") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+function renderPage(
+  ui: ReactElement,
+  url = "/models/z-ai/glm-5.3",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
@@ -571,6 +572,199 @@ describe("ModelDetailPage", () => {
     expect(
       screen.getByRole("option", { name: /us\.zai\.glm-5\.3/ }),
     ).toBeInTheDocument()
+  })
+
+  describe("the drawer's request", () => {
+    /** GLM with each offering served on the routes given, in order. */
+    const servedOn = (
+      ...routes: NonNullable<CatalogOffering["endpoints"]>[]
+    ): CatalogModelDetail => ({
+      ...GLM_DETAIL,
+      offerings: GLM_DETAIL.offerings.map((each, index) => ({
+        ...each,
+        endpoints: routes[index] ?? [],
+      })),
+    })
+
+    async function openDrawer(detail: CatalogModelDetail) {
+      mockApi({ detail })
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole("button", { name: "Use this model" }),
+      )
+      const drawer = await screen.findByRole("dialog", {
+        name: "Use this model",
+      })
+      const curl = () =>
+        (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value
+      return { user, drawer, curl }
+    }
+
+    it("calls the route the gateway's pick is served on", async () => {
+      const { drawer, curl } = await openDrawer(servedOn(["/embeddings"]))
+
+      expect(curl()).toContain(`${API_ROOT}/embeddings`)
+      expect(within(drawer).getByText(/^Calls/)).toHaveTextContent(
+        `Calls POST ${API_ROOT}/embeddings.`,
+      )
+      // One route needs no choice.
+      expect(within(drawer).queryByRole("button", { name: /Route/ })).toBeNull()
+    })
+
+    it("follows the pinned offering's routes", async () => {
+      const { user, drawer, curl } = await openDrawer(
+        servedOn(["/embeddings"], ["/images/generations", "/images/edits"]),
+      )
+
+      await user.click(
+        within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+      )
+      await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
+
+      // Two routes: the first, in models.dev's order, until another is picked.
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/images/generations`),
+      )
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/images/generations`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/images/edits` }),
+      )
+      await waitFor(() => expect(curl()).toContain("-F image=@image.png"))
+      expect(
+        within(drawer).getByText(/with the path to your own file/),
+      ).toHaveTextContent("Replace image.png with the path to your own file.")
+    })
+
+    it("opens another offering on its own first route", async () => {
+      const { user, drawer, curl } = await openDrawer(
+        servedOn(
+          ["/responses", "/messages"],
+          ["/chat/completions", "/messages"],
+        ),
+      )
+
+      // A route picked on the gateway's pick, which the next offering lists second.
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/responses`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/messages` }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/messages`))
+
+      await user.click(
+        within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+      )
+      await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
+
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/chat/completions`),
+      )
+
+      // Back on the gateway's pick, the earlier choice is gone too.
+      await user.click(
+        within(drawer).getByRole("button", { name: /^Fireworks/ }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: "Let the gateway choose" }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/responses`))
+    })
+
+    it("opens on the first route of a new gateway pick after a refresh", async () => {
+      const detail = servedOn(
+        ["/responses", "/messages"],
+        ["/chat/completions", "/messages"],
+      )
+      mockApi({ detail })
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />, undefined, client)
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole("button", { name: "Use this model" }),
+      )
+      const drawer = await screen.findByRole("dialog", {
+        name: "Use this model",
+      })
+      const curl = () =>
+        (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value
+
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/responses`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/messages` }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/messages`))
+
+      // The gateway now picks Fireworks, which lists `/messages` second.
+      mockApi({
+        detail: {
+          ...detail,
+          resolves_to: detail.offerings[1]?.selector ?? null,
+        },
+      })
+      await client.invalidateQueries()
+
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/chat/completions`),
+      )
+    })
+
+    it("says a speech request's voice differs by provider", async () => {
+      const { drawer, curl } = await openDrawer(servedOn(["/audio/speech"]))
+
+      expect(curl()).toContain('"voice": "alloy"')
+      expect(
+        within(drawer).getByText(/Voices differ by provider/),
+      ).toHaveTextContent(
+        "Voices differ by provider: if this one does not list alloy, use one it does.",
+      )
+    })
+
+    it("names the package the Python request needs", async () => {
+      const { user, drawer } = await openDrawer(servedOn(["/messages"]))
+
+      await user.click(within(drawer).getByRole("button", { name: "Python" }))
+
+      expect(
+        (within(drawer).getByLabelText("Python") as HTMLTextAreaElement).value,
+      ).toContain("from anthropic import Anthropic")
+      expect(within(drawer).getByText("pip install anthropic")).toBeVisible()
+    })
+
+    it("falls back to chat, and says so, where no route is known", async () => {
+      const { drawer, curl } = await openDrawer(servedOn())
+
+      expect(curl()).toContain(`${API_ROOT}/chat/completions`)
+      expect(
+        within(drawer).getByText(/models.dev names no route for this offering/),
+      ).toBeInTheDocument()
+    })
+
+    it("sends a decision route to its docs instead of a request", async () => {
+      const { drawer } = await openDrawer(servedOn(["/decisions"]))
+
+      expect(within(drawer).queryByLabelText("cURL")).toBeNull()
+      expect(within(drawer).getByText(/decision_providers/)).toBeInTheDocument()
+      expect(
+        within(drawer).getByRole("link", { name: /How to ask for a decision/ }),
+      ).toHaveAttribute(
+        "href",
+        expect.stringContaining("api-reference.md#decisions"),
+      )
+    })
   })
 
   it("offers a deployment operator no rate link on a deployment-supplied offering", async () => {

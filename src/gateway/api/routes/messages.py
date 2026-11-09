@@ -71,7 +71,7 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INVALID_REQUEST, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
@@ -563,6 +563,7 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
 
     One already in the envelope is returned as it is. A string detail becomes the
     message; a dict detail gives its ``message``, and its other fields ride beside it.
+    A ``RefusalException``'s fields go at the top of the body, where ``code`` goes.
     """
     if isinstance(exc, BodyHTTPException):
         return exc
@@ -571,8 +572,11 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
         message = str(detail.get("message", HTTPStatus(exc.status_code).phrase))
-        return _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
-    return _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+        enveloped = _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
+    else:
+        enveloped = _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+    enveloped.body.update(body_fields_of(exc))
+    return enveloped
 
 
 _ERR_OVERLOADED = "overloaded_error"

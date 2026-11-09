@@ -141,7 +141,11 @@ from gateway.core.error_codes import (
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     UPSTREAM_RATE_LIMITED,
+    USER_BLOCKED,
+    USER_NOT_FOUND,
     WRONG_MODEL_TYPE,
+    RefusalException,
+    body_fields_of,
     error_code_of,
     error_headers,
 )
@@ -229,6 +233,7 @@ from gateway.services.budgets import (
     EstimateInputs,
     PricingLookup,
     ReservationHandle,
+    end_user_fields,
     estimate_cost,
     estimate_tokens,
     get_budget_state,
@@ -2476,7 +2481,9 @@ async def _grow_reservation(
         logger.warning("Reservation top-up refused for candidate %s:%s; stopping the chain", instance, model)
         if refused_detail is None:
             raise
-        raise HTTPException(status_code=exc.status_code, detail=refused_detail, headers=exc.headers) from exc
+        raise RefusalException(
+            exc.status_code, refused_detail, headers=exc.headers, fields=body_fields_of(exc)
+        ) from exc
 
 
 class ReservationToolGate:
@@ -2760,11 +2767,17 @@ async def _admit_idempotent(
                 409, IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL, ErrorKind.INVALID_REQUEST, headers={"Retry-After": "5"}
             )
         case UnknownCaller():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
-        case BlockedCaller(external_id=external_id):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{user_subject(user_id, external_id=external_id)} is blocked",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User '{user_id}' not found",
+                headers=error_headers(USER_NOT_FOUND),
+            )
+        case BlockedCaller(external_id=external_id):
+            raise RefusalException(
+                status.HTTP_403_FORBIDDEN,
+                f"{user_subject(user_id, external_id=external_id)} is blocked",
+                headers=error_headers(USER_BLOCKED),
+                fields=end_user_fields(external_id),
             )
 
 
