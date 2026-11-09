@@ -261,6 +261,22 @@ async def test_an_authenticated_person_matching_no_organization_is_refused(async
     assert await _count(async_db, User) == accounts_before
 
 
+async def test_a_later_sign_in_takes_the_display_name_the_provider_now_reports(async_db: AsyncSession) -> None:
+    """Nothing here sets such an account's name, so the provider is where a change to it comes from."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example", full_name=None))
+    assert first.account.full_name is None
+
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example", full_name="Ada Lovelace"))
+
+    refreshed = await async_db.get(User, first.account.id)
+    assert refreshed is not None
+    assert refreshed.full_name == "Ada Lovelace"
+
+
 async def test_one_issuer_shared_by_two_organizations_is_one_account_with_two_memberships(
     async_db: AsyncSession,
 ) -> None:

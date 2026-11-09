@@ -404,6 +404,7 @@ class IdentityService:
         if link is not None:
             account = await self._active_account(link.user_id, label)
             password_removed = await self._prove_vouched_address(account)
+            self._take_display_name_from_sso(account, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
 
         if external.provider.startswith(OIDC_PROVIDER_PREFIX):
@@ -451,6 +452,20 @@ class IdentityService:
         self._users.stage(account)
         await self._links.add(external, user_id=account.id)
         return IdentityResolution(identity=account, new_account=True)
+
+    def _take_display_name_from_sso(self, account: User, external: ProviderIdentity) -> None:
+        """Take the display name an organization's own provider reports, for an account only it names.
+
+        Such an account holds no address and no surface here sets its name, so the provider is where
+        the name comes from and a later sign-in is when a change to it arrives. A provider reporting
+        none leaves the name alone rather than clearing it.
+        """
+        if not external.provider.startswith(OIDC_PROVIDER_PREFIX):
+            return
+        if external.full_name is None or external.full_name == account.full_name:
+            return
+        account.full_name = external.full_name
+        self._users.stage(account)
 
     async def _prove_vouched_address(self, account: User) -> bool:
         """Treat a sign-in through a provider link as proof of a vouched address, and say if a password went.
