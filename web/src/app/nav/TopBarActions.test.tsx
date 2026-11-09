@@ -121,10 +121,10 @@ describe("TopBarActions", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
   })
 
-  it("places Feedback immediately after Documentation and opens it", async () => {
+  it("places Contact immediately after Documentation and opens it", async () => {
     const onOpenFeedback = vi.fn()
     await renderActions({ feedback_enabled: true }, onOpenFeedback)
-    const button = screen.getByRole("button", { name: "Feedback" })
+    const button = screen.getByRole("button", { name: "Contact" })
     expect(
       screen.getByRole("link", { name: "Documentation" }).nextElementSibling,
     ).toBe(button)
@@ -136,11 +136,11 @@ describe("TopBarActions", () => {
     expect(onOpenFeedback).toHaveBeenCalledOnce()
   })
 
-  it("offers no Feedback when the deployment has it off", async () => {
+  it("offers no Contact when the deployment has feedback off", async () => {
     await renderActions({ feedback_enabled: false }, vi.fn())
     expect(await cluster()).toHaveTextContent("Documentation")
     expect(
-      screen.queryByRole("button", { name: "Feedback" }),
+      screen.queryByRole("button", { name: "Contact" }),
     ).not.toBeInTheDocument()
   })
 })

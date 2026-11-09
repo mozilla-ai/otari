@@ -307,9 +307,10 @@ each domain it reads, and budgets is the first.
 ### feedback
 
 This domain holds the messages a signed-in dashboard user sends to the Otari
-team. The gateway forwards each one to otari.ai without the caller's
-credentials, and limits how often one caller may send. It is a core feature,
-switched by `feedback_enabled`.
+team from Contact. The gateway checks the address a reply may go to, limits how
+often one caller may send, and hands each message to `FeedbackDeliveryPort`,
+whose core adapter forwards it to otari.ai without the caller's credentials. It
+is a core feature, switched by `feedback_enabled`, which is off by default.
 
 ### Shared
 
