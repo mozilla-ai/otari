@@ -15,6 +15,12 @@ A provider is one module, `<package>/src/<import name>/providers/<name>.py`, hol
 `_registry.py`. The base class checks option names and the shared parameters, sets the logging
 context and calls the adapter.
 
+The shared parameters are few on purpose: search's `max_results` and `time_range`, fetch's
+`max_chars`. A parameter becomes shared only when a host cannot do its job without it on every
+provider. Everything else stays native, under the provider's own name, even where many providers
+have a similar option (a domain filter, a country): a host that needs such a rule applied for
+certain, as otari's domain policy, checks the results itself.
+
 ## The procedure
 
 1. **Read the provider's documentation**, its OpenAPI spec when it has one, since that is usually
@@ -37,7 +43,10 @@ context and calls the adapter.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
    - A shared parameter wins over the native option it maps to.
-   - Refuse a reserved key: the query, the key, and anything a shared parameter sets.
+   - Refuse a reserved key: the query and the key. A native option that a shared parameter also
+     sets stays offered, so its whole range stays reachable (Perplexity's `search_recency_filter`
+     takes `hour`, which `time_range` does not), and the shared parameter wins when both are
+     passed; say so in the option's description.
    - An HTTP status of 400 or more raises `ProviderError(provider, status, tag)`. Take the tag
      from the body only when it looks like a code, and never put body text, the URL, the query or
      the key in an error.
@@ -342,3 +351,34 @@ already had for it.
   `Empty pageno parameter`); an empty search with `engines=wikinews` and words no article holds.
   A 403 is SearXNG's answer when `json` is not among the instance's `search.formats`, which no
   fixture records.
+
+### 2026-11-09, Perplexity (any-search)
+
+The first provider whose price per call depends on an option.
+
+- A provider can sell one search at several prices: Perplexity's `search_type` is `web` at $5 per
+  1,000 or `fast` at $1. A host that bills a flat price per tool cannot let a caller pick the
+  dearer tier on a tool priced for the cheaper one, unless the provider reports what the call
+  cost. Hence `cost_tier` and `reports_cost`: they state the provider's facts, and the host
+  decides what to lock. Exa's `type` is a cost tier too, but Exa reports its cost.
+- A field's name does not say what it holds. Perplexity's `snippet` is passages taken from the
+  page, cut to `max_tokens_per_page`, so it is the hit's `text`, and a host reads no page for it.
+  Map by meaning, and leave `text` empty when the provider sends an empty string.
+- The error shape a provider documents may never come. Perplexity documents only a 422 with
+  `detail` for its search; every failure probed came as a 400 or 401 with
+  `{"error": {"message", "type", "code"}}`, and a message can quote the request (`got USA`).
+  Probe several failures (a made-up key, a count out of range, a value outside a list, a field of
+  the wrong type) before choosing where the tag comes from.
+- Optional can mean absent rather than null: Perplexity leaves `date` out of a result it has no
+  date for, and never sent the documented `server_time`. Check what the adapter reads as
+  "absent or null".
+- The documentation, its schema and the SDK can disagree: Perplexity's schema allows 50 results,
+  its text says 20 for a web search, and its SDK's `search_type` lacks `fast`. The live probe
+  decides: 30 results is a 400.
+- A provider may accept what it does not apply. Perplexity ignores an unknown field and takes a
+  domain filter that mixes domains to search and to leave out, which its documentation says it
+  does not do. The base class refuses unknown options; say in an option's description what the
+  provider documents it does not do.
+- Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
+  `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
+  `pplx-` key.

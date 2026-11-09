@@ -77,6 +77,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("mojeek", "error")),
         "in_body_error": Scenario(handler=_replay("mojeek", "in_body_error")),
     },
+    "perplexity": {
+        "normal": Scenario(handler=_replay("perplexity", "normal")),
+        "empty": Scenario(handler=_replay("perplexity", "empty")),
+        "error": Scenario(handler=_replay("perplexity", "error")),
+    },
     "searxng": {
         "normal": Scenario(handler=_replay("searxng", "normal")),
         "empty": Scenario(handler=_replay("searxng", "empty")),

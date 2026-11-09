@@ -45,6 +45,8 @@ EXPECTED: dict[str, Expected] = {
     "exa": Expected(dated={"category": "news"}),
     # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
     "mojeek": Expected(dated={}, snippets=True),
+    # Perplexity returns page text and no snippet, and dates the hits it knows a day for.
+    "perplexity": Expected(dated={}),
     # Serply returns Google's snippet and no page text, and dates no hit.
     # Searched where SEARXNG_BASE_URL names an instance, on two engines with public APIs, which answer CI where
     # scraping engines meet CAPTCHAs. Neither has a time filter, so a search with one comes back empty.
@@ -57,7 +59,7 @@ EXPECTED: dict[str, Expected] = {
 
 def _require_key(provider: str) -> None:
     metadata = AnySearch.get_provider_metadata(provider)
-    for variable in (metadata.env_key, metadata.env_api_base):
+    for variable in (metadata.env_key, metadata.env_api_base if metadata.requires_api_base else None):
         if variable and not os.environ.get(variable):
             pytest.skip(f"{variable} is not set")
 
