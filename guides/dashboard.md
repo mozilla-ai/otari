@@ -1,349 +1,269 @@
 # Admin dashboard
 
-The dashboard is where you manage Otari in the browser: on otari.ai, sign in at
+The dashboard is where you manage Otari in the browser. On otari.ai, sign in at
 [otari.ai](https://otari.ai); a self-hosted gateway serves it at its root. It
-uses the same management API available to scripts, so access and behavior are
-determined by the server rather than duplicated in the frontend.
+uses the same management API as scripts, so the server decides what you can see
+and do, and a page the gateway does not serve is not offered.
 
-The dashboard reads `GET /api/v1/bootstrap` before rendering. That response
-controls the available sign-in methods and navigation surfaces, so a page the
-gateway does not serve is not offered.
-
-What a self-hosted gateway's operator sets up and sees, including the master
-key, the first run and the deployment view, is in
-[Run the dashboard](https://docs.otari.ai/self-hosting/run-the-dashboard).
+What a self-hosted operator sets up and sees (the master key, the first run and
+the deployment view) is in [Run the dashboard](https://docs.otari.ai/self-hosting/run-the-dashboard).
 
 ## Signing in
 
-Password sign-in works for an existing account. Passkeys and Google or GitHub
-sign-in add more ways to sign in where they are set up, and where signup is open
-a new address can also create an account with its own organization, through the
-signup form or a Google or GitHub sign-in. Where terms of service are
-published, signup asks you to accept them first. How each method works is in
-[Sign-in and accounts](https://docs.otari.ai/self-hosting/sign-in).
+Sign in with a password, a passkey, or Google or GitHub, depending on what the
+deployment offers. Where signup is open, a new address can create an account
+with its own organization, after accepting the terms of service where they are
+published. A link to a dashboard page opened while signed out shows the sign-in
+screen first, then that page. See [Sign-in and accounts](https://docs.otari.ai/self-hosting/sign-in).
 
-A link to a dashboard page opened while signed out shows the sign-in screen
-first, then that page once you have signed in, whichever method you use.
+Signing in can also add you to an organization that has proven your email
+domain; see [Email-domain auto-join](members.md#email-domain-auto-join).
 
-Signing in can also add a membership, where an organization has proven the
-email domain of the identity's verified address; see
-[Email-domain auto-join](members.md#email-domain-auto-join).
-
-Account settings also carries the name you are known by, which is not a
-credential: it is what the account menu, the organization roster and the user
-column on the Overview shows. Someone an admin added to the roster by
-address has no name until they set one here. Clearing it puts those surfaces
-back to naming you by your sign-in address. The dashboard reads who is signed in
-from `GET /api/v1/auth/profile`, which answers whether or not you belong to an
-organization, so the account menu names you even before you join one.
+**Account settings** holds the name you are known by in the account menu, the
+organization roster and the Overview's user column. Someone added by address has
+no name until they set one; with no name, you are shown by your sign-in address.
 
 ## The setup guide
 
-Overview offers a short setup flow until the selected workspace serves its first
-successful gateway request from outside the product. A message sent in the
-Playground does not close it: the guide marks the moment somebody's own code
-first reached the gateway, which is the point of the flow. The key it creates is
-an ordinary workspace API key.
-Skipping the guide hides it for that workspace; it does not revoke a key already
-created. A self-hosted gateway can turn the flow off; see
+Overview shows a short setup flow until the selected workspace serves its first
+successful request from your own code. Messages sent in the Playground do not
+count. The key the guide creates is an ordinary workspace API key.
+
+Skipping the guide hides it for that workspace and does not revoke a key it
+created. A self-hosted gateway can turn it off; see
 [The setup guide](https://docs.otari.ai/self-hosting/run-the-dashboard#the-setup-guide).
 
 ## Navigation
 
-Exact page names and availability can change with configuration and installed
-extensions. The running dashboard is the source of truth.
+Page names and availability depend on configuration and installed extensions.
+The running dashboard is the source of truth.
 
-The workspace view contains day-to-day gateway operations:
+The workspace view holds day-to-day gateway work:
 
-| Page | What it is | Rules |
+| Page | What it is | More |
 | --- | --- | --- |
-| Overview | The landing page: what needs attention, then Usage, Requests and Sessions as tabs, and the [setup guide](#the-setup-guide) | [The Overview](#the-overview), [Agent traces](traces.md) |
-| Playground | In-product chat and comparisons | [Playground](#playground) |
-| Models | The catalog grouped by model | [Models and Routing](#models-and-routing), [Models](https://docs.otari.ai/reference/gateway/models#the-catalog-grouped-by-model) |
-| Routing | Routing policies, aliases and Automatic fallback | [Models and Routing](#models-and-routing), [Routing](https://docs.otari.ai/reference/gateway/routing) |
-| Tools | Built-in tools, MCP servers and guardrails for the workspace | [Built-in tools](https://docs.otari.ai/reference/gateway/tools) |
+| Overview | What needs attention, then Usage, Requests and Sessions as tabs, and the setup guide | [The Overview](#the-overview), [Agent traces](traces.md) |
+| Playground | Chat with a model or compare two | [Playground](#playground) |
+| Models | The catalog, grouped by model | [Models and Routing](#models-and-routing) |
+| Routing | Routing policies, Automatic fallback, and the workspace's guardrails | [Models and Routing](#models-and-routing), [Routing](https://docs.otari.ai/reference/gateway/routing) |
+| Tools | Web search, code execution and MCP servers | [Built-in tools](https://docs.otari.ai/reference/gateway/tools) |
 | API keys | Workspace API keys | [API keys](api-keys.md) |
 | Members | Workspace members | [Members and invitations](members.md) |
 
-The organization view contains tenant-wide administration:
+The organization view holds tenant-wide administration:
 
-| Page | What it is | Rules |
+| Page | What it is | More |
 | --- | --- | --- |
 | Usage | Organization-wide usage | [Workspace-scoped spend](https://docs.otari.ai/learn/workspaces#workspace-scoped-spend) |
-| Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
+| Workspaces, Members & roles | Workspaces and organization members, with invitations | [Organization](#organization) |
 | Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](members.md#email-domain-auto-join) |
-| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](https://docs.otari.ai/learn/budgets) |
-| Providers > Inference (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models) |
-| Providers > Web search (under General) | The organization's own search and fetch keys | [Web search keys](#web-search-keys) |
-| Guardrails, Org settings (under General) | Organization guardrail policy and settings | [Guardrails](guardrails.md) |
+| Spend & budgets | Budgets and the spend ceilings holding them | [Budgets](https://docs.otari.ai/learn/budgets) |
+| Providers > Inference | The organization's own provider keys, their models, and what the organization pays for them | [Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models) |
+| Providers > Web search | The organization's own search and fetch keys | [Web search keys](#web-search-keys) |
+| Guardrails | Guardrails mandated across the organization | [Manage guardrails](https://docs.otari.ai/how-to-guides/manage-guardrails) |
+| Org settings | The organization's name and settings | [Organization](#organization) |
 
-A self-hosted gateway's operator also has a deployment view, opened from the
-account menu; see [The deployment view](https://docs.otari.ai/self-hosting/run-the-dashboard#the-deployment-view).
-
-Providers answers to the organization role rather than to deployment authority:
-its owners and admins manage the keys, the models each key offers, and the rate each model is billed
-at. Which rate applies is in [Pricing](https://docs.otari.ai/self-hosting/providers/hosted-providers#pricing).
+Organization owners and admins manage Providers: the keys, the models each key
+offers, and the rate each model is billed at (see
+[Pricing](https://docs.otari.ai/self-hosting/providers/hosted-providers#pricing)). A self-hosted operator also has a
+deployment view, opened from the account menu; see
+[The deployment view](https://docs.otari.ai/self-hosting/run-the-dashboard#the-deployment-view).
 
 ### Web search keys
 
-Providers > Web search is the organization's own search and fetch keys, in one
-table per kind. Adding a key asks for its provider first, from the providers the
-search and fetch libraries serve, and then for what that provider needs: a
-name, the API key, and under More settings an endpoint of its own and the
-provider's options. Editing a key never shows its secret; moving it to
-another endpoint needs the API key entered again. The star on a key sets it
-as the workspace default, the key every workspace uses unless it pins
-another, and clicking a filled star unsets it. A
-workspace uses the key its owners or admins pinned, otherwise the starred
-key, otherwise the deployment's own search or fetch tool, so a key added and
-not starred changes nothing until a workspace pins it. Archiving a key takes
-it out of use, and an archived key can be restored or deleted. A key this
-deployment cannot decrypt is marked unreadable. The page sets no prices: the
-deployment's operator prices an organization's search and fetch calls.
+**Providers > Web search** lists the organization's search keys and fetch keys,
+one table each.
+
+- **Add a key**: pick the provider, then enter a name and the API key. **More
+  settings** holds a custom endpoint and the provider's options.
+- **Star a key** to make it the default for every workspace that has not pinned
+  another. Click a filled star to unset it. A key that is neither starred nor
+  pinned is not used.
+- **Archive a key** to take it out of use; restore or delete it later.
+
+A workspace uses the key its owners or admins pinned, else the starred key, else
+the deployment's own search or fetch tool. Editing a key never shows its secret,
+and moving it to another endpoint asks for the API key again. A key the
+deployment cannot decrypt is marked unreadable. Prices for search and fetch calls
+are set by the deployment's operator, not here.
 
 ### What a page shows depends on who is signed in
 
-What a page shows can depend on who is signed in, not only on the deployment:
-
-- **Spend and budgets.** An organization owner or admin manages their own
-  organization's budgets and the spend ceilings holding them, while a deployment
-  operator gets the deployment's own budgets, their active organization's, and
-  the gateway users assigned to them.
-- **API keys.** An operator manages every key in the organization and chooses
-  each key's owner, while a member sees the same page scoped to their own keys,
-  always billed to themselves and never budget-exempt. An operator, or an
-  organization owner or admin, can also cap a key's own spend: the key's create
-  and edit forms take an existing budget or a custom amount and reset, and a
-  Budget column shows each key's spend this period against its limit. Where the
-  deployment turns on `federation_member_rules`, a key's actions menu offers
-  Workload identity… to the operator, and to an organization owner or admin on
-  their own keys; see
+- **Spend & budgets.** An organization owner or admin manages their
+  organization's budgets and ceilings. A deployment operator also sees the
+  deployment's own budgets and the gateway users assigned to them.
+- **API keys.** An operator manages every key in the organization and picks each
+  key's owner. A member sees only their own keys, always billed to themselves and
+  never budget-exempt. An operator, or an organization owner or admin, can cap a
+  key's spend from its create and edit forms, and the Budget column shows each
+  key's spend against its limit. Where the deployment enables it, a key's actions
+  menu offers **Workload identity…**; see
   [Rules on a member's own key](https://docs.otari.ai/self-hosting/operations/workload-identity#rules-on-a-members-own-key).
-- **The Overview's attention strip.** It appears only when there is something
-  to act on, above the tabs on every one of them, and each item links to the
-  page that explains it: a high error rate today opens Requests on today's
-  failures. It is about what the caller answers for, so it does not follow the
-  page's filters: for an organization member it carries their own error rate
-  when it is high; an owner or admin sees the organization's error rate and a
-  spend ceiling at or near its limit; a deployment operator sees the
-  deployment's error rate, provider health and the deployment's own budgets.
-- **The Overview's tabs and Routing** show an operator their active
-  organization, not every organization on the deployment.
+- **The Overview's attention strip** appears only when there is something to act
+  on, and each item links to the page that explains it. It ignores the page's
+  filters. A member sees their own error rate when it is high; an owner or admin
+  sees the organization's error rate and any spend ceiling near its limit; an
+  operator sees the deployment's error rate, provider health and budgets.
+- **The Overview's tabs and Routing** show an operator their active organization
+  only.
 
 ## Models and Routing
 
-Models is the catalog grouped by model: one card per model, with a rail of
-filters beside it, and a page per model with its facts and every offering
-compared in a table, each with its own limits and the price your organization
-is charged. Every price is shown in the unit it bills, such as "$0.50 / 1M"
-for tokens or "$0.04 per image", and under the side it bills, as on the
-Providers page: an image price, or a video model's per-second price, is under
-Output, and a minute of audio has a rate on each side. A card shows the cheapest price where all of
-the model's offerings bill in one unit, and "priced in several units" where
-they do not. Under the table, **Price rules** lists, for each offering whose
-price has them, its overrides and multipliers in words, such as "×0.5 on every
-price when service tier is flex". The table shows the base prices. The rules
-are read-only here; set them with `rates` on the pricing API or in the config
-file ([Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers)). Each row shows the provider's own model ID under the provider, which
-tells apart two offerings on one provider, such as Bedrock's regional inference
-profiles. "Use this model" opens a drawer beside the table with the request to
-copy, sent to the gateway's pick or to a provider pinned by its selector. The
-request is for the route that offering is served on (its `endpoints`), in cURL
-and in Python: an embeddings request for an embedding model, a speech request
-for a speech model. Where the offering is served on more than one route, the
-drawer lets you choose one, and the first is the default. Where no route is
-known, it shows the chat request and says so. The `/decisions` and
-`/systemone` routes take a `decision_providers` selector, so the drawer links to
-[Decisions](https://docs.otari.ai/reference#decisions) instead of showing a request. The
-page is read-only; an organization's own rate is set on Providers > Inference, which an
-offering on one of that organization's keys links to. An offering the
-deployment supplies the credential for says so instead, because its rate is the
-deployment price list's rather than a tenant's. What the page requests is in [Browsing the grouped catalog](https://docs.otari.ai/reference/gateway/models#browsing-the-grouped-catalog).
+**Models** shows one card per model, with filters beside the list. A model's page
+compares every offering in a table, with each offering's limits and the price
+your organization pays. **Use this model** shows a request to copy, for the
+route the offering is served on.
 
-Routing lists each policy with its main model, its backups in order, and who it
-applies to; the empty list offers a fallback directly. In the policy forms,
-models are chosen by model and then by provider. How to create and edit a policy
-there is in [Failover](https://docs.otari.ai/reference/gateway/routing#failover).
+- Prices are shown in the unit they bill, such as "$0.50 / 1M" for tokens or
+  "$0.04 per image". A card shows the cheapest price when all offerings bill in
+  one unit, and "priced in several units" otherwise.
+- **Price rules** under the table lists each offering's overrides and multipliers
+  in words, such as "×0.5 on every price when service tier is flex". They are
+  read-only here; see [Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers).
+- Each row shows the provider's own model ID, which tells apart offerings on one
+  provider, such as Bedrock's regional inference profiles.
+- **Use this model** opens a drawer with a request to copy.
 
-Routing's **Automatic fallback** section, read from
-`GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
-organization sent requests to in the last 30 days, most requested first, by
-catalog id (see [Catalog spellings](https://docs.otari.ai/reference/gateway/models#catalog-spellings)). Each row
-shows its requests (an absorbed attempt is not one), the share of them that
-sent the catalog id and so could fall back, and its providers in the order such
-a request tries them for your organization, each at the input price that order
-ranks by. That order is the baseline; automatic routing can reorder it per
-request. The share is a dash for a model one provider serves, and is flagged
-below half. A row with requests that named a provider or a routing policy opens
-on the API keys that sent them, with the provider each reached; a policy's own
-fallback still applied to the ones that named a policy. The order is the
-catalog's, before a key's allow-list or a missing credential leaves an offering
-out of a request's plan. Requests from before a deployment recorded the catalog
-id they sent count as having named one. An owner or admin reads every
-workspace in the organization, anyone else the workspaces they belong to. The
-response also says who runs the built-in tools on each offering (`own_tools`,
-`otari_tools`), for a caller that declares them in the provider's own words and
-sends no `Otari-*` executor header.
+The page is read-only. An organization sets its own rate on **Providers >
+Inference**, which an offering on one of its keys links to. See
+[Browsing the grouped catalog](https://docs.otari.ai/reference/gateway/models#browsing-the-grouped-catalog).
+
+**Routing** lists each policy with its main model, its backups in order, and who
+it applies to. In the policy forms you pick a model, then a provider. See
+[Failover](https://docs.otari.ai/reference/gateway/routing#failover).
+
+**Automatic fallback**, on the Routing page, lists every model your organization
+sent requests to in the last 30 days, most requested first, by catalog id (see
+[Catalog spellings](https://docs.otari.ai/reference/gateway/models#catalog-spellings)). Each row shows:
+
+- its request count;
+- the share of requests that sent the catalog id and so could fall back (a dash
+  when one provider serves the model, flagged when below half);
+- its providers in the order a request tries them, with the input price that
+  order ranks by.
+
+That order is a baseline: automatic routing can reorder it per request, and a
+key's allow-list or a missing credential can leave a provider out. A row whose
+requests named a provider or a policy opens on the API keys that sent them. An
+owner or admin sees every workspace in the organization; anyone else, the
+workspaces they belong to.
 
 ## Entering a rate
 
-A rate is per million tokens or in another unit, and the rate form asks which:
-tokens, requests, images, megapixels, characters, minutes of audio, seconds of
-video, or web searches. Each rate is entered the way providers publish it. A
-token or character rate is per 1,000,000, a request, image or search rate per
-1,000, and a megapixel, minute or second rate per one. $2 per 1,000 requests for
-a rerank model is entered as 2 and stored as 2000 per million, which is how
-every per-million field travels on the wire. A `rates` block is different: it
-carries each price per one of its unit, as published, so $0.06 per second is
-0.06. A minute of audio has two rates, for the audio a model hears and the
-audio it speaks, and so does a stored override that prices a second of audio;
-every other unit but tokens has one. A second of video is sent as a `rates`
-block that prices video output, because a per-second rate in the per-million
-fields prices audio input. Editing a stored per-second price moves the price
-the form shows, which is the first one the gateway reads (text, image, audio,
-then video), and keeps the block's other prices and its rules. An override that
-prices a second of both audio and video therefore shows its audio rates, and
-its video price, which video jobs are billed at, is changed through the API. An
-edit in the same unit keeps the override's context tiers, which the form does
-not show. The
-hosted model form stores the per-million fields only, so it does not offer
-seconds of video, and it does not reprice a model priced per second. The model
-lists name a rate by its unit, for example "$0.002 per request" or "$0.06 per
-second".
+The rate form asks for the unit first: tokens, requests, images, megapixels,
+characters, minutes of audio, seconds of video, or web searches. Enter each rate
+the way providers publish it:
 
-The same choice is on the Requests view's "Price this model", offered on a
-served request that carried no cost (a failed attempt billed nothing, so its
-error is the guide instead). It opens in the unit the request's endpoint bills:
-per request for a rerank, transcription or moderation request, per character
-for speech, per image for an image generation or edit, and per second for a
-video. What each unit bills is in
+| Unit | Entered per |
+| --- | --- |
+| Tokens, characters | 1,000,000 |
+| Requests, images, searches | 1,000 |
+| Megapixels, minutes, seconds | 1 |
+
+A minute of audio has two rates, one for audio the model hears and one for audio
+it speaks. The model lists show each rate in its unit, for example "$0.002 per
+request" or "$0.06 per second". How each unit is stored and billed is in
 [Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit).
+
+Some limits of the form:
+
+- An override that prices seconds of both audio and video shows its audio rates;
+  change its video price through the API.
+- An edit in the same unit keeps the override's context tiers and rules, which
+  the form does not show.
+- The hosted model form stores per-million fields only, so it does not offer
+  seconds of video and cannot reprice a per-second model.
+
+**Price this model** on a request in the Requests tab opens the same form, in the
+unit the request's endpoint bills. It is offered on a served request that carried
+no cost.
 
 ## Playground
 
-The Playground is the in-product chat page: pick a model the gateway serves and
-talk to it, or put two side by side and record which answered better. Requests
-run through the same path as any other completion, so routing policies,
-guardrails, budgets and the tool loop all apply, and every request appears on
-the Overview.
+The Playground is the in-product chat page: pick a model and talk to it, or put
+two side by side and record which answered better. Requests run through the same
+path as any completion, so routing policies, guardrails, budgets and tools all
+apply, and every request appears on the Overview. How to use it is in
+[Playground](https://docs.otari.ai/playground/playground).
 
-A question can carry files. Attach them with the paperclip in the composer or
-drop them anywhere on the page; each uploads at once and shows as a chip with
-its name and size until the question is sent. The model reads them the way an
-API request's [uploaded files](https://docs.otari.ai/reference/gateway/files) are read, so a text-only local model is
-given their extracted text. When comparing, both models get the same files. A
-saved conversation remembers which files each question carried. Removing a
-chip takes the file off that question and keeps the upload: the Files dialog
-lists everything you uploaded in the workspace, to attach again or to delete.
-These controls do not appear when file uploads are off.
+**Billing.** A Playground request uses no API key. It is billed to you, in the
+workspace selected in the switcher, against your own budget and rate limit, and
+its usage row has no key. A viewer cannot send one. Playground requests do not
+complete the setup guide.
 
-The Tools menu attaches web search, code execution and any number of MCP
-servers to the next message, in any mix: the model is offered all of them in one
-tool loop. A tool the gateway runs shows in the transcript above the reply as a
-collapsed row with its status, opening to the arguments the model sent and what
-the tool returned (a long result is shortened for display). This activity is
-shown in the Playground only and is not saved with a conversation; a request
-made through the API still returns just the final message, as
-[What clients receive](https://docs.otari.ai/reference/gateway/tools#what-clients-receive) describes.
+**Files.** Attach files with the paperclip or by dropping them on the page. The
+model reads them like an API request's [uploaded files](https://docs.otari.ai/reference/gateway/files); in Compare,
+both models get them. Removing a file from a question keeps the upload, and the
+**Files** dialog lists your uploads in the workspace to reattach or delete. These
+controls are hidden when file uploads are off.
 
-Two things are worth knowing about how it is billed and what it stores.
+**Tools.** The **Tools** menu adds web search, code execution and MCP servers to
+the next message, in any mix. Each tool call shows above the reply as a
+collapsed row with its status, its arguments and what it returned. This is shown
+only in the Playground and is not saved; an API request still gets only the final
+message (see [What clients receive](https://docs.otari.ai/reference/gateway/tools#what-clients-receive)).
 
-A Playground request carries no API key. It is authorized by the dashboard
-session and billed to whoever sent it, in the workspace the switcher has
-selected, against that person's own budget and rate limit; its usage row
-therefore has no key attached. A viewer cannot send one, since it spends like a
-key, so the page tells them so instead of offering a composer. Picking a different model changes which provider
-credential the gateway resolves, never who pays. A request made here also does
-not count as the workspace's first request, so the setup guide keeps waiting for
-one from outside the product, which is the milestone it exists to mark.
-
-Nothing is stored until asked for. Saving a conversation or recording a
-comparison prompts once for content retention, and the flags are per person and
-revocable; withdrawing one blocks new saves and deletes nothing. Saved
-transcripts, recorded comparisons and pinned models are visible only to the
-person who created them, even to colleagues in the same workspace, and each can
-be deleted from the page.
+**What is stored.** Each request is recorded in usage, as any request is. Its
+content is kept only once you save a conversation or record a comparison. The first time, you are asked to agree to content retention; you can
+withdraw that later, which blocks new saves and deletes nothing. Saved
+conversations, comparisons and pinned models are visible only to you, and each
+can be deleted.
 
 ## Observability
 
 ### The Overview
 
-The Overview is the landing page. It opens with what needs attention (see
+The Overview opens with what needs attention (see
 [What a page shows depends on who is signed in](#what-a-page-shows-depends-on-who-is-signed-in)),
-then reads the gateway three ways, as tabs over one time window and one set of
-filters: Usage (spend, tokens and requests over time, with breakdowns, at `/`),
-Requests (the per-request log, at `/requests`) and Sessions (agent sessions, at
-`/sessions`). Below the tabs, the time range and the model, user, API key and
-status filters are always shown; they live in the URL and travel when you switch
-tab, and clicking a chart bar narrows the window to that bar. Today, a time
-range on Usage, starts the window at local midnight. Every tab opens on
-everyone's requests in the workspace; pick yourself in the User filter to see
-only your own. The old `/usage` and `/activity` addresses open the matching tab
-with their filters.
+then three tabs over one time range and one set of filters:
+
+- **Usage**: spend, tokens and requests over time, with breakdowns.
+- **Requests**: the per-request log.
+- **Sessions**: agent sessions (see [Agent traces](traces.md)).
+
+The time range and the model, user, API key and status filters stay in place when
+you switch tabs, and are kept in the URL. Clicking a chart bar narrows the range
+to that bar. **Today** starts at local midnight. Every tab shows everyone's
+requests in the workspace; pick yourself under **User** to see only yours.
 
 ### Requests and Sessions
 
-The Overview's Requests tab is the per-request log. A request opens from the
-`Otari-Request-ID` its response carried, at `/requests?request=<id>`, on the
-attempt that served it or the one that failed last, wherever it sits in the log;
-its detail shows that same id. Its Sessions tab lists
-[agent sessions](traces.md) where the deployment records traces
-(`trace_capture_enabled`, on by default), and is not offered where it does not.
-Sessions applies the user, API key, model and status filters carried from the
-other tabs; a model filter matches the sessions with an LLM call on that model,
-and a status with no session meaning is shown as not applied rather than
-dropped. Narrowing the chart to a window that holds a single session opens it.
-Its chart counts sessions per hour or day as succeeded or failed, and its Levels
-column counts each session's errors, tools' errors included; a tool's error
-alone does not fail a session (see
-[Sessions and failures](traces.md#sessions-and-failures)). The Last activity,
-Levels, Latency, Tokens and Total cost headers sort the list across every page:
-a header's first press puts the largest first and a second press flips it, and
-the order is kept in the URL with the filters. A session opens in a side panel
-as a tree of its turns, LLM calls and tool calls, a timeline of the same spans,
-or a flat log. The token count in its header breaks down into input, the share
-of it the prompt cache served, and output, for the session or the span picked.
-Before a span is picked, the panel shows what the session cost against its
-key's own spend ceiling and where the gateway stepped in. A request in Requests
-whose session was recorded links to it: **View trace** in the request's detail
-opens the session on that LLM call. The Usage tab provides aggregates and time
-series; its spend by session groups requests by the same sessions, keyed by
-trace id. Routed requests share a request-group ID, so the request log can show
-the attempted models and the model that served the response. Imported usage is
-labeled by source and does not consume a budget.
+**Requests** is the per-request log. To find one request, open
+`/requests?request=<id>` with the `Otari-Request-ID` its response carried. Routed
+requests share a request group, so the log shows each model tried and the one
+that served the response. Imported usage is labeled by its source and does not
+use a budget.
+
+**Sessions** lists agent sessions where the deployment records traces.
+
+- A model filter matches sessions with an LLM call on that model.
+- The Levels column counts each session's errors, tool errors included; a tool
+  error alone does not fail a session (see
+  [Sessions and failures](traces.md#sessions-and-failures)).
+- Click Last activity, Levels, Latency, Tokens or Total cost to sort; click again
+  to reverse.
+- A session opens in a side panel. Before you pick a span, it shows what the
+  session cost against its key's spend ceiling and where the gateway stepped in.
+- **View trace** in a request's detail opens its session on that call.
 
 ## Organization
 
-Organizations own workspaces. The workspace switcher determines which keys,
-members, usage, tools, aliases, and stored routing policies are in view. The
-organization section manages resources shared across those workspaces.
+An organization owns workspaces. The workspace switcher decides which keys,
+members, usage, tools, aliases and routing policies are in view; the organization
+section manages what those workspaces share. What you can see or change depends
+on your organization and workspace roles; see [Access control](access-control.md).
 
-What a signed-in person can see or change is enforced by their organization and
-workspace roles. Deployment-wide operations require an operator. See
-[Access control](access-control.md).
+**Invitations** waiting for you are listed under Invitations, reached from the
+organization switcher. Someone signed in who belongs to no organization is taken
+there when an invitation is waiting; otherwise Overview says how to get in.
+Creating an organization is offered only where signup is open.
 
-Invitations waiting on you are listed under Invitations, reached from the
-organization switcher. After you accept one, the page offers to take you into
-that organization. Someone signed in who is not yet a member of any
-organization is taken to Invitations when one is waiting; otherwise Overview
-says how to get in, and the sidebar holds only Overview. Creating an
-organization is offered to them only where signup is open, since the gateway
-refuses it otherwise.
+Opening an invitation link while signed in as a different address says who the
+invitation is for and offers to sign out, because accepting always adds the
+invited address. After you set a password from an invitation link, the sign-in
+screen opens with your address filled in.
 
-Opening an invitation link in a browser signed in as a different address, or as
-an identity with no address, says who the invitation is for and offers to sign
-out and continue, because accepting always adds the invited address, whoever is
-signed in. After a
-password is set from an invitation link, the sign-in screen opens with the
-invited address filled in. When the link cannot set a password and the address
-has none yet, the page says how to get in instead: a Google or GitHub sign-in,
-or "Forgot your password?", whichever the deployment offers. The other pages in
-front of sign-in carry the address the same way: from the sign-in screen to
-"Forgot your password?", from signup or a resend to the page saying which
-address was mailed and on to another resend, and back to the sign-in screen
-after a verification or a recovery request. A password never travels with it.
-
-On Members, an invited row offers Reissue and Revoke; see
+On **Members & roles**, an invited row offers **Reissue** and **Revoke**; see
 [Manage existing members](members.md#manage-existing-members). When an
 invitation email does not go out, you get the accept link to share; see
 [Invitations](members.md#invitations).

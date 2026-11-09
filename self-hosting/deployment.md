@@ -1,102 +1,97 @@
 # Deployment
 
-Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Self-hosted quickstart](self-hosted-quickstart.md) for local setup; this page covers production choices.
+Otari publishes `mzdotai/otari` on Docker Hub. For local setup, use the
+[Self-hosted quickstart](self-hosted-quickstart.md); this page covers production.
 
 ## Production checklist
 
-A durable deployment should:
-
-- use PostgreSQL and back it up
-- set a strong master key in a secret store
-- set and back up `OTARI_SECRET_KEY`, which encrypts the provider credentials it stores
-- set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value to turn on provider
-  copies of attached files, which are off without it (see
-  [Provider copies](configuration.md#provider-copies))
-- configure explicit pricing or deliberately enable default pricing
-- terminate TLS in front of the gateway
-- restrict database and management access
-- monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
-  [Common settings](configuration.md#common-settings)), `/metrics`
-- pin an image version, [verify it](#verify-the-image), and test migrations before upgrading
-
-The default SQLite database is intended for evaluation and single-node local use.
+- Use PostgreSQL and back it up. The default SQLite database is for evaluation
+  and single-node local use.
+- Keep a strong master key in a secret store.
+- Set and back up `OTARI_SECRET_KEY`, which encrypts stored provider credentials.
+- Set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value. Without it,
+  provider copies of attached files are off (see
+  [Provider copies](configuration.md#provider-copies)).
+- Configure explicit pricing, or turn on default pricing deliberately.
+- Terminate TLS in front of the gateway.
+- Restrict database and management access.
+- Monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
+  [Common settings](configuration.md#common-settings)), `/metrics`.
+- Pin an image version, [verify it](#verify-the-image), and test migrations
+  before upgrading.
 
 ### Behind a reverse proxy
 
-When TLS ends at a proxy or a platform ingress, each request reaches Otari from
-the proxy's address. The dashboard sign-in limit and the public-catalog limit
-count failures per client address, so all visitors then share one budget. Ten
-wrong passwords from one visitor lock everyone out of the dashboard for a
-minute.
-
 Set `forwarded_allow_ips` (`OTARI_FORWARDED_ALLOW_IPS`) to the proxy's
 addresses or networks, comma-separated, so Otari reads the client address from
-`X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
-container, as on Railway: any peer in the list can set its own client address.
-When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
-only `127.0.0.1` is trusted. A country file
-([Supported countries](configuration.md#supported-countries)) looks up the same
-client address.
+`X-Forwarded-For`.
+
+Without it, every request seems to come from the proxy. The dashboard sign-in
+limit and the public-catalog limit count failures per client address, so ten
+wrong passwords from one visitor lock everyone out of the dashboard for a
+minute. A [country file](#the-country-file) also looks up the client address.
+
+Use `*` only where the proxy is the only path to the container, as on Railway:
+any peer in the list can set its own client address. When the setting is unset,
+uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that only `127.0.0.1` is
+trusted.
 
 ### Watch the connection pool
 
-On PostgreSQL the gateway serves requests from a fixed pool of database
-connections, and running out of them makes every request fail at once. Alert
-when checked-out connections stay close to capacity for a sustained period,
-from these `/metrics` series, labeled by `pool` (`request` for request traffic,
-`log` for the usage-log writer):
+On PostgreSQL, requests share a fixed pool of database connections, and when
+it runs out every request fails at once. Alert when checked-out connections
+stay close to capacity. These `/metrics` series carry a `pool` label (`request`
+for request traffic, `log` for the usage-log writer):
 
 | Metric | Meaning |
 | --- | --- |
 | `gateway_db_pool_connections_checked_out` | Connections in use right now |
 | `gateway_db_pool_connections_idle` | Connections available to hand out |
 | `gateway_db_pool_overflow_connections` | Connections open beyond the pool's base size |
-| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log`, which has no overflow |
+| `gateway_db_pool_capacity` | Most connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log` (no overflow) |
 
-SQLite keeps no pool, so these series do not appear there. The pool settings
-are in [Database connections](configuration.md#database-connections).
+SQLite has no pool, so these series do not appear there. The pool settings are
+in [Database connections](configuration.md#database-connections).
 
 ### Watch providers and refusals
 
-`/metrics` also reports each upstream attempt, labeled by the provider instance
-and the model a usage row names, so a dashboard can follow one provider's
-errors, latency and spend without reading the usage log:
+`/metrics` reports each upstream attempt by provider instance and model, so a
+dashboard can follow one provider's errors, latency and spend:
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status that classified a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure that carried no status, such as a stream that ended without reporting its usage. `fallback` is `true` for a candidate after the plan's first |
-| `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, observed for a plan's first candidate only, since a fallback's would include its predecessors' time |
-| `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for a plan's first candidate only |
+| `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status of a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure with no status, such as a stream that ended without reporting usage. `fallback` is `true` for any candidate after the first |
+| `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, for the first candidate only |
+| `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for the first candidate only |
 | `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
 | `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
 | `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
-| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](https://docs.otari.ai/reference#error-codes), by that code and, for `budget_exceeded`, the scope that refused (`user`, `api_token`, ...; empty otherwise) |
+| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](https://docs.otari.ai/reference#error-codes), by code and, for `budget_exceeded`, the refusing scope (`user`, `api_token`, ...; empty otherwise) |
 
-`model` is the model as the provider was sent it. A request that names its own
-`provider:model` adds a series per distinct model, so restrict keys to the
-models they may use where callers are not trusted to pick.
+`model` is the model name sent to the provider. Each distinct `provider:model`
+a caller names adds a series, so where callers are not trusted to pick, restrict
+keys to the models they may use.
 
 ### Verify the image
 
-Each published image carries a signed build provenance attestation, which ties it
-to the `mozilla-ai/otari` repository and the workflow that built it. Check it with
-the GitHub CLI before you deploy a tag:
+Each published image carries a signed build provenance attestation tying it to
+the `mozilla-ai/otari` repository and the workflow that built it. Check it
+before you deploy a tag:
 
 ```sh
 gh attestation verify oci://docker.io/mzdotai/otari:<tag> --repo mozilla-ai/otari
 ```
 
-The command fails for an image that this repository's publishing workflow did not
-build, such as one pushed to Docker Hub with stolen credentials.
+The command fails for an image this repository's workflow did not build, such
+as one pushed to Docker Hub with stolen credentials.
 
 ## Docker Compose
 
-The repository Compose stack runs Otari and PostgreSQL. The
-[Self-hosted quickstart](self-hosted-quickstart.md) walks through its first start, including the
-`.env` secrets it needs.
+The repository's Compose stack runs Otari and PostgreSQL. The
+[Self-hosted quickstart](self-hosted-quickstart.md) covers its first start and
+the `.env` secrets it needs.
 
-Use `docker-compose.build.yml` when testing source changes:
+To test source changes, add `docker-compose.build.yml`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
@@ -104,10 +99,8 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Railway](https://github.com/mozilla-ai/otari/blob/53930f2870d0fd22454c187bfc1880e800a764d0/deploy/railway/README.md)
-
-That page owns its current image tag, variables, platform limits, and
-maintenance instructions.
+- [Railway](https://github.com/mozilla-ai/otari/blob/a89e11c5ec35774d3b3b4d70c5d220ceb062cca8/deploy/railway/README.md): that page owns its image tag,
+  variables, platform limits and maintenance steps.
 
 ## Optional services
 
@@ -120,48 +113,50 @@ docker compose --profile guardrails up -d
 docker compose --profile object-storage up -d
 ```
 
-The `object-storage` profile runs an S3-compatible store for uploaded files;
-[Object storage with Docker Compose](https://docs.otari.ai/reference/gateway/files#object-storage-with-docker-compose)
-has the settings that use it.
+- `object-storage` runs an S3-compatible store for uploaded files; see
+  [Object storage with Docker Compose](https://docs.otari.ai/reference/gateway/files#object-storage-with-docker-compose).
+- Web search needs no container when `web_search_provider` names a licensed API
+  (`tavily` or `brave`) and `web_search_provider_api_key` holds its key.
 
-Web search needs no container when `web_search_provider` names a licensed API
-(`tavily` or `brave`) and `web_search_provider_api_key` carries its key. These
-services are optional; requests that require an unconfigured backend fail
-without affecting ordinary inference.
-
-See [Built-in tools](https://docs.otari.ai/reference/gateway/tools) and [Guardrails](https://docs.otari.ai/guides/guardrails/guardrails).
+A request that needs a backend you have not configured fails; ordinary
+inference is unaffected. See [Built-in tools](https://docs.otari.ai/reference/gateway/tools) and
+[Guardrails](https://docs.otari.ai/guides/guardrails/guardrails).
 
 ## Upgrading from hosted or hybrid mode
 
-A deployment that ran in hosted mode serves inference and the Playground as
-well as management. Set `OTARI_PROVIDER_ACCOUNT_PEPPER` to keep provider copies
-of attached files on: without it, startup turns them off and logs a warning.
-`web_search_workspace_default` and `code_execution_workspace_default` default
-to `true`; set them to `false` to keep web access and code execution off for a
-workspace with no policy of its own.
+From hosted mode:
 
-A gateway that ran in hybrid mode serves from its own database too: leftover
-`OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored, so
-declare its providers and create its keys and budgets as a new deployment does.
+- Set `OTARI_PROVIDER_ACCOUNT_PEPPER` to keep provider copies of attached files
+  on. Without it, startup turns them off and logs a warning.
+- `web_search_workspace_default` and `code_execution_workspace_default` default
+  to `true`. Set them to `false` to keep web access and code execution off for
+  workspaces with no policy of their own.
+
+From hybrid mode, the gateway now serves from its own database. Leftover
+`OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored; declare
+providers and create keys and budgets as for a new deployment.
 
 ## The country file
 
-A provider that serves only some countries needs the country each request comes
-from ([Supported countries](configuration.md#supported-countries)). Where no
-proxy sets a country header, Otari looks the client address up in a MaxMind DB
+A provider that serves only some countries needs each request's country
+([Supported countries](configuration.md#supported-countries)). Where no proxy
+sets a country header, Otari looks up the client address in a MaxMind DB
 country file, such as GeoLite2 Country or DB-IP Lite Country. The Docker image
-has the reader but not the file. Give it the file one of two ways.
+has the reader but not the file.
 
-The simpler way is to upload it in the Country file card on the dashboard's
-Settings page. Otari stores the file in its database, so every replica reads
-it and nothing is mounted. Upload a new file each time its provider publishes
-one to keep it current: DB-IP Lite each month, GeoLite2 twice a week.
+The simplest way to provide it: upload the file in the **Country file** card on
+the dashboard's **Settings** page. Otari stores it in the database, so every
+replica reads it. Upload each new release to keep it current (DB-IP Lite
+monthly, GeoLite2 twice a week).
+
+DB-IP Lite is under CC BY 4.0: credit DB-IP where your service names its data
+sources, for example with a link to `https://db-ip.com`.
 
 ### A mounted country file
 
-Where you control the containers, mount the folder that holds the file and name
-the file's path. Add this to the `otari` service in Compose, with the file saved
-as `./geoip/countries.mmdb`:
+Where you control the containers, mount the folder that holds the file and set
+its path. In Compose, with the file at `./geoip/countries.mmdb`, add to the
+`otari` service:
 
 ```yaml
     volumes:
@@ -170,16 +165,14 @@ as `./geoip/countries.mmdb`:
       - OTARI_CLIENT_COUNTRY_DATABASE=/app/geoip/countries.mmdb
 ```
 
-Otari reads a replaced file again without a restart, so a job that writes a
-new file on its provider's schedule, such as [geoipupdate](https://github.com/maxmind/geoipupdate)
-for GeoLite2, keeps it current. Replace the file in one step (write a new file,
-then rename it over the old one), so Otari never reads a half-written file. Mount
-the folder rather than the file: a mount of one file keeps the old file after a
-rename. Every replica needs its own copy. While `client_country_database` is set, a file
-uploaded on the dashboard is not read.
-
-DB-IP Lite is under CC BY 4.0, which asks you to credit DB-IP where your
-service names its data sources, for example with a link to `https://db-ip.com`.
+- Otari rereads a replaced file without a restart, so a scheduled job such as
+  [geoipupdate](https://github.com/maxmind/geoipupdate) keeps it current.
+- Replace the file atomically (write a new file, then rename it over the old
+  one).
+- Mount the folder, not the file: a single-file mount keeps the old file after
+  a rename.
+- Every replica needs its own copy.
+- While `client_country_database` is set, an uploaded file is not read.
 
 ## Configuration
 

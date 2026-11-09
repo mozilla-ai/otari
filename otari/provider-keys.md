@@ -4,132 +4,58 @@ icon: key
 
 # Provider keys
 
-Provider keys are the upstream credentials Otari uses to call LLM providers
-such as OpenAI, Anthropic or Mistral. They belong to the organization, and
-workspaces inherit them unless a workspace pins or turns off a key per provider.
+Provider keys are the upstream credentials your organization uses to call LLM providers like OpenAI, Anthropic, or Mistral. They live at the organization level. Workspaces inherit provider access by default and can pin or disable keys per provider.
 
-A provider key is not an [API key](https://docs.otari.ai/guides/organizations-and-access/api-keys): your application sends an API
-key to Otari, and Otari calls the provider with a provider key, so the
-application never sees the provider key. Where a request's credential comes
-from when the organization has no key for a model (a deployment's own providers,
-or its [hosted providers](https://docs.otari.ai/self-hosting/providers/hosted-providers)) is in
-[The credential ladder](https://docs.otari.ai/self-hosting/providers/hosted-providers#the-credential-ladder).
+## Two ways to get provider access
 
-Only organization owners and admins can add or remove provider keys, or change
-which keys a workspace can use.
+### Otari-managed keys
 
-## Add a provider key
+Use the Mozilla.ai inference catalog without bringing your own key material. Otari handles the upstream credential, and usage is billed against your [balance](billing.md).
 
-1. Open **Organization**, then **Providers**, then **Inference**.
-2. Click **Add provider key**.
-3. Select the **Provider**.
-4. Enter a **Name** that tells several keys for the same provider apart, such
-   as `production`, `staging` or `backup`.
-5. Paste the **API key** and click **Add provider key**.
+### Your own keys
+
+Bring your existing provider API keys and let Otari use them on your behalf. The upstream provider bills you directly, and Otari adds no per-token routing charge.
+
+Most organizations use a mix. Managed keys are convenient for catalog models. Your own keys are for specific accounts, contracts, or providers not in the catalog.
+
+## How workspaces resolve provider keys
+
+When a workspace makes a request, Otari resolves which provider key to use in this order:
+
+1. If the workspace has a key pinned for the provider, use that.
+2. Otherwise, use the organization default key for that provider.
+3. If there is no default, or the workspace has turned it off, use another of the organization's keys for that provider that the workspace has not turned off.
+
+This means a workspace inherits everything by default but can opt out of specific keys or override defaults per provider. When the organization has no key for the provider, otari.ai's own keys can serve the request; see [The credential ladder](https://docs.otari.ai/self-hosting/providers/hosted-providers#the-credential-ladder).
 
 ## Add a key for your own endpoint
 
-A key can point at a compatible endpoint other than the provider's own, such
-as an OpenAI-compatible host like Synthetic, or a vLLM or LM Studio server:
-enter its **API base URL** when you add the key. Such a key is a different
-service from the provider it speaks the protocol of, so requests name it by a
-**Request prefix** of its own rather than by the provider:
+A key can point at a compatible endpoint other than the provider's own, such as Synthetic or a vLLM server: enter its **API base URL** when you add the key. Requests then name the key by its **Request prefix** rather than by the provider, for example `synthetic:hf:Qwen/Qwen3.8-27B`.
 
-```text
-synthetic:hf:Qwen/Qwen3.8-27B
-```
-
-The prefix is made from the key's name unless you enter one. It uses lowercase
-letters, digits, `.`, `_` and `-`, cannot be a provider's name (`openai`,
-`vllm`) or a provider instance the deployment configures, and is unique in the
-organization. It never changes once set, because your applications send it;
-renaming the key leaves it as it was.
-
-`openai:<model>` therefore never reaches a key with its own endpoint, even one
-of provider OpenAI: it reaches the organization's OpenAI keys without one, or
-the deployment's OpenAI. The key's models, its rates (**Set your rate**) and its
-usage are all listed under its prefix, and the key is never a provider's
-default (it is the only key its prefix names). A spending ceiling narrowed to the
-provider does not cover it either: narrow one to the prefix.
-
-The base URL is set when the key is added. You can change it later, but not
-remove it, and a key added without one cannot gain one: add a new key for the
-endpoint instead.
-
-## Set a default key per provider
-
-If the organization has several keys for one provider, mark one as the default
-so workspaces inherit it: on **Inference**, click **Make default provider** (the
-star icon) on the key. How a workspace picks among several keys is in
-[Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys).
+The prefix is made from the key's name unless you enter one, and never changes once set, because your applications send it. To cap the key's spend, narrow a spend ceiling to its prefix, not to the provider. A key added without a base URL cannot gain one later: add a new key instead.
 
 ## Control workspace access
 
-Open **Organization**, then **Workspaces**, select the workspace, and open its
-**Providers** tab. Every provider the workspace could call is listed there:
-the organization's own keys first, then the
-deployment's [hosted providers](https://docs.otari.ai/self-hosting/providers/hosted-providers#workspace-access). A
-provider with several keys, or a key and a hosted provider, is one row that
-opens to show each of them. Past eight providers, a search and an **All**,
-**Customized** or **Off** filter narrow the list. Each row has a switch, a
-**Models** control and a menu (**⋯**):
+Each workspace's **Providers** tab, under **Organization** → **Workspaces**, lists the keys and hosted providers it can use. There you can turn a key off, limit which models the workspace may call, or pin a key with **Always use this key**. A row you changed is marked **Customized**, and **Reset** returns it to the organization's settings. For the steps, see [Manage provider keys](manage-provider-keys.md#control-workspace-access).
 
-- Turn the switch off and the workspace cannot use that key or hosted provider.
-- **Models** opens a dialog. Choose **All models, including ones added later**,
-  or **Only these models** and select the models the workspace may call. The
-  models are listed under their vendor, since one provider can serve several
-  (Together serves DeepSeek, Meta and Qwen models): a vendor's box selects all
-  of its models, and opening the vendor picks some of them. A list with no
-  model in it cannot be saved: to block a provider, turn its switch off.
-- Where the organization holds several keys for one provider, **Always use this
-  key** in a key's menu pins it for the workspace, whatever the organization's
-  default.
-- A row you changed is marked **Customized**. **Reset**, in its menu, returns
-  it to what the organization decides.
+**Require zero data retention**, at the top of the tab, limits the workspace to providers declared to keep no prompts or completions; see [Zero data retention](https://docs.otari.ai/self-hosting/providers/hosted-providers#zero-data-retention). Other providers are then refused, and the workspace's model lists show only declared ones.
 
-**Require zero data retention**, at the top of the tab, holds the workspace to
-providers declared to keep no prompts or completions
-([Zero data retention](https://docs.otari.ai/self-hosting/providers/hosted-providers#zero-data-retention)). With it on,
-a request is refused with `403` on an organization key or a hosted provider
-that is not declared, and on any provider configured in `config.yml` or
-endpoint the workspace or its users registered, neither of which can be
-declared. The rows it blocks say so, and nothing the workspace shows names an
-undeclared source: **Models**, the **Playground**'s model list, the model
-pickers and automatic fallbacks on **Routing**, an API key's model access and
-the setup guide's example all list only declared offerings. An API key in the
-workspace is listed only those by `GET /api/v1/models` and
-`GET /api/v1/catalog/models` too.
+## Provider keys vs API keys
 
-A new workspace starts with every row as the organization decides, so a
-workspace only differs from its organization where an admin changed it.
+These are two different things, and the naming is unfortunately close:
 
-**Models** lists what the workspace selected in the switcher may call, with
-these settings applied, whatever your role in the organization.
+* **Provider keys** are your upstream credentials, like your OpenAI or Anthropic key, that Otari uses to call providers. They are managed at the organization level.
+* **API keys** are the workspace-scoped tokens your application sends to otari.ai. They are managed per workspace.
 
-## Rotate a provider key
+Your application sends an API key to Otari. Otari uses a provider key to call the upstream provider. The application never sees the provider key.
 
-Add the replacement before removing the old key. Keys are resolved at request
-time, so your applications' API keys need no change.
+## How security works
 
-1. Create a new key in the provider's dashboard. Do not revoke the old one yet.
-2. In **Organization**, then **Providers**, then **Inference**, click **Add
-   provider key**, select
-   the same provider, give it a distinct name, and paste the new key.
-3. Make the new key the provider's default with **Make default provider** (its
-   star icon).
-4. For each workspace that pins the old key, open its **Providers** tab and select
-   **Always use this key** in the new key's menu (**⋯**). A workspace keeps
-   using a pinned key after the organization default changes.
-5. Send a test request from each affected workspace and confirm it in **Usage**.
-6. **Archive** the old key in Otari (an archived key can then be deleted), then
-   revoke it with the provider.
+* **Organization scope**. Provider keys are owned by the organization, not copied into each workspace.
+* **Workspace controls**. Each workspace decides which organization keys are effective for its workloads.
+* **Role gating**. Only admins and owners can add or remove provider key material, or change which keys a workspace can access.
+* **Runtime resolution**. Otari resolves the right provider key at request time. The workspace's API key never carries the upstream secret.
 
-If you suspect the old key was exposed, assign the replacement immediately and
-revoke the exposed key with the provider.
+Removing a provider key from Otari does not revoke it with the upstream provider. After deleting a key from Otari, also revoke it in the provider's dashboard.
 
-A key with its own [request prefix](#add-a-key-for-your-own-endpoint) is
-rotated in place instead, since no other key can take its prefix: click **Edit**
-on the key, paste the new API key, and save.
-
-Removing a provider key from Otari does not revoke it with the provider. Revoke
-it in the provider's dashboard as well.
+Ready to create a key? See [Manage provider keys](manage-provider-keys.md).

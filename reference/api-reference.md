@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/53930f2870d0fd22454c187bfc1880e800a764d0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a89e11c5ec35774d3b3b4d70c5d220ceb062cca8/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -23,12 +23,14 @@ URL in the form it expects:
 | OpenAI SDKs and OpenAI-compatible tools | the base URL plus `/v1`, for example `https://api.otari.ai/api/v1` |
 | Anthropic SDKs and Claude Code | the base URL itself, for example `https://api.otari.ai/api`, since they append `/v1/messages` |
 
-Leaving `/api` off is the most common mistake. On otari.ai, a request to
-`https://api.otari.ai/v1/...` never reaches Otari: a small one answers `404 Not
-Found`, and a large one, such as any Claude Code request, answers `403
-Forbidden`, which Claude Code reports as "Failed to authenticate". Your own
-gateway answers a request under `/v1` with a 404 whose detail names the same
-path under `/api/v1`.
+Leaving `/api` off is the most common mistake:
+
+- On otari.ai, a request to `https://api.otari.ai/v1/...` never reaches Otari.
+  A small one answers `404 Not Found`; a large one, such as any Claude Code
+  request, answers `403 Forbidden`, which Claude Code reports as "Failed to
+  authenticate".
+- Your own gateway answers a request under `/v1` with a 404 whose detail names
+  the same path under `/api/v1`.
 
 An otari.ai key belongs to one region. Sent to the other region's URL, it
 answers `421` naming the host it belongs to.
@@ -55,19 +57,22 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-An API key itself reaches the inference routes, `GET /api/v1/usage/requests/{request_id}`
-for its own requests, [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own
-budget and usage, and the catalog reads that describe the deployment rather
-than act on it: `GET /api/v1/models`, `/pricing`, `/tools`, `/providers/catalog`,
-`/tool-settings/guardrails/catalog`, `/tool-settings/guardrails/profiles` and
-`/search-tools/providers`. A [service key](https://docs.otari.ai/guides/organizations-and-access/end-users) also reaches the
-end-user routes. The rest of the management API, including `/api/v1/usage`,
-`/api/v1/budgets` and everything under `/api/v1/organizations/me`, takes the
-master key or a dashboard session cookie. A request that carries an API key is
-never read as a session, so those routes answer it `401` with
-`{"detail": "Invalid master key"}`, on otari.ai too, where a tenant has no master
-key: that part is managed in the dashboard, and an application reads what its own
-key has spent and may still spend from `/api/v1/key`.
+An API key reaches:
+
+- the inference routes;
+- `GET /api/v1/usage/requests/{request_id}` for its own requests;
+- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
+- the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
+  `/providers/catalog`, `/tool-settings/guardrails/catalog`,
+  `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
+- for a [service key](https://docs.otari.ai/guides/organizations-and-access/end-users), the end-user routes.
+
+The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
+and everything under `/api/v1/organizations/me`, takes the master key or a
+dashboard session cookie. A request that carries an API key is never read as a
+session, so those routes answer it `401` with
+`{"detail": "Invalid master key"}`, on otari.ai too (where a tenant has no
+master key and manages that part in the dashboard).
 
 ## Core inference APIs
 
@@ -129,30 +134,35 @@ no way to send them back.
 
 Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
 streaming or not, and so do the responses of the embeddings, rerank, images,
-audio, moderations, decisions and search endpoints. The exception is a request
-rejected before the gateway handles it: a failed authentication (`401`) or a
-body that does not validate (`422`) carries none. The gateway mints it, sends
-it on its own refusals as well, and records it on the request's usage rows, so
+audio, moderations, decisions and search endpoints. A request rejected before
+the gateway handles it (a failed authentication `401`, or a body that does not
+validate, `422`) carries none. The gateway mints the id, sends it on its own
+refusals as well, and records it on the request's usage rows, so
 [`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
-finds the request's cost by it. The gateway also names the
-provider instance and model that served the request, whether a fallback did, and
-how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
-`Otari-Fallback` and `Otari-Response-Duration-Ms`, and splits that duration into
-its own time and the provider's in `Server-Timing`; see
+finds the request's cost by it.
+
+The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
+`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
+request and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-[rerank](#rerank), embeddings and images (`/images/generations` and
-`/images/edits`) endpoints carry the same two fields on their `usage`; an image
-model whose provider sends no `usage` (OpenAI's DALL-E models) gets one holding
-just the two fields, and one that sends token counts keeps them beside the
-fields. On a stream the fields ride the terminal usage event: for Chat
-Completions, the last chunk that reports usage and either has no choices (OpenAI's
-`stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
-and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for
-Messages; and `response.completed` for Responses. The two fields always appear
-together, and an unpriced or unreported request carries neither.
+two fields always appear together, and an unpriced or unreported request
+carries neither.
+
+- The [rerank](#rerank), embeddings and images (`/images/generations` and
+  `/images/edits`) endpoints carry the same two fields on their `usage`. An
+  image model whose provider sends no `usage` (OpenAI's DALL-E models) gets one
+  holding just the two fields; one that sends token counts keeps them beside
+  the fields.
+- On a stream the fields ride the terminal usage event:
+  - Chat Completions: the last chunk that reports usage and either has no
+    choices (OpenAI's `stream_options.include_usage` chunk) or finishes a
+    choice (providers such as Cohere and Gemini report usage on the chunk
+    carrying `finish_reason`);
+  - Messages: `message_delta`;
+  - Responses: `response.completed`.
 
 The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
@@ -167,16 +177,17 @@ the inline field always agree, and `pricing_source` still says the request was
 priced.
 
 Speech (`/audio/speech`) answers with audio bytes, so its cost rides the
-response headers instead: `Otari-Cost-USD` and `Otari-Pricing-Source` carry
-the same two values, under the same rule (both when the request was priced,
-neither when it was not), and `Otari-Usage-Unit` and `Otari-Usage-Units` name
-the meter the request was billed on and the count billed: the characters of
-`input` at a rate priced per character, or one request at a rate priced per
-request. The two usage headers are absent when nothing was billed, which is
-what a zero rate settles. A speech model with no rate is refused with `402`
-`pricing_required` under `require_pricing`, as the other priced endpoints are;
-see [Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit)
-for which rates price it.
+response headers instead:
+
+| Header | Value |
+| --- | --- |
+| `Otari-Cost-USD`, `Otari-Pricing-Source` | The same two values, under the same rule (both when the request was priced, neither when it was not). |
+| `Otari-Usage-Unit`, `Otari-Usage-Units` | The meter the request was billed on and the count billed: the characters of `input` at a rate priced per character, or one request at a rate priced per request. Absent when nothing was billed, as with a zero rate. |
+
+A speech model with no rate is refused with `402` `pricing_required` under
+`require_pricing`; see
+[Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit) for
+which rates price it.
 
 ### Who runs a built-in tool
 
@@ -292,17 +303,20 @@ the same tags in an `Otari-Tags` header, on the same three surfaces:
 Otari-Tags: agent=bug-fix,run=1234
 ```
 
-The value is comma-separated `key=value` pairs. Whitespace around a pair is
-ignored, everything after a pair's first `=` is its value, and keys and values
-are percent-decoded, so `note=a%2Cb` records `a,b`. A non-ASCII character must
-be percent-encoded as UTF-8 (`caf%C3%A9`), and a header sent more than once is
-read as one comma-joined list. Header tags are the base and the body's tags
-override them on the same key; the bounds apply to the merged set. A raw
-non-ASCII character, a pair without `=`, a `%` that does not start a two-digit
-hex escape, a key given twice, a value that does not decode to UTF-8, or tags
-past the bounds are refused with a 422 whose `detail` locates the error at
-`["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The header is
-never forwarded to the provider.
+The value is comma-separated `key=value` pairs:
+
+- Whitespace around a pair is ignored, and everything after a pair's first `=`
+  is its value.
+- Keys and values are percent-decoded, so `note=a%2Cb` records `a,b`. A
+  non-ASCII character must be percent-encoded as UTF-8 (`caf%C3%A9`).
+- A header sent more than once is read as one comma-joined list.
+- Header tags are the base and the body's tags override them on the same key;
+  the bounds apply to the merged set.
+- A raw non-ASCII character, a pair without `=`, a `%` that does not start a
+  two-digit hex escape, a key given twice, a value that does not decode to
+  UTF-8, or tags past the bounds are refused with a 422 whose `detail` locates
+  the error at `["header", "Otari-Tags"]`.
+- The header is never forwarded to the provider.
 
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
@@ -615,21 +629,25 @@ The request and the response follow LiteLLM's `/v1/search`, so a client written
 for it works against Otari with its base URL changed. `include_raw` and
 `provider_options` are Otari's own.
 
-**Which tool.** The path names the tool. On `POST /api/v1/search`, the body's
-`search_tool_name` does, else the deployment's `web_search_default_tool`, else
-the only configured tool. A call that names no tool runs on the workspace's
-[organization search key](tools.md#organization-search-keys) when it has a usable
-one; a named call runs on that tool with its own key. Either way the tool decides
-the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. Where there is no tool to pick (the deployment configures none, or
-several and no default), a call that names none still runs on the organization
-key, as the tool `web_search` on the key's provider, with a 30 second timeout.
-The access check reads the key's `allowed_tools`, else its user's,
-for the tool's name or `*`. With neither set, it follows the key's model access,
-or its user's when the key has none: unrestricted model access runs every search
-tool, and restricted model access runs only a tool named by its deprecated
-`<provider>:<tool>` entry in `allowed_models`
-([Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
+**Which tool.**
+
+- The path names the tool. On `POST /api/v1/search`, the body's
+  `search_tool_name` does, else the deployment's `web_search_default_tool`,
+  else the only configured tool.
+- A call that names no tool runs on the workspace's
+  [organization search key](tools.md#organization-search-keys) when it has a
+  usable one; a named call runs on that tool with its own key. Either way the
+  tool decides the access check, the `rate_limits` rules, the timeout and the
+  usage row's model and provider.
+- Where there is no tool to pick (none configured, or several and no default),
+  a call that names none still runs on the organization key, as the tool
+  `web_search` on the key's provider, with a 30 second timeout.
+- The access check reads the key's `allowed_tools`, else its user's, for the
+  tool's name or `*`. With neither set, it follows the key's model access, or
+  its user's when the key has none: unrestricted model access runs every search
+  tool, and restricted model access runs only a tool named by its deprecated
+  `<provider>:<tool>` entry in `allowed_models`
+  ([Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
 
 **Request.**
 
@@ -707,10 +725,10 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | The provider failed the search, or could not be reached | 502 | |
 | The workspace's stored web-access policy cannot be read | 503 | |
 
-Every provider failure is a 502 whose `detail` names no upstream detail, whatever
-the provider answered, unlike the completion routes, which classify a provider's
-failure. The 502 carries what is safe to show of the failure as headers instead,
-never a body, a URL or the query:
+Every provider failure is a 502 whose `detail` names no upstream detail (the
+completion routes, by contrast, classify a provider's failure). The 502 carries
+what is safe to show of the failure as headers, never a body, a URL or the
+query:
 
 | Header | Value |
 |---|---|
@@ -733,9 +751,7 @@ document describes the supported providers, filters, and management schemas.
 `POST /api/v1/fetch` and `POST /api/v1/fetch/{fetch_tool_name}` read one page
 through a configured fetch tool, as [Search](#search) runs a search tool. This is
 separate from `otari_web_fetch`, which lets a model fetch pages during a
-completion; both are described in [Built-in tools](tools.md#direct-fetch). A
-client that runs its own agent loop reads pages this way, with the gateway's URL
-checks, prices and budgets, without a completion for each page.
+completion; both are described in [Built-in tools](tools.md#direct-fetch).
 
 `web_fetch_enabled` governs this endpoint as it governs the `otari_web_fetch`
 tool, read on every request: while it is off, a call is refused with `400`.
@@ -1016,23 +1032,24 @@ parameter. Credentials, URLs, account identifiers, and reflected payloads are
 removed.
 
 The diagnostic is the provider's own sentence, taken from the error body it
-sent, and not the provider SDK's rendering of that error. An OpenAI 400 for a
+sent, not the provider SDK's rendering of that error. An OpenAI 400 for a
 model that only accepts its default temperature answers:
 
 ```json
 {"detail": "Unsupported value: 'temperature' does not support 0.5 with this model. Only the default (1) value is supported."}
 ```
 
-rather than a detail that begins `Error code: 400 - {'error': {...}}`. The same
-holds for Anthropic, Cohere and the other providers whose SDKs keep the parsed
-body: only the body's message can reach the caller, never a status prefix, the
-body's other fields, or the response headers. When that body has no message, or
-its message is redacted away, the caller gets the fixed detail for the status
-instead (for a 400,
-`The provider rejected the request as invalid (check the model name and parameters)`).
-The provider's `param` and `code` fields are not copied into the response. When
-the request named a model alias, a provider message that names the alias's
-target names the alias instead.
+rather than a detail that begins `Error code: 400 - {'error': {...}}`.
+
+- The same holds for Anthropic, Cohere and the other providers whose SDKs keep
+  the parsed body: only the body's message can reach the caller, never a status
+  prefix, the body's other fields, or the response headers.
+- When that body has no message, or its message is redacted away, the caller
+  gets the fixed detail for the status instead (for a 400,
+  `The provider rejected the request as invalid (check the model name and parameters)`).
+- The provider's `param` and `code` fields are not copied into the response.
+- When the request named a model alias, a provider message that names the
+  alias's target names the alias instead.
 
 The completion routes and the pass-through routes (embeddings, images, audio,
 moderations, rerank) classify a provider failure the same way:
@@ -1062,18 +1079,19 @@ were already billed. Messages and Responses are not checked, since an empty
 
 A 5xx that resending the same request cannot fix also carries
 `x-should-retry: false`, the header the OpenAI and Anthropic SDKs read before
-their own retry rule, so such a client stops after one attempt instead of
-retrying with backoff. Two failures qualify: a provider account out of credit
-or over its billing limit, and a fault in the code making the provider call,
-such as a provider adapter that cannot convert the request, which raises before
-anything is sent and has no upstream status. A timeout, a dropped connection, a
-provider's own 5xx or 429, and any failure Otari cannot place carry no such
-header, so a client retries those. A streamed request that
-fails before its first chunk carries it too, since that is answered with an
-ordinary HTTP error (see [Error codes](#error-codes)). A routing policy still
-moves on to its next candidate on either failure: the header describes only the
-answer the caller receives, and a policy that tried several candidates and saw
-every one fail answers without it.
+their own retry rule, so such a client stops after one attempt:
+
+- Two failures qualify: a provider account out of credit or over its billing
+  limit, and a fault in the code making the provider call (such as a provider
+  adapter that cannot convert the request), which raises before anything is
+  sent.
+- A timeout, a dropped connection, a provider's own 5xx or 429, and any
+  failure Otari cannot place carry no such header.
+- A streamed request that fails before its first chunk carries it too, since
+  that is answered with an ordinary HTTP error (see [Error codes](#error-codes)).
+- A routing policy still moves on to its next candidate on either failure. A
+  policy that tried several candidates and saw every one fail answers without
+  the header.
 
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
@@ -1127,9 +1145,9 @@ at the top level of the body.
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](budgets.md#what-a-budget-limits). Its `Retry-After` is
+cost of $Y`); see [Refusals](budget-enforcement.md#refusals). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](https://docs.otari.ai/learn/budgets#refusals-and-retry-after).
+[`Retry-After`](budget-enforcement.md#retry-after).
 
 ### Provider failures
 
@@ -1153,55 +1171,61 @@ already carries `upstream_rate_limited`.
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
-`502` for a provider outage. Otari holds the response until the provider's first
-chunk to make that possible. The gateway holds it for at most
-`streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
-and commits the `200` as soon as the stream opens). For a stream running the
-gateway's tools, opening their backends (connecting to MCP servers, leasing a
-sandbox) counts toward that window too. A stream running the
-gateway's tools (MCP servers, sandbox, web search) locks onto its candidate
-once the first round of that loop ends instead, which can happen before
-anything is sent: a failure past that point cannot fall over either, even
-though no output has reached the client yet. A provider slower than that to start still streams, and a
-failure after that point is reported as below.
+`502` for a provider outage. To make that possible, Otari holds the response
+until the provider's first chunk, for at most `streaming_first_chunk_hold_ms`
+(15 seconds by default; `0` turns the hold off and commits the `200` as soon as
+the stream opens).
 
-A failure after a stream has started arrives as an error event, which carries
-the code as `error.code` on Chat Completions and Responses:
+- For a stream running the gateway's tools, opening their backends (connecting
+  to MCP servers, leasing a sandbox) counts toward that window.
+- Such a stream (MCP servers, sandbox, web search) locks onto its candidate
+  once the first round of the tool loop ends, which can happen before anything
+  is sent; a failure past that point cannot fall over either.
+- A provider slower than the window to start still streams, and a failure
+  after that point is reported as below.
+
+A failure after a stream has started arrives as an error event; the `200`
+status line has already gone out. On Chat Completions and Responses it carries
+the code as `error.code`:
 `{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
-The status line has already gone out as `200` by then, so the event is the only
-place the failure is named. It carries the code from the table above when one
-applies (`upstream_rate_limited`, `context_length_exceeded`),
-`provider_stream_interrupted` when the provider's stream ended before it
-finished, otherwise `provider_error` when the provider failed the stream. On
-Chat Completions and Responses, a failure on the provider's own side also
-carries the [provider failure](#provider-failures)'s fields as
-`error.provider_failure`: `{"provider": "exa", "status": 503, "tag":
-"SERVICE_OVERLOADED", "retryable": true}`, with `status` `null` when the provider
-gave none. On
-Chat Completions a stream is finished once a choice reports its
-`finish_reason`; one that closes without any, even after sending content, ends
-in this error event rather than in a bare `data: [DONE]`. On Responses from a
-provider with its own Responses API, a stream is finished once the provider sends
-`response.completed`, `response.incomplete` or `response.failed`, and one that
-closes before them ends the same way. A Responses stream Otari
-[translates from a chat completion](#responses-on-providers-without-a-responses-api)
-ends in `response.completed`, or in `response.incomplete` when the
-provider stopped for length or a content filter, once a chunk reports its
-`finish_reason`, as on Chat Completions. One that closes without any ends in
-the same error event. The error event's message is the `detail` the same failure would carry as an HTTP
-error where that names a cause (a rejected parameter, the provider's own
-explanation of a rejected request, redacted as described above, or what
-happened upstream, such as the provider's error status), and a fixed
-`An error occurred during streaming` otherwise. An event with no `code` is a
-failure inside the gateway. Either way, the gateway records the
-request's usage row with status `error`.
-On Messages, a stream the provider ends without `message_stop`, including one
-that sent no events at all, also ends in an `api_error` event rather than
-closing as if it had succeeded, and the request is settled as failed. A Messages
-error event's `error.type` says whether a retry makes sense:
-`overloaded_error` and `rate_limit_error` when the provider failed the stream
-that way, `timeout_error` when it stopped responding (a read timeout, such as
-Bedrock's, or an upstream `504`), and `api_error` otherwise.
+
+- **Code**: the code from the table above when one applies
+  (`upstream_rate_limited`, `context_length_exceeded`),
+  `provider_stream_interrupted` when the provider's stream ended before it
+  finished, otherwise `provider_error` when the provider failed the stream. An
+  event with no `code` is a failure inside the gateway.
+- **Provider failure fields**: on Chat Completions and Responses, a failure on
+  the provider's own side also carries the
+  [provider failure](#provider-failures)'s fields as `error.provider_failure`:
+  `{"provider": "exa", "status": 503, "tag": "SERVICE_OVERLOADED", "retryable": true}`,
+  with `status` `null` when the provider gave none.
+- **Message**: the `detail` the same failure would carry as an HTTP error where
+  that names a cause (a rejected parameter, the provider's own explanation of a
+  rejected request, redacted as described above, or what happened upstream,
+  such as the provider's error status), and a fixed
+  `An error occurred during streaming` otherwise.
+- The gateway records the request's usage row with status `error`.
+
+When a stream counts as finished:
+
+- **Chat Completions**: once a choice reports its `finish_reason`. One that
+  closes without any, even after sending content, ends in the error event
+  rather than in a bare `data: [DONE]`.
+- **Responses, from a provider with its own Responses API**: once the provider
+  sends `response.completed`, `response.incomplete` or `response.failed`. One
+  that closes before them ends in the error event.
+- **Responses
+  [translated from a chat completion](#responses-on-providers-without-a-responses-api)**:
+  once a chunk reports its `finish_reason`, ending in `response.completed`, or
+  `response.incomplete` when the provider stopped for length or a content
+  filter. One that closes without any ends in the error event.
+- **Messages**: a stream the provider ends without `message_stop`, including
+  one that sent no events at all, ends in an `api_error` event, and the request
+  is settled as failed. A Messages error event's `error.type` says whether a
+  retry makes sense: `overloaded_error` and `rate_limit_error` when the
+  provider failed the stream that way, `timeout_error` when it stopped
+  responding (a read timeout, such as Bedrock's, or an upstream `504`), and
+  `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
