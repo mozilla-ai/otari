@@ -379,6 +379,10 @@ The first provider whose price per call depends on an option.
   domain filter that mixes domains to search and to leave out, which its documentation says it
   does not do. The base class refuses unknown options; say in an option's description what the
   provider documents it does not do.
+- The base class checks an option's name, never its value, so an `enum` is documentation. When
+  the adapter leaves out a value the provider runs, as Perplexity's `people` search type, the
+  adapter refuses it before the request with `UnsupportedValueError`, as SearXNG's does for `method`
+  (CodeRabbit on #3046); a value the provider refuses can stay the provider's to refuse.
 - Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
