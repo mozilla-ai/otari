@@ -185,8 +185,9 @@ async def delete_active_organization(
     whose workspaces still hold usage, API keys, aliases or routing policies, so
     a deletion never takes spend history with it.
 
-    Answers with the caller's context in the organization they are moved to,
-    their oldest other one.
+    Answers with the caller's context in the organization they are moved to: the
+    oldest of their other memberships that admits them, which an organization
+    requiring sign-in through its own connection does not.
     """
     return await service.delete_active_organization_for_user(user=current_identity, sso_enforcement=connections)
 

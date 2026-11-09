@@ -1115,10 +1115,12 @@ class OrganizationService:
         write below back with it.
 
         ``user.active_organization_id`` has no ON DELETE action, so every identity
-        pointed here is moved first: onto its oldest other live membership, else
-        onto the default organization, where it holds no membership and so
-        resolves to none, as it did here. The caller moves into their oldest
-        other organization, whose context is returned.
+        pointed here is cleared first rather than moved: whether another
+        organization admits each of them is a question this cannot ask, and
+        resolving their context answers it under the rule that applies then.
+
+        The caller moves into their oldest other membership that admits them,
+        which is not always their oldest, and its context is returned.
         """
         organization = await self.get_active_organization_for_user(user)
         await self.require_active_organization_management_access(user=user, organization=organization)
