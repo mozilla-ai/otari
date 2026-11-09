@@ -1060,6 +1060,13 @@ price. `GET /api/v1/search-tools/providers` marks such an option `cost_tier`, an
 `operator_only` while it is set only this way; `?kind=fetch` lists the fetch
 providers'.
 
+A tool whose cost tier has a value the provider does not take does not run,
+and the startup log says so: a search on it
+answers 400 `Search tool '<name>' is not configured correctly.`, the in-loop
+tool does not take it as its default, its connection test is refused, and a
+fetch tool is left out, as if nothing named it. The dashboard and the API
+refuse such a value when a tool is saved.
+
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
