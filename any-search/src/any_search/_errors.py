@@ -5,6 +5,7 @@ and returns these, and the query is the user's content.
 """
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 _TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
@@ -56,10 +57,11 @@ class UnsupportedValueError(AnySearchError, ValueError):
     The message names the allowed values, never the one passed.
     """
 
-    def __init__(self, provider: str, parameter: str, allowed: list[str]) -> None:
+    def __init__(self, provider: str, parameter: str, allowed: Sequence[str]) -> None:
         self.provider = provider
         self.parameter = parameter
-        self.allowed = allowed
+        # A copy, so a caller that changes it leaves the adapter's own list alone.
+        self.allowed = list(allowed)
         super().__init__(f"{provider} takes {parameter} {' or '.join(allowed)}")
 
 

@@ -110,6 +110,10 @@ async def test_a_search_type_the_adapter_does_not_offer_is_refused_before_the_re
         await _search(search_type=search_type)
     # A ValueError too, as a bad value is.
     assert isinstance(refused.value, ValueError)
+    # The allowed values are a copy: emptying them leaves fast accepted.
+    refused.value.allowed.clear()
+    _, request = await _search(search_type="fast")
+    assert json.loads(request.content)["search_type"] == "fast"
 
 
 @pytest.mark.asyncio

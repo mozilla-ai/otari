@@ -42,9 +42,10 @@ that carries none is filled in.
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
-`UnsupportedParameterError` rather than being dropped. An adapter that refuses a value of an
-option before the request, such as SearXNG's `method` or Perplexity's `search_type`, raises
-`UnsupportedValueError`, a `ValueError` too, whose message names the allowed values.
+`UnsupportedParameterError` rather than being dropped. Two adapters check a value before the
+request: SearXNG's `method` and Perplexity's `search_type` raise `UnsupportedValueError`, a
+`ValueError` too, whose message names the allowed values. Any other value is the provider's to
+refuse, which comes back as a `ProviderError`, as the `fake` provider's does.
 `SHARED_PARAMETERS` lists the shared parameters, so a host can tell them from native options, and
 `shared_parameter_problems` says which values `search` refuses, so a host can check them before the
 call.
