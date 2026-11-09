@@ -151,6 +151,7 @@ export function NarrowedDefaults({
             label="Provider"
             value={provider}
             onChange={setProvider}
+            isDisabled={isHeld}
             placeholder="Select a provider…"
             shouldReserveMessage={false}
             options={available.map((instance) => ({
@@ -162,6 +163,7 @@ export function NarrowedDefaults({
             label="Budget"
             value={budgetId}
             onChange={setBudgetId}
+            isDisabled={isHeld}
             placeholder="Select a budget…"
             shouldReserveMessage={false}
             options={budgetChoices(budgets)}
