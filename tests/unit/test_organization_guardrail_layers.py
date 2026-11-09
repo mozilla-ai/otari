@@ -306,14 +306,3 @@ def test_a_callers_credential_never_follows_a_policy_mandate_of_their_profile() 
     )
 
     assert merged.credentials == {}
-
-
-def test_an_earlier_entrys_credential_does_not_ride_to_a_later_entrys_url() -> None:
-    """The last entry of a profile is the one that runs, credential and all."""
-    caller = [
-        _guardrail("probe", url=_CALLER_URL, credential="tok"),
-        _guardrail("probe", url="https://elsewhere.example/guardrails"),
-    ]
-
-    assert merge_guardrail_layers(_ctx(), caller, []).credentials == {}
-    assert merge_guardrail_layers(_ctx(_guardrail("pii")), caller, []).credentials == {}

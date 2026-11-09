@@ -398,3 +398,22 @@ def test_a_credential_without_a_url_is_refused_without_echoing_it(
     assert resp.status_code == 422, resp.text
     assert "tok-secret" not in resp.text
     runner.assert_not_awaited()
+
+
+def test_a_credentialed_profile_named_twice_is_refused_without_echoing_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    path, _, body = _ROUTES["chat"]
+    runner = AsyncMock()
+    guardrails = [
+        {"profile": "probe", "url": "https://a.example/guard"},
+        {"profile": "probe", "url": "https://b.example/guard", "credential": "tok-secret"},
+    ]
+
+    with patch("gateway.api.routes._helpers.run_input_guardrails", new=runner):
+        resp = client.post(path, json={**body, "guardrails": guardrails}, headers=api_key_header)
+
+    assert resp.status_code == 422, resp.text
+    assert "tok-secret" not in resp.text
+    runner.assert_not_awaited()

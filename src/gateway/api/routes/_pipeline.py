@@ -4024,14 +4024,13 @@ def merge_guardrail_layers(
 def _caller_credentials(requested: list[GuardrailConfig] | None, mandated: Collection[str]) -> dict[str, str]:
     """The credentials the caller sent, keyed by profile, for the profiles no layer mandates.
 
-    The last entry of a profile is the one that runs, so it alone decides: an
-    earlier entry's credential must not ride to a later entry's URL.
+    Keying by profile is sound because a request body may not name a profile
+    twice when one of its entries carries a credential (``RequestedGuardrails``).
     """
-    last = {guardrail.profile: guardrail for guardrail in requested or []}
     return {
-        profile: guardrail.credential.get_secret_value()
-        for profile, guardrail in last.items()
-        if guardrail.credential is not None and profile not in mandated
+        guardrail.profile: guardrail.credential.get_secret_value()
+        for guardrail in requested or []
+        if guardrail.credential is not None and guardrail.profile not in mandated
     }
 
 

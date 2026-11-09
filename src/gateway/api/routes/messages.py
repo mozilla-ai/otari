@@ -77,7 +77,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, gateway_container_value
@@ -275,7 +275,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)

@@ -18,8 +18,9 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import GuardrailConfig, RequestedGuardrails
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.url_safety import UnsafeURLError
 
@@ -367,6 +368,32 @@ def test_a_request_body_credential_is_never_dumped() -> None:
 
     assert "credential" not in cfg.model_dump()
     assert "tok" not in repr(cfg)
+
+
+_REQUESTED = TypeAdapter(RequestedGuardrails)
+_WITH_TOKEN = {"profile": "probe", "url": "https://a.example", "credential": "tok"}
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [_WITH_TOKEN, {"profile": "probe", "url": "https://b.example"}],
+        [{"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN],
+        [{"profile": "probe"}, _WITH_TOKEN],
+        [_WITH_TOKEN, {"profile": "probe"}],
+    ],
+    ids=["token-first", "token-last", "default-url-first", "default-url-last"],
+)
+def test_a_credentialed_profile_named_twice_is_refused(entries: list[dict[str, str]]) -> None:
+    """Credentials are keyed by profile, so a token would reach the other entry's endpoint too."""
+    with pytest.raises(ValidationError, match="appears more than once"):
+        _REQUESTED.validate_python(entries)
+
+
+def test_a_profile_named_twice_without_a_credential_is_still_accepted() -> None:
+    entries = [{"profile": "probe"}, {"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN | {"profile": "x"}]
+
+    assert len(_REQUESTED.validate_python(entries)) == 3
 
 
 @pytest.mark.asyncio
