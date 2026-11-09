@@ -15,7 +15,7 @@ from sqlmodel import col
 from gateway import container as container_module
 from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
+from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL, FeedbackDeliveryError
 from gateway.models.tenancy import DashboardSession, User
 from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -331,6 +331,41 @@ def test_a_bound_delivery_receives_the_verified_sender(
         {"message": "Operator", "reply_to": None, "sender_id": None},
     ]
     assert not deliveries
+
+
+class RefusingDelivery:
+    def __init__(self, status_code: int, retry_after: int | None = None) -> None:
+        self.error = FeedbackDeliveryError(status_code, retry_after)
+
+    async def deliver(self, *, message: str, reply_to: str | None, sender_id: Any) -> None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("raised", "retry_after", "answered", "detail", "retry_header"),
+    [
+        (413, None, 413, "Feedback is too large.", None),
+        (422, None, 422, "Check the feedback text.", None),
+        (429, 30, 429, "Please wait before sending more feedback.", "30"),
+        (500, None, 503, "We could not confirm delivery. Please try again.", None),
+        (502, 30, 503, "We could not confirm delivery. Please try again.", None),
+    ],
+)
+def test_a_bound_delivery_refusal_is_answered_by_the_port_contract(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    raised: int,
+    retry_after: int | None,
+    answered: int,
+    detail: str,
+    retry_header: str | None,
+) -> None:
+    refusing = RefusingDelivery(raised, retry_after)
+    client.app.state.container.bind(FeedbackDeliveryPort, lambda session: refusing)  # type: ignore[attr-defined]
+    response = client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}, headers=master_key_header)
+    assert response.status_code == answered
+    assert response.json()["detail"] == detail
+    assert response.headers.get("Retry-After") == retry_header
 
 
 def test_feedback_is_off_by_default(postgres_url: str) -> None:

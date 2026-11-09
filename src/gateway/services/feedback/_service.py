@@ -4,8 +4,8 @@ from gateway.core.addresses import normalized_address
 from gateway.exceptions.feedback_exceptions import AnotherAccountError, UnshareableEmailError
 from gateway.rate_limit import RateLimiter
 
-# Each send is a real POST upstream, and the receiver's own limit is shared by
-# everyone behind this gateway's address, so one caller must not spend it.
+# Each send reaches the team, and the intake's own limit is shared by everyone
+# behind this gateway's address, so one caller must not spend it.
 SENDS_PER_WINDOW = 5
 WINDOW_SEC = 10 * 60
 # The receiver's own cap on `reply_to`; keep the two together.

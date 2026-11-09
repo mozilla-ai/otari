@@ -76,16 +76,19 @@ async def submit_feedback(
             message=body.message, reply_to=reply_to, sender_id=session_identity.id if session_identity else None
         )
     except FeedbackDeliveryError as exc:
-        detail = {
+        details = {
             413: "Feedback is too large.",
             # This gateway already checked the message by the receiver's rules,
             # so a refusal of a send with an address is the address, as from a
             # receiver that does not know the field yet.
             422: UNSHAREABLE_EMAIL if reply_to is not None else "Check the feedback text.",
             429: "Please wait before sending more feedback.",
-        }.get(exc.status_code, "We could not confirm delivery. Please try again.")
-        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
-        raise HTTPException(exc.status_code, detail, headers=headers) from None
+        }
+        # Any other status an adapter raises is a delivery it could not confirm.
+        status_code = exc.status_code if exc.status_code in details else status.HTTP_503_SERVICE_UNAVAILABLE
+        detail = details.get(status_code, "We could not confirm delivery. Please try again.")
+        headers = {"Retry-After": str(exc.retry_after)} if status_code == 429 and exc.retry_after is not None else None
+        raise HTTPException(status_code, detail, headers=headers) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

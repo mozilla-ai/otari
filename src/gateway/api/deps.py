@@ -2639,17 +2639,22 @@ async def get_deployment_trace_scope(
     )
 
 
-async def get_feedback_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _authenticated: Annotated[str | None, Depends(verify_master_key)],
-) -> FeedbackService:
-    """Finish authentication's database work before waiting for the receiver."""
-    await release_session(db)
+def get_feedback_service() -> FeedbackService:
     return FeedbackService()
 
 
-def get_feedback_delivery_port(container: Annotated[Container, Depends(get_container)]) -> FeedbackDeliveryPort:
-    """Resolve where accepted feedback goes; it holds no session, released above."""
+async def get_feedback_delivery_port(
+    container: Annotated[Container, Depends(get_container)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _authenticated: Annotated[str | None, Depends(verify_master_key)],
+) -> FeedbackDeliveryPort:
+    """Resolve where accepted feedback goes, with authentication's database work finished first.
+
+    Delivery can wait seconds on the network, so the request's connection goes
+    back to the pool here. The adapter gets no session: one that needs the
+    database opens its own unit of work.
+    """
+    await release_session(db)
     return container.resolve(FeedbackDeliveryPort, None)
 
 
