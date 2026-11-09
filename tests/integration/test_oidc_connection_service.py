@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
+from gateway.core.config import OAUTH_PROVIDERS
 from gateway.core.database import release_session
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
@@ -130,6 +131,9 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
+        # The providers a configured deployment offers, because a link at one nobody configured is
+        # not a way in and an empty set here would hide that rule rather than exercise it.
+        offered_providers=frozenset(OAUTH_PROVIDERS),
     )
 
 

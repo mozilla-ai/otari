@@ -18,6 +18,7 @@ from gateway.container import Container
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    OAUTH_PROVIDERS,
     TRACE_CONTENT_HEADER,
     TRACE_CONTENT_KEEP,
     X_API_KEY_HEADER,
@@ -1723,6 +1724,9 @@ def get_oidc_connection_service(
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=config.oidc_allow_private_hosts,
         passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
+        offered_providers=frozenset(
+            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
+        ),
     )
 
 

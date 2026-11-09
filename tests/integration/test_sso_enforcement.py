@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionDisabledError,
@@ -77,7 +77,9 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
-def _connection_service(db: AsyncSession) -> OIDCConnectionService:
+def _connection_service(
+    db: AsyncSession, *, offered_providers: frozenset[str] = frozenset(OAUTH_PROVIDERS)
+) -> OIDCConnectionService:
     uow = UnitOfWork(db)
     return OIDCConnectionService(
         uow,
@@ -86,6 +88,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
+        offered_providers=offered_providers,
     )
 
 
@@ -911,6 +914,62 @@ async def test_enforcement_is_refused_when_the_named_owner_could_not_sign_in_wit
         )
 
     assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_a_link_at_a_provider_nobody_configured_is_not_a_route_in(async_db: AsyncSession) -> None:
+    """A link needs its provider to still be offered: one nobody configured signs nobody in."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    owner.hashed_password = None
+    async_db.add(owner)
+    async_db.add(
+        OAuthIdentityLink(
+            provider="google",
+            subject="google-subject",
+            user_id=owner.id,
+            email_at_link=owner.email,
+            email_assertion_at_link=EmailAssertion.VERIFIED,
+        )
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    service = _connection_service(async_db, offered_providers=frozenset())
+    with pytest.raises(SsoBreakGlassRouteRequiredError):
+        await service.set_sso_enforcement_for_user(
+            user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+        )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_a_link_at_a_configured_provider_is_a_route_in(async_db: AsyncSession) -> None:
+    """The same link, on a deployment that offers that provider, is the way in the exception needs."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    owner.hashed_password = None
+    async_db.add(owner)
+    async_db.add(
+        OAuthIdentityLink(
+            provider="google",
+            subject="google-subject",
+            user_id=owner.id,
+            email_at_link=owner.email,
+            email_assertion_at_link=EmailAssertion.VERIFIED,
+        )
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is True
 
 
 async def test_enforcement_is_permitted_where_the_named_owner_keeps_a_passkey(async_db: AsyncSession) -> None:

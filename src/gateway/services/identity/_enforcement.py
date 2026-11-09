@@ -2,7 +2,7 @@
 
 import uuid
 
-from gateway.models.identity import oidc_identity_provider
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, oidc_identity_provider
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
 from gateway.repositories.identity.oidc_connection_repository import OIDCConnectionRepository
@@ -33,22 +33,28 @@ async def has_route_without(
     *,
     provider: str,
     passkey_rp_id: str | None,
+    offered_providers: frozenset[str],
     links: OAuthIdentityLinkRepository,
     passkeys: WebAuthnCredentialRepository,
 ) -> bool:
     """Whether ``user`` can still sign in with ``provider`` unavailable.
 
-    A password and a passkey need no provider at all. A link at another provider needs that one
-    rather than this.
+    A password and a passkey need no provider at all. A link needs the provider it names to still
+    be on offer, which is why both of the deployment's own answers are asked for rather than assumed.
 
     NOTE: ``passkey_rp_id`` is the relying party this deployment serves, and ``None`` where it
     serves none, because a passkey registered under another is one no authenticator will offer.
+
+    NOTE: ``offered_providers`` is the built-in providers an operator has configured. A link at an
+    organization's own connection is a way in whatever this holds, because the organization
+    administers that provider rather than the deployment.
     """
     if user.hashed_password is not None:
         return True
     if passkey_rp_id is not None and await passkeys.exists_for_user(user.id, rp_id=passkey_rp_id):
         return True
-    return await links.exists_for_user_at_another_provider(provider=provider, user_id=user.id)
+    others = await links.get_other_providers_for_user(provider=provider, user_id=user.id)
+    return any(other.startswith(OIDC_PROVIDER_PREFIX) or other in offered_providers for other in others)
 
 
 async def sso_enforcement_refuses_every_membership(

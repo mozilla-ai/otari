@@ -101,6 +101,7 @@ class OIDCConnectionService:
         domains: ClaimedDomains,
         allow_private_hosts: bool,
         passkey_rp_id: str | None,
+        offered_providers: frozenset[str],
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
@@ -113,6 +114,7 @@ class OIDCConnectionService:
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
         self._passkey_rp_id = passkey_rp_id
+        self._offered_providers = offered_providers
 
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
@@ -445,6 +447,7 @@ class OIDCConnectionService:
                 account,
                 provider=provider,
                 passkey_rp_id=self._passkey_rp_id,
+                offered_providers=self._offered_providers,
                 links=self._links,
                 passkeys=self._passkeys,
             ):
@@ -542,6 +545,7 @@ class OIDCConnectionService:
             account,
             provider=oidc_identity_provider(connection.resolved_issuer),
             passkey_rp_id=self._passkey_rp_id,
+            offered_providers=self._offered_providers,
             links=self._links,
             passkeys=self._passkeys,
         ):
