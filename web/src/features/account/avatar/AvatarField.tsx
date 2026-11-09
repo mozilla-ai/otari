@@ -6,6 +6,8 @@ import {
   useState,
 } from "react"
 
+import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
+
 import { AvatarFace } from "./AvatarFace"
 import { face } from "./faces"
 import {
@@ -14,7 +16,6 @@ import {
   isAtRest,
   LANDING,
   LENS,
-  prefersReducedMotion,
   spring,
   springEasing,
   step,
@@ -44,7 +45,7 @@ const ROWS = 12
 export const FIELD_FACES = COLS * ROWS
 
 // A face fills 70% of its cell and rows sit one cell apart, so row and column
-// gaps match and a face swollen by the lens still clears its neighbours. A
+// gaps match and a face swollen by the lens still clears its neighbors. A
 // narrow frame gets a smaller shape at full size rather than a shrunken one,
 // which keeps every cell over the 44px touch floor.
 const MAX_PITCH = 52
@@ -104,7 +105,7 @@ function mod(n: number, m: number): number {
   return ((n % m) + m) % m
 }
 
-function cellCentre({ r, c }: Cell, pitch: number): { x: number; y: number } {
+function cellCenter({ r, c }: Cell, pitch: number): { x: number; y: number } {
   return {
     x: c * pitch + (mod(r, 2) ? pitch / 2 : 0),
     y: r * pitch * ROW_RATIO,
@@ -141,6 +142,12 @@ export function AvatarField({
   onChange: (id: number, source: ChangeSource) => void
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
+  // Where the frame sits on screen, measured on resize and when a pointer
+  // enters, so moving the pointer never reads layout.
+  const frameBox = useRef<DOMRect | null>(null)
+  const isReduced = usePrefersReducedMotion()
+  const reduced = useRef(isReduced)
+  reduced.current = isReduced
   const reticleRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 520, height: 300 })
   const isCompact = size.width < COMPACT_BELOW
@@ -169,7 +176,7 @@ export function AvatarField({
   onChangeRef.current = onChange
   const shownRef = useRef(shown)
   shownRef.current = shown
-  const centreId = useRef(value)
+  const centerId = useRef(value)
   // While a tapped face glides into the frame, the faces it passes over are
   // not choices: the tap already chose.
   const gliding = useRef(false)
@@ -188,11 +195,11 @@ export function AvatarField({
   const idAt = (cell: Cell) =>
     shownRef.current[mod(cell.r, ROWS) * COLS + mod(cell.c, COLS)]
 
-  const centredCell = () =>
+  const centeredCell = () =>
     cellAt(-offset.current.x.value, -offset.current.y.value, pitchRef.current)
 
   const pulse = () => {
-    if (prefersReducedMotion()) return
+    if (reduced.current) return
     reticleRef.current?.animate([{ scale: "1.12" }, { scale: "1" }], {
       duration: PULSE.duration,
       easing: PULSE.easing,
@@ -200,11 +207,11 @@ export function AvatarField({
   }
 
   // Report the face in the frame whenever it changes during a drag or a coast.
-  const reportCentre = () => {
+  const reportCenter = () => {
     if (gliding.current) return
-    const id = idAt(centredCell())
-    if (id === centreId.current) return
-    centreId.current = id
+    const id = idAt(centeredCell())
+    if (id === centerId.current) return
+    centerId.current = id
     onChangeRef.current(id, "drag")
     if (drag.current?.pointerType === "touch") haptic()
   }
@@ -224,11 +231,11 @@ export function AvatarField({
           o.y = axis(o.y.target)
           o.isLanding = false
           gliding.current = false
-          reportCentre()
+          reportCenter()
           pulse()
           haptic()
         } else {
-          reportCentre()
+          reportCenter()
         }
       }
       const l = lens.current
@@ -252,14 +259,14 @@ export function AvatarField({
 
   /** Land on `cell`, carrying `velocity` (px/s) into the spring. */
   const landOn = (cell: Cell, velocity = { x: 0, y: 0 }) => {
-    const { x, y } = cellCentre(cell, pitchRef.current)
+    const { x, y } = cellCenter(cell, pitchRef.current)
     const o = offset.current
-    if (prefersReducedMotion()) {
+    if (reduced.current) {
       o.x = axis(-x)
       o.y = axis(-y)
       o.isLanding = false
       gliding.current = false
-      reportCentre()
+      reportCenter()
       setFrame((n) => n + 1)
       return
     }
@@ -272,7 +279,7 @@ export function AvatarField({
   }
 
   const jumpTo = (cell: Cell) => {
-    const { x, y } = cellCentre(cell, pitchRef.current)
+    const { x, y } = cellCenter(cell, pitchRef.current)
     stopLanding()
     offset.current.x = axis(-x)
     offset.current.y = axis(-y)
@@ -281,7 +288,7 @@ export function AvatarField({
 
   const aimLens = (x: number, y: number) => {
     const l = lens.current
-    if (prefersReducedMotion()) {
+    if (reduced.current) {
       l.x = axis(x)
       l.y = axis(y)
       setFrame((n) => n + 1)
@@ -305,7 +312,7 @@ export function AvatarField({
     for (let i = kr - 1; i <= kr + 1; i++) {
       for (let j = kc - 1; j <= kc + 1; j++) {
         const cell = { r: r0 + i * ROWS, c: c0 + j * COLS }
-        const { x, y } = cellCentre(cell, pitch)
+        const { x, y } = cellCenter(cell, pitch)
         const distance = Math.hypot(x - view.x, y - view.y)
         if (distance < bestDistance) {
           bestDistance = distance
@@ -317,16 +324,33 @@ export function AvatarField({
   }
 
   // A new frame width rescales the lattice; keep the same cell in the frame.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the pitch; the rest are refs
   useEffect(() => {
     const o = offset.current
     const cell = cellAt(-o.x.value, -o.y.value, lastPitch.current)
     lastPitch.current = pitch
-    const { x, y } = cellCentre(cell, pitch)
+    const { x, y } = cellCenter(cell, pitch)
     o.x = axis(-x)
     o.y = axis(-y)
     o.isLanding = false
+    // A glide cut short ends wherever it was: that face is the choice now.
+    gliding.current = false
+    reportCenter()
     setFrame((n) => n + 1)
   }, [pitch])
+
+  // Asking for less motion mid-landing finishes the landing at once.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the preference on purpose
+  useEffect(() => {
+    if (!isReduced || !offset.current.isLanding) return
+    const o = offset.current
+    o.x = axis(o.x.target)
+    o.y = axis(o.y.target)
+    o.isLanding = false
+    gliding.current = false
+    reportCenter()
+    setFrame((n) => n + 1)
+  }, [isReduced])
 
   // Open on the current face, without motion: it is where the picker starts,
   // not a move the person made. The bloom is the only opening motion.
@@ -345,7 +369,7 @@ export function AvatarField({
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the order on purpose
   useEffect(() => {
     if (order === shown) return
-    if (prefersReducedMotion()) {
+    if (reduced.current) {
       setShown(order)
       return
     }
@@ -389,6 +413,7 @@ export function AvatarField({
     const frame = frameRef.current
     if (!frame) return
     const observer = new ResizeObserver(([entry]) => {
+      frameBox.current = frame.getBoundingClientRect()
       setSize({
         width: entry.contentRect.width,
         height: entry.contentRect.height,
@@ -405,10 +430,10 @@ export function AvatarField({
       const o = offset.current
       o.x = axis(o.x.value - event.deltaX)
       o.y = axis(o.y.value - event.deltaY)
-      reportCentre()
+      reportCenter()
       setFrame((n) => n + 1)
       window.clearTimeout(quiet)
-      quiet = window.setTimeout(() => landOn(centredCell()), 120)
+      quiet = window.setTimeout(() => landOn(centeredCell()), 120)
     }
     frame.addEventListener("wheel", onWheel, { passive: false })
     return () => {
@@ -421,7 +446,8 @@ export function AvatarField({
   }, [])
 
   const local = (event: PointerEvent) => {
-    const box = event.currentTarget.getBoundingClientRect()
+    frameBox.current ??= event.currentTarget.getBoundingClientRect()
+    const box = frameBox.current
     return {
       x: event.clientX - box.left - box.width / 2,
       y: event.clientY - box.top - box.height / 2,
@@ -481,7 +507,7 @@ export function AvatarField({
     const o = offset.current
     o.x = axis(state.from.x + dx)
     o.y = axis(state.from.y + dy)
-    reportCentre()
+    reportCenter()
     setFrame((n) => n + 1)
   }
 
@@ -492,11 +518,17 @@ export function AvatarField({
     setPressed(null)
     if (!state.moved) {
       const hit = cellUnder(event)
-      if (!hit) return
+      // Mid-shuffle a face can still show the look it is folding away from,
+      // so a tap then would choose a face nobody saw. Either way, settle
+      // whatever the press interrupted.
+      if (!hit || ripple.current) {
+        landOn(centeredCell())
+        return
+      }
       const [r, c] = hit.split(":").map(Number)
       const id = idAt({ r, c })
-      if (id !== centreId.current) {
-        centreId.current = id
+      if (id !== centerId.current) {
+        centerId.current = id
         gliding.current = true
         onChange(id, "tap")
       }
@@ -529,12 +561,12 @@ export function AvatarField({
     const move = moves[event.key]
     if (!move) return
     event.preventDefault()
-    const now = centredCell()
+    const now = centeredCell()
     const next = { r: now.r + move.r, c: now.c + move.c }
     // No motion on a key press: it lands as fast as the key repeats.
     jumpTo(next)
     const id = idAt(next)
-    centreId.current = id
+    centerId.current = id
     onChange(id, "key")
   }
 
@@ -553,9 +585,8 @@ export function AvatarField({
   const lensAt = { x: lens.current.x.value, y: lens.current.y.value }
   const reach = LENS_REACH_CELLS * pitch
 
-  // Read per render, so flipping the OS setting takes effect without
-  // reopening. Inline transitions outrank `motion-reduce:`; this does not.
-  const isReduced = prefersReducedMotion()
+  // Inline transitions outrank `motion-reduce:`, so the preference is read
+  // here rather than left to CSS.
   const isBlooming = !hasBloomed.current && !isReduced
   const renderedAt = performance.now()
   const tiles = []
@@ -564,9 +595,9 @@ export function AvatarField({
   let framedScale = 1
   for (let r = rMin; r <= rMax; r++) {
     for (let c = cMin; c <= cMax; c++) {
-      const centre = cellCentre({ r, c }, pitch)
-      const x = centre.x + ox
-      const y = centre.y + oy
+      const center = cellCenter({ r, c }, pitch)
+      const x = center.x + ox
+      const y = center.y + oy
       const rim = Math.hypot(x / windowX, y / windowY)
       if (rim >= EDGE + FADE) continue
       const toRing = Math.min(1, Math.max(0, (rim - 0.6) / (EDGE - 0.6)))
@@ -600,16 +631,21 @@ export function AvatarField({
         <div
           key={cellKey}
           data-cell={cellKey}
-          className="absolute top-1/2 left-1/2"
+          // The cell is the whole pitch, so a tap between faces still lands
+          // on one and every target clears 44px; the face sits inside it.
+          className="absolute top-1/2 left-1/2 flex items-center justify-center"
           style={{
-            width: tile,
-            height: tile,
+            width: pitch,
+            height: rowHeight,
             opacity,
             zIndex: scale > 1.05 ? 1 : 0,
-            transform: `translate(${x - tile / 2}px, ${y - tile / 2}px)`,
+            transform: `translate(${x - pitch / 2}px, ${y - rowHeight / 2}px)`,
           }}
         >
-          <div className="size-full" style={{ transform: `scale(${scale})` }}>
+          <div
+            className="shrink-0"
+            style={{ width: tile, height: tile, transform: `scale(${scale})` }}
+          >
             <div
               className="size-full"
               style={{
@@ -673,7 +709,10 @@ export function AvatarField({
         onPointerCancel={() => {
           drag.current = null
           setPressed(null)
-          landOn(centredCell())
+          landOn(centeredCell())
+        }}
+        onPointerEnter={(event) => {
+          frameBox.current = event.currentTarget.getBoundingClientRect()
         }}
         onPointerLeave={() => {
           if (!drag.current) aimLens(0, 0)

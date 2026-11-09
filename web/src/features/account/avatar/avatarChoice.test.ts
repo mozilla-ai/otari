@@ -40,10 +40,31 @@ describe("useAvatar", () => {
 
 describe("readAvatarChoice", () => {
   it("ignores a stored value that is not a face", () => {
-    window.localStorage.setItem(`otari.avatar.v2:${ADA}`, "not-a-face")
+    window.localStorage.setItem(`otari.avatar:${ADA}`, "not-a-face")
     expect(readAvatarChoice(ADA)).toBeNull()
-    window.localStorage.setItem(`otari.avatar.v2:${ADA}`, String(FACE_COUNT))
+    window.localStorage.setItem(`otari.avatar:${ADA}`, String(FACE_COUNT))
     expect(readAvatarChoice(ADA)).toBeNull()
+  })
+
+  it("keeps a pick for the page view when storage refuses it", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError")
+    })
+    const { result } = renderHook(() => useAvatar(GRACE))
+    const other = (defaultFaceFor(GRACE) + 1) % FACE_COUNT
+    act(() => saveAvatarChoice(GRACE, other))
+    expect(result.current).toBe(other)
+  })
+
+  it("redraws when another tab clears storage", () => {
+    saveAvatarChoice(ADA, 7)
+    const { result } = renderHook(() => useAvatar(ADA))
+    expect(result.current).toBe(7)
+    window.localStorage.clear()
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: null }))
+    })
+    expect(result.current).toBe(defaultFaceFor(ADA))
   })
 
   it("falls back to the default when storage is refused", () => {

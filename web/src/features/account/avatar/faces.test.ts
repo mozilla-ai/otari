@@ -5,8 +5,8 @@ import { defaultFaceFor, FACE_COUNT, face, sampleFaces } from "./faces"
 /** The lit cells of a face, read back off its path, as "x,y" strings. */
 function litCells(id: number): Set<string> {
   const lit = new Set<string>()
-  const { sides, centre } = face(id)
-  for (const run of (sides + centre).matchAll(/M(\d+) (\d+)h(\d+)/g)) {
+  const { sides, center } = face(id)
+  for (const run of (sides + center).matchAll(/M(\d+) (\d+)h(\d+)/g)) {
     const [x, y, width] = [Number(run[1]), Number(run[2]), Number(run[3])]
     for (let i = 0; i < width; i++) lit.add(`${x + i},${y}`)
   }
@@ -19,11 +19,11 @@ describe("face", () => {
     expect(FACE_COUNT).toBe(8 * 25_487)
   })
 
-  it("walks tone fastest, so neighbouring ids differ in colour first", () => {
+  it("walks tone fastest, so neighboring ids differ in color first", () => {
     expect(face(0).tone).toBe(1)
     expect(face(1).tone).toBe(2)
     expect(face(0).sides).toBe(face(1).sides)
-    expect(face(0).centre).toBe(face(1).centre)
+    expect(face(0).center).toBe(face(1).center)
   })
 
   it("draws every face mirrored, inside the margin, with 6 to 10 cells lit", () => {
@@ -50,12 +50,12 @@ describe("face", () => {
     expect(labels.size).toBe(4000)
   })
 
-  it("draws the centre column, and only it, in a second tone", () => {
+  it("draws the center column, and only it, in a second tone", () => {
     for (let id = 0; id < FACE_COUNT; id += 1499) {
-      const { tone, accent, centre } = face(id)
+      const { tone, accent, center } = face(id)
       expect(accent).not.toBe(tone)
-      expect(centre).not.toBe("")
-      for (const run of centre.matchAll(/M(\d+) /g)) expect(run[1]).toBe("3")
+      expect(center).not.toBe("")
+      for (const run of center.matchAll(/M(\d+) /g)) expect(run[1]).toBe("3")
     }
   })
 

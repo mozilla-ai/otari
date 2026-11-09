@@ -17,7 +17,7 @@ function readPreference(): boolean {
  *
  * Almost nothing here needs it: `motion-reduce:` covers a CSS transition or
  * animation without a component knowing anything. This is for the case CSS
- * cannot reach, which today is a canvas that animates itself and has to be told
+ * cannot reach: a canvas, or a spring stepped per frame, that has to be told
  * to stop.
  *
  * Subscribed rather than read once, because the preference can change while the

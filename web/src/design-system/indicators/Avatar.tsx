@@ -3,9 +3,9 @@
  *
  * It takes the letters rather than deriving them: turning an identity into
  * two letters is application logic, and a primitive has no business knowing
- * an account has a name or an email address. The account control no longer
- * draws initials (it draws the person's avatar face), and shows this with
- * "··" only while the identity loads.
+ * an account has a name or an email address. The account control draws the
+ * person's avatar face, and shows this with "··" only while the identity
+ * loads.
  *
  * No image, and no `src` prop to invite one. This dashboard has no avatar
  * upload, so the only way to fill one would be a third-party image host, which

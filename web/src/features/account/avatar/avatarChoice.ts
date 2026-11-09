@@ -11,11 +11,15 @@ import { defaultFaceFor, FACE_COUNT } from "./faces"
  * profile is the whole of making it shared; every reader goes through
  * `useAvatar`.
  */
-// v2: the generated set. A v1 pick indexed the retired 72-face set.
-const PREFIX = "otari.avatar.v2:"
+const PREFIX = "otari.avatar:"
 const listeners = new Set<() => void>()
+// Picks this browser refused to store (private mode, quota), kept for the
+// rest of the page view.
+const unstored = new Map<string, number>()
 
 export function readAvatarChoice(userId: string): number | null {
+  const held = unstored.get(userId)
+  if (held !== undefined) return held
   try {
     const raw = window.localStorage.getItem(PREFIX + userId)
     if (raw === null) return null
@@ -29,8 +33,9 @@ export function readAvatarChoice(userId: string): number | null {
 export function saveAvatarChoice(userId: string, id: number): void {
   try {
     window.localStorage.setItem(PREFIX + userId, String(id))
+    unstored.delete(userId)
   } catch {
-    // Storage refused (private mode, quota): the pick lasts this page view.
+    unstored.set(userId, id)
   }
   for (const notify of listeners) notify()
 }
@@ -38,7 +43,8 @@ export function saveAvatarChoice(userId: string, id: number): void {
 function subscribe(notify: () => void): () => void {
   listeners.add(notify)
   const onStorage = (event: StorageEvent) => {
-    if (event.key?.startsWith(PREFIX)) notify()
+    // A null key is another tab clearing storage.
+    if (event.key === null || event.key.startsWith(PREFIX)) notify()
   }
   window.addEventListener("storage", onStorage)
   return () => {

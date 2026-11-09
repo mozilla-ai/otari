@@ -25,10 +25,11 @@ export function AvatarFace({
   id: number
   className?: string
 }) {
-  const { tone, accent, sides, centre } = face(id)
+  const { tone, accent, sides, center } = face(id)
   return (
     <svg
       aria-hidden
+      data-face={id}
       viewBox="0 0 7 7"
       shapeRendering="crispEdges"
       className={`block shrink-0 ${className}`}
@@ -41,7 +42,7 @@ export function AvatarFace({
         }}
       />
       <path d={sides} fill={TONE_FILL[tone]} />
-      <path d={centre} fill={TONE_FILL[accent]} />
+      <path d={center} fill={TONE_FILL[accent]} />
     </svg>
   )
 }

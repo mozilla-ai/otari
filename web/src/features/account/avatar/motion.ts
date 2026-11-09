@@ -76,7 +76,3 @@ export function springEasing(
 
 /** A strong ease-out, for things arriving: fast to respond, soft to land. */
 export const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)"
-
-export function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
-}
