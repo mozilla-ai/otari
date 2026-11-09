@@ -8,10 +8,12 @@ import type {
 import { contextWeightsOf, sessionRequests } from "./contextMap"
 import {
   explainSpan,
+  GATES_NO_INPUT,
   type GateTally,
   gateGroupExplanation,
   groupWords,
   noInput,
+  TURN_NO_INPUT,
 } from "./explain"
 import {
   failureLabel,
@@ -282,10 +284,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           completionTokens: turn.output_tokens,
           cachedTokens: turn.cache_read_tokens,
           cost: turn.cost > 0 ? turn.cost : undefined,
-          noInput: {
-            sentence:
-              "A turn keeps nothing of its own. Its steps are under it.",
-          },
+          noInput: TURN_NO_INPUT,
           isRollup: true,
           metadata: {
             State: turn.state,
@@ -366,6 +365,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         : undefined
     }
     const adoptedBy = new Map<string, string | null>()
+    // The request whose row a lone call took, so the row says why that request shows nothing.
+    const foldedInto = new Map<string, TraceSpan>()
     // A span's gates go under one row of their own, so a tool call reads as one
     // line until it is opened, and its gates as one more until they are.
     const visit = (node: SpanNode, parentOverride?: string) => {
@@ -373,6 +374,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
       const call = loneCall(node)
       if (call) {
         adoptedBy.set(call.span.span_id, parentOf(span))
+        foldedInto.set(call.span.span_id, span)
         visit(call)
         return
       }
@@ -390,6 +392,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
       const input = spanInput(span)
       const gate = gateCheck(span, gateSummaries, checkEvidence)
+      const folded = foldedInto.get(span.span_id)
       observations.push({
         id: span.span_id,
         parentObservationId:
@@ -408,7 +411,9 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         output: spanOutput(span),
         // A gate can read its evidence off a sibling gate of the same check.
         noInput:
-          input === undefined && !gate?.evidence ? noInput(span) : undefined,
+          input === undefined && !gate?.evidence
+            ? noInput(folded?.opens_turn ? folded : span)
+            : undefined,
         gate,
         detail:
           span.operation === "tool.blocked_on_user" ||
@@ -469,7 +474,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
             span.kind === "step",
             gateNodes.length,
           ),
-          noInput: { sentence: "Its gates are under it." },
+          noInput: GATES_NO_INPUT,
         })
         for (const gate of gateNodes) visit(gate, groupId)
       }

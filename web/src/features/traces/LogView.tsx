@@ -205,8 +205,15 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
-                  {obs.input == null && obs.output == null && obs.noInput ? (
+                  {obs.input == null && obs.noInput ? (
                     <NoInputNote noInput={obs.noInput} />
+                  ) : null}
+                  {obs.input == null && obs.gate?.evidence ? (
+                    <IOBlock
+                      label="What it checked"
+                      value={obs.gate.evidence}
+                      format={format}
+                    />
                   ) : null}
                   {obs.input != null ? (
                     <IOBlock label="Input" value={obs.input} format={format} />

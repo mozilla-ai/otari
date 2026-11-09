@@ -235,7 +235,7 @@ describe("SessionsPage", () => {
         ...detail,
         spans: detail.spans.map((span) =>
           span.span_id === "call-toolu_1"
-            ? { ...span, origin: "otlp" as const }
+            ? { ...span, origin: "otlp" as const, operation: "tool" }
             : span,
         ),
       },
@@ -291,7 +291,12 @@ describe("SessionsPage", () => {
         ...detail,
         spans: detail.spans.map((span) =>
           span.span_id === "call-toolu_1"
-            ? { ...span, origin: "otlp" as const, outcome: "blocked" as const }
+            ? {
+                ...span,
+                origin: "otlp" as const,
+                operation: "tool",
+                outcome: "blocked" as const,
+              }
             : span,
         ),
       },
@@ -322,6 +327,77 @@ describe("SessionsPage", () => {
     expect(
       within(peek).getByRole("link", { name: /How to keep it/ }),
     ).toBeInTheDocument()
+  })
+
+  it("says why a tool shows no input beside the output it kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // A routed call whose output was kept and whose arguments were not.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { "tool.output": "3 files changed" } }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=call-toolu_1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("Output")).toBeInTheDocument()
+    expect(within(peek).getAllByText(/3 files changed/).length).toBeGreaterThan(
+      0,
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(within(peek).getByRole("button", { name: /\(call-too\)/ }))
+
+    expect(
+      within(peek).getByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+  })
+
+  it("says what a gate checked is not shown, and links how to keep it", async () => {
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(/What the gate checked is not shown\./),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    )
   })
 
   it("reads an opened session in the workspace its list entry names", async () => {

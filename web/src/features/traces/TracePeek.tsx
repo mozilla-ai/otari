@@ -119,7 +119,7 @@ function PreviewBody({
           </p>
         </section>
       ) : null}
-      {empty && noInput ? (
+      {input == null && noInput ? (
         <NoInputNote noInput={noInput} className="text-subtle" />
       ) : null}
       <IOBlock label="Input" value={input} format={format} />

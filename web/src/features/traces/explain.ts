@@ -33,12 +33,13 @@ export interface NoInput {
   docsHref?: string
 }
 
-const KEEPING_CONTENT = docsSourceHref(
+export const KEEPING_CONTENT = docsSourceHref(
   "traces.md",
   "keeping-what-a-span-was-about",
 )
 
-// The tools Claude Code reports a command or a file path for.
+// The tools Claude Code reports a command or a file path for. Otari keeps
+// Claude Code's full_command and file_path; these are the tools that send them.
 const TOOL_KEEPS: Record<string, string> = {
   Bash: "command",
   Read: "file path",
@@ -47,17 +48,29 @@ const TOOL_KEEPS: Record<string, string> = {
 }
 
 // A step that opens a turn can keep its prompt, routed or exported. A routed
-// request can keep each tool call's arguments; an exported tool only a command
-// or file path, and an exported gate what it checked.
+// request can keep each tool call's arguments; a tool Claude Code exported only
+// a command or file path, and an exported gate what it checked.
 function notShown(span: TraceSpan): string | undefined {
   if (span.kind === "step" && span.opens_turn) return "Its prompt is not shown."
   if (span.origin === "gateway")
     return span.kind === "tool" ? "Its arguments are not shown." : undefined
-  const kept = span.kind === "tool" ? TOOL_KEEPS[span.tool_name ?? ""] : null
-  if (kept) return `Its ${kept} is not shown.`
+  const tool = span.tool_name ?? ""
+  // Claude Code names its tool spans' operation "tool"; other exporters' tools keep nothing.
+  if (
+    span.kind === "tool" &&
+    span.operation === "tool" &&
+    Object.hasOwn(TOOL_KEEPS, tool)
+  )
+    return `Its ${TOOL_KEEPS[tool]} is not shown.`
   if (gateVerdict(span)) return "What the gate checked is not shown."
   return undefined
 }
+
+export const TURN_NO_INPUT: NoInput = {
+  sentence: "A turn keeps nothing of its own. Its steps are under it.",
+}
+
+export const GATES_NO_INPUT: NoInput = { sentence: "Its gates are under it." }
 
 export function noInput(span: TraceSpan): NoInput {
   const sentence = notShown(span)

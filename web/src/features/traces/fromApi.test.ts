@@ -520,6 +520,8 @@ describe("toTrace", () => {
         kind: "tool",
         tool_name,
         origin,
+        // Claude Code names its tool spans' operation "tool".
+        operation: origin === "otlp" ? "tool" : "execute_tool",
       })
     const base = traceDetail()
     const trace = toTrace(
@@ -540,6 +542,16 @@ describe("toTrace", () => {
           tool("fetch-1", "WebFetch"),
           // Read off a request the gateway routed, which keeps its arguments.
           tool("routed-1", "Bash", "gateway"),
+          // Another exporter's tool, which Otari keeps nothing of.
+          traceSpan({
+            span_id: "other-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            origin: "otlp",
+            operation: "execute_tool",
+          }),
+          tool("proto-1", "constructor"),
           traceSpan({
             span_id: "gate-1",
             parent_span_id: "bash-1",
@@ -594,6 +606,12 @@ describe("toTrace", () => {
       sentence: "Its arguments are not shown.",
       docsHref: docs,
     })
+    expect(byId.get("other-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this tool.",
+    })
+    expect(byId.get("proto-1")?.noInput).toEqual({
+      sentence: "Otari keeps no content for this tool.",
+    })
     expect(byId.get("mcp-1")?.noInput).toEqual({
       sentence: "Otari keeps no content for this kind of span.",
     })
@@ -616,6 +634,32 @@ describe("toTrace", () => {
     expect(byId.get("req-2")?.noInput).toEqual({
       sentence: "A request that continues a turn keeps nothing of its own.",
     })
+    expect(byId.get("llm-2")?.noInput).toEqual({
+      sentence: "Otari never keeps what a model call sent or got back.",
+    })
+  })
+
+  it("keeps the prompt hint on a call that took its turn-opening request's row", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", opens_turn: true }),
+          traceSpan({ span_id: "llm-1", parent_span_id: "req-1", kind: "llm" }),
+          traceSpan({ span_id: "req-2" }),
+          traceSpan({ span_id: "llm-2", parent_span_id: "req-2", kind: "llm" }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.has("req-1")).toBe(false)
+    expect(byId.get("llm-1")?.noInput).toEqual({
+      sentence: "Its prompt is not shown.",
+      docsHref:
+        "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    })
+    expect(byId.has("req-2")).toBe(false)
     expect(byId.get("llm-2")?.noInput).toEqual({
       sentence: "Otari never keeps what a model call sent or got back.",
     })
