@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { useModelCatalog } from "@/features/models/ModelComboBox"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
  * One repeated row of a policy section, with the model catalog's hint under the
@@ -30,7 +30,7 @@ export function SectionRow({
   const { hint } = useModelCatalog(
     modelValue,
     "catalog",
-    useSelectedWorkspace().selected?.workspace_id,
+    useNarrowingWorkspace(),
   )
   return (
     <div className="flex flex-col gap-1">

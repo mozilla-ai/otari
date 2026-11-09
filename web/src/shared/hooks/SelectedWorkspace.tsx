@@ -121,3 +121,14 @@ const NO_WORKSPACE: SelectedWorkspace = {
 export function useSelectedWorkspace(): SelectedWorkspace {
   return useContext(Context) ?? NO_WORKSPACE
 }
+
+/**
+ * The workspace a read narrows to: the selected one's id, `""` for a caller
+ * with no workspace (the whole reach), or `null` while the selection is not
+ * final, so a workspace-bound read waits rather than answering unscoped first.
+ */
+export function useNarrowingWorkspace(): string | null {
+  const { selected, isSettled } = useSelectedWorkspace()
+  if (selected) return selected.workspace_id
+  return isSettled ? "" : null
+}

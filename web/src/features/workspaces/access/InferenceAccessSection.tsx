@@ -162,9 +162,12 @@ export function InferenceAccessSection({
       ? hostedRows.find((row) => row.provider === open.provider)
       : undefined
 
+  // Held for the policy too: until it answers, no row knows it is blocked, and
+  // a key's model dialog would offer what the workspace refuses.
   const isLoading =
     (overrides.isPending && !overrides.data) ||
-    (hosted.isPending && !hosted.data)
+    (hosted.isPending && !hosted.data) ||
+    (policy.isPending && !policy.data)
 
   // One row per provider: a provider with several sources (two keys, or a key
   // and a hosted provider) folds them under a row that opens in place.

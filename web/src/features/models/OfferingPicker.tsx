@@ -75,8 +75,11 @@ export function OfferingPicker({
   isRequired?: boolean
   autoFocus?: boolean
   actions?: ReactNode
-  /** Narrows the catalog to what this workspace may call; unset is the caller's whole reach. */
-  workspaceId?: string
+  /**
+   * Narrows the catalog to what this workspace may call; unset is the
+   * caller's whole reach, and `null` holds it until the workspace is known.
+   */
+  workspaceId?: string | null
 }) {
   const [query, setQuery] = useState("")
   // The field reports a keystroke and a pick through the same `onChange`, a

@@ -3,7 +3,7 @@ import { useState } from "react"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { OfferingPicker } from "@/features/models/OfferingPicker"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import { PolicyGroup } from "./PolicyGroup"
 import {
@@ -33,7 +33,7 @@ export function MainSelectionGroup({
   isDeploymentWide: boolean
   fallbackWorkspaceId: string | null
 }) {
-  const workspaceId = useSelectedWorkspace().selected?.workspace_id
+  const workspaceId = useNarrowingWorkspace()
   const writer = usePolicyWrite(row, { isDeploymentWide, fallbackWorkspaceId })
   const [main, setMain] = useState({ target: stored.target, pool: stored.pool })
   const draft = { ...stored, ...main }

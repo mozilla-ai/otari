@@ -6,7 +6,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import type { TierDown } from "./policyDraft"
 import { SectionRow } from "./SectionRow"
@@ -19,7 +19,7 @@ export function TierDownSection({
   tierDowns: TierDown[]
   onChange: (next: TierDown[]) => void
 }) {
-  const workspaceId = useSelectedWorkspace().selected?.workspace_id
+  const workspaceId = useNarrowingWorkspace()
   const update = (index: number, patch: Partial<TierDown>) =>
     onChange(
       tierDowns.map((tier, i) => (i === index ? { ...tier, ...patch } : tier)),

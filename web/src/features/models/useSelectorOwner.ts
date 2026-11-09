@@ -18,7 +18,7 @@ const LOOKUP_LIMIT = 25
 export function useSelectorOwner(
   selector: string,
   enabled = true,
-  workspaceId = "",
+  workspaceId: string | null = "",
 ): CatalogModelSummary | undefined {
   const term = useDebounced(selector.trim())
   const lookup = useCatalogSearch(

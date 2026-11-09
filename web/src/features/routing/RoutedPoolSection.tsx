@@ -8,7 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import {
   type PoolDraft,
@@ -57,7 +57,7 @@ export function RoutedPoolSection({
   /** Whether the policy already dispatches as many models as it may. */
   isAtCap: boolean
 }) {
-  const workspaceId = useSelectedWorkspace().selected?.workspace_id
+  const workspaceId = useNarrowingWorkspace()
   const { backend, models, weights, safeIndex } = pool
   const isWeighted = backend === WEIGHTED_BACKEND
   const isPriority = backend === PRIORITY_BACKEND

@@ -1,50 +1,54 @@
 import { expect, type Page, test } from "@playwright/test"
 
-import { login } from "../helpers"
-import { PARITY } from "../parity-data"
-import { call, docScreenshot, listed } from "./fixtures"
+import { API_ROOT } from "@/shared/api/client"
 
-const KEY_NAME = "playground"
+import { authHeaders, expectOk, login } from "../helpers"
+import { PARITY } from "../parity-data"
+import { call, docScreenshot } from "./fixtures"
+
 const KEYS = "/organizations/me/provider-keys"
 
 /**
  * An organization key offering the seeded model, so the workspace has a model
  * to chat with. The Playground lists only what its workspace may call, and a
  * pricing row alone is not that. The credential is fake: nothing is sent.
+ * Returns the key's id, for the clean-up.
  */
-async function offerModel(page: Page): Promise<void> {
+async function offerModel(page: Page): Promise<string> {
   const { provider, model } = PARITY.models.priced
-  await call(page, "POST", KEYS, {
-    provider,
-    name: KEY_NAME,
-    api_key: "sk-docs-playground-not-a-secret",
+  const created = await page.request.post(`${API_ROOT}${KEYS}`, {
+    headers: authHeaders,
+    data: {
+      provider,
+      name: "playground",
+      api_key: "sk-docs-playground-not-a-secret",
+    },
   })
-  const key = await keyId(page)
-  if (key) await call(page, "POST", `${KEYS}/${key}/models`, { model })
-}
-
-async function keyId(page: Page): Promise<string | undefined> {
-  const keys = await listed<{ id: string; name: string }>(page, KEYS)
-  return keys.find((key) => key.name === KEY_NAME)?.id
+  await expectOk(created, `POST ${KEYS}`)
+  const { id } = (await created.json()) as { id: string }
+  await call(page, "POST", `${KEYS}/${id}/models`, { model })
+  return id
 }
 
 /** A key is deleted once archived. */
-async function cleanUp(page: Page): Promise<void> {
-  const key = await keyId(page)
-  if (!key) return
-  await call(page, "POST", `${KEYS}/${key}/archive`)
-  await call(page, "DELETE", `${KEYS}/${key}`)
+async function removeKey(page: Page, id: string): Promise<void> {
+  await call(page, "POST", `${KEYS}/${id}/archive`)
+  await call(page, "DELETE", `${KEYS}/${id}`)
 }
-
-test.afterEach(async ({ page }) => {
-  await cleanUp(page)
-})
 
 // docs/playground.md. The page's controls are checked by the labels the steps
 // give them; sending a prompt needs a provider this gateway does not have, so
 // the capture is the page a reader lands on.
 test("the playground", async ({ page }) => {
-  await offerModel(page)
+  const keyId = await offerModel(page)
+  try {
+    await walkThePlayground(page)
+  } finally {
+    await removeKey(page, keyId)
+  }
+})
+
+async function walkThePlayground(page: Page): Promise<void> {
   await login(page)
   await page.getByRole("link", { name: "Playground", exact: true }).click()
 
@@ -53,6 +57,10 @@ test("the playground", async ({ page }) => {
   await expect(page.getByText("Starting points")).toBeVisible()
   await expect(page.getByRole("button", { name: "Add tools" })).toContainText(
     "Tools",
+  )
+  // The capture shows the model the key above offers, not one from elsewhere.
+  await expect(page.getByRole("button", { name: "Model" })).toHaveText(
+    `${PARITY.models.priced.provider}/${PARITY.models.priced.model}`,
   )
   await docScreenshot(page, "playground-single")
 
@@ -63,4 +71,4 @@ test("the playground", async ({ page }) => {
   }
   await expect(history.getByLabel("Search history")).toBeVisible()
   await expect(history.getByRole("button", { name: "View all" })).toBeVisible()
-})
+}

@@ -2,17 +2,13 @@ import { Fragment, useId } from "react"
 
 import { offeringPhrase } from "@/features/models/offerings"
 import { useSelectorOwner } from "@/features/models/useSelectorOwner"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import { WEIGHTED_BACKEND } from "./policyModel"
 
 /** One target in words, named from the catalog once it answers. */
 function Offering({ selector }: { selector: string }) {
-  const owner = useSelectorOwner(
-    selector,
-    true,
-    useSelectedWorkspace().selected?.workspace_id,
-  )
+  const owner = useSelectorOwner(selector, true, useNarrowingWorkspace())
   return (
     <span className="text-foreground">{offeringPhrase(selector, owner)}</span>
   )
