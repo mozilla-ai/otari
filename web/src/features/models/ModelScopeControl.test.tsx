@@ -30,6 +30,7 @@ function mockApi({
   providerKeys = [] as ReturnType<typeof orgProviderKey>[],
   providerKeysStatus = 200,
   requireZeroRetention = false,
+  policyStatus = 200,
 } = {}) {
   const urls: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -60,6 +61,7 @@ function mockApi({
       })
     }
     if (url.includes("/provider-policy")) {
+      if (policyStatus !== 200) return json({ detail: "nope" }, policyStatus)
       return json({ require_zero_data_retention: requireZeroRetention })
     }
     if (new URL(url, "http://localhost").pathname === `${API_ROOT}/models`) {
@@ -198,6 +200,24 @@ describe("ModelScopeControl", () => {
     expect(
       screen.queryByRole("option", { name: /^All local-vllm models/ }),
     ).not.toBeInTheDocument()
+  })
+
+  it("says when the workspace's policy could not be read", async () => {
+    // Narrowed to the listing until the policy answers, and said, so a missing
+    // choice is not mistaken for a provider that does not exist.
+    mockApi({
+      operator: true,
+      models: ["byok-openai:gpt-4o-mini"],
+      providers: ["byok-openai", "local-vllm"],
+      policyStatus: 500,
+    })
+    renderControl({ initial: ["byok-openai:gpt-4o"], workspaceId: "ws-1" })
+
+    expect(
+      await screen.findByText(
+        /data retention policy, so only the models it lists/,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("offers an operator a wildcard for a hosted provider /models cannot list", async () => {
