@@ -5,6 +5,7 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  maxEndUsersError,
   NO_SERVICE_KEY,
   type ServiceKeyChoice,
   ServiceKeyFields,
@@ -115,7 +116,7 @@ describe("ServiceKeyFields", () => {
   it("keeps an organization's key a service key once it is one", () => {
     stubBudgets()
     renderFields(
-      { isServiceKey: true, budgetIds: [], defaultBudgetId: "" },
+      { ...NO_SERVICE_KEY, isServiceKey: true, maxEndUsers: "10000" },
       { scope: "organization", isLocked: true },
     )
 
@@ -160,6 +161,7 @@ describe("ServiceKeyFields", () => {
       isServiceKey: true,
       budgetIds: ["eu-ai", "eu-memories"],
       defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
     })
   })
 
@@ -170,6 +172,7 @@ describe("ServiceKeyFields", () => {
       isServiceKey: true,
       budgetIds: ["eu-ai", "eu-memories"],
       defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
     })
 
     await user.click(await screen.findByRole("checkbox", { name: "AI eu-ai" }))
@@ -178,6 +181,7 @@ describe("ServiceKeyFields", () => {
       isServiceKey: true,
       budgetIds: ["eu-memories"],
       defaultBudgetId: "",
+      maxEndUsers: "",
     })
   })
 
@@ -188,6 +192,7 @@ describe("ServiceKeyFields", () => {
       isServiceKey: true,
       budgetIds: ["eu-ai"],
       defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
     })
 
     await pickOption(user, "Default end-user budget", /^None: uncapped/)
@@ -196,6 +201,61 @@ describe("ServiceKeyFields", () => {
     expect(
       screen.getByRole("button", { name: /Default end-user budget/ }),
     ).toHaveTextContent("None: uncapped unless a request names one")
+  })
+
+  it("starts an organization's key at the default cap and refuses it empty", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields(NO_SERVICE_KEY, { scope: "organization" })
+
+    await user.click(screen.getByLabelText("Service key"))
+    const cap = await screen.findByRole("textbox", { name: /Max end users/ })
+    expect(cap).toHaveValue("10000")
+
+    await user.clear(cap)
+    expect(latest()?.maxEndUsers).toBe("")
+    expect(await screen.findByText("Required")).toBeInTheDocument()
+  })
+
+  it("leaves an operator's key uncapped when the cap is empty", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields()
+
+    await user.click(screen.getByLabelText("Service key"))
+    const cap = await screen.findByRole("textbox", { name: /Max end users/ })
+    expect(cap).toHaveValue("")
+    await user.type(cap, "2.5")
+
+    expect(latest()?.maxEndUsers).toBe("2.5")
+    expect(
+      await screen.findByText("A whole number, 0 or more"),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("maxEndUsersError", () => {
+  const choice = { ...NO_SERVICE_KEY, isServiceKey: true }
+
+  it("takes no cap only on an operator's key", () => {
+    expect(maxEndUsersError(choice, "deployment")).toBeUndefined()
+    expect(maxEndUsersError(choice, "organization")).toBe("Required")
+  })
+
+  it("takes a whole number, zero included", () => {
+    expect(
+      maxEndUsersError({ ...choice, maxEndUsers: "0" }, "organization"),
+    ).toBeUndefined()
+    expect(
+      maxEndUsersError({ ...choice, maxEndUsers: "-1" }, "deployment"),
+    ).toBe("A whole number, 0 or more")
+    // Past the safe range it would round, or serialize as null and clear the cap.
+    expect(
+      maxEndUsersError(
+        { ...choice, maxEndUsers: "9".repeat(400) },
+        "deployment",
+      ),
+    ).toBe("At most 9,007,199,254,740,991")
   })
 })
 
@@ -206,12 +266,24 @@ describe("serviceKeyBody", () => {
         isServiceKey: true,
         budgetIds: ["eu-ai"],
         defaultBudgetId: "",
+        maxEndUsers: "",
       }),
     ).toEqual({
       is_service_key: true,
       end_user_budget_ids: ["eu-ai"],
       end_user_budget_id: null,
+      max_end_users: null,
     })
+  })
+
+  it("sends the cap as a number", () => {
+    expect(
+      serviceKeyBody({
+        ...NO_SERVICE_KEY,
+        isServiceKey: true,
+        maxEndUsers: " 500 ",
+      }),
+    ).toMatchObject({ max_end_users: 500 })
   })
 
   it("sends only the flag for a key that is not one, so its budgets survive", () => {
@@ -220,6 +292,7 @@ describe("serviceKeyBody", () => {
         isServiceKey: false,
         budgetIds: ["eu-ai"],
         defaultBudgetId: "eu-ai",
+        maxEndUsers: "",
       }),
     ).toEqual({ is_service_key: false })
   })

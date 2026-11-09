@@ -64,6 +64,9 @@ export const KEYS = "keys"
 // edit invalidates KEYS, and that changes nothing about which identities may
 // stand in for the key.
 export const FEDERATION_RULES = "federation-rules"
+// A service key's end users, which requests create rather than key edits, so
+// also a root of its own.
+export const KEY_END_USERS = "key-end-users"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
