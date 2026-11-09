@@ -45,7 +45,8 @@ export const serviceKeyChoice = (apiKey: ApiKey): ServiceKeyChoice => ({
   budgetIds: apiKey.end_user_budget_ids,
   defaultBudgetId: apiKey.end_user_budget_id ?? "",
   maxEndUsers:
-    apiKey.max_end_users === null ? "" : String(apiKey.max_end_users),
+    // A gateway older than the field omits it, which reads as no cap.
+    apiKey.max_end_users == null ? "" : String(apiKey.max_end_users),
 })
 
 /**
@@ -62,7 +63,11 @@ export function maxEndUsersError(
   if (typed === "") {
     return scope === "organization" ? "Required" : undefined
   }
-  return /^\d+$/.test(typed) ? undefined : "A whole number, 0 or more"
+  // Past the safe range a number rounds, or becomes Infinity, which JSON sends
+  // as null and so would clear the cap.
+  return /^\d+$/.test(typed) && Number.isSafeInteger(Number(typed))
+    ? undefined
+    : "A whole number, 0 or more"
 }
 
 /**

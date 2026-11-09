@@ -36,7 +36,8 @@ export function EndUsersDialog({
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [query, setQuery] = useState("")
-  const externalId = useDebounced(query.trim())
+  // Untrimmed: an id is any string, spaces included.
+  const externalId = useDebounced(query)
   const endUsers = useKeyEndUsers(apiKey.id, page, pageSize, externalId)
   const budgets = useEndUserBudgets(
     apiKey.is_organization_service_key ? "organization" : "deployment",

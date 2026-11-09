@@ -131,6 +131,29 @@ describe("EndUsersDialog", () => {
     ).toBe(true)
   })
 
+  it("pages past the first 25 end users", async () => {
+    const rows = Array.from({ length: 26 }, (_, index) =>
+      endUser({ user_id: `svc:user-${index}`, external_id: `user-${index}` }),
+    )
+    const fetchSpy = mockApi(rows)
+    const user = userEvent.setup()
+    renderDialog()
+
+    await screen.findByText("user-24")
+    expect(screen.queryByText("user-25")).not.toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Next page, end users of mlpa" }),
+    )
+
+    expect(await screen.findByText("user-25")).toBeInTheDocument()
+    expect(screen.queryByText("user-0")).not.toBeInTheDocument()
+    expect(
+      fetchSpy.mock.calls.some(([input]) =>
+        String(input).includes("skip=25&limit=26"),
+      ),
+    ).toBe(true)
+  })
+
   it("says when the key has no end users", async () => {
     mockApi([])
     renderDialog()

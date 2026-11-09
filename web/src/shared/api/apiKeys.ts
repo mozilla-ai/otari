@@ -156,6 +156,9 @@ export function useKeyEndUsers(
       return { rows: rows.slice(0, pageSize), hasMore: rows.length > pageSize }
     },
     enabled: scope.isReady,
+    // Requests move spend and counts all the time, so a reopen within a few
+    // seconds reuses the page and anything later reads it again.
+    staleTime: 10_000,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === keyId ? previous : undefined,
   })

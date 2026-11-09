@@ -249,6 +249,13 @@ describe("maxEndUsersError", () => {
     expect(
       maxEndUsersError({ ...choice, maxEndUsers: "-1" }, "deployment"),
     ).toBe("A whole number, 0 or more")
+    // Past the safe range it would round, or serialize as null and clear the cap.
+    expect(
+      maxEndUsersError(
+        { ...choice, maxEndUsers: "9".repeat(400) },
+        "deployment",
+      ),
+    ).toBe("A whole number, 0 or more")
   })
 })
 

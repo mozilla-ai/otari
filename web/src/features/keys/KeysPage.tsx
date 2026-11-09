@@ -1359,7 +1359,13 @@ export function KeysPage() {
   // react-aria's own restore has no target left. Measured, not assumed: dropping
   // this strands focus in both the regenerate-cancel and edit-close tests.
   const { triggerRef: actionTriggerRef } = useConfirmationFocus(
-    !!(pendingRegenerate || pendingDelete || editing || regenerated),
+    !!(
+      pendingRegenerate ||
+      pendingDelete ||
+      editing ||
+      regenerated ||
+      listingEndUsers
+    ),
   )
   const tableRegion = useRef<HTMLDivElement>(null)
   // Seeded from the viewport rather than defaulting to "wide": the observer only
