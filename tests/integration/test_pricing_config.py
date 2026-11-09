@@ -784,6 +784,33 @@ def _undated_rates_config(audio_input_price: float) -> GatewayConfig:
 
 
 @pytest.mark.asyncio
+async def test_a_restart_puts_an_undated_config_rate_back_over_a_rate_set_through_the_api(
+    async_db: AsyncSession,
+) -> None:
+    """The file's rate differs from the API's version in force, so the restart adds it again."""
+    config = _undated_pricing_config(30.0)
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await _pricing(async_db).write_rate(
+        "openai:gpt-4", input_price_per_million=25.0, output_price_per_million=50.0, cache_rates={}
+    )
+    await async_db.commit()
+    set_through_the_api = (await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC)))[
+        "openai:gpt-4"
+    ]
+    assert set_through_the_api.origin == "api"
+    assert set_through_the_api.input_price_per_million == Decimal(25)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    in_force = (await _pricing(async_db).current_versions(["openai:gpt-4"], datetime.now(UTC)))["openai:gpt-4"]
+    assert in_force.origin == "config"
+    assert in_force.input_price_per_million == Decimal(30)
+    assert in_force.output_price_per_million == Decimal(60)
+    assert in_force.cache_read_price_per_million == Decimal(3)
+    assert in_force.pricing_tiers == [{"min_input_tokens": 1000, "input_price_per_million": 40.0}]
+
+
+@pytest.mark.asyncio
 async def test_undated_config_rates_block_is_seeded_once_across_restarts(async_db: AsyncSession) -> None:
     """An unchanged ``rates`` block adds no row on a restart."""
     config = _undated_rates_config(100.0)
