@@ -394,7 +394,11 @@ function EnforcementSection({
 }) {
   const set = useSetOrganizationSsoEnforcement()
   const preflight = useOrganizationSsoPreflight()
-  const candidates = preflight.data?.break_glass_candidates ?? []
+  // An unread report and a report of nobody are different answers, and the controls below would
+  // otherwise state the second while holding the first: turning enforcement on is the one action
+  // here that costs somebody their access, so it waits for the report rather than assuming it.
+  const report = preflight.data ?? null
+  const candidates = report?.break_glass_candidates ?? []
   const [required, setRequired] = useState(enforcement.required)
   const [breakGlassUserId, setBreakGlassUserId] = useState(
     enforcement.break_glass_user_id ?? "",
@@ -435,7 +439,14 @@ function EnforcementSection({
       <Checkbox isSelected={required} onChange={setRequired}>
         Require sign-in through this connection
       </Checkbox>
-      {required ? (
+      {required && report === null ? (
+        <p className="text-caption">
+          {preflight.error === null
+            ? "Reading who this would affect\u2026"
+            : "Who this would affect could not be read, so it cannot be turned on yet. Try again."}
+        </p>
+      ) : null}
+      {required && report !== null ? (
         <div className="flex flex-col gap-3">
           {candidates.length === 0 ? (
             <p className="text-caption">
@@ -487,7 +498,12 @@ function EnforcementSection({
       ) : null}
       <ErrorBanner error={set.error} />
       <div className="flex justify-end border-t border-border pt-4">
-        <Button variant="primary" onPress={submit} isPending={set.isPending}>
+        <Button
+          variant="primary"
+          onPress={submit}
+          isPending={set.isPending}
+          isDisabled={required && report === null}
+        >
           Save enforcement
         </Button>
       </div>

@@ -39,6 +39,8 @@ interface MockOpts {
   context?: OrganizationContext
   members?: OrganizationMember[]
   preflight?: OrganizationSsoPreflight
+  /** What the preflight answers, so a test can drive the page without a report. */
+  preflightResponse?: () => Response
   /** What a save answers, so a test can drive the refusal path. */
   save?: () => Response
   /** What setting enforcement answers, so a test can drive each of its refusals. */
@@ -63,6 +65,7 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse(served)
     }
     if (url.includes("/sso/preflight")) {
+      if (opts.preflightResponse) return opts.preflightResponse()
       return jsonResponse(preflight)
     }
     if (url.includes("/sso/enforcement")) {
@@ -510,6 +513,28 @@ describe("OrganizationSsoPage", () => {
         "Nobody has signed in through this organization's connection yet, so there is nothing proven to require.",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("refuses to turn enforcement on before it can say who it affects", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflightResponse: () => jsonResponse({ detail: "unavailable" }, 503),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/could not be read, so it cannot be turned on/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Save enforcement" }),
+    ).toBeDisabled()
   })
 
   it("says what a save did, because the form looks unchanged otherwise", async () => {

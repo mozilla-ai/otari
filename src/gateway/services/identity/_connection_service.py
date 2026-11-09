@@ -482,7 +482,12 @@ class OIDCConnectionService:
         async with self._uow:
             connection: OIDCConnection | None = None
             if break_glass_user_id is not None:
-                await self._require_break_glass_owner(organization, break_glass_user_id)
+                await self._require_break_glass_member(organization, break_glass_user_id)
+                # Ownership only while enforcement is on, because that is the only time the
+                # exception grants anything: an owner demoted since they were named would otherwise
+                # stand in the way of turning enforcement off.
+                if required:
+                    await self._require_break_glass_owner(organization, break_glass_user_id)
             if required:
                 connection = await self._require_connection_ready_for_enforcement(
                     organization, break_glass_user_id=break_glass_user_id, break_glass_waived=break_glass_waived
@@ -537,14 +542,29 @@ class OIDCConnectionService:
         ):
             raise SsoBreakGlassRouteRequiredError
 
+    async def _require_break_glass_member(self, organization: Organization, user_id: uuid.UUID) -> None:
+        """Refuse a break-glass account that is not an active member of this organization.
+
+        Held whether or not enforcement is on, because the column is a foreign key and an id naming
+        nobody would otherwise reach the database as an integrity error instead of a refusal.
+
+        Raises:
+            SsoBreakGlassRequiredError: The account is not an active member here.
+        """
+        if await self._organizations.members.get_active_by_organization_and_user(organization.id, user_id) is None:
+            raise SsoBreakGlassRequiredError
+
     async def _require_break_glass_owner(self, organization: Organization, user_id: uuid.UUID) -> None:
         """Refuse a break-glass account that is not one of this organization's own active owners.
+
+        Held while enforcement is on, which is the only time the exception grants anything. An owner
+        demoted since they were named must not stand in the way of turning enforcement off.
 
         Raises:
             SsoBreakGlassRequiredError: The account is not an active owner here.
         """
         owner = await self._organizations.members.get_active_by_organization_and_user(organization.id, user_id)
-        if owner is None or owner.role != "owner":
+        if owner is None or owner.role != OWNER_ROLE:
             raise SsoBreakGlassRequiredError
 
     async def members_enforcement_would_refuse(

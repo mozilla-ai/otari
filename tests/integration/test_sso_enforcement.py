@@ -394,6 +394,33 @@ async def test_enforcement_cannot_be_set_before_one_sign_in_has_succeeded(async_
     assert (await _reloaded(async_db, organization)).sso_required is False
 
 
+async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_one(
+    async_db: AsyncSession,
+) -> None:
+    """Turning it off cannot be refused over an account the exception no longer grants anything to."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    demoted = await _member_with_email(
+        async_db, organization, role="owner", email="was@acme.example", full_name="Was Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = demoted.id
+    async_db.add(organization)
+    membership = await _membership_of(async_db, organization, demoted)
+    membership.role = "member"
+    async_db.add(membership)
+    await async_db.commit()
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=False, break_glass_user_id=demoted.id, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
 async def test_enforcement_is_permitted_once_the_connection_has_signed_somebody_in(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
