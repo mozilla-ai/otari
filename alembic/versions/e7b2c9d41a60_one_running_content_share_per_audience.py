@@ -56,6 +56,10 @@ def _newest_per_audience() -> sa.Select[tuple[object]]:
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        # Held to the end of the migration's transaction, so a process still on the
+        # old code cannot add a duplicate between the backfill and the index.
+        op.execute(sa.text(f"LOCK TABLE {_TABLE} IN SHARE ROW EXCLUSIVE MODE"))
     op.execute(
         _shares.update()
         .where(_shares.c.revoked_at.is_(None), _shares.c.id.notin_(_newest_per_audience()))
