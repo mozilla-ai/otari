@@ -13,6 +13,7 @@ from gateway.core.database import database_refusal
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
+    WORKSPACE_MEMBER_WORKSPACE_FK,
     User,
     Workspace,
     WorkspaceCreate,
@@ -24,8 +25,6 @@ from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.tenancy.user_repository import user_alphabetical_order
 
 _MEMBER_UNIQUE = "uq_workspace_member_workspace_user"
-# PostgreSQL's default name for the unnamed workspace foreign key in the tenancy migration.
-_MEMBER_WORKSPACE_FK = "workspace_member_workspace_id_fkey"
 _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 # SQLite's foreign-key refusal carries no constraint name, so it cannot be told
 # from any other foreign key on this table and is not listed here.
@@ -424,7 +423,7 @@ class WorkspaceMemberRepository:
             # besides the generated primary key.
             if code in _UNIQUE_VIOLATION and constraint in (_MEMBER_UNIQUE, None):
                 raise WorkspaceMemberAlreadyExistsError(user_id) from None
-            if code in _FOREIGN_KEY_VIOLATION and constraint == _MEMBER_WORKSPACE_FK:
+            if code in _FOREIGN_KEY_VIOLATION and constraint == WORKSPACE_MEMBER_WORKSPACE_FK:
                 raise WorkspaceNotFoundError(workspace_id) from None
             raise
         await self.db.refresh(member)

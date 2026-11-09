@@ -307,6 +307,7 @@ def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
         "output_price_per_million": 5.0,
         "pricing_tiers": [],
         "unit": "token",
+        "rates": {"text": {"input": {"price": 1.0, "unit": "token"}, "output": {"price": 5.0, "unit": "token"}}},
     }
 
 

@@ -13,7 +13,10 @@ import {
   credentialLabel,
   EMPTY_CATALOG_LIST,
   EMPTY_FILTERS,
+  listedPrices,
+  listedRate,
   makerKeyOf,
+  modelTypeOptions,
   priceSourceLabel,
   providerOptions,
   vendorOptions,
@@ -79,6 +82,7 @@ const GLM = model({
     "nebius:zai-org/GLM-5.3",
   ],
   price_sources: ["defaults", "deployment"],
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 })
@@ -97,6 +101,7 @@ describe("catalogRequest", () => {
           query: "  moonshot  ",
           providers: ["nebius", "fireworks"],
           vendors: [""],
+          types: ["video", "image"],
           inputModalities: ["text", "image"],
           outputModalities: ["audio"],
           capabilities: ["reasoning", "tool_call"],
@@ -116,6 +121,7 @@ describe("catalogRequest", () => {
       search: "moonshot",
       provider: ["fireworks", "nebius"],
       vendor: [""],
+      type: ["image", "video"],
       input_modality: ["image", "text"],
       output_modality: ["audio"],
       capability: ["reasoning", "tool_call"],
@@ -173,6 +179,7 @@ describe("the list's URL", () => {
         outputModalities: ["text"],
         providers: ["fireworks", "nebius"],
         vendors: ["", "Z.ai"],
+        types: ["chat", "embedding"],
         capabilities: ["reasoning"],
         minContext: 128_000,
         maxInput: 3,
@@ -202,6 +209,13 @@ describe("the list's URL", () => {
     expect(catalogUrlChanges(from, to, { q: "glm" })).toEqual({
       capability: ["reasoning"],
     })
+  })
+
+  it("drops a kind the API does not know, so it never reaches the query", () => {
+    const list = catalogListFromUrl(
+      readQuery(new URLSearchParams("type=image&type=hologram")),
+    )
+    expect(list.filters.types).toEqual(["image"])
   })
 
   it("adds and removes only this change's values in a repeated param", () => {
@@ -265,6 +279,14 @@ describe("options", () => {
     ])
   })
 
+  it("names each kind the catalog holds, in the order the API gives", () => {
+    expect(modelTypeOptions(["chat", "image", "transcription"])).toEqual([
+      { value: "chat", label: "Chat" },
+      { value: "image", label: "Image generation" },
+      { value: "transcription", label: "Transcription" },
+    ])
+  })
+
   it("lists every provider instance once", () => {
     expect(
       providerOptions(["fireworks", "nebius"]).map((o) => o.value),
@@ -279,10 +301,11 @@ describe("options", () => {
         query: "glm",
         outputModalities: ["text"],
         providers: ["nebius", "fireworks"],
+        types: ["video"],
         minContext: 32_000,
         pricing: "custom",
       }),
-    ).toBe(5)
+    ).toBe(6)
   })
 })
 
@@ -300,5 +323,60 @@ describe("priceSourceLabel", () => {
     expect(priceSourceLabel("deployment")).toBe("custom")
     expect(priceSourceLabel("defaults")).toBe("default")
     expect(priceSourceLabel(null)).toBe("not priced")
+  })
+})
+
+describe("the listed price", () => {
+  const priced = {
+    offering_count: 2,
+    unpriced_count: 0,
+    min_input_price_per_million: 0.5,
+    min_output_price_per_million: 2,
+  }
+
+  it("names a token price per million of each direction", () => {
+    const tokens = { ...priced, price_unit: "token" as const }
+    expect(listedPrices(tokens)).toEqual([
+      "$0.50/M input tokens",
+      "$2.00/M output tokens",
+    ])
+    expect(listedRate(tokens, "input")).toBe("from $0.50 / 1M")
+    expect(listedRate(tokens, "output")).toBe("from $2.00 / 1M")
+  })
+
+  it("names a price in another unit once, in that unit", () => {
+    const images = {
+      ...priced,
+      price_unit: "image" as const,
+      min_input_price_per_million: 40_000,
+      min_output_price_per_million: 0,
+    }
+    expect(listedPrices(images)).toEqual(["$0.04 per image"])
+    expect(listedRate(images, "input")).toBe("from $0.04 per image")
+    expect(listedRate(images, "output")).toBe("—")
+  })
+
+  it("shows no number for offerings priced in different units", () => {
+    const mixed = {
+      ...priced,
+      price_unit: null,
+      min_input_price_per_million: null,
+      min_output_price_per_million: null,
+    }
+    expect(listedPrices(mixed)).toEqual(["priced in several units"])
+    expect(listedRate(mixed, "input")).toBe("several units")
+    expect(listedRate(mixed, "output")).toBe("—")
+  })
+
+  it("says a model nobody priced is unpriced", () => {
+    const unpriced = {
+      ...priced,
+      unpriced_count: 2,
+      price_unit: null,
+      min_input_price_per_million: null,
+      min_output_price_per_million: null,
+    }
+    expect(listedPrices(unpriced)).toEqual(["unpriced"])
+    expect(listedRate(unpriced, "input")).toBe("—")
   })
 })

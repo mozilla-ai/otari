@@ -19,7 +19,12 @@ from gateway.services.merged_catalog_service import ModelObject
 # NOTE: A dict-typed value is opaque to the serializer, so a null inside one
 # survives. ``pricing_tiers`` has such an arm, which the integration test covers
 # by pricing a tiered model.
+#
+# A price's ``rates`` block leaves out a field it was not given whatever the
+# route asks (``RatesDocument``'s serializer), so its models' fields are listed
+# for the shape the document already has.
 OMITTABLE_FIELDS = {
+    "CacheRates": {"explicit", "read", "storage", "write"},
     "ModelArchitecture": set(),
     "ModelListResponse": set(),
     "ModelObject": {
@@ -34,7 +39,12 @@ OMITTABLE_FIELDS = {
     "ModelPricingInfo": {
         "cache_read_price_per_million",
         "cache_write_price_per_million",
+        "rates",
     },
+    "RateMultiplier": set(),
+    "RateOverride": {"cache", "price", "reasoning"},
+    "RatesDocument": {"web_search"},
+    "UnitRate": {"cache", "price", "reasoning", "unit"},
     "PricingTier": {
         "cache_read_price_per_million",
         "cache_write_price_per_million",

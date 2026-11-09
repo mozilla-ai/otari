@@ -6,6 +6,11 @@ import type { CatalogModelDetail, CatalogOffering } from "@/client"
 import { CopyableValue, CopyField } from "@/design-system/actions/CopyField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import {
+  formatOfferingPrice,
+  formatPricedRate,
+  pricingUnitOf,
+} from "@/features/models/pricingUnit"
 import { formatRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import {
@@ -23,8 +28,14 @@ import { providerModelId } from "./modelKey"
 
 const GATEWAY_PICKS = "__gateway__"
 
-function rate(value: number | null | undefined): string {
-  return value == null ? "unpriced" : formatRate(value)
+/** The price the gateway's pick is at, as the sentence naming it reads. */
+function cheapestPrice(offering: CatalogOffering): string {
+  const pricing = offering.pricing
+  if (pricing == null) return "no price"
+  const unit = pricingUnitOf(pricing.unit)
+  return unit === "token"
+    ? `${formatRate(pricing.input_price_per_million)} per 1M in`
+    : formatPricedRate(pricing.input_price_per_million, unit)
 }
 
 /** What a request sends for an offering: its short spelling where there is one. */
@@ -58,7 +69,7 @@ export function UseModelDrawer({
   const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
   const offeringOptions = model.offerings.map((offering) => ({
     value: offering.selector,
-    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
+    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${formatOfferingPrice(offering.pricing)}`,
   }))
   const options = model.selector
     ? [
@@ -126,8 +137,7 @@ export function UseModelDrawer({
                           <code className="text-mono-caption">
                             {selectorFor(cheapest)}
                           </code>{" "}
-                          at {rate(cheapest.pricing?.input_price_per_million)}{" "}
-                          per 1M in
+                          at {cheapestPrice(cheapest)}
                         </>
                       ) : null}
                       . Pick a provider to pin one instead and send its

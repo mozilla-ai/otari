@@ -9,9 +9,10 @@ from gateway.services.catalog._model_type import (
     model_type,
     not_chat_detail,
     not_embedding_detail,
+    offered_model_types,
     offering_model_type,
 )
-from gateway.services.catalog._query import query_catalog
+from gateway.services.catalog._query import common_price_unit, query_catalog
 from gateway.services.catalog._selectors import (
     CatalogModel,
     Identities,
@@ -47,6 +48,7 @@ __all__ = [
     "build_selector_index",
     "catalog_model_type",
     "catalog_models",
+    "common_price_unit",
     "current_selector_index",
     "dated_builds",
     "hide_alias_target",
@@ -56,6 +58,7 @@ __all__ = [
     "model_type",
     "not_chat_detail",
     "not_embedding_detail",
+    "offered_model_types",
     "offering_model_type",
     "offering_input_rate",
     "organization_offerings",

@@ -30,6 +30,7 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { kindFilterOf } from "@/features/models/offeredKinds"
 import { PricingOverrideDialog } from "@/features/organization/PricingOverrideDialog"
 import { canManage } from "@/features/organization/roles"
 import {
@@ -88,6 +89,7 @@ const URL_DEFAULTS = {
   override: "",
   models_page: "0",
   models_size: String(PAGE_SIZE_OPTIONS[0]),
+  models_type: "",
 }
 
 // The organization's own upstream credentials: one BYO key per provider that
@@ -584,8 +586,10 @@ export function OrganizationProvidersPage() {
                 onPress={() =>
                   url.patch({
                     provider: expandedKeyId === row.id ? "" : row.id,
-                    // A different provider's panel starts at its own first page.
+                    // A different provider's panel starts at its own first page,
+                    // on every kind of model.
                     models_page: "0",
+                    models_type: "",
                   })
                 }
               />
@@ -784,6 +788,10 @@ export function OrganizationProvidersPage() {
             onPageChange={(next) => url.patch({ models_page: String(next) })}
             onPageSizeChange={(size) =>
               url.patch({ models_size: String(size), models_page: "0" })
+            }
+            kind={kindFilterOf(url.get("models_type"))}
+            onKindChange={(next) =>
+              url.patch({ models_type: next, models_page: "0" })
             }
           />
         </section>

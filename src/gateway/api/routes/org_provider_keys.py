@@ -42,6 +42,7 @@ from gateway.schemas.providers import (
     WorkspaceProviderModelRestrictionRequest,
     WorkspaceProviderModelRestrictionsPublic,
 )
+from gateway.types.model_type import OfferedModelType
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
@@ -196,13 +197,19 @@ async def list_org_provider_key_models(
     key_id: uuid.UUID,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 500,
+    model_type: Annotated[
+        OfferedModelType | None,
+        Query(alias="type", description="Only models of this kind; `unknown` for those no source names a kind for"),
+    ] = None,
 ) -> OrgProviderKeyModelsPublic:
     """List the models offered on one key, each with the rate it currently serves at.
 
     Organization owners and admins only. ``count`` is the total rather than the
     page length, so a client knows whether another page is owed.
     """
-    return await service.list_models(user=current_identity, key_id=key_id, skip=skip, limit=limit)
+    return await service.list_models(
+        user=current_identity, key_id=key_id, skip=skip, limit=limit, model_type=model_type
+    )
 
 
 @org_router.post("/{key_id}/models", status_code=status.HTTP_201_CREATED)
