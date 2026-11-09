@@ -8060,10 +8060,8 @@ export interface components {
          * ActivationApiKeyPublic
          * @description The API key the guide hands out, with its plaintext.
          *
-         *     Returned once per call and never stored in plaintext, like every other key
-         *     this gateway mints: a page reload issues a new one and rotates the same row,
-         *     which is what makes the guide able to show a working key without keeping a
-         *     readable secret anywhere.
+         *     Returned once, on the press that asked for it, and never stored in
+         *     plaintext, like every other key this gateway mints.
          */
         ActivationApiKeyPublic: {
             /** Key */
