@@ -27,6 +27,7 @@ from typing import Any, Literal, NamedTuple, cast
 import click
 import yaml
 
+from otari_agent.claude_code_paths import claude_user_settings_path
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.definitions import GateDefinition, bounded, definition_digest
 from otari_agent.domain.evaluators import matched_changed_paths
@@ -2859,13 +2860,19 @@ def _policy_header(repo_name: str) -> str:
 
 
 def _starter_gates_yaml(repo_name: str) -> str:
-    """A two-gate starter policy, chosen to teach `runs` rather than to be useful.
+    """A four-gate starter policy, chosen to teach `runs` rather than to be useful.
 
     One gate of each shape a `runs` value can take: a command gate, which can
     only ever refuse a call before it happens, and a path gate naming both
     moments, which is what most real rules want. Between them a reader sees
     that the field is a real choice and that the two halves of an entry say
     different things.
+
+    The last two are a read gate and the command gate it needs beside it. A
+    read gate on its own sees the harness's read tool and nothing a shell
+    command reads, which `otari guardrails validate` warns about, so shipping
+    the read gate alone would hand every new repository a warning instead of
+    the pattern that answers it.
     """
     return _policy_header(repo_name) + (
         "  - id: no-force-push\n"
@@ -2893,6 +2900,35 @@ def _starter_gates_yaml(repo_name: str) -> str:
         "    message: >-\n"
         "      A .env file holds secrets and does not belong in the repo.\n"
         "      Keep it untracked and out of commits.\n"
+        "\n"
+        "  - id: no-reading-env-file\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.read_target]\n"
+        "    enforcement: advisory\n"
+        '    forbidden: [".env", "**/.env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not read one.\n"
+        "\n"
+        "  - id: no-shell-access-to-env-file\n"
+        "    type: command\n"
+        # The pair the read gate above needs. A read gate sees the harness's
+        # read tool and nothing a shell command reads, and unlike a write
+        # nothing catches that afterwards, so the shell side is a gate of its
+        # own or it is not covered at all.
+        #
+        # One bare token rather than a list of readers, because a phrase's
+        # words must appear unbroken: `head .env` would miss `head -5 .env`,
+        # and the readers are unbounded anyway (`awk`, `xxd`, `source`,
+        # `python -c`). Naming the path catches every one of them, at the
+        # cost of also firing on a command that only mentions it.
+        "    runs: [pre_tool_use.command]\n"
+        "    enforcement: advisory\n"
+        "    accept_warnings: [single-token-phrase]\n"
+        '    forbidden: [".env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not name one in a shell command:\n"
+        "      a shell read is invisible to the read gate and can print the\n"
+        "      value into the transcript.\n"
     )
 
 
@@ -2920,13 +2956,15 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
 
     Returns True if a new entry was appended, False if otari hook was already
     registered here, whatever flags or executable path that entry named, and
-    its registration was reused. An entry holding sibling hook commands keeps
-    its own matcher and otari's hook item moves to an entry of its own,
-    because a matcher covers every command in its entry and narrowing one
-    here would narrow it for the siblings too. Only that item's `command` is
-    written, so another field on it survives either way. Every other key in
-    the file, including other hooks and permissions and other events, is
-    preserved untouched.
+    those registrations were reused. Every otari hook item in the event is
+    rewritten, not just the first, because Claude Code runs every entry whose
+    matcher matches and one left behind would keep enforcing what the others
+    no longer do. An entry holding sibling hook commands keeps its own matcher
+    and otari's hook item moves to an entry of its own, because a matcher
+    covers every command in its entry and narrowing one here would narrow it
+    for the siblings too. Only that item's `command` is written, so another
+    field on it survives either way. Every other key in the file, including
+    other hooks and permissions and other events, is preserved untouched.
     """
     if settings_path.is_file():
         try:
@@ -2944,32 +2982,35 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     entries = hooks_section.setdefault(event, [])
     if not isinstance(entries, list):
         raise click.ClickException(f'{settings_path}\'s "hooks.{event}" must be a JSON array.')
+
+    def entry_for(hook_item: dict[str, object]) -> dict[str, object]:
+        new_entry: dict[str, object] = {"hooks": [hook_item]}
+        return {"matcher": matcher, **new_entry} if matcher is not None else new_entry
+
     updated = False
-    split_item: dict[str, object] | None = None
+    split_items: list[dict[str, object]] = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             continue
-        for index, hook_item in enumerate(entry["hooks"]):
+        # Reversed, because splitting pops the item this index names.
+        for index in reversed(range(len(entry["hooks"]))):
+            hook_item = entry["hooks"][index]
             existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
             if not isinstance(existing_command, str) or _otari_hook_argv(existing_command) is None:
                 continue
             if matcher is not None and len(entry["hooks"]) > 1:
                 split_item = entry["hooks"].pop(index)
                 split_item["command"] = command
+                split_items.append(split_item)
             else:
                 if matcher is not None:
                     entry["matcher"] = matcher
                 hook_item["command"] = command
             updated = True
-            break
-        if updated:
-            break
 
-    if not updated or split_item is not None:
-        new_entry: dict[str, object] = {"hooks": [split_item or {"type": "command", "command": command}]}
-        if matcher is not None:
-            new_entry = {"matcher": matcher, **new_entry}
-        entries.append(new_entry)
+    entries.extend(entry_for(item) for item in split_items)
+    if not updated:
+        entries.append(entry_for({"type": "command", "command": command}))
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
@@ -3002,12 +3043,12 @@ _HOOK_SETUP_BY_HARNESS = {
 
 
 def _hook_global_registration_without_repo_only() -> Path | None:
-    """`~/.claude/settings.json`, if it registers otari hook there without `--repo-only`.
+    """Claude Code's user settings file, if it registers otari hook there without `--repo-only`.
 
     That registration runs in every repository on this machine, so it would still enforce the
     person's own gates in a repository whose own entry just turned them off.
     """
-    settings_path = Path.home() / ".claude" / "settings.json"
+    settings_path = claude_user_settings_path()
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
