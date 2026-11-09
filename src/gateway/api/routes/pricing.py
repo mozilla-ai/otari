@@ -180,7 +180,7 @@ class PricingResponse(BaseModel):
     )
     rates: RatesDocument = Field(description=RATES_DESCRIPTION)
     origin: str | None = Field(
-        description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+        description="Which writer set this row: config, api, seed or migration. Null before origins were recorded.",
     )
     created_at: str
     updated_at: str

@@ -18662,7 +18662,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+            "description": "Which writer set this row: config, api, seed or migration. Null before origins were recorded.",
             "title": "Origin"
           },
           "output_price_per_million": {
