@@ -104,14 +104,14 @@ describe("RoutingPage", () => {
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
     expect(
-      within(autoRow).queryByRole("button", { name: "Edit" }),
+      within(autoRow).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
     expect(
-      within(autoRow).queryByRole("button", { name: "Delete" }),
+      within(autoRow).queryByRole("button", { name: /^Delete / }),
     ).not.toBeInTheDocument()
     // Its page still opens, read-only.
     expect(
-      within(autoRow).getByRole("button", { name: "View" }),
+      within(autoRow).getByRole("button", { name: /^View / }),
     ).toBeInTheDocument()
   })
 
@@ -154,7 +154,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await user.click(within(row).getByRole("button", { name: /^Edit / }))
     expect(await screen.findByText("Policy page for fast")).toBeInTheDocument()
   })
 
@@ -166,7 +166,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("cheap")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await user.click(within(row).getByRole("button", { name: /^Edit / }))
     expect(
       await screen.findByText("Policy page for cheap as u-bob"),
     ).toBeInTheDocument()
@@ -188,14 +188,14 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(row).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).getByRole("button", { name: "View" }),
+      within(row).getByRole("button", { name: /^View / }),
     ).toBeInTheDocument()
     // Delete stays available: removing a policy is never lossy.
     expect(
-      within(row).getByRole("button", { name: "Delete" }),
+      within(row).getByRole("button", { name: /^Delete / }),
     ).toBeInTheDocument()
   })
 
@@ -216,7 +216,7 @@ describe("RoutingPage", () => {
     expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
     expect(within(row).getByText("alias")).toBeInTheDocument()
     expect(
-      within(row).getByRole("button", { name: "Delete" }),
+      within(row).getByRole("button", { name: /^Delete / }),
     ).toBeInTheDocument()
   })
 
@@ -230,7 +230,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await user.click(within(row).getByRole("button", { name: /^Delete / }))
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
@@ -252,7 +252,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await user.click(within(row).getByRole("button", { name: /^Delete / }))
     const dialog = await screen.findByRole("alertdialog")
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
@@ -270,7 +270,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await user.click(within(row).getByRole("button", { name: /^Delete / }))
     const dialog = await screen.findByRole("alertdialog")
     await user.click(
       within(dialog).getByRole("button", { name: "Delete policy" }),
@@ -301,7 +301,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const fast = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(fast).getByRole("button", { name: "Delete" }))
+    await user.click(within(fast).getByRole("button", { name: /^Delete / }))
     const first = await screen.findByRole("alertdialog")
     await user.click(
       within(first).getByRole("button", { name: "Delete policy" }),
@@ -310,7 +310,7 @@ describe("RoutingPage", () => {
     await user.click(within(first).getByRole("button", { name: "Cancel" }))
 
     const smart = screen.getByText("smart").closest("tr")!
-    await user.click(within(smart).getByRole("button", { name: "Delete" }))
+    await user.click(within(smart).getByRole("button", { name: /^Delete / }))
 
     const second = await screen.findByRole("alertdialog")
     expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
@@ -330,7 +330,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await user.click(within(row).getByRole("button", { name: /^Delete / }))
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -393,7 +393,7 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("balanced")).closest("tr")!
     expect(
-      within(row).getByRole("button", { name: "Edit" }),
+      within(row).getByRole("button", { name: /^Edit / }),
     ).toBeInTheDocument()
   })
 
@@ -415,7 +415,7 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(row).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
   })
 
@@ -435,7 +435,7 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("future")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(row).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
   })
 
@@ -447,10 +447,10 @@ describe("RoutingPage", () => {
 
       const row = (await screen.findByText("smart")).closest("tr")!
       expect(
-        within(row).getByRole("button", { name: "View" }),
+        within(row).getByRole("button", { name: /^View / }),
       ).toBeInTheDocument()
       expect(
-        within(row).queryByRole("button", { name: "Edit" }),
+        within(row).queryByRole("button", { name: /^Edit / }),
       ).not.toBeInTheDocument()
     },
   )
@@ -477,10 +477,10 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(row).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).getByRole("button", { name: "View" }),
+      within(row).getByRole("button", { name: /^View / }),
     ).toBeInTheDocument()
   })
 
@@ -502,10 +502,10 @@ describe("RoutingPage", () => {
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(row).queryByRole("button", { name: /^Edit / }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).queryByRole("button", { name: "Delete" }),
+      within(row).queryByRole("button", { name: /^Delete / }),
     ).not.toBeInTheDocument()
   })
 
@@ -676,7 +676,7 @@ describe("RoutingPage scoped to the selected workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("button", { name: /^Delete / }))
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -702,7 +702,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("button", { name: /^Delete / }))
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -754,7 +754,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed-alias")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("button", { name: /^Delete / }))
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -784,7 +784,7 @@ describe("RoutingPage for an organization admin", () => {
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Delete" }),
+      screen.queryByRole("button", { name: /^Delete / }),
     ).not.toBeInTheDocument()
   })
 
@@ -806,7 +806,7 @@ describe("RoutingPage for an organization admin", () => {
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Delete" }),
+      screen.queryByRole("button", { name: /^Delete / }),
     ).not.toBeInTheDocument()
   })
 

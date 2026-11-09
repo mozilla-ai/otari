@@ -1428,6 +1428,20 @@ describe("no font size is written at a call site", () => {
 // call sites that do not meet it, so it is enforced as one floor in the
 // stylesheet rather than as a className each of them has to remember.
 describe("the phone viewport's touch-target floor", () => {
+  it("raises every form field to 44px below the shell's mobile boundary", () => {
+    // The places carry their own phone height; this is the one for a field in
+    // no place, so a dialog's fields match the 44px buttons under them.
+    expect(CSS).toMatch(
+      /@media \(max-width: 767px\) \{\s*:root \{\s*--field-height: 2\.75rem;/,
+    )
+  })
+
+  it("keeps a text field at 16px on a touch screen, so iOS does not zoom into it", () => {
+    expect(CSS).toMatch(
+      /@media \(pointer: coarse\) \{[^}]*textarea,\s*select \{\s*font-size: max\(1rem, 16px\);/,
+    )
+  })
+
   it("raises every HeroUI button to 44px below the shell's mobile boundary", () => {
     // `[data-slot="button"]` is HeroUI's Button and nothing else, and 767px is
     // AppShell's own MOBILE_QUERY, so the rule turns on exactly where the

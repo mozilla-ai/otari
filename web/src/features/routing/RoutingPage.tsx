@@ -124,12 +124,14 @@ export function RoutingPage() {
             <RowAction
               icon={canOpenToEdit ? FiEdit2 : FiEye}
               label={canOpenToEdit ? "Edit" : "View"}
+              ariaLabel={`${canOpenToEdit ? "Edit" : "View"} ${policy.name}`}
               onPress={() => openPolicy(policy)}
             />
             {isConfig ? null : (
               <RowAction
                 icon={FiTrash2}
                 label="Delete"
+                ariaLabel={`Delete ${policy.name}`}
                 onPress={() => setPendingDelete(policy)}
               />
             )}
