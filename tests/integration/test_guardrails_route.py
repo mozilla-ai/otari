@@ -353,3 +353,48 @@ def test_no_guardrails_field_is_a_noop(
 
     assert resp.status_code == 200, resp.text
     runner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+def test_a_callers_credential_reaches_the_runner_for_their_own_endpoint(
+    route: str,
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """otari#2955: the field was accepted and dropped, so the caller's service was called unauthenticated."""
+    path, provider_symbol, body = _ROUTES[route]
+    # A blocking verdict, so the request ends at the guardrail and no provider answer is needed.
+    runner = AsyncMock(
+        return_value=GuardrailVerdict(results=[GuardrailResult(profile="probe", mode="block", valid=False)])
+    )
+    guardrail = {"profile": "probe", "mode": "block", "url": "https://caller.example/guard", "credential": "tok"}
+
+    with (
+        patch("gateway.api.routes._helpers.run_input_guardrails", new=runner),
+        patch(provider_symbol, new=AsyncMock()),
+    ):
+        resp = client.post(path, json={**body, "guardrails": [guardrail]}, headers=api_key_header)
+
+    assert resp.status_code == 403, resp.text
+    assert "tok" not in resp.text
+    assert runner.await_args is not None
+    assert runner.await_args.kwargs["credentials"] == {"probe": "tok"}
+
+
+def test_a_credential_without_a_url_is_refused_without_echoing_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    path, _, body = _ROUTES["chat"]
+    runner = AsyncMock()
+
+    with patch("gateway.api.routes._helpers.run_input_guardrails", new=runner):
+        resp = client.post(
+            path,
+            json={**body, "guardrails": [{"profile": "probe", "credential": "tok-secret"}]},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 422, resp.text
+    assert "tok-secret" not in resp.text
+    runner.assert_not_awaited()

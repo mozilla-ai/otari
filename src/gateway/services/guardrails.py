@@ -187,8 +187,9 @@ async def _validate_one(
     payload: dict[str, object] = {"profile": cfg.profile, "input_text": input_text}
     if cfg.validate_kwargs:
         payload["validate_kwargs"] = cfg.validate_kwargs
-    # An organization guardrail may carry a credential for the endpoint it names
-    # (otari#654). It goes in the header rather than the body: `/validate` forbids
+    # An organization guardrail, or a caller's entry with its own `url`, may
+    # carry a credential for the endpoint it names. It goes in the header rather
+    # than the body: `/validate` forbids
     # unknown body fields, and a guardrail's *vendor* key is not this in any case;
     # the guardrails service constructs its guardrails from the operator's own
     # config and holds those itself. Never logged, here or by the caller.
@@ -319,12 +320,12 @@ async def run_input_guardrails(
     configured to fail open.
 
     ``credentials`` maps a profile name to the bearer credential its entry
-    carries, and is populated only for guardrails an organization mandates
-    (`services/tenancy/organization_guardrail_service.py`). It is a separate
-    argument rather than a field on :class:`GuardrailConfig` because that model
-    is parsed from the request body: a credential field there would be one a
-    caller could set, which would turn the guardrail list into a way to make
-    this gateway send a secret to an endpoint of the caller's choosing.
+    carries: an organization's stored one
+    (`services/tenancy/organization_guardrail_service.py`), or the caller's own
+    for a profile no layer mandates. It is a separate argument rather than read
+    off :class:`GuardrailConfig` because the merge decides which credential
+    belongs to the URL that survived it, and no stored secret may follow a
+    caller's entry.
 
     ``in_process`` maps a profile to a guardrail this worker already holds,
     built from the organization's own definition

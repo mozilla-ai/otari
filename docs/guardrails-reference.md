@@ -30,6 +30,7 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `on_unavailable` | `block` (default) or `monitor`. See [When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable). |
 | `validate_kwargs` | Extra arguments for the check, merged on top of the profile's own. |
 | `url` | A guardrails service to send this check to instead of the deployment's. A URL that fails Otari's address safety check is a `400`. |
+| `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
 | `on` | The directions to check. Defaults to `["input"]`; `output` is accepted but not enforced yet. |
 
 ## Modes

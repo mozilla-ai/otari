@@ -330,12 +330,12 @@ async def test_safe_url_override_is_used_instead_of_default(monkeypatch: pytest.
 async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An organization guardrail's credential authenticates its own check and no other.
+    """A credential authenticates its own check and no other.
 
-    The credential arrives keyed by profile rather than on `GuardrailConfig`
-    (otari#654): that model is parsed from the request body, so a field there
-    would be one a caller could set. This asserts the routing that keying is
-    for, since the two checks in one request go out on one client.
+    The credential arrives keyed by profile rather than read off
+    `GuardrailConfig`, because the merge decides which one belongs to the URL
+    that survived it. This asserts the routing that keying is for, since the two
+    checks in one request go out on one client.
     """
     seen: dict[str, str | None] = {}
 
@@ -354,6 +354,30 @@ async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
 
     assert verdict.blocked is False
     assert seen == {"prompt-injection": "Bearer s3cret", "pii": None}
+
+
+def test_a_request_body_credential_needs_a_url_of_its_own() -> None:
+    """Without one it would go to the deployment's service, which may be a plain-http sidecar."""
+    with pytest.raises(ValueError, match="requires 'url'"):
+        GuardrailConfig.model_validate({"profile": "probe", "credential": "tok"})
+
+
+def test_a_request_body_credential_is_never_dumped() -> None:
+    cfg = GuardrailConfig.model_validate({"profile": "probe", "url": "https://caller.example", "credential": "tok"})
+
+    assert "credential" not in cfg.model_dump()
+    assert "tok" not in repr(cfg)
+
+
+@pytest.mark.asyncio
+async def test_a_credential_never_travels_over_plain_http() -> None:
+    with pytest.raises(UnsafeURLError, match="https"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="probe", url="http://caller.example/guard")],
+            "x",
+            default_url=None,
+            credentials={"probe": "tok"},
+        )
 
 
 @pytest.mark.asyncio
