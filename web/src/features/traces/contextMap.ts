@@ -146,8 +146,7 @@ export function scaleToTotal(
 export function formatBlockTokens(value: number): string {
   const rounded = Math.round(value)
   // Rounding a count just under a million to one decimal must not read "1000.0k".
-  if (rounded >= 999_950)
-    return formatTokens(rounded >= 1_000_000 ? rounded : 1_000_000)
+  if (rounded >= 999_950) return formatTokens(Math.max(rounded, 1_000_000))
   return formatTokens(rounded)
 }
 

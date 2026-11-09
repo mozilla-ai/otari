@@ -321,6 +321,18 @@
           }
         }
       }
+    },
+    {
+      // A test builds its harness components inside the test or a wrapper factory,
+      // once per render, so the remount this rule guards against never happens
+      // there, and stubbed constructors (`function PublicKeyCredential() {}`) read
+      // to it as components.
+      "includes": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/tests/**"],
+      "linter": {
+        "rules": {
+          "correctness": { "noComponentHookFactories": "off" }
+        }
+      }
     }
   ]
 }
