@@ -5,7 +5,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from gateway.models.identity import MAX_BLOCK_REASON_LENGTH, MAX_EMAIL_LENGTH, BlockedEmail, MailedLinkStatus
+from gateway.models.identity import (
+    MAX_BLOCK_REASON_LENGTH,
+    MAX_EMAIL_LENGTH,
+    MAX_OIDC_ISSUER_LENGTH,
+    BlockedEmail,
+    MailedLinkStatus,
+)
 from gateway.models.tenancy import AVATAR_FACE_COUNT, OrganizationDomainRole
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
@@ -128,7 +134,8 @@ class OIDCConnectionRequest(BaseModel):
     """What an organization administrator submits to configure its own sign-in connection."""
 
     issuer: str = Field(
-        max_length=255, description="The identity provider's issuer URL, as the organization's own claim."
+        max_length=MAX_OIDC_ISSUER_LENGTH,
+        description="The identity provider's issuer URL, as the organization's own claim.",
     )
     client_id: str = Field(max_length=255, description="The OAuth client ID this deployment authenticates with.")
     client_secret: str | None = Field(
