@@ -439,16 +439,17 @@ class _ResponsesToolLoopStrategy:
                 logger.warning("Could not add hidden tool-loop items to the response output")
 
     def exit_before_split(self, result: Response) -> bool:
-        return False
+        # The provider said why the round stopped short (the token limit, a content
+        # filter), so a call's arguments may be cut, even beside the caller's own calls.
+        # Not ``status``: any-llm's Gemini adapter reports a round that asks for a
+        # function call as ``incomplete`` too.
+        return result.incomplete_details is not None
 
     def split_owned(self, result: Response, pool: ToolBackend) -> tuple[list[Any], bool]:
         return _split_function_calls(list(result.output or []), pool)
 
     def exit_after_split(self, result: Response) -> bool:
-        # The provider said why the round stopped short (the token limit, a content
-        # filter), so a call's arguments may be cut. Not ``status``: any-llm's Gemini
-        # adapter reports a round that asks for a function call as ``incomplete`` too.
-        return result.incomplete_details is not None
+        return False
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: dict[str, Any] | None = None
