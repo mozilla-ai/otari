@@ -93,8 +93,12 @@ providers declared to keep no prompts or completions
 a request is refused with `403` on an organization key or a hosted provider
 that is not declared, and on any provider configured in `config.yml` or
 endpoint the workspace or its users registered, neither of which can be
-declared. The rows it blocks say so, and **Models** lists only
-declared offerings for the workspace.
+declared. The rows it blocks say so, and nothing the workspace shows names an
+undeclared source: **Models**, the **Playground**'s model list, the model
+pickers and automatic fallbacks on **Routing**, an API key's model access and
+the setup guide's example all list only declared offerings. An API key in the
+workspace is listed only those by `GET /api/v1/models` and
+`GET /api/v1/catalog/models` too.
 
 A new workspace starts with every row as the organization decides, so a
 workspace only differs from its organization where an admin changed it.

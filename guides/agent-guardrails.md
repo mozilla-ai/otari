@@ -37,7 +37,7 @@ Without Homebrew, install the sdist from a Release:
 uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/otari_agent-X.Y.Z.tar.gz
 ```
 
-A source checkout's virtualenv carries the same command. See [cli/README.md](https://github.com/mozilla-ai/otari/blob/bb118e5f0ec3384dc5a269fd0dac1a5228420323/cli/README.md) for the rest of that distribution.
+A source checkout's virtualenv carries the same command. See [cli/README.md](https://github.com/mozilla-ai/otari/blob/8fd41d249461a247165fd8511ce007aa8226e9d5/cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -233,7 +233,7 @@ To run it on every pull request:
 3. Run the `judge` gates as a separate job, with `--type judge`, since they need a signed-in model CLI and a credential. Keep the credential away from the pull request's code: run this job from the base branch's copy of the workflow (`pull_request_target` on GitHub), fetch the pull request as Git objects only, and pass `--base <base> --head <head>` so only its diff is read. Nothing from the pull request then runs next to the credential.
 4. Make the `path` and `verifier` job a required status check, and review changes to that workflow and to the scripts its verifiers call: that job runs the pull request's own code.
 
-Otari's own repository does this in [`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/bb118e5f0ec3384dc5a269fd0dac1a5228420323/.github/workflows/otari-guardrails-check.yml) and [`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/bb118e5f0ec3384dc5a269fd0dac1a5228420323/.github/workflows/otari-guardrails-judges.yml).
+Otari's own repository does this in [`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/8fd41d249461a247165fd8511ce007aa8226e9d5/.github/workflows/otari-guardrails-check.yml) and [`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/8fd41d249461a247165fd8511ce007aa8226e9d5/.github/workflows/otari-guardrails-judges.yml).
 
 ## Reporting to Otari
 
