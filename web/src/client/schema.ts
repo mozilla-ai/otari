@@ -12447,6 +12447,8 @@ export interface components {
          *     on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
          */
         GuardrailConfig: {
+            /** Credential */
+            credential?: string | null;
             /**
              * Mode
              * @default monitor

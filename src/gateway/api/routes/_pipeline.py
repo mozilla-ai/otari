@@ -3985,15 +3985,19 @@ def merge_guardrail_layers(
     operator who named a URL meant the check to go there, not to be answered
     here.
 
+    A caller's own credential is kept only for a profile no layer mandates: a
+    mandate replaces the caller's entry, URL included, and the caller's secret
+    was meant for the caller's URL.
+
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map, an empty mandated set
+    mandated anything, alongside the caller's credentials, an empty mandated set
     and no in-process entries: that is the shape `apply_input_guardrails` treats
     as "no guardrails ran", and it is what keeps a deployment that configures
     nothing behaving exactly as it did.
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:
-        return EffectiveGuardrails(requested, {}, frozenset(), {})
+        return EffectiveGuardrails(requested, _caller_credentials(requested, frozenset()), frozenset(), {})
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
@@ -4013,7 +4017,21 @@ def merge_guardrail_layers(
             mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
             in_process.pop(guardrail.profile, None)
+    credentials |= _caller_credentials(requested, mandated)
     return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
+
+
+def _caller_credentials(requested: list[GuardrailConfig] | None, mandated: Collection[str]) -> dict[str, str]:
+    """The credentials the caller sent, keyed by profile, for the profiles no layer mandates.
+
+    Keying by profile is sound because a request body may not name a profile
+    twice when one of its entries carries a credential (``RequestedGuardrails``).
+    """
+    return {
+        guardrail.profile: guardrail.credential.get_secret_value()
+        for guardrail in requested or []
+        if guardrail.credential is not None and guardrail.profile not in mandated
+    }
 
 
 def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) -> dict[str, InProcessGuardrail | None]:

@@ -34,8 +34,11 @@ def _guardrail(
     mode: Literal["block", "monitor"] = "block",
     on_unavailable: Literal["block", "monitor"] = "block",
     url: str | None = None,
+    credential: str | None = None,
 ) -> GuardrailConfig:
-    return GuardrailConfig(profile=profile, mode=mode, on_unavailable=on_unavailable, url=url)
+    return GuardrailConfig.model_validate(
+        {"profile": profile, "mode": mode, "on_unavailable": on_unavailable, "url": url, "credential": credential}
+    )
 
 
 def _organization(
@@ -248,3 +251,58 @@ def test_the_strictest_of_all_three_layers_wins() -> None:
     assert merged.configs is not None and len(merged.configs) == 1
     assert merged.configs[0].mode == "block", "the organization's block survives two monitor layers"
     assert merged.configs[0].on_unavailable == "block", "and so does the caller's own"
+
+
+_CALLER_URL = "https://caller.example/guardrails"
+
+
+def test_a_callers_credential_reaches_their_own_endpoint_when_nothing_is_mandated() -> None:
+    caller = [_guardrail("probe", url=_CALLER_URL, credential="tok")]
+
+    merged = merge_guardrail_layers(_ctx(), caller, [])
+
+    assert merged.configs is caller
+    assert merged.credentials == {"probe": "tok"}
+
+
+def test_a_callers_credential_survives_a_mandate_of_another_profile() -> None:
+    merged = merge_guardrail_layers(
+        _ctx(_guardrail("pii")),
+        [_guardrail("probe", url=_CALLER_URL, credential="tok")],
+        [_organization(_guardrail("prompt-injection"), credential="s3cret")],
+    )
+
+    assert merged.credentials == {"probe": "tok", "prompt-injection": "s3cret"}
+
+
+def test_a_callers_credential_never_follows_an_organization_mandate_of_their_profile() -> None:
+    """The mandate's URL replaces the caller's, so the caller's secret has nowhere it was meant for."""
+    merged = merge_guardrail_layers(
+        _ctx(),
+        [_guardrail("probe", url=_CALLER_URL, credential="tok")],
+        [_organization(_guardrail("probe", url="https://org.example/guardrails"))],
+    )
+
+    assert merged.configs is not None
+    assert merged.configs[0].url == "https://org.example/guardrails"
+    assert merged.credentials == {}
+
+
+def test_a_callers_credential_never_replaces_the_organizations() -> None:
+    merged = merge_guardrail_layers(
+        _ctx(),
+        [_guardrail("probe", url=_CALLER_URL, credential="tok")],
+        [_organization(_guardrail("probe", url="https://org.example/guardrails"), credential="s3cret")],
+    )
+
+    assert merged.credentials == {"probe": "s3cret"}
+
+
+def test_a_callers_credential_never_follows_a_policy_mandate_of_their_profile() -> None:
+    merged = merge_guardrail_layers(
+        _ctx(_guardrail("probe")),
+        [_guardrail("probe", url=_CALLER_URL, credential="tok")],
+        [],
+    )
+
+    assert merged.credentials == {}

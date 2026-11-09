@@ -18,8 +18,9 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import GuardrailConfig, RequestedGuardrails
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.url_safety import UnsafeURLError
 
@@ -330,12 +331,12 @@ async def test_safe_url_override_is_used_instead_of_default(monkeypatch: pytest.
 async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An organization guardrail's credential authenticates its own check and no other.
+    """A credential authenticates its own check and no other.
 
-    The credential arrives keyed by profile rather than on `GuardrailConfig`
-    (otari#654): that model is parsed from the request body, so a field there
-    would be one a caller could set. This asserts the routing that keying is
-    for, since the two checks in one request go out on one client.
+    The credential arrives keyed by profile rather than read off
+    `GuardrailConfig`, because the merge decides which one belongs to the URL
+    that survived it. This asserts the routing that keying is for, since the two
+    checks in one request go out on one client.
     """
     seen: dict[str, str | None] = {}
 
@@ -354,6 +355,56 @@ async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
 
     assert verdict.blocked is False
     assert seen == {"prompt-injection": "Bearer s3cret", "pii": None}
+
+
+def test_a_request_body_credential_needs_a_url_of_its_own() -> None:
+    """Without one it would go to the deployment's service, which may be a plain-http sidecar."""
+    with pytest.raises(ValueError, match="requires 'url'"):
+        GuardrailConfig.model_validate({"profile": "probe", "credential": "tok"})
+
+
+def test_a_request_body_credential_is_never_dumped() -> None:
+    cfg = GuardrailConfig.model_validate({"profile": "probe", "url": "https://caller.example", "credential": "tok"})
+
+    assert "credential" not in cfg.model_dump()
+    assert "tok" not in repr(cfg)
+
+
+_REQUESTED = TypeAdapter(RequestedGuardrails)
+_WITH_TOKEN = {"profile": "probe", "url": "https://a.example", "credential": "tok"}
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [_WITH_TOKEN, {"profile": "probe", "url": "https://b.example"}],
+        [{"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN],
+        [{"profile": "probe"}, _WITH_TOKEN],
+        [_WITH_TOKEN, {"profile": "probe"}],
+    ],
+    ids=["token-first", "token-last", "default-url-first", "default-url-last"],
+)
+def test_a_credentialed_profile_named_twice_is_refused(entries: list[dict[str, str]]) -> None:
+    """Credentials are keyed by profile, so a token would reach the other entry's endpoint too."""
+    with pytest.raises(ValidationError, match="appears more than once"):
+        _REQUESTED.validate_python(entries)
+
+
+def test_a_profile_named_twice_without_a_credential_is_still_accepted() -> None:
+    entries = [{"profile": "probe"}, {"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN | {"profile": "x"}]
+
+    assert len(_REQUESTED.validate_python(entries)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_credential_never_travels_over_plain_http() -> None:
+    with pytest.raises(UnsafeURLError, match="https"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="probe", url="http://caller.example/guard")],
+            "x",
+            default_url=None,
+            credentials={"probe": "tok"},
+        )
 
 
 @pytest.mark.asyncio
