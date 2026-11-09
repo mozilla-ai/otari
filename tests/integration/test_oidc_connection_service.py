@@ -89,10 +89,35 @@ def _stub_refused_discovery(monkeypatch: pytest.MonkeyPatch, *, calls: list[str]
 
 
 async def _stored(db: AsyncSession, organization_id: uuid.UUID) -> OIDCConnection | None:
-    """Read the organization's connection straight from the repository, bypassing the service."""
+    """Read the organization's connection straight from the repository, bypassing the service.
+
+    Refreshed outside the block, because committing it expires every column and a caller reading
+    one then would load it with no await of its own to do it in.
+    """
     uow = UnitOfWork(db)
     async with uow:
-        return await OIDCConnectionRepository(uow).get_for_organization(organization_id)
+        connection = await OIDCConnectionRepository(uow).get_for_organization(organization_id)
+    if connection is not None:
+        await db.refresh(connection)
+    return connection
+
+
+async def _move_the_issuer_in_another_session(db: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Point the organization's stored connection at another issuer, the way a concurrent save would."""
+    other_engine = create_async_engine(db.get_bind().engine.url)
+    try:
+        async with AsyncSession(other_engine, expire_on_commit=False) as other:
+            stored = (
+                await other.execute(select(OIDCConnection).where(OIDCConnection.organization_id == organization_id))
+            ).scalar_one()
+            stored.issuer = "https://the-issuer-that-won.example"
+            stored.resolved_issuer = "https://the-issuer-that-won.example"
+            stored.encrypted_client_secret = encrypt_secret("the-secret-that-won")
+            stored.client_secret_last4 = "swon"
+            other.add(stored)
+            await other.commit()
+    finally:
+        await other_engine.dispose()
 
 
 def _connection_service(db: AsyncSession) -> OIDCConnectionService:
@@ -346,17 +371,45 @@ async def test_an_edit_that_leaves_the_secret_out_keeps_the_stored_one(
     assert decrypt_secret(stored.encrypted_client_secret) == "first-secret-value"
 
 
+async def test_a_concurrent_move_of_the_issuer_refuses_a_submission_keeping_the_secret(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The secret is kept against the row being written over, not against a read taken before discovery.
+
+    The move lands while discovery is in flight, which is the window the connection is released for.
+    """
+    organization = await create_organization(async_db, slug="raced-issuer")
+    admin = await _admin(async_db, organization)
+    organization_id = organization.id
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
+
+    async def _discover_then_move(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        await _move_the_issuer_in_another_session(async_db, organization_id)
+        return DiscoveredProvider(resolved_issuer=_ISSUER, document=_document(), discovered_at=datetime.now(UTC))
+
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.discover_connection_metadata", _discover_then_move)
+
+    with pytest.raises(OIDCConnectionSecretRequiredError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret=None))
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert decrypt_secret(stored.encrypted_client_secret) == "the-secret-that-won"
+
+
 async def test_a_first_save_that_leaves_the_secret_out_is_refused(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     organization = await create_organization(async_db, slug="nothing-to-keep")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
 
     with pytest.raises(OIDCConnectionSecretRequiredError):
         await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret=None))
 
-    assert await _stored(async_db, organization.id) is None
+    assert await _stored(async_db, organization_id) is None
 
 
 async def test_a_moved_issuer_cannot_carry_the_stored_secret(
@@ -365,6 +418,7 @@ async def test_a_moved_issuer_cannot_carry_the_stored_secret(
     """The secret proves this deployment is that client, so it must not follow the issuer somewhere new."""
     organization = await create_organization(async_db, slug="moved-issuer")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
@@ -374,7 +428,7 @@ async def test_a_moved_issuer_cannot_carry_the_stored_secret(
             user=admin, request=_request(issuer="https://elsewhere.example", client_secret=None)
         )
 
-    stored = await _stored(async_db, organization.id)
+    stored = await _stored(async_db, organization_id)
     assert stored is not None
     assert stored.resolved_issuer == _ISSUER
     assert decrypt_secret(stored.encrypted_client_secret) == "first-secret-value"
@@ -385,6 +439,7 @@ async def test_a_changed_client_id_cannot_carry_the_stored_secret(
 ) -> None:
     organization = await create_organization(async_db, slug="changed-client")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
@@ -393,7 +448,7 @@ async def test_a_changed_client_id_cannot_carry_the_stored_secret(
             user=admin, request=_request(client_id="another-client-id", client_secret=None)
         )
 
-    stored = await _stored(async_db, organization.id)
+    stored = await _stored(async_db, organization_id)
     assert stored is not None
     assert stored.client_id == "a-client-id"
 

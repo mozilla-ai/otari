@@ -60,34 +60,23 @@ class _StoredSecret:
     last4: str
 
 
-def _require_a_secret_to_keep(request: OIDCConnectionRequest, stored: OIDCConnection | None) -> None:
-    """Refuse a submission that leaves the client secret out with no stored one that may stand in.
-
-    The stored secret proves this deployment is one client at one issuer, so it may only be kept
-    where the submission still names both. Carrying it to an issuer or a client ID the caller just
-    changed would hand it to whoever controls the new one.
-
-    Raises:
-        OIDCConnectionSecretRequiredError: There is no stored secret that may stand in.
-
-    """
-    if request.client_secret is not None:
-        return
-    if stored is None or stored.issuer != request.issuer or stored.client_id != request.client_id:
-        raise OIDCConnectionSecretRequiredError
-
-
 def _secret_to_store(request: OIDCConnectionRequest, stored: OIDCConnection | None) -> _StoredSecret:
     """The client secret to store: the submitted one, encrypted, or the stored one kept as it is.
 
+    The stored secret proves this deployment is one client at one issuer, so it is kept only where
+    the submission still names both. Carrying it to an issuer or a client ID the caller just changed
+    would hand it to whoever controls the new one.
+
+    NOTE: Decided here, against the row being written over, rather than against an earlier read of
+    it. A submission that leaves the secret out therefore costs one discovery before its refusal.
+
     Raises:
-        OIDCConnectionSecretRequiredError: Nothing was submitted and a concurrent request removed
-            the connection whose secret would have been kept.
+        OIDCConnectionSecretRequiredError: Nothing was submitted and no stored secret may stand in.
 
     """
     if request.client_secret is not None:
         return _StoredSecret(encrypted=encrypt_secret(request.client_secret), last4=request.client_secret[-4:])
-    if stored is None:
+    if stored is None or stored.issuer != request.issuer or stored.client_id != request.client_id:
         raise OIDCConnectionSecretRequiredError
     return _StoredSecret(encrypted=stored.encrypted_client_secret, last4=stored.client_secret_last4)
 
@@ -167,10 +156,6 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
         if not secret_box_configured():
             raise SecretBoxUnavailableTenancyError(stored="an organization's own sign-in connection")
-
-        async with self._uow:
-            stored = await self._connections.get_for_organization(organization.id)
-        _require_a_secret_to_keep(request, stored)
 
         await self._uow.release()
         discovered = await discover_connection_metadata(request.issuer, allow_private_hosts=self._allow_private_hosts)
