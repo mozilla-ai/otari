@@ -18,6 +18,7 @@ from gateway.adapters.identity_provider_adapter import DeploymentIdentityProvide
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    OIDCConnectionDisabledError,
     OIDCConnectionEnforcedError,
     OIDCConnectionNotFoundError,
     OIDCConnectionUnprovenError,
@@ -391,6 +392,25 @@ async def test_enforcement_cannot_be_set_before_one_sign_in_has_succeeded(async_
         await _connection_service(async_db).set_sso_enforcement_for_user(
             user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
         )
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_enforcement_cannot_be_required_through_a_disabled_connection(async_db: AsyncSession) -> None:
+    """Requiring a connection nobody can sign in through refuses every member holding no exemption."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    connection.enabled = False
+    async_db.add(connection)
+    await async_db.commit()
+
+    with pytest.raises(OIDCConnectionDisabledError):
+        await _connection_service(async_db).set_sso_enforcement_for_user(
+            user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+        )
+
     assert (await _reloaded(async_db, organization)).sso_required is False
 
 

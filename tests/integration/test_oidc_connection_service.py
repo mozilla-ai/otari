@@ -20,6 +20,7 @@ from gateway.core.database import release_session
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
+    OIDCConnectionDisabledError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
     OIDCDiscoveryError,
@@ -227,6 +228,30 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     assert stored is not None
     assert stored.resolved_issuer == resolved_issuer
     assert stored.discovery_document == document
+
+
+async def test_save_refuses_disabling_a_connection_the_organization_requires(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the invariant: it must not be reachable by editing the connection instead."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization_id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    with pytest.raises(OIDCConnectionDisabledError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(enabled=False))
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert stored.enabled is True
 
 
 async def test_save_encrypts_the_client_secret_and_returns_only_last4(

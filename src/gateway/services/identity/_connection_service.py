@@ -9,6 +9,7 @@ from apron_auth import BrowserBoundAuthorization, StoredStateClient
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
+    OIDCConnectionDisabledError,
     OIDCConnectionEnforcedError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
@@ -165,6 +166,8 @@ class OIDCConnectionService:
             raise OIDCDiscoveryError
 
         async with self._uow:
+            if not request.enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
+                raise OIDCConnectionDisabledError
             connection = await self._connections.get_for_organization(organization.id)
             secret = _secret_to_store(request, connection)
             if connection is None:
@@ -231,7 +234,7 @@ class OIDCConnectionService:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
                 raise OIDCConnectionNotFoundError
-            if organization.sso_required:
+            if await self._organizations.organizations.is_sso_enforced(organization.id):
                 raise OIDCConnectionEnforcedError
             await self._connections.delete(connection)
 
@@ -519,6 +522,8 @@ class OIDCConnectionService:
             raise OIDCConnectionNotFoundError
         if connection.first_sign_in_at is None:
             raise OIDCConnectionUnprovenError
+        if not connection.enabled:
+            raise OIDCConnectionDisabledError
         if break_glass_user_id is None and not break_glass_waived:
             raise SsoBreakGlassRequiredError
         if break_glass_user_id is not None:

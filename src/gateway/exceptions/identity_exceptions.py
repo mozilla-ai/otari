@@ -413,6 +413,22 @@ class OIDCConnectionConflictError(TenancyConflictError):
         super().__init__("Another change to this organization's sign-in connection finished first. Try again.")
 
 
+class OIDCConnectionDisabledError(TenancyValidationError):
+    """A connection an organization requires sign-in through, given as disabled.
+
+    Enforcement over a connection nobody can sign in through refuses every member holding no
+    exemption, so the pair is refused rather than stored and reported afterwards.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A connection this organization requires must stay enabled. Stop requiring sign-in "
+            "through it first, or enable it."
+        )
+
+
 class OIDCConnectionEnforcedError(TenancyValidationError):
     """A connection is asked to be removed while its organization still requires sign-in through it.
 
@@ -755,6 +771,7 @@ __all__ = [
     "OAuthProviderUnavailableError",
     "OAuthStateError",
     "OIDCConnectionConflictError",
+    "OIDCConnectionDisabledError",
     "OIDCConnectionEnforcedError",
     "OIDCConnectionNotFoundError",
     "OIDCConnectionSecretRequiredError",

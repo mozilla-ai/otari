@@ -48,6 +48,18 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
             select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update()
         )
 
+    async def is_sso_enforced(self, organization_id: uuid.UUID) -> bool:
+        """Whether this organization requires sign-in through its own connection, read from the row.
+
+        A read rather than an attribute of an instance already in hand, because a caller deciding a
+        write inside a transaction resolved the organization before opening it, and the attribute
+        holds whatever was true then.
+        """
+        result = await self.db.execute(
+            select(col(Organization.sso_required)).where(col(Organization.id) == organization_id)
+        )
+        return bool(result.scalar_one_or_none())
+
     async def create_organization(
         self,
         *,
