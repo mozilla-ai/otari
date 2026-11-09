@@ -256,13 +256,15 @@ tools, models, costs, outcomes and guardrail verdicts) but not what it was about
 | The deployment's operator, by break-glass | Any session, where the deployment enables it, recorded with a reason and a reference. |
 | Anyone else | Never. |
 
-**Sharing a session.** On a session you own, click **Share this session**, choose
-who to share with (your organization's owners and admins, or the team that runs
-the deployment), and add an optional note. The share lasts until you end it,
-until you lose access to the workspace, or until retention deletes the session.
-You see who read it and when; reads are recorded at most once an hour per reader,
-and the record outlives the share. A share with the operator of a deployment that
-serves several organizations, such as otari.ai, needs the operator to act in your
+**Sharing a session.** On a session you own, click **Share this session**,
+choose who to share with (your organization's owners and admins, or the team
+that runs the deployment), and add an optional note. A session has one running
+share per audience: sharing again with the same audience replaces the note on
+the running share. The share lasts until you end it, until you lose access to
+the workspace, or until retention deletes the session. You see who read it and
+when; reads are recorded at most once an hour per reader, and the record
+outlives the share. A share with the operator of a deployment that serves
+several organizations, such as otari.ai, needs the operator to act in your
 organization.
 
 **Break-glass.** For an investigation the owner cannot be asked to share for,

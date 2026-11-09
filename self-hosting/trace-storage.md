@@ -46,12 +46,18 @@ content.
 - When the key source is unreachable, refuses, or takes more than 1.5 seconds,
   spans are stored without content and the source is not asked again for 30
   seconds. A batch spanning many sessions waits at most 1.5 seconds in all.
+- Writing and reading pause separately, and reading pauses per key source:
+  during a KMS outage, content sealed under `OTARI_SECRET_KEY` still opens, and
+  the other way round. Content sealed under a key source the deployment no
+  longer has is refused rather than treated as an outage, and pauses nothing.
 - Content that cannot be opened reads back empty. Both cases are counted by
   reason on `gateway_trace_content_unsealed` and
   `gateway_trace_content_unopened`.
 
 Content sealed by earlier versions with `OTARI_SECRET_KEY` alone still reads
-back; nothing needs re-encrypting.
+back; nothing needs re-encrypting. That older form is bound only to its
+workspace and span, not its session, and becomes eligible for deletion once
+its session is older than `trace_session_max_age_days`.
 
 ## Sealing content with AWS KMS
 
