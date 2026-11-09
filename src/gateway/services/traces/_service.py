@@ -415,15 +415,20 @@ class TraceService:
 
         A batch per block, as clearing a workspace's content goes, so a write holding
         the row of a user it stores for waits for one batch rather than for every user
-        who has written a trace since the last pass.
+        who has written a trace since the last pass. Each batch starts past the last
+        user the previous one took, so writers remaking rows behind the sweep cannot
+        keep it from finishing.
         """
         cutoff = now - ERASURE_MARGIN - ERASURE_KEPT_FOR
         forgotten = 0
+        after: str | None = None
         while True:
             async with self._uow:
-                batch = await self._erasures.forget_erased_before(cutoff, limit=FORGET_ERASURES_BATCH)
+                batch, after = await self._erasures.forget_erased_before(
+                    cutoff, limit=FORGET_ERASURES_BATCH, after=after
+                )
             forgotten += batch
-            if batch < FORGET_ERASURES_BATCH:
+            if after is None:
                 return forgotten
 
     async def share_content(

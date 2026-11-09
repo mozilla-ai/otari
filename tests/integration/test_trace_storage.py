@@ -25,7 +25,7 @@ from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.api.deps import is_workspace_member, workspaces_keeping_content_for
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.tenancy import User as TenancyUser
@@ -1090,28 +1090,56 @@ async def test_forgetting_erasures_commits_each_batch_before_taking_the_next(
     for user in users:
         await store.write((_write(workspace, f"s-{user}", _span("tool-1", kind="tool"), user_id=user),))
 
-    ended = 0
-    real_exit = UnitOfWork.__aexit__
+    committed = 0
+    real_commit = AsyncSession.commit
 
-    async def counting_exit(self: UnitOfWork, *exc: Any) -> Any:
-        nonlocal ended
-        ended += 1
-        return await real_exit(self, *exc)
+    async def counting_commit(self: AsyncSession) -> None:
+        nonlocal committed
+        await real_commit(self)
+        committed += 1
 
-    blocks_seen: list[int] = []
+    commits_seen: list[int] = []
     real_forget = UserBarrierRepository.forget_erased_before
 
-    async def recording_forget(self: UserBarrierRepository, cutoff: datetime, *, limit: int) -> int:
-        blocks_seen.append(ended)
-        return await real_forget(self, cutoff, limit=limit)
+    async def recording_forget(
+        self: UserBarrierRepository, cutoff: datetime, *, limit: int, after: str | None = None
+    ) -> tuple[int, str | None]:
+        commits_seen.append(committed)
+        return await real_forget(self, cutoff, limit=limit, after=after)
 
-    monkeypatch.setattr(UnitOfWork, "__aexit__", counting_exit)
+    monkeypatch.setattr(AsyncSession, "commit", counting_commit)
     monkeypatch.setattr(UserBarrierRepository, "forget_erased_before", recording_forget)
 
     assert await store.expire_erasures(now=datetime.now(UTC)) == len(users)
-    # Three batches of at most two, each after the previous one's block ended.
-    assert len(blocks_seen) == 3
-    assert blocks_seen == sorted(set(blocks_seen))
+    # Three batches of at most two, each taken once the one before it committed.
+    assert [seen - commits_seen[0] for seen in commits_seen] == [0, 1, 2]
+
+
+async def test_forgetting_erasures_finishes_while_writers_remake_rows_behind_it(
+    store: TraceService, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write remakes a never-erased user's row, so a sweep that started over each batch could run forever."""
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    async_db.add_all(TraceUserBarrier(user_id=f"user-{n}") for n in range(5))
+    await async_db.commit()
+    real_forget = UserBarrierRepository.forget_erased_before
+    batches = 0
+
+    async def remaking_forget(
+        self: UserBarrierRepository, cutoff: datetime, *, limit: int, after: str | None = None
+    ) -> tuple[int, str | None]:
+        nonlocal batches
+        batches += 1
+        answer = await real_forget(self, cutoff, limit=limit, after=after)
+        # Two rows sorting before every user the sweep has reached, made between batches.
+        self.db.add_all(TraceUserBarrier(user_id=f"a-{batches}-{n}") for n in range(2))
+        await self.db.flush()
+        return answer
+
+    monkeypatch.setattr(UserBarrierRepository, "forget_erased_before", remaking_forget)
+
+    assert await asyncio.wait_for(store.expire_erasures(now=datetime.now(UTC)), timeout=10) == 5
+    assert batches == 3
 
 
 async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(

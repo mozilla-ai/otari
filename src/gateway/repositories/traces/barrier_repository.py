@@ -91,8 +91,13 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         )
         return dict(result.tuples().all())
 
-    async def forget_erased_before(self, cutoff: datetime, *, limit: int) -> int:
+    async def forget_erased_before(
+        self, cutoff: datetime, *, limit: int, after: str | None = None
+    ) -> tuple[int, str | None]:
         """Delete up to ``limit`` rows of users erased before ``cutoff``, and of users never erased.
+
+        Only users sorting after ``after`` are taken. Returns how many rows went and
+        the user to continue after, or ``None`` once no row is left past this batch.
 
         A never-erased user's row only serializes writes and is made again on the
         next one, so no user's id is kept past its use. Rows are locked in ``user_id``
@@ -106,20 +111,20 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         their spans.
         """
         expired = or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff)
+        candidates = select(TraceUserBarrier.user_id).where(expired)
+        if after is not None:
+            candidates = candidates.where(TraceUserBarrier.user_id > after)
         locked = await self.db.execute(
-            select(TraceUserBarrier.user_id)
-            .where(expired)
-            .order_by(TraceUserBarrier.user_id)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
+            candidates.order_by(TraceUserBarrier.user_id).limit(limit).with_for_update(skip_locked=True)
         )
         user_ids = list(locked.scalars().all())
         if not user_ids:
-            return 0
+            return 0, None
         # The predicate again, not the ids alone: SQLite has no FOR UPDATE, so a row
         # erased between the select and here is no longer one this may delete.
         result = await self.db.execute(delete(TraceUserBarrier).where(TraceUserBarrier.user_id.in_(user_ids), expired))
-        return int(getattr(result, "rowcount", 0) or 0)
+        forgotten = int(getattr(result, "rowcount", 0) or 0)
+        return forgotten, user_ids[-1] if len(user_ids) == limit else None
 
     async def erase(self, user_id: str, at: datetime) -> None:
         """Record the user's erasure, holding their row until the transaction ends."""
