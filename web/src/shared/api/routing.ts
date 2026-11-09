@@ -104,6 +104,7 @@ export function useRoutingPolicies(workspaceId?: string) {
 export function useAutomaticFallbacks(workspaceId?: string) {
   return useQuery({
     queryKey: [AUTOMATIC_FALLBACKS, workspaceId ?? null],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<AutomaticFallbacksResponse>(
         workspaceId
