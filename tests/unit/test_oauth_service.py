@@ -154,6 +154,23 @@ class TestHalfConfiguredOAuthIsAnnounced:
         finally:
             gateway_logger.removeHandler(caplog.handler)
 
+    def test_an_address_carrying_credentials_is_refused_for_what_is_wrong_with_it(self) -> None:
+        """An https address the library still refuses must not be reported as needing https."""
+        config = GatewayConfig(
+            public_base_url="https://operator:secret@otari.example.com",
+            oauth_google_client_id="google-id",
+            oauth_google_client_secret="google-secret",  # noqa: S106
+        )
+
+        with pytest.raises(OAuthNotConfiguredError) as refusal:
+            oauth_service.require_configured(config, "google")
+
+        reason = str(refusal.value)
+        assert "user or password" in reason
+        assert "https address" not in reason
+        assert "secret" not in reason
+        assert "operator" not in reason
+
     def test_a_missing_public_base_url_is_named(self, caplog: pytest.LogCaptureFixture) -> None:
         config = GatewayConfig(
             oauth_google_client_id="google-id",

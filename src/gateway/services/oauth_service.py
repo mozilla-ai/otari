@@ -47,7 +47,7 @@ import secrets
 import string
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from apron_auth import OAuthClient, ProviderConfig
 from apron_auth.errors import INVALID_GRANT, ConfigurationError, NonceValidationError, StateError, TokenExchangeError
@@ -453,7 +453,18 @@ def require_configured(config: GatewayConfig, provider: str) -> None:
     try:
         _provider_config(config, provider, client_id, client_secret)
     except ConfigurationError:
+        # Two settings of public_base_url reach the library's one refusal, and an operator told to
+        # set https on an address that is already https has nowhere to go. The credential case is
+        # asked here rather than read back off the library's message.
+        if _address_carries_credentials(config):
+            raise OAuthNotConfiguredError.address_carries_credentials(provider) from None
         raise OAuthNotConfiguredError.insecure_address(provider) from None
+
+
+def _address_carries_credentials(config: GatewayConfig) -> bool:
+    """Whether this deployment's own address embeds a user or a password."""
+    parsed = urlsplit(config.public_base_url or "")
+    return parsed.username is not None or parsed.password is not None
 
 
 def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:

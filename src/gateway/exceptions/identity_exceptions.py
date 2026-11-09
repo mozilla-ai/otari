@@ -218,6 +218,21 @@ class OAuthNotConfiguredError(TenancyValidationError):
         )
 
     @classmethod
+    def address_carries_credentials(cls, provider: str) -> "OAuthNotConfiguredError":
+        """This deployment's own address embeds a user and password, which a redirect URI may not.
+
+        NOTE: The reason names the condition and never the address, so neither the response nor the
+        log repeats the credential it is refusing.
+        """
+        return cls(
+            provider,
+            reason=(
+                f"{provider} sign-in needs public_base_url to carry no user or password. "
+                "Remove the credentials from it, then restart."
+            ),
+        )
+
+    @classmethod
     def insecure_address(cls, provider: str) -> "OAuthNotConfiguredError":
         """This deployment's own address cannot build a redirect URI for ``provider``."""
         return cls(
