@@ -967,13 +967,21 @@ export function useDeleteOrganizationSso() {
 // Who requiring sign-in through the connection would affect today: every
 // active member holding no sign-in link to it. Read before the enforcement
 // toggle is offered, and short-lived, since a member linking moves the count.
+// Keyed on the organization, unlike the reads around it. This report names the members who would
+// lose access, and a key shared across organizations serves the previous one's report while the
+// new one is still being fetched, so the page would show one organization's people to another and
+// offer an owner from it. The settings beside it carry no names and recover on the same refetch.
 export function useOrganizationSsoPreflight(enabled = true) {
+  const context = useOrganizationContext(enabled)
+  const organizationId = context.data?.organization.id ?? null
   return useQuery({
-    queryKey: [ORGANIZATION_SSO_PREFLIGHT],
+    queryKey: [ORGANIZATION_SSO_PREFLIGHT, organizationId],
     queryFn: () =>
       apiFetch<OrganizationSsoPreflight>("/organizations/me/sso/preflight"),
     staleTime: 15_000,
-    enabled,
+    // Withheld until the organization is settled, so the report cannot be read under one key and
+    // then attributed to another.
+    enabled: enabled && organizationId !== null,
   })
 }
 
