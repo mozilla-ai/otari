@@ -16,7 +16,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.inference_exceptions import VideoJobNotFoundError
 from gateway.log_config import logger
 from gateway.repositories.inference import VideoJobRepository
-from gateway.services.pricing import PriceFacts, price_video
+from gateway.services.pricing import PriceFacts, price_video, reported_video_cost
 
 if TYPE_CHECKING:
     import uuid
@@ -180,15 +180,17 @@ class VideoJobService:
     async def remember_completed(self, record: VideoJobRecord, job: VideoJob) -> None:
         """Keep what a completed job reported, so a later read needs no provider that may have forgotten it.
 
-        The first output's address and media type are kept; inline data is not,
-        since a provider that returns it also keeps the job. The record then
-        answers every later read of the job and serves its content.
+        Its length, the provider's charge, and the first output's address and
+        media type are kept; inline data is not, since a provider that returns
+        it also keeps the job. The record then answers every later read of the
+        job and serves its content.
         """
         output = next((item for item in job.outputs if item.url is not None), None)
         async with self._uow:
             await self._jobs.remember_completed(
                 record.id,
                 seconds=job.seconds,
+                cost=reported_video_cost(job.cost),
                 output_url=None if output is None else output.url,
                 output_mime_type=None if output is None else output.mime_type,
                 completed_at=datetime.now(UTC),
@@ -210,6 +212,7 @@ class VideoJobService:
             completed_at=int(record.completed_at.timestamp()),
             seconds=record.completed_seconds,
             outputs=outputs,
+            cost=None if record.completed_cost is None else float(record.completed_cost),
         )
 
     async def settle_completed(

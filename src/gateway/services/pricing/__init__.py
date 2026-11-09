@@ -42,7 +42,13 @@ from gateway.services.pricing._usage_pricing import (
     request_rate,
     validated_units,
 )
-from gateway.services.pricing._video_pricing import VIDEO_SECONDS, estimate_video_cost, price_video, video_rate
+from gateway.services.pricing._video_pricing import (
+    VIDEO_SECONDS,
+    estimate_video_cost,
+    price_video,
+    reported_video_cost,
+    video_rate,
+)
 from gateway.services.pricing.bundled import (
     BUNDLED_SNAPSHOT_NAME,
     bundled_catalog,
@@ -120,6 +126,7 @@ __all__ = [
     "price_slot",
     "price_usage",
     "price_video",
+    "reported_video_cost",
     "request_rate",
     "reset_generations",
     "resolve_as_of",

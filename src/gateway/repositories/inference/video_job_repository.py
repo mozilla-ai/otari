@@ -14,6 +14,7 @@ from gateway.repositories.base_repository import BaseRepository
 
 if TYPE_CHECKING:
     import uuid
+    from decimal import Decimal
 
 
 class VideoJobRepository(BaseRepository[VideoJobRecord, Never, Never]):
@@ -81,6 +82,7 @@ class VideoJobRepository(BaseRepository[VideoJobRecord, Never, Never]):
         video_id: str,
         *,
         seconds: int | None,
+        cost: Decimal | None,
         output_url: str | None,
         output_mime_type: str | None,
         completed_at: datetime,
@@ -92,6 +94,7 @@ class VideoJobRepository(BaseRepository[VideoJobRecord, Never, Never]):
             .values(
                 completed_at=completed_at,
                 completed_seconds=seconds,
+                completed_cost=cost,
                 output_url=output_url,
                 output_mime_type=output_mime_type,
             )
