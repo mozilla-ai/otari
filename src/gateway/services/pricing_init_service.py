@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.money import to_usd
-from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind, rates_of
 from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import (
@@ -23,6 +23,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys, enriching_fetch_tool
+from gateway.types.price_rates import dump_rates, load_rates
 from gateway.types.tool_charges import InstanceRateKey
 
 
@@ -152,6 +153,15 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
         )
 
 
+def _same_rates_block(stored: ModelPricing, configured: ModelPricing) -> bool:
+    """Whether two versions' ``rates`` blocks agree, numbers compared by value.
+
+    The columns cannot tell apart two blocks that differ only where no column
+    reaches, such as a rate on another modality.
+    """
+    return load_rates(dump_rates(rates_of(stored))) == load_rates(dump_rates(rates_of(configured)))
+
+
 async def initialize_pricing_from_config(
     config: GatewayConfig, db: AsyncSession, pricing: DeploymentPricingService
 ) -> None:
@@ -231,7 +241,11 @@ async def initialize_pricing_from_config(
             origin="config",
         )
         current = in_force.get(model_key)
-        if current is not None and DeploymentPricingService.rates_match(current, new_pricing):
+        if (
+            current is not None
+            and DeploymentPricingService.rates_match(current, new_pricing)
+            and _same_rates_block(current, new_pricing)
+        ):
             logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
             continue
 
