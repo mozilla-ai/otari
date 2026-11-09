@@ -533,7 +533,7 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
-PROVIDER_REQUEST_TOO_LARGE_DETAIL = "The provider refused the request as too large (reduce the size of the messages)"
+PROVIDER_REQUEST_TOO_LARGE_DETAIL = "The provider refused the request as too large (reduce the request size)"
 
 
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
