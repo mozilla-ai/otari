@@ -804,6 +804,26 @@ async def test_undated_config_rates_block_change_no_column_holds_adds_a_version(
     assert [version.rates["audio"]["input"]["price"] for version in versions] == [Decimal(100), Decimal(120)]
 
 
+def test_undated_config_pricing_boots_on_a_one_connection_pool(postgres_url: str, test_db: Session) -> None:
+    """Startup reads the version in force without waiting on the connection it already holds."""
+    config = _undated_pricing_config(30.0).model_copy(
+        update={
+            "database_url": postgres_url,
+            "host": "127.0.0.1",
+            "port": 8000,
+            "db_pool_size": 1,
+            "db_max_overflow": 0,
+            "db_pool_timeout": 2.0,
+        }
+    )
+    # The second start finds the bootstrap key and the version in force already stored.
+    for _ in range(2):
+        with TestClient(create_app(config)):
+            pass
+
+    assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "openai:gpt-4").count() == 1
+
+
 @pytest.mark.asyncio
 async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncSession) -> None:
     """Test that log_usage falls back to legacy slash format when colon format is absent."""
