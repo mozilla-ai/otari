@@ -11,6 +11,7 @@ import {
   deleteSession,
   retryUnlessNotFound,
   setUnauthorizedHandler,
+  signInWithPasskey,
   siteFetch,
   startOAuthSignIn,
 } from "./client"
@@ -224,21 +225,6 @@ describe("apiFetch", () => {
     })
   })
 
-  it("keeps the refusal's error code, so a caller can tell refusals apart", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json(
-        { detail: "Add billing details first.", code: "some_code" },
-        { status: 409 },
-      ),
-    )
-
-    await expect(apiFetch("/billing/top-up")).rejects.toMatchObject({
-      status: 409,
-      message: "Add billing details first.",
-      code: "some_code",
-    })
-  })
-
   it("keeps the error code on a 401 as well as signing out", async () => {
     const onUnauthorized = vi.fn()
     setUnauthorizedHandler(onUnauthorized)
@@ -262,19 +248,44 @@ describe("apiFetch", () => {
   })
 })
 
-describe("apiStream", () => {
-  it("keeps the refusal's error code", async () => {
+describe("the refusal's error code", () => {
+  // Every helper that throws on a refusal keeps its code, so a caller tells
+  // refusals apart by code rather than by wording that may change.
+  it.each([
+    ["apiFetch", 409, () => apiFetch("/billing/top-up")],
+    ["apiStream", 403, () => apiStream("/chat/completions")],
+    ["apiStream on a 401", 401, () => apiStream("/chat/completions")],
+    ["siteFetch", 500, () => siteFetch(DASHBOARD_BUILD_PATH)],
+    ["createSession", 500, () => createSession({ masterKey: "test-key" })],
+    ["startOAuthSignIn", 500, () => startOAuthSignIn("github")],
+    ["signInWithPasskey", 500, () => signInWithPasskey()],
+  ])("reaches ApiError.code through %s", async (_name, status, call) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json(
-        { detail: "Model not allowed.", code: "some_code" },
-        { status: 403 },
+        { detail: "Model not allowed.", code: "model_not_allowed" },
+        { status },
       ),
     )
 
-    await expect(apiStream("/chat/completions")).rejects.toMatchObject({
-      status: 403,
+    await expect(call()).rejects.toMatchObject({
+      status,
       message: "Model not allowed.",
-      code: "some_code",
+      code: "model_not_allowed",
+    })
+  })
+
+  it("is empty when the body is not JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Bad Gateway</html>", {
+        status: 502,
+        statusText: "Bad Gateway",
+      }),
+    )
+
+    await expect(apiFetch("/models")).rejects.toMatchObject({
+      status: 502,
+      message: "Bad Gateway",
+      code: "",
     })
   })
 })
