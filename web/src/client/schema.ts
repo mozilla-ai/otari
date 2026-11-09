@@ -15337,7 +15337,7 @@ export interface components {
             mode: "block" | "monitor";
             /**
              * On Unavailable
-             * @description What a block-mode entry does when the guardrails service cannot be reached at all
+             * @description What a block-mode entry does when the guardrails service cannot be reached or gives no verdict
              * @default block
              * @enum {string}
              */
