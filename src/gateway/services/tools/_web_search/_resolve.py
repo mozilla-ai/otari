@@ -231,6 +231,19 @@ def resolve_search(
     return None
 
 
+def resolve_search_on_key(
+    credential: WebSearchCredential, *, name: str, request_options: Mapping[str, Any] | None
+) -> ResolvedSearch | None:
+    """A direct search no instance stands behind, on the organization's key alone, as ``name``.
+
+    ``None`` for a key whose provider this gateway cannot call. Raises what
+    :func:`resolve_search` raises for the request's options and the key.
+    """
+    return _search_on_credential(
+        credential, name=name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request_options or _NO_OPTIONS
+    )
+
+
 def search_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
     """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it.
 
