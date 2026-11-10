@@ -220,6 +220,9 @@ The models.dev catalog is refreshed as follows:
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
   back. Both give the same limits, capabilities and prices.
+- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+  models.dev, which serves models.dev's catalog plus the models it does not
+  list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
 - When neither can be read, the last good copy stays in use and the gateway
   logs why.
 - A document is refused when it lists no models or when more than a quarter of
