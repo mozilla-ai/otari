@@ -147,24 +147,25 @@ def model_capabilities(
     ``tool_choice`` for ``tool_call``, ``response_format`` for ``structured_output``,
     ``reasoning`` for ``reasoning``.
 
-    An engine that says how it was started overrides two of those flags: it
-    calls tools only with a tool-call parser, whatever the model can do, and a
-    reasoning parser means the model reasons. What it reads overrides
-    models.dev's input modalities.
+    An engine that names its parsers overrides two of those flags: it calls
+    tools only with a tool-call parser, whatever the model can do, and a
+    reasoning parser means the model reasons. What it says it reads overrides
+    models.dev's input modalities, whether or not it named its parsers.
     """
     served = _served(config, model_key, organization_id)
     metadata = _entry(config, models_dev, model_key, served)
     settings = served if served is not None and served.settings_reported else None
-    if metadata is None and settings is None:
+    served_modalities = served.input_modalities if served is not None else None
+    if metadata is None and settings is None and served_modalities is None:
         return None
     tool_call = metadata.tool_call if metadata else None
     reasoning = metadata.reasoning if metadata else None
-    input_modalities = metadata.input_modalities if metadata else ["text"]
+    input_modalities = (
+        list(served_modalities) if served_modalities else (metadata.input_modalities if metadata else ["text"])
+    )
     if settings is not None:
         tool_call = settings.tool_call_parser is not None
         reasoning = reasoning or settings.reasoning_parser is not None
-        if settings.input_modalities is not None:
-            input_modalities = list(settings.input_modalities)
     flags = (
         (tool_call, ("tools", "tool_choice")),
         (metadata.structured_output if metadata else None, ("response_format",)),

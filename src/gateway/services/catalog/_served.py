@@ -41,18 +41,24 @@ _MODEL_INFO_TIMEOUT_SECONDS = 5.0
 # real server, and an engine serves a handful of models.
 _MAX_MODEL_INFO_BYTES = 64 * 1024
 _MAX_MODELS_PER_LISTING = 1000
-# The ``served_models`` column widths.
+# The ``served_models`` column widths, and the largest value its ``Integer`` holds.
 _MAX_MODEL_CHARS = 512
 _MAX_PARSER_CHARS = 64
+_MAX_CONTEXT_WINDOW = 2**31 - 1
 
 
 @dataclass(frozen=True, slots=True)
 class EngineSettings:
-    """How an SGLang server was started, from its ``/model_info``."""
+    """How an SGLang server was started, from its ``/model_info``.
+
+    ``parsers_reported`` is whether the answer named its parsers at all; an
+    SGLang that leaves them out says nothing about tool calls or reasoning.
+    """
 
     reasoning_parser: str | None
     tool_call_parser: str | None
     input_modalities: tuple[str, ...] | None
+    parsers_reported: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +103,10 @@ def _engine(model: Model) -> str | None:
 
 
 def _positive_int(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+    """A context length its column can hold, else ``None``."""
+    if isinstance(value, int) and not isinstance(value, bool) and 0 < value <= _MAX_CONTEXT_WINDOW:
+        return value
+    return None
 
 
 def _text(value: object, limit: int) -> str | None:
@@ -120,7 +129,7 @@ def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedF
         return facts
     return dataclasses.replace(
         facts,
-        settings_reported=True,
+        settings_reported=settings.parsers_reported,
         reasoning_parser=settings.reasoning_parser,
         tool_call_parser=settings.tool_call_parser,
         input_modalities=settings.input_modalities,
@@ -139,6 +148,7 @@ def _settings_from(info: Mapping[str, Any]) -> EngineSettings:
         reasoning_parser=_text(info.get("reasoning_parser"), _MAX_PARSER_CHARS),
         tool_call_parser=_text(info.get("tool_call_parser"), _MAX_PARSER_CHARS),
         input_modalities=modalities,
+        parsers_reported="reasoning_parser" in info and "tool_call_parser" in info,
     )
 
 

@@ -401,3 +401,26 @@ def test_values_too_long_to_store_are_dropped() -> None:
     assert facts_from_listing(_vllm("m" * 513, max_model_len=1), None) is None
     facts = facts_from_listing(_vllm(max_model_len=1, root="r" * 513), None)
     assert facts is not None and facts.root is None
+
+
+@pytest.mark.asyncio
+async def test_an_sglang_that_names_no_parsers_keeps_models_dev_s_tool_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leaving the parser fields out says nothing about tool calls, unlike naming them null."""
+    _route_http(monkeypatch, lambda _request: httpx.Response(200, json={"has_image_understanding": True}))
+
+    settings = await read_engine_settings([_sglang(root="r")], api_base="http://box/v1", api_key=None)
+    assert settings is not None and not settings.parsers_reported
+    facts = facts_from_listing(_sglang(root="Qwen/Qwen3-32B"), settings)
+    assert facts is not None
+    _serve("cairn", "cairn-qwen", facts)
+
+    capabilities = model_capabilities(_config(), MODELS_DEV, "cairn:cairn-qwen")
+
+    assert capabilities is not None
+    assert capabilities.supported_parameters == ["tools", "tool_choice", "response_format", "reasoning"]
+    assert capabilities.input_modalities == ["text", "image"]
+
+
+def test_a_context_length_its_column_cannot_hold_is_left_unknown() -> None:
+    facts = facts_from_listing(_vllm(max_model_len=2**31, root="r"), None)
+    assert facts is not None and facts.context_window is None
