@@ -1309,6 +1309,7 @@ def _searched_terminal(searches: int) -> ResponseStreamEvent:
 
 @pytest.mark.asyncio
 async def test_stream_adds_the_provider_searches_of_hidden_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The terminal event reports the searches of every round, not just the final one's."""
     fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
     iter_streams = iter(
         [

@@ -115,6 +115,7 @@ def test_a_responses_response_with_no_reported_count_counts_its_provider_search_
     [None, "two", {"web_search": None}, {"web_search": {"num_requests": "2"}}, {"web_search": {"num_requests": -1}}],
 )
 def test_a_malformed_reported_count_falls_back_to_the_items(tool_usage: Any) -> None:
+    """A provider-controlled ``tool_usage`` that is not a count is ignored, never billed as one."""
     result = SimpleNamespace(usage=_responses_usage(tool_usage=tool_usage), output=[_search_call("ws_1")])
 
     usage = _ResponsesAdapter().extract_usage(result)  # type: ignore[arg-type]
@@ -124,6 +125,7 @@ def test_a_malformed_reported_count_falls_back_to_the_items(tool_usage: Any) -> 
 
 
 def test_a_responses_stream_reads_the_searches_off_its_terminal_response() -> None:
+    """A stream reports its searches on the terminal event's response, where its usage is."""
     completed = SimpleNamespace(
         type="response.completed",
         response=SimpleNamespace(usage=_responses_usage(tool_usage={"web_search": {"num_requests": 3}}), output=[]),
