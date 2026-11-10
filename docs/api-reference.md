@@ -1128,7 +1128,7 @@ at the top level of the body.
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |
-| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |

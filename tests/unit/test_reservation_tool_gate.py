@@ -64,7 +64,7 @@ def priced(monkeypatch: pytest.MonkeyPatch) -> list[LabelCalls]:
     async def fake_price(_db: Any, calls: Sequence[LabelCalls], *, organization_id: uuid.UUID) -> ToolCharges:
         assert organization_id == _ORGANIZATION, "priced for the request's organization"
         asked.extend(calls)
-        return ToolCharges(Decimal(0), [], {call.tool: _UNIT for call in calls}, [], Decimal(0))
+        return ToolCharges(Decimal(0), [], {call.tool: _UNIT for call in calls}, [], Decimal(0), {})
 
     async def fake_release(_db: Any) -> None:
         pass

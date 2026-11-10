@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -42,6 +42,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import (
     BillingPort,
     InsufficientFundsError,
+    ToolUse,
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
@@ -52,6 +53,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
@@ -1350,6 +1352,14 @@ def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> Entitle
     return container.resolve(EntitlementPort, db)
 
 
+def get_signup_invite_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> SignupInvitePort:
+    """Resolve the signup-invite adapter this build bound at startup."""
+    return container.resolve(SignupInvitePort, db)
+
+
 def get_growth_signal_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
@@ -1645,6 +1655,7 @@ BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
+SignupInvitePortDep = Annotated[SignupInvitePort, Depends(get_signup_invite_port)]
 PersonGrowthSignalPortDep = Annotated[GrowthSignalPort | None, Depends(get_person_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
@@ -2871,16 +2882,24 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
             await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
 
         async def admit_funding(
-            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+            self,
+            *,
+            organization_id: uuid.UUID | None,
+            api_key_id: str | None,
+            user_id: str,
+            request_id: str,
+            tool: str,
         ) -> object | None:
             try:
                 return await admit_deployment_paid(
                     billing,
                     deployment_paid=True,
+                    billed=None,
                     organization_id=organization_id,
                     api_key_id=api_key_id,
                     user_id=user_id,
                     request_id=request_id,
+                    tools=frozenset({tool}),
                 )
             except InsufficientFundsError:
                 raise
@@ -2890,9 +2909,11 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 await release_session(db)
                 raise FundsCheckFailedError(describe_port_error(exc)) from exc
 
-        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+        async def settle_funding(
+            self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
+        ) -> None:
             await cast(DeploymentCharge, funding).settle(
-                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+                cost, tools=tools, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
             )
 
         async def release(self) -> bool:
@@ -2983,6 +3004,7 @@ __all__ = [
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",
+    "SignupInvitePortDep",
     "PersonGrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",

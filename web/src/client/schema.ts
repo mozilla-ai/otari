@@ -721,6 +721,10 @@ export interface paths {
          *
          *     Refused with a 400 where the deployment publishes terms and ``terms_accepted``
          *     is not set, whatever the address.
+         *
+         *     With an ``invite`` that names this address, the account is verified as it is
+         *     created and ``verified`` says so: the invitation reached the mailbox, so a
+         *     verification email would prove nothing more. Only the token's holder learns that.
          */
         post: operations["auth-signup"];
         delete?: never;
@@ -19099,6 +19103,11 @@ export interface components {
              */
             full_name?: string | null;
             /**
+             * Invite
+             * @description An invitation token from a link emailed to this address. Where it names the same address, the account is verified at once and no verification email is sent.
+             */
+            invite?: string | null;
+            /**
              * Password
              * @description The password to sign in with once verified. At least 8 characters, at most 72 bytes.
              */
@@ -19120,6 +19129,12 @@ export interface components {
              * @description What the caller should do next.
              */
             message: string;
+            /**
+             * Verified
+             * @description The account is verified already, through its invitation, so the caller can sign in now.
+             * @default false
+             */
+            verified: boolean;
         };
         /**
          * SpanPublic

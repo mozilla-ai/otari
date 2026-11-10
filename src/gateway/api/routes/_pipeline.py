@@ -214,7 +214,13 @@ from gateway.models.tools import (
     WebTool,
 )
 from gateway.models.usage import StreamCutBy, UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import (
+    FUNDS_CHECK_UNAVAILABLE_DETAIL,
+    NO_TOOLS,
+    BillingPort,
+    InsufficientFundsError,
+    ToolUse,
+)
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import (
@@ -223,6 +229,7 @@ from gateway.rate_limit import (
     RateLimitInfo,
     admit_rate_limit_rules,
     check_rate_limit,
+    open_rate_limit_grant,
     rate_limit_headers,
 )
 from gateway.schemas.inference import SettledCost
@@ -267,6 +274,7 @@ from gateway.services.inference import (
     UnidentifiedEndUserError,
     UnknownCaller,
     admit_deployment_paid,
+    billed_model,
     describe_port_error,
     end_user_identifier,
     is_empty_completion,
@@ -276,6 +284,7 @@ from gateway.services.inference import (
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
+    organization_slot_key,
     provider_failure,
     upstream_body_messages,
     upstream_error_message,
@@ -1769,6 +1778,7 @@ async def _admit_or_refuse(
             billing,
             deployment_paid=resolved.deployment_paid,
             organization_id=organization_id,
+            billed=billed_model(resolved.provider, resolved.model) if resolved.deployment_paid else None,
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             request_id=ctx.request_id,
@@ -1804,7 +1814,44 @@ async def _admit_or_refuse(
             ctx.request_id,
         )
         raise await _funding_unavailable(ctx, resolved, adapter=adapter)
+    try:
+        await _hold_organization_slot(ctx, charge)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        await _record_funding_refusal(ctx, resolved, adapter=adapter, detail=detail, status_code=exc.status_code)
+        raise adapter.error(exc.status_code, detail, ErrorKind.RATE_LIMIT, headers=dict(exc.headers or {})) from exc
+    except asyncio.CancelledError:
+        # A client that disconnects while waiting for a slot; nothing was dispatched.
+        await release_reservation(ctx)
+        raise
     ctx.deployment_charge = charge
+
+
+# How long a deployment-paid call waits for one of its organization's slots, and the longest one is held.
+_ORGANIZATION_SLOT_WAIT_SEC = 10.0
+_ORGANIZATION_SLOT_LEASE_SEC = 900.0
+_ORGANIZATION_SLOT_RULE = "organization_concurrency"
+
+
+async def _hold_organization_slot(ctx: RequestContext, charge: DeploymentCharge | None) -> None:
+    """Hold one of the organization's slots for a call its billing port limits, waiting briefly for one.
+
+    Taken after admission has committed, so a call waiting for a slot holds no
+    database connection. The slot is given back when the response ends.
+
+    Raises:
+        HTTPException: 429 when no slot frees in time.
+
+    """
+    if charge is None or charge.concurrency_limit is None or ctx.rate_limit_grant is None:
+        return
+    await ctx.rate_limit_grant.hold_slot(
+        organization_slot_key(charge.organization_id),
+        charge.concurrency_limit,
+        wait_sec=_ORGANIZATION_SLOT_WAIT_SEC,
+        lease_sec=_ORGANIZATION_SLOT_LEASE_SEC,
+        rule=_ORGANIZATION_SLOT_RULE,
+    )
 
 
 async def _discard_failed_funding_check(db: AsyncSession) -> None:
@@ -2003,6 +2050,7 @@ def _hosted_candidate(
                 billing,
                 deployment_paid=True,
                 organization_id=ctx.organization_id,
+                billed=billed_model(hosted.provider, hosted.model),
                 api_key_id=ctx.api_key_id,
                 user_id=ctx.user_id,
                 request_id=ctx.request_id,
@@ -2030,6 +2078,14 @@ def _hosted_candidate(
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
             )
+        try:
+            await _hold_organization_slot(ctx, charge)
+        except HTTPException as exc:
+            raise CandidateCannotServe(exc) from exc
+        except asyncio.CancelledError:
+            # A client that disconnects while waiting for a slot; nothing was dispatched.
+            await release_reservation(ctx)
+            raise
         ctx.deployment_charge = charge
         return hosted
 
@@ -3255,7 +3311,7 @@ async def resolve_request_context(
         user_id=user_id,
         estimated_tokens=estimated_tokens,
         budget_limits=None if budget_exempt else await _budget_minute_limits(uow, db, user_id, config.budget_strategy),
-    )
+    ) or open_rate_limit_grant(raw_request)
     # Reserve first so user/blocked/budget rejections (404/403) take
     # precedence over the missing-pricing rejection (402); refund if we
     # then reject for missing pricing.
@@ -4217,7 +4273,9 @@ async def prepare_gateway_tools(
 
     admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
     if backends.billing is not None:
-        await _admit_tool_funding(adapter, ctx, backends.billing, admitted.values())
+        unfunded = await _admit_tool_funding(adapter, ctx, backends.billing, admitted)
+        answers = {**answers, **unfunded}
+        admitted = {claimed: answer for claimed, answer in admitted.items() if claimed not in unfunded}
 
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
@@ -4386,56 +4444,88 @@ async def _admit_tool_funding(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     billing: BillingPort,
-    admitted: Iterable[_AdmittedTools],
-) -> None:
-    """Pass a request that may run a gateway tool on the deployment's account through the funding gate.
+    admitted: Mapping[frozenset[str], _AdmittedTools],
+) -> dict[frozenset[str], _ToolRefusal]:
+    """Pass the gateway tools each answer may run on the deployment's account through the funding gate.
 
     The model's gate (:func:`_admit_or_refuse`) only sees the model call, so a
     request whose organization pays for its model would otherwise run searches
     and sandboxes on the deployment's account with nothing paid in. The gate is
-    the same one, and so is the refusal. Sets ``ctx.tool_funding``, which
-    settlement charges those calls through.
+    the same one, asked once per distinct set of tools, so a fallback whose tools
+    cannot be funded is skipped (returned as refused) without refusing a head
+    that needs none of them. Refuses the request only where no answer is left.
+    Sets ``ctx.tool_funding``, which settlement charges those calls through.
     """
-    paid = [
-        tool
-        for answer in admitted
-        for tool in admitted_tools(code_execution=answer.code.use_sandbox, web=answer.web_access)
-        if tool.deployment_paid
-    ]
-    if not paid:
-        return
-    tool_key = gateway_tool_pricing_key(paid[0].name)
-    try:
-        funding = await admit_deployment_paid(
-            billing,
-            deployment_paid=True,
-            organization_id=ctx.organization_id,
-            api_key_id=ctx.api_key_id,
-            user_id=ctx.user_id,
-            request_id=ctx.request_id,
-        )
-    except InsufficientFundsError as exc:
+    paid_by_answer: dict[frozenset[str], list[Any]] = {}
+    for claimed, answer in admitted.items():
+        paid = [
+            tool
+            for tool in admitted_tools(code_execution=answer.code.use_sandbox, web=answer.web_access)
+            if tool.deployment_paid
+        ]
+        if paid:
+            paid_by_answer[claimed] = paid
+    if not paid_by_answer:
+        return {}
+    funding: DeploymentCharge | None = None
+    verdicts: dict[frozenset[str], InsufficientFundsError | None] = {}
+    unfunded: dict[frozenset[str], _ToolRefusal] = {}
+    last_refusal: tuple[str, InsufficientFundsError] | None = None
+    for claimed, paid in paid_by_answer.items():
+        tool_keys = frozenset(gateway_tool_pricing_key(tool.name) for tool in paid)
+        if tool_keys not in verdicts:
+            try:
+                funding = (
+                    await admit_deployment_paid(
+                        billing,
+                        deployment_paid=True,
+                        organization_id=ctx.organization_id,
+                        billed=None,
+                        api_key_id=ctx.api_key_id,
+                        user_id=ctx.user_id,
+                        request_id=ctx.request_id,
+                        tools=tool_keys,
+                    )
+                    or funding
+                )
+                verdicts[tool_keys] = None
+            except InsufficientFundsError as exc:
+                verdicts[tool_keys] = exc
+            except Exception as exc:
+                logger.error(
+                    "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",
+                    ctx.organization_id,
+                    ctx.request_id,
+                    describe_port_error(exc),
+                )
+                await _discard_failed_funding_check(ctx.db)
+                await _refuse_tool_funding(
+                    ctx,
+                    adapter,
+                    gateway_tool_pricing_key(paid[0].name),
+                    FUNDS_CHECK_UNAVAILABLE_DETAIL,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+                raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+        refusal = verdicts[tool_keys]
+        if refusal is not None:
+            last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal)
+            unfunded[claimed] = _ToolRefusal(
+                adapter.error(
+                    402, refusal.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+                )
+            )
+    if last_refusal is not None and len(unfunded) == len(admitted):
+        tool_key, refused = last_refusal
         logger.info(
             "Gateway tools refused for insufficient funds: organization=%s request_id=%s",
             ctx.organization_id,
             ctx.request_id,
         )
-        await _refuse_tool_funding(ctx, adapter, tool_key, exc.public_message, status.HTTP_402_PAYMENT_REQUIRED)
+        await _refuse_tool_funding(ctx, adapter, tool_key, refused.public_message, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, exc.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
-        ) from exc
-    except Exception as exc:
-        logger.error(
-            "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",
-            ctx.organization_id,
-            ctx.request_id,
-            describe_port_error(exc),
-        )
-        await _discard_failed_funding_check(ctx.db)
-        await _refuse_tool_funding(
-            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
-        )
-        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+            402, refused.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+        ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.
     if funding is not None and not await release_session(ctx.db):
@@ -4445,10 +4535,15 @@ async def _admit_tool_funding(
             ctx.request_id,
         )
         await _refuse_tool_funding(
-            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+            ctx,
+            adapter,
+            gateway_tool_pricing_key(next(iter(paid_by_answer.values()))[0].name),
+            FUNDS_CHECK_UNAVAILABLE_DETAIL,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
         )
         raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
     ctx.tool_funding = funding
+    return unfunded
 
 
 async def _refuse_tool_funding(
@@ -4964,12 +5059,14 @@ class LoggedUsage(NamedTuple):
     ran, which is what the organization's funds are charged: the model's cost
     when the model call was deployment-paid, plus each gateway-run tool call the
     deployment's account ran, whoever paid for the model call. ``None`` where
-    neither part has a cost.
+    neither part has a cost. ``deployment_paid_tools`` is that cost's gateway-run
+    tool calls, per tool's pricing name.
     """
 
     cost: Decimal | None
     pricing_source: SettledSource | None
     deployment_paid_cost: Decimal | None = None
+    deployment_paid_tools: Mapping[str, ToolUse] = NO_TOOLS
 
 
 async def record_usage(
@@ -5222,7 +5319,7 @@ async def record_usage(
     # are folded in last: after the token branch (which may not have run at all) and
     # after cost_override (which replaces the token cost, not the whole bill).
     model_cost = usage_log.cost if deployment_paid else None
-    tool_cost = await _apply_tool_charges(
+    tool_cost, paid_tools = await _apply_tool_charges(
         db,
         usage_log,
         tool_tally,
@@ -5262,7 +5359,7 @@ async def record_usage(
         )
 
     await log_writer.put(usage_log)
-    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost)
+    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost, paid_tools)
 
 
 async def bills_per_request(
@@ -5339,14 +5436,14 @@ async def _apply_tool_charges(
     tally: ToolUsageTally | None,
     *,
     model_search_rate: ModelSearchRate | None = None,
-) -> Decimal | None:
+) -> tuple[Decimal | None, Mapping[str, ToolUse]]:
     """Fold a request's gateway-run tool calls onto its usage row, returning the part the deployment's account ran.
 
     Writes the counts under the reserved ``tools`` meter namespace, appends one
     charge line per tool and label, and adds their cost to the row's total.
-    ``None`` where the deployment's account ran nothing with a cost.
-    ``model_search_rate`` prices the searches the model's provider ran where
-    the operator priced no row for them.
+    ``None`` where the deployment's account ran nothing with a cost, beside that
+    part's calls and cost per gateway-run tool. ``model_search_rate`` prices the
+    searches the model's provider ran where the operator priced no row for them.
 
     Never raises. Settlement must not turn an accounting problem into a failed
     response; the precedent is :func:`log_gateway_rejection`. A pricing lookup that
@@ -5354,7 +5451,7 @@ async def _apply_tool_charges(
     it could not be priced.
     """
     if tally is None or tally.is_empty():
-        return None
+        return None, NO_TOOLS
 
     tool_meters = tally.meters()
     if tally.overflowed:
@@ -5372,7 +5469,7 @@ async def _apply_tool_charges(
     calls = tally.label_calls()
     if not calls:
         commit_meters()
-        return None
+        return None, NO_TOOLS
     try:
         charges = await price_tool_calls(
             db,
@@ -5386,7 +5483,7 @@ async def _apply_tool_charges(
             "Failed to price gateway tool calls; counts recorded without cost: %s", describe_database_error(exc)
         )
         commit_meters()
-        return None
+        return None, NO_TOOLS
 
     # The rate is stored per row, not just the cost, so per-tool spend stays
     # aggregatable in SQL (the row's own ``cost`` mixes tokens and tools) and a
@@ -5409,7 +5506,10 @@ async def _apply_tool_charges(
             unpriced.label,
             describe_rate_key(unpriced.rate_key),
         )
-    return charges.deployment_paid_total or None
+    tools = {
+        name: ToolUse(calls=calls, amount=amount) for name, (calls, amount) in charges.deployment_paid_tools.items()
+    }
+    return charges.deployment_paid_total or None, tools
 
 
 def _settled_tokens(usage: CompletionUsage | None) -> int:
@@ -5431,6 +5531,7 @@ async def charge_deployment_paid(
     db: AsyncSession,
     cost: Decimal | None,
     *,
+    tools: Mapping[str, ToolUse],
     provider: Any,
     model: str,
     expects_cost: bool,
@@ -5438,7 +5539,8 @@ async def charge_deployment_paid(
 ) -> None:
     """Settle what the deployment's account ran on ``db``, before the request's reservation settles.
 
-    ``cost`` is the row's ``LoggedUsage.deployment_paid_cost``. ``charge`` is set
+    ``cost`` is the row's ``LoggedUsage.deployment_paid_cost``, and ``tools`` its
+    ``deployment_paid_tools``. ``charge`` is set
     when the model call was deployment-paid, and ``tool_funding`` when a gateway
     tool was admitted to run on the deployment's account; either charges it, so
     tool calls are charged whoever paid for the model call. ``expects_cost``
@@ -5451,6 +5553,7 @@ async def charge_deployment_paid(
         return
     await funding.settle(
         cost,
+        tools=tools,
         model=model,
         description=f"{provider}:{model}",
         expects_cost=expects_cost and charge is not None,
@@ -5658,6 +5761,7 @@ async def _log_failure_and_refund(
                 ctx.deployment_charge,
                 ctx.db,
                 logged.deployment_paid_cost,
+                tools=logged.deployment_paid_tools,
                 provider=provider,
                 model=model,
                 expects_cost=False,
@@ -6092,6 +6196,7 @@ def build_streaming_response(
             deployment_charge,
             db,
             logged.deployment_paid_cost,
+            tools=logged.deployment_paid_tools,
             provider=provider,
             model=model,
             expects_cost=expects_cost,
@@ -6942,6 +7047,7 @@ async def log_exhausted_plan(
             None,
             ctx.db,
             logged.deployment_paid_cost,
+            tools=logged.deployment_paid_tools,
             provider=last.instance,
             model=last.model,
             expects_cost=False,
@@ -7226,6 +7332,7 @@ async def run_non_stream(
                 ctx.deployment_charge,
                 ctx.db,
                 logged.deployment_paid_cost,
+                tools=logged.deployment_paid_tools,
                 provider=provider,
                 model=model,
                 expects_cost=True,

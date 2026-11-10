@@ -22812,6 +22812,19 @@
             "description": "Filled in only if not already set.",
             "title": "Full Name"
           },
+          "invite": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An invitation token from a link emailed to this address. Where it names the same address, the account is verified at once and no verification email is sent.",
+            "title": "Invite"
+          },
           "password": {
             "description": "The password to sign in with once verified. At least 8 characters, at most 72 bytes.",
             "maxLength": 1024,
@@ -22840,6 +22853,12 @@
             "description": "What the caller should do next.",
             "title": "Message",
             "type": "string"
+          },
+          "verified": {
+            "default": false,
+            "description": "The account is verified already, through its invitation, so the caller can sign in now.",
+            "title": "Verified",
+            "type": "boolean"
           }
         },
         "required": [
@@ -32183,7 +32202,7 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.",
+        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.\n\nWith an ``invite`` that names this address, the account is verified as it is\ncreated and ``verified`` says so: the invitation reached the mailbox, so a\nverification email would prove nothing more. Only the token's holder learns that.",
         "operationId": "auth-signup",
         "requestBody": {
           "content": {

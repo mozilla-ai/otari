@@ -98,6 +98,7 @@ from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
 from gateway.services.inference import (
     close_decision_client,
+    configure_closed_models,
     load_stored_country_database_at_startup,
     open_country_database,
     reset_stored_country_database,
@@ -977,6 +978,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         config: GatewayConfig = app.state.config
         app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
+        configure_closed_models(
+            providers=config.closed_model_providers,
+            closed_families=config.closed_model_families,
+            open_families=config.closed_model_open_families,
+        )
         configure_models_dev_base_url(config.models_dev_base_url)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
