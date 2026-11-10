@@ -217,9 +217,14 @@ loadtest = [
 # The lock's format revision follows whichever uv writes it, and uv keeps the
 # existing revision only while it has nothing to change. Touching one dependency
 # on another minor therefore rewrites the whole lock: hundreds of changed lines
-# with no difference to what installs, in a diff that explains none of it.
-# `astral-sh/setup-uv` reads this field, so pinning it here pins CI too and the
-# version lives in one place.
+# with no difference to what installs, in a diff that explains none of it. This
+# is the one place that version is decided.
+#
+# `astral-sh/setup-uv` reads this field, so no workflow names a version of its
+# own. A container that installs uv itself cannot read it, and uv refuses every
+# command when the two disagree, so `Dockerfile` and
+# `loadtest/uv-tools.Dockerfile` each pin an exact version and
+# `tests/unit/test_uv_version_pin.py` holds both of them to this range.
 required-version = ">=0.13.0,<0.14.0"
 
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
