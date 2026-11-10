@@ -255,14 +255,13 @@ class MCPClientPool:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
-                deadline: float | None = None
+                # When an attached server must be up by, on the loop's clock; ``None`` for a named one.
+                expires_at: float | None = None
                 if cfg.attached:
                     attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
-                    deadline = min(ATTACHED_CONNECT_DEADLINE_S, attached_by - loop.time())
+                    expires_at = min(loop.time() + ATTACHED_CONNECT_DEADLINE_S, attached_by)
                 try:
-                    if deadline is not None and deadline <= 0:
-                        raise TimeoutError
-                    server = await self._connect(cfg, deadline)
+                    server = await self._connect(cfg, expires_at)
                 except BaseException as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
@@ -291,29 +290,35 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig, deadline: float | None = None) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, expires_at: float | None = None) -> _ConnectedServer:
         """Open one server's session; a per-user server that refuses its token with a 401 is tried once more.
 
         The session is opened on a stack of its own, joined to the pool's once it is up, so an
-        attempt the server refused leaves nothing behind to close. ``deadline`` bounds how long
-        the server may take to answer its first two requests, in seconds.
+        attempt the server refused leaves nothing behind to close. ``expires_at``, on the event
+        loop's clock, bounds the whole of it: both attempts and the renewal between them.
 
         Raises:
             McpSignInRequiredError: the refused token's sign-in ended and the connection was removed.
             McpConnectionUnavailableError: the refused token could not be renewed right now.
+            TimeoutError: ``expires_at`` passed first.
         """
+        loop = asyncio.get_running_loop()
         retried = False
         while True:
             stack = AsyncExitStack()
             try:
-                session, listed = await self._open(stack, cfg, deadline)
+                left = None if expires_at is None else expires_at - loop.time()
+                if left is not None and left <= 0:
+                    raise TimeoutError
+                session, listed = await self._open(stack, cfg, left)
             except BaseException as exc:
                 failure = await closed_with(stack, exc)
                 if retried or cfg.renew_token is None or not refused_token(failure):
                     raise failure from None
-                cfg = cfg.model_copy(
-                    update={"authorization_token": await cfg.renew_token(cfg.authorization_token or "")}
-                )
+                # The renewal is shielded and stores its answer even when this wait gives up on it.
+                async with asyncio.timeout_at(expires_at):
+                    token = await cfg.renew_token(cfg.authorization_token or "")
+                cfg = cfg.model_copy(update={"authorization_token": token})
                 retried = True
                 continue
             await self._stack.enter_async_context(stack)

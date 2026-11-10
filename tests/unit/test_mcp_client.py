@@ -912,3 +912,30 @@ async def test_a_slow_named_server_spends_none_of_the_attached_budget(monkeypatc
         pass
 
     assert connected == ["named", "attached"]
+
+
+@pytest.mark.asyncio
+async def test_an_attached_servers_retry_after_a_refused_token_stays_inside_its_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow renewal after a 401 is cut off at the attached server's deadline, not added on top of it."""
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_DEADLINE_S", 0.2)
+    request = httpx2.Request("POST", "https://93.184.216.34/mcp")
+
+    async def refused(self: MCPClientPool, stack: Any, cfg: McpServerConfig, *_: object) -> Any:
+        raise BaseExceptionGroup(
+            "refused", [httpx2.HTTPStatusError("401", request=request, response=httpx2.Response(401, request=request))]
+        )
+
+    async def slow_renewal(rejected: str) -> str:
+        await asyncio.sleep(5)
+        return "renewed"
+
+    monkeypatch.setattr(MCPClientPool, "_open", refused)
+    attached = _ATTACHED.model_copy(update={"authorization_token": "stale", "renew_token": slow_renewal})
+    started = asyncio.get_running_loop().time()
+
+    async with MCPClientPool([attached]) as pool:
+        assert pool.openai_tools == []
+
+    assert asyncio.get_running_loop().time() - started < 1
