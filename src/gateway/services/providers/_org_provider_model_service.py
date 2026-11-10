@@ -122,16 +122,19 @@ def _quantized(value: Decimal | None) -> Decimal | None:
 
 
 def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool:
-    """Whether a stored rate still says what today's community default says.
+    """Whether a stored rate still says what today's community default says, per the same unit.
 
     Compared at the rate column's own scale, because the stored value has been
     through it and the freshly resolved one has not, so an exact comparison
     would report a difference the database cannot hold and reprice every model
-    on every refresh.
+    on every refresh. The unit counts: the same number per image and per token
+    are two prices.
     """
     for field in _RATE_FIELDS:
         if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
             return False
+    if (stored.unit or "token") != (default.unit or "token"):
+        return False
     return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
 
@@ -207,6 +210,7 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.unit = default.unit or "token"
     row.rates = rates_of(default)
 
 
