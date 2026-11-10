@@ -32,6 +32,15 @@ MODELS_DEV = parse_catalog(
         "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
         # An entry with no window, so the dataset below it is asked.
         "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
+        # models.dev marks every one of these for structured output, but Bedrock only emulates
+        # ``response_format`` for Claude; every other family rejects it (mozilla-ai/otari#3060).
+        "amazon-bedrock": {
+            "models": {
+                "alibaba/qwen3-coder-30b-a3b-instruct": {"tool_call": True, "structured_output": True},
+                "mistralai/devstral-2": {"tool_call": True, "structured_output": True},
+                "anthropic.claude-sonnet-4-5": {"tool_call": True, "structured_output": True},
+            }
+        },
     }
 )
 
@@ -130,6 +139,30 @@ def test_an_alias_takes_its_targets_capabilities_but_not_its_name() -> None:
 
     assert alias.name is None
     assert alias.supported_parameters == ["tools", "tool_choice", "response_format"]
+
+
+def test_bedrock_served_qwen_coder_models_do_not_advertise_response_format() -> None:
+    """Otari#3060: Bedrock rejects ``response_format`` for this model, so the catalog should not advertise it."""
+    capabilities = model_capabilities(_config(), MODELS_DEV, "bedrock:alibaba/qwen3-coder-30b-a3b-instruct")
+
+    assert capabilities is not None
+    assert "response_format" not in capabilities.supported_parameters, (
+        f"supported_parameters advertised response_format for a Bedrock-served Qwen coder model, "
+        f"but requests with it fail for bedrock: {capabilities.supported_parameters}"
+    )
+
+
+def test_bedrock_only_emulates_response_format_for_anthropic_models() -> None:
+    """Otari#3060: any-llm forces ``response_format`` via a tool call on Bedrock, verified for Claude only."""
+    devstral = model_capabilities(_config(), MODELS_DEV, "bedrock:mistralai/devstral-2")
+    claude = model_capabilities(_config(), MODELS_DEV, "bedrock:anthropic.claude-sonnet-4-5")
+
+    assert devstral is not None and claude is not None
+    assert "response_format" not in devstral.supported_parameters, (
+        f"supported_parameters advertised response_format for a non-Anthropic Bedrock model, "
+        f"but Bedrock rejects it for every family but Claude: {devstral.supported_parameters}"
+    )
+    assert "response_format" in claude.supported_parameters
 
 
 def test_an_undescribed_model_reports_unknown_capabilities() -> None:

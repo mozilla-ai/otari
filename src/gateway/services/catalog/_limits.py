@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, NamedTuple
 
+from any_llm import LLMProvider
 from pydantic import BaseModel, Field
 
 from gateway.core.config import GatewayConfig
@@ -38,6 +39,19 @@ class ModelCapabilities(NamedTuple):
     output_modalities: list[str]
 
 
+def _bedrock_overridden_parameters(model_id: str) -> frozenset[str]:
+    """``response_format`` for every Bedrock model but Claude's.
+
+    Bedrock has no native structured-output field. any-llm emulates ``response_format``
+    by forcing a synthetic tool call, which it has only verified for Anthropic/Claude
+    models (mirrors ``any_llm.providers.bedrock.utils._is_anthropic_model``); every
+    other family (Nova, Titan, Llama, Mistral, gpt-oss, ...) raises
+    ``UnsupportedParameterError`` for it, though models.dev's ``structured_output``
+    flag says the model takes it (https://github.com/mozilla-ai/otari/issues/3060).
+    """
+    return frozenset() if "anthropic." in model_id else frozenset({"response_format"})
+
+
 def _entry(config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str) -> ModelCatalogEntry | None:
     """models.dev's entry for a ``provider:model`` key; a bare key names no provider to look it up under."""
     instance, separator, model_id = model_key.partition(":")
@@ -72,11 +86,19 @@ def model_capabilities(
     ``supported_parameters`` names only the request parameters models.dev records
     a flag for, so it is not the full set a model accepts: ``tools`` and
     ``tool_choice`` for ``tool_call``, ``response_format`` for ``structured_output``,
-    ``reasoning`` for ``reasoning``.
+    ``reasoning`` for ``reasoning``. On Bedrock, ``response_format`` is left out for
+    every model but Claude's, regardless of the flag; see
+    :func:`_bedrock_overridden_parameters`.
     """
     metadata = _entry(config, models_dev, model_key)
     if metadata is None:
         return None
+    instance, _separator, model_id = model_key.partition(":")
+    overridden = (
+        _bedrock_overridden_parameters(model_id)
+        if config.provider_instance_type(instance) == LLMProvider.BEDROCK.value
+        else frozenset()
+    )
     flags = (
         (metadata.tool_call, ("tools", "tool_choice")),
         (metadata.structured_output, ("response_format",)),
@@ -84,7 +106,9 @@ def model_capabilities(
     )
     return ModelCapabilities(
         name=metadata.name,
-        supported_parameters=[parameter for flag, parameters in flags if flag for parameter in parameters],
+        supported_parameters=[
+            parameter for flag, parameters in flags if flag for parameter in parameters if parameter not in overridden
+        ],
         input_modalities=metadata.input_modalities,
         output_modalities=metadata.output_modalities,
     )
