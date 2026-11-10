@@ -1,10 +1,14 @@
 import { render } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 
 import { defaultFaceFor } from "./faces"
 import { MemberAvatar } from "./MemberAvatar"
 
 const ADA = "33333333-3333-3333-3333-333333333333"
+
+afterEach(() => {
+  window.localStorage.clear()
+})
 
 function drawnFace(container: HTMLElement): number | null {
   const svg = container.querySelector("[data-face]")
@@ -32,6 +36,5 @@ describe("MemberAvatar", () => {
     window.localStorage.setItem(`otari.avatar:${ADA}`, "42")
     const { container } = render(<MemberAvatar userId={ADA} face={null} />)
     expect(drawnFace(container)).toBe(defaultFaceFor(ADA))
-    window.localStorage.clear()
   })
 })

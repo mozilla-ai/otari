@@ -198,16 +198,16 @@ export function useUpdateAvatar() {
         body: JSON.stringify({ face } satisfies UpdateAvatarRequest),
       }),
     onMutate: async (face) => {
-      const context = [ORGANIZATIONS, "context"]
+      const contextKey = [ORGANIZATIONS, "context"]
       await Promise.all([
-        queryClient.cancelQueries({ queryKey: context, exact: true }),
+        queryClient.cancelQueries({ queryKey: contextKey, exact: true }),
         queryClient.cancelQueries({ queryKey: [PROFILE], exact: true }),
       ])
       const previous = {
-        context: queryClient.getQueryData<OrganizationContext>(context),
+        context: queryClient.getQueryData<OrganizationContext>(contextKey),
         profile: queryClient.getQueryData<CallerIdentity>([PROFILE]),
       }
-      queryClient.setQueryData<OrganizationContext>(context, (current) =>
+      queryClient.setQueryData<OrganizationContext>(contextKey, (current) =>
         current?.caller
           ? { ...current, caller: { ...current.caller, avatar_face: face } }
           : current,
