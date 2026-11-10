@@ -1814,3 +1814,22 @@ async def test_disconnecting_does_not_wait_on_a_slow_authorization_server(
         await _service(async_db, config).disconnect(
             user=world.member, workspace_id=world.workspace.id, server_id=world.server.id
         )
+
+
+async def test_a_user_spelled_like_an_account_is_not_shown_as_that_account(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """Uppercase digits of a dashboard account's id are a different request-plane user, and listed as one."""
+    world = await _world(async_db, config)
+    lookalike = str(world.member.id).upper()
+    async_db.add(BillingUser(user_id=lookalike))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    url = await connections.start(server_id=world.server.id, user_id=lookalike)
+    await connections.complete(state=_state(url), code="code")
+
+    listed = await _service(async_db, config).server_connections(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id
+    )
+
+    assert [(entry.user_id, entry.email, entry.full_name) for entry in listed.data] == [(lookalike, None, None)]
