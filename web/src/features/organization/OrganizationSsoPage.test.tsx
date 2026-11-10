@@ -488,6 +488,31 @@ describe("OrganizationSsoPage", () => {
     })
   })
 
+  it("says why no owner can be named, rather than claiming none can sign in", async () => {
+    mockApi({ sso: organizationSso({ connection: oidcConnection() }) })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/No owner here can be named as the exception/),
+    ).toBeInTheDocument()
+    // A deployment operator is an owner who can sign in without the provider and is never
+    // refused by enforcement, so saying no owner can sign in without it is false wherever
+    // one owns the organization, which is every self-hosted deployment.
+    expect(
+      screen.queryByText(/No owner here can sign in without your provider/),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/cannot keep a way back in/),
+    ).not.toBeInTheDocument()
+  })
+
   it("states what the organization gives up when it waives the exception", async () => {
     mockApi({ sso: organizationSso({ connection: oidcConnection() }) })
     const user = userEvent.setup()
@@ -506,7 +531,7 @@ describe("OrganizationSsoPage", () => {
 
     expect(
       await screen.findByText(
-        /nobody in this organization can sign in until a deployment operator steps in/,
+        /a deployment operator has to switch enforcement off before anybody here can sign in again/,
       ),
     ).toBeInTheDocument()
   })

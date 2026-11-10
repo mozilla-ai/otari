@@ -494,10 +494,10 @@ function EnforcementSection({
         <div className="flex flex-col gap-3">
           {candidates.length === 0 ? (
             <p className="text-caption">
-              No owner here can sign in without your provider, so this
-              organization cannot keep a way back in. Waive it below to turn
-              enforcement on, knowing a provider outage needs an operator to
-              undo.
+              No owner here can be named as the exception: one whose only way in
+              is your provider could not sign in while it is unavailable, and a
+              deployment operator is never refused by enforcement, so needs no
+              exception. Waive it below to turn enforcement on.
             </p>
           ) : (
             <Select
@@ -534,8 +534,9 @@ function EnforcementSection({
           </Checkbox>
           {breakGlassWaived ? (
             <p className="text-caption">
-              If sign-in through your provider ever fails, nobody in this
-              organization can sign in until a deployment operator steps in.
+              If sign-in through your provider ever fails, a deployment operator
+              has to switch enforcement off before anybody here can sign in
+              again.
             </p>
           ) : null}
         </div>
