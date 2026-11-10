@@ -272,7 +272,7 @@ describe("AcceptInvitationPage", () => {
     })
     expect(submit).toBeDisabled()
 
-    await user.click(screen.getByLabelText("I accept the terms of service"))
+    await user.click(screen.getByLabelText("I accept the Terms of Service"))
     await user.click(submit)
 
     await screen.findByText(/Your password is set/)
@@ -339,7 +339,7 @@ describe("AcceptInvitationPage", () => {
       expect(accepted).toEqual([])
 
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(instead)
 
@@ -368,7 +368,7 @@ describe("AcceptInvitationPage", () => {
 
       await user.click(
         await screen.findByRole("checkbox", {
-          name: "I accept the terms of service",
+          name: "I accept the Terms of Service",
         }),
       )
       await user.click(
