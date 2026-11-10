@@ -7,7 +7,7 @@ icon: server
 This guide is for an MCP server that lives on a network the public internet
 cannot reach: a home lab, an office LAN, a VPN. It shows two ways to connect it
 to Otari and how to lock it down afterward. For the basic steps of adding a
-server, see [Add an MCP server](add-an-mcp-server.md).
+server, see [Configure an MCP server](configure-an-mcp-server.md).
 
 ## Why Otari refuses a private address
 
@@ -212,7 +212,7 @@ A reachable server is not a safe one until you decide who may use it.
    want the model to see, rather than **Every tool the server offers**. A tool
    that is not exposed is out of reach whatever any rule says.
 2. Set the **Default policy** to **Deny**, then add rules for the keys or users
-   who need it. [Control access to an MCP server](control-access-to-an-mcp-server.md)
+   who need it. [Control who can use it](configure-an-mcp-server.md#control-who-can-use-it)
    has the steps.
 3. Turn off **Let requests name their own MCP servers** unless you need it, so
    requests cannot reach the server with a URL and token of their own.
