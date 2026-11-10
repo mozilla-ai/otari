@@ -155,14 +155,17 @@ export function OAuthCallbackPage({
           remembered.termsAccepted,
         )
         if (result.isOk) {
-          // A sign-in that made the account is that account's signup, which
-          // is the funnel step a provider signup would otherwise skip.
-          recordEvent(
-            result.newAccount
-              ? TELEMETRY_EVENTS.SIGNUP_SUCCESS
-              : TELEMETRY_EVENTS.LOGIN_SUCCESS,
-            { authentication_method: provider },
-          )
+          // A sign-in that made the account is that account's signup as well,
+          // which is the funnel step a provider signup would otherwise skip.
+          // It is still a sign-in, so the login is recorded either way.
+          if (result.newAccount) {
+            recordEvent(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+              authentication_method: provider,
+            })
+          }
+          recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+            authentication_method: provider,
+          })
           login()
           if (result.passwordRemoved) {
             setPasswordRemoved({ returnHash })

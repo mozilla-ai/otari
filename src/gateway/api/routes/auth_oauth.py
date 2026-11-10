@@ -174,8 +174,9 @@ class OAuthCallbackRequest(BaseModel):
 class OAuthSessionResponse(BaseModel):
     """A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
 
-    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
-    dashboard's sign-in path does not care which credential got it here.
+    The three fields ``POST /api/v1/auth/session`` answers, deliberately, so the
+    dashboard's sign-in path does not care which credential got it here, and two
+    only a provider sign-in can produce: ``password_removed`` and ``new_account``.
     """
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")

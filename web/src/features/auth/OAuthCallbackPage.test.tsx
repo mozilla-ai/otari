@@ -107,7 +107,7 @@ describe("OAuthCallbackPage", () => {
     )
   })
 
-  it("records a sign-in that created the account as a signup, not a login", async () => {
+  it("records a sign-in that created the account as a signup, then as the login it also is", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: true }),
@@ -116,13 +116,24 @@ describe("OAuthCallbackPage", () => {
     renderCallback("#/auth/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
-    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
-      authentication_method: "google",
-    })
-    expect(recordEvent).not.toHaveBeenCalledWith(
-      TELEMETRY_EVENTS.LOGIN_SUCCESS,
-      expect.anything(),
+    expect(recordEvent.mock.calls).toEqual([
+      [TELEMETRY_EVENTS.SIGNUP_SUCCESS, { authentication_method: "google" }],
+      [TELEMETRY_EVENTS.LOGIN_SUCCESS, { authentication_method: "google" }],
+    ])
+  })
+
+  it("records a sign-in to an account that already existed as a login only", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: false }),
     )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(recordEvent.mock.calls).toEqual([
+      [TELEMETRY_EVENTS.LOGIN_SUCCESS, { authentication_method: "google" }],
+    ])
   })
 
   it("clears the stored state, so one value answers exactly one callback", async () => {
