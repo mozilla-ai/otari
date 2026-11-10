@@ -38,9 +38,8 @@ How a domain fits together:
   [Who commits](.github/skills/backend-standards/SKILL.md#who-commits) gives
   the rules.
 - **Savepoints.** A repository may open a savepoint for one purpose: to
-  diagnose a refusal of its own write, by asking the database a question after
-  the flush that failed. It never opens one so that a step can continue: the
-  step still fails, and its block rolls it back.
+  diagnose a refusal of its own write, by asking the database why the flush
+  failed. It never opens one so that a step can continue.
 - **Builders** live in `api/deps.py`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
