@@ -29,7 +29,13 @@ from gateway.log_config import logger
 from gateway.services.pricing import bundled_catalog
 from gateway.types.model_endpoint import ModelEndpoint, models_dev_endpoints
 from gateway.types.model_type import ModelType, models_dev_model_type
-from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
+from gateway.types.models_dev import (
+    MODELS_DEV_BASE_URL,
+    MODELS_DEV_SOURCES,
+    ModelsDevCatalog,
+    ModelsDevModel,
+    ModelsDevSource,
+)
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
 # stalling a dashboard load, and a failure just means "the last good copy this time".
@@ -112,20 +118,49 @@ class _CatalogCache:
     """Single-blob TTL cache for the whole models.dev catalog.
 
     ``data`` is the catalog this worker serves, kept through a failed fetch so
-    an outage does not take the facts away, and ``fetched_at`` when it was
-    downloaded, by this worker or by the one that stored it. ``ok`` and ``at``
-    describe this worker's last fetch attempt, and so which TTL governs the next
-    one.
+    an outage does not take the facts away, ``fetched_at`` when it was
+    downloaded, by this worker or by the one that stored it, and ``source`` the
+    base URL it was downloaded from, None when that is not known. ``ok`` and
+    ``at`` describe this worker's last fetch attempt, and so which TTL governs
+    the next one.
     """
 
     data: ModelsDevCatalog | None = None
     fetched_at: datetime | None = None
+    source: str | None = None
     ok: bool = False
     at: float = 0.0  # time.monotonic() of the last attempt, 0.0 when never tried
 
 
 _cache = _CatalogCache()
 _lock = asyncio.Lock()
+
+# Set once at startup from ``GatewayConfig.models_dev_base_url``: the price
+# refresh downloads without the config object in hand.
+_base_url = MODELS_DEV_BASE_URL
+
+
+def configure_models_dev_base_url(url: str) -> None:
+    """Set where the catalog is downloaded from, from ``config.models_dev_base_url``."""
+    global _base_url
+    _base_url = url.rstrip("/")
+
+
+def models_dev_base_url() -> str:
+    """Where the catalog is downloaded from."""
+    return _base_url
+
+
+def catalog_source_changed() -> bool:
+    """Whether the served catalog came from another base URL than the configured one.
+
+    True after a restart that moved ``models_dev_base_url``, until a download
+    from the new source is served: the old catalog stays up as the fallback,
+    but no claim or age makes it count as fresh.
+    """
+    return _cache.data is not None and _cache.source != _base_url
+
+
 _MISS = object()
 
 
@@ -148,16 +183,18 @@ def cached_models_dev_catalog() -> ModelsDevCatalog | None:
     return _served()
 
 
-def serve_catalog(catalog: ModelsDevCatalog, fetched_at: datetime) -> None:
-    """Serve ``catalog``, downloaded at ``fetched_at``: a stored copy, or one this worker fetched."""
+def serve_catalog(catalog: ModelsDevCatalog, fetched_at: datetime, source: str | None) -> None:
+    """Serve ``catalog``, downloaded at ``fetched_at`` from ``source``: a stored copy, or one this worker fetched."""
     _cache.data = catalog
     _cache.fetched_at = fetched_at
+    _cache.source = source
 
 
 def clear_catalog_cache() -> None:
     """Reset the cache (tests, and after a config change)."""
     _cache.data = None
     _cache.fetched_at = None
+    _cache.source = None
     _cache.ok = False
     _cache.at = 0.0
 
@@ -211,7 +248,7 @@ async def _download_from(source: ModelsDevSource) -> ModelsDevCatalog:
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
-            client.stream("GET", source.url, headers={"User-Agent": "otari-gateway"}) as resp,
+            client.stream("GET", source.url_for(_base_url), headers={"User-Agent": "otari-gateway"}) as resp,
         ):
             resp.raise_for_status()
             chunks: list[bytes] = []
@@ -250,7 +287,9 @@ async def _fetch() -> ModelsDevCatalog | None:
 
 def _fresh_cached(reuse_within: float) -> ModelsDevCatalog | None:
     fetched_at = _cache.fetched_at
-    if reuse_within > 0 and fetched_at is not None and (datetime.now(UTC) - fetched_at).total_seconds() < reuse_within:
+    if catalog_source_changed() or reuse_within <= 0 or fetched_at is None:
+        return None
+    if (datetime.now(UTC) - fetched_at).total_seconds() < reuse_within:
         return _cache.data
     return None
 
@@ -268,7 +307,7 @@ async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bo
             return reused
         data = await _download()
         if fill_cache:
-            serve_catalog(data, datetime.now(UTC))
+            serve_catalog(data, datetime.now(UTC), _base_url)
         return data
 
 
@@ -295,7 +334,7 @@ async def load_models_dev_catalog(config: GatewayConfig, *, serve_stale: bool = 
             return _served()
         data = await _fetch()
         if data is not None:
-            serve_catalog(data, datetime.now(UTC))
+            serve_catalog(data, datetime.now(UTC), _base_url)
         _cache.ok = data is not None
         _cache.at = time.monotonic()
         return _served()

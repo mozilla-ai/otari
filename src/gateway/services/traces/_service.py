@@ -6,7 +6,7 @@ import dataclasses
 import math
 import uuid
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -33,7 +33,7 @@ from gateway.models.traces import (
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SealItem, SpanContent
-from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, counted_once, trace_view
+from gateway.services.traces._reading import MAX_SPANS_PER_READ, counted_once, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
@@ -91,6 +91,10 @@ MAX_SERIES_BUCKETS = 720
 MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE = 1_000
 
 
+# A model's context window as a session's organization reaches it: (provider, model, organization).
+OrganizationContextWindowOf = Callable[[str | None, str, uuid.UUID | None], int | None]
+
+
 class TraceService:
     """Agent traces in this deployment's database, inside a tenant scope.
 
@@ -106,7 +110,7 @@ class TraceService:
         repositories: TracesRepositories,
         content: SpanContent,
         owners: SessionOwners,
-        context_window_of: ContextWindowOf,
+        context_window_of: OrganizationContextWindowOf,
     ) -> None:
         self._uow = uow
         self._content = content
@@ -629,7 +633,12 @@ class TraceService:
         stored = await self.get(scope, trace_id, span_limit=MAX_SPANS_PER_READ, workspace_id=workspace_id)
         if stored is None:
             raise TraceNotFoundError(trace_id)
-        return trace_view(stored, now=datetime.now(UTC), context_window_of=self._context_window_of)
+        organization_id = await self._owners.organization_of(stored.summary.workspace_id)
+        return trace_view(
+            stored,
+            now=datetime.now(UTC),
+            context_window_of=lambda provider, model: self._context_window_of(provider, model, organization_id),
+        )
 
     async def for_request(self, scope: TraceScope, request_id: str) -> TraceSummary:
         """The session a gateway request was traced into, found by its ``Otari-Request-ID``.

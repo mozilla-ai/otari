@@ -72,6 +72,15 @@ async def _row(sessions: Sessions, source: str) -> PricingSnapshot | None:
 CONFIG = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
 
 
+async def _a_retry_later(sessions: Sessions) -> None:
+    """Age the download claim past the retry window, and no further."""
+    async with sessions() as session:
+        claim = await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_CLAIM_SOURCE)
+        assert claim is not None
+        claim.updated_at = datetime.now(UTC) - timedelta(seconds=refresh.CATALOG_RETRY_SECONDS + 1)
+        await session.commit()
+
+
 async def _a_day_later(sessions: Sessions) -> None:
     """Age the download claim and the served catalog past the interval, so the next tick downloads."""
     two_days_ago = datetime.now(UTC) - timedelta(days=2)
@@ -100,7 +109,8 @@ async def test_one_worker_downloads_and_every_worker_serves_the_stored_catalog(
     assert mcs.cached_models_dev_catalog() == upstream["catalog"]
     row = await _row(sessions, refresh.MODELS_DEV_CATALOG_SOURCE)
     assert row is not None
-    assert json.loads(row.snapshot) == json.loads(json.dumps(catalog_document(upstream["catalog"])))
+    expected = catalog_document(upstream["catalog"], source=mcs.models_dev_base_url())
+    assert json.loads(row.snapshot) == json.loads(json.dumps(expected))
 
 
 @pytest.mark.asyncio
@@ -151,7 +161,7 @@ async def test_a_failed_download_keeps_the_stored_catalog_and_retries_within_a_m
 async def test_a_stored_catalog_this_version_cannot_read_is_skipped_once(
     sessions: Sessions, caplog: pytest.LogCaptureFixture
 ) -> None:
-    mcs.serve_catalog(_catalog(), datetime.now(UTC))
+    mcs.serve_catalog(_catalog(), datetime.now(UTC), mcs.models_dev_base_url())
     async with sessions() as session:
         session.add(PricingSnapshot(source=refresh.MODELS_DEV_CATALOG_SOURCE, snapshot='{"_meta": {"format": 99}}'))
         await session.commit()
@@ -258,3 +268,67 @@ async def test_a_database_error_in_a_tick_is_logged_without_its_statement(
     assert "models.dev catalog refresh failed (OperationalError" in caplog.text
     assert "the-payload" not in caplog.text
     assert "UPDATE pricing_snapshots" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_restart_against_another_source_replaces_the_stored_catalog_within_a_minute(
+    sessions: Sessions, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old source's claim does not hold the new source off for a day, and the old catalog serves until then."""
+    assert await refresh.download_models_dev_catalog_if_due(CONFIG)
+    _new_worker()
+    monkeypatch.setattr(mcs, "_base_url", mcs._base_url)
+    mcs.configure_models_dev_base_url("https://mirror.example")
+    upstream["catalog"] = _catalog("A mirrored model.")
+    upstream["error"] = mcs.ModelsDevFetchError("unreachable")
+
+    async with sessions() as session:
+        assert await refresh.load_stored_models_dev_catalog(session)
+    assert mcs.catalog_source_changed()
+    assert mcs.cached_models_dev_catalog() == _catalog()
+    # The day-old claim of the old source holds the download off for the retry window only.
+    assert not await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert upstream["downloads"] == 1
+    await _a_retry_later(sessions)
+    # The failure keeps the old catalog up and is retried a minute later, not at once.
+    assert not await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert upstream["downloads"] == 2
+    assert mcs.cached_models_dev_catalog() == _catalog()
+    assert not await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert upstream["downloads"] == 2
+
+    upstream["error"] = None
+    await _a_retry_later(sessions)
+    assert await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert not mcs.catalog_source_changed()
+    assert mcs.cached_models_dev_catalog() == _catalog("A mirrored model.")
+    row = await _row(sessions, refresh.MODELS_DEV_CATALOG_SOURCE)
+    assert row is not None
+    assert json.loads(row.snapshot)["_meta"]["source"] == "https://mirror.example"
+
+
+@pytest.mark.asyncio
+async def test_a_stored_catalog_with_no_source_is_served_and_replaced(
+    sessions: Sessions, upstream: dict[str, Any]
+) -> None:
+    """A row written before the source was recorded is treated as another source's, so it is downloaded over once."""
+    async with sessions() as session:
+        session.add(
+            PricingSnapshot(
+                source=refresh.MODELS_DEV_CATALOG_SOURCE,
+                snapshot=json.dumps(catalog_document(_catalog("An old model."))),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            PricingSnapshot(source=refresh.MODELS_DEV_CATALOG_CLAIM_SOURCE, snapshot="", updated_at=datetime.now(UTC))
+        )
+        await session.commit()
+        assert await refresh.load_stored_models_dev_catalog(session)
+    assert mcs.cached_models_dev_catalog() == _catalog("An old model.")
+
+    assert not await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert upstream["downloads"] == 0
+    await _a_retry_later(sessions)
+    assert await refresh.download_models_dev_catalog_if_due(CONFIG)
+    assert mcs.cached_models_dev_catalog() == _catalog()
