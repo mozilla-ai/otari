@@ -108,8 +108,9 @@ class GatewaySettings(BaseModel):
     )
     secret_key_configured: bool = Field(
         description=(
-            "Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, "
-            "so a deployment without it can store none. The dashboard reads the same fact from the membership "
+            "Whether the server has a key to encrypt stored credentials with: OTARI_SECRET_KEY, or the key file a "
+            "SQLite deployment generates beside its database. Provider credentials are encrypted at rest with it, "
+            "so a deployment without one can store none. The dashboard reads the same fact from the membership "
             "context's provider_key_encryption_available, because this endpoint is operator-only and the "
             "provider-key pages are read by tenants."
         )

@@ -7,7 +7,7 @@ import type { OAuthProvider } from "./oauthProviders"
  * These are deliberately not files in `src/routes/`, for the reason
  * `AcceptInvitationPage` is not one either: every route there sits behind the
  * session gate `App.tsx`'s `DeploymentRoot` puts in front of the router, and
- * the whole point of these eight is that the visitor holds neither a session nor
+ * the whole point of these is that the visitor holds neither a session nor
  * the master key. `DeploymentRoot` renders them directly, ahead of that gate.
  *
  * The gateway agrees on the spelling rather than being told it: the
@@ -40,6 +40,8 @@ import type { OAuthProvider } from "./oauthProviders"
  * `none` is the pair a token already in hand reaches. Neither sends anything,
  * and the message that carried the token was sent while mail *was* configured,
  * so refusing them on today's setting would strand a link that still works.
+ * The first-run setup link is the third: the gateway prints it in its own log
+ * (`/#/setup?key=…`, `services/master_key_service.py`), and it sends nothing.
  */
 type PublicAuthRequirement = "mail" | "oauth" | "none"
 
@@ -69,6 +71,7 @@ export const PUBLIC_AUTH_PAGES = {
   "/recover-password": "mail",
   "/verify-email": "none",
   "/reset-password": "none",
+  "/setup": "none",
   // Spelled out per provider rather than matched with a parameter, so this
   // table stays the single closed list of what renders in front of a session
   // and `publicAuthPath` keeps answering on an exact lookup. The `satisfies`

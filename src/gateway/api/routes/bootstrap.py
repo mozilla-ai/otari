@@ -208,6 +208,13 @@ class DeploymentBootstrap(BaseModel):
         )
     )
     feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
+    platform_connect: bool = Field(
+        default=False,
+        description=(
+            "Whether this deployment offers connecting to otari.ai from the dashboard (the platform_url "
+            "setting is not empty). False, the dashboard shows no such option and the routes are not mounted."
+        ),
+    )
     federation_member_rules: bool = Field(
         description=(
             "Whether an organization's owners and admins may give their own API keys federation rules (the "
@@ -257,6 +264,7 @@ async def get_bootstrap(
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
+        platform_connect=any(feature.name == "platform_connect" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
         # Gated on mail as well as on the setting, and not only because the

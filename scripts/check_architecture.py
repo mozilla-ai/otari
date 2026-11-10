@@ -1533,6 +1533,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),
     },
+    "gateway.models.providers.PlatformConnectAttempt": {
+        "repository": "gateway/repositories/providers/platform_connect_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.ModelAlias": {
         "repository": None,
         "baseline": (

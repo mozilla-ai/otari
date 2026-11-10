@@ -52,6 +52,7 @@ from urllib.parse import ParseResult, parse_qsl, quote, urlencode, urlparse, url
 
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
+from gateway.core.settings.providers import https_or_loopback_problem
 
 
 def redact_url_secrets(value: str) -> str:
@@ -409,3 +410,14 @@ def validate_public_https_url_shape(url: str, *, label: str) -> None:
     reason = _blocked_reason(literal)
     if reason is not None:
         raise UnsafeURLError(f"{label} host {host!r} is {reason}")
+
+
+def validate_credential_address(url: str, *, label: str) -> None:
+    """Refuse an address a credential travels to or a browser opens unless it is https, or http on this machine.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    _parse_safe_url(url, label=label)
+    problem = https_or_loopback_problem(url)
+    if problem is not None:
+        raise UnsafeURLError(f"{label} URL {problem}")

@@ -55,7 +55,10 @@ WORKDIR /app
 # distrusted emSign roots, whatever the system trust store says.
 RUN pip install --no-cache-dir --upgrade "pip>=26.2.2"
 
-RUN useradd -m -u 1000 otari && chown otari:otari /app
+# /data holds what must outlive the container: the default SQLite database and
+# the secret key file beside it. Created and owned here, before VOLUME, so a new
+# volume starts out writable by the otari user.
+RUN useradd -m -u 1000 otari && mkdir /data && chown otari:otari /app /data
 
 COPY --from=builder --chown=otari:otari /app/.venv /app/.venv
 COPY --chown=otari:otari src ./src
@@ -82,5 +85,10 @@ ARG OTARI_VERSION=0.0.0-dev
 ENV OTARI_VERSION=${OTARI_VERSION}
 ENV OTARI_HOST=0.0.0.0
 ENV OTARI_PORT=8000
+# The default only: a database_url in a mounted config file, or
+# OTARI_DATABASE_URL, still wins.
+ENV OTARI_DEFAULT_DATABASE_URL=sqlite:////data/otari.db
+
+VOLUME /data
 
 CMD ["otari", "serve"]

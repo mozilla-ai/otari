@@ -14,9 +14,16 @@ from gateway.services.workspace_scope import default_workspace_id
 
 
 async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_format: ApiKeyFormatPort) -> None:
-    """Create a first API key for new installations, in this build's format."""
+    """Create a first API key for new installations, in this build's format.
+
+    Not where the gateway generated its own master key, unless ``bootstrap_api_key``
+    was set explicitly: that deployment starts from the setup link, and its
+    operator creates the first key in the dashboard.
+    """
 
     if not config.bootstrap_api_key:
+        return
+    if not config.master_key and "bootstrap_api_key" not in config.model_fields_set:
         return
 
     existing_key = (await db.execute(select(APIKey.id).limit(1))).scalar_one_or_none()

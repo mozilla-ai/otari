@@ -43,6 +43,10 @@ _HF_BACKEND_PROVIDER_IDS: Mapping[str, tuple[str, ...]] = {
 }
 
 _BEDROCK_PROVIDER_ID = "amazon-bedrock"
+# The any-llm implementation that reaches another Otari, whose model ids are ``vendor:model``.
+_OTARI_PROVIDER = "otari"
+# Another Otari lists a model as ``vendor/model``; ``vendor:model`` is the selector spelling of the same.
+_OTARI_MODEL_ID = re.compile(r"([^/:]+)[/:](.+)")
 _BEDROCK_GEO_PREFIXES = ("us", "eu", "global", "apac", "jp", "au")
 _BEDROCK_VERSION_SUFFIX = re.compile(r"(?:-v\d+(?::\d+)?|:\d+)$")
 
@@ -299,7 +303,9 @@ class ModelsDevPriceIndex:
 
         Tried in order: a HuggingFace pinned-backend selector against the
         backend's own provider; the provider's own entry; the any-llm
-        implementation behind the instance; a model id that is unambiguous in
+        implementation behind the instance; for an ``otari`` provider, whose
+        ids read ``vendor/model`` or ``vendor:model``, the vendor's own entry, an estimate of what
+        the Otari behind it charges; a model id that is unambiguous in
         price across every provider; then the vendor-prefixed spellings of the
         id. Serving providers differ in rate, so the scoped lookups precede the
         agnostic one.
@@ -313,6 +319,11 @@ class ModelsDevPriceIndex:
         for name in scoped:
             for provider_id in dict.fromkeys((*models_dev_provider_ids(name), name)):
                 if (found := self._scoped(provider_id, model)) is not None:
+                    return found
+        if _OTARI_PROVIDER in scoped and (split := _OTARI_MODEL_ID.match(model)) is not None:
+            vendor, vendor_model = split.groups()
+            for provider_id in dict.fromkeys((*models_dev_provider_ids(vendor), vendor)):
+                if (found := self._scoped(provider_id, vendor_model)) is not None:
                     return found
         if (found := self._agnostic(model)) is not None:
             return found

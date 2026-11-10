@@ -403,6 +403,13 @@ export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
 export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
 export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
+
+// ---------------------------------------------------------------------------
+// Connecting the deployment to otari.ai: the code an operator approves there,
+// and where the attempt stands. Neither carries the device code or the key.
+// ---------------------------------------------------------------------------
+export type PlatformConnectStart = Schemas["PlatformConnectStartPublic"]
+export type PlatformConnectStatus = Schemas["PlatformConnectStatusPublic"]
 export type ReencryptHostedProvidersResult =
   Schemas["HostedProvidersReencryptPublic"]
 export type DeploymentProviderMigration =
