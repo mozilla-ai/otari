@@ -49,15 +49,23 @@ Request body:
 | Field | Type | Meaning |
 |---|---|---|
 | `device_code` | string | The secret the gateway exchanges for the key. Never shown to a person. |
-| `user_code` | string | The short code the operator checks on the approval page. |
+| `user_code` | string | The short code the operator checks on the approval page, such as `BCDF-GHJK`. The gateway shows it as sent and neither validates nor reformats it. |
 | `verification_uri` | string | The approval page. |
-| `verification_uri_complete` | string | The approval page with `user_code` filled in. The gateway opens this one. |
+| `verification_uri_complete` | string | The approval page with `user_code` filled in, such as `https://otari.ai/dashboard/?region=us#/connect?code=BCDF-GHJK`. The gateway opens it as sent, query and fragment included. |
 | `expires_in` | integer, seconds | How long the codes stay valid. |
 | `interval` | integer, seconds | The shortest wait between two polls. |
 
 `verification_uri_complete` is held to the transport rule above (`https`, or
-`http` on a local host), because a browser opens it. Any other status, or a
-`200` missing a field, is a failure: the gateway starts no attempt.
+`http` on a local host), because a browser opens it; nothing else about it is
+read. The platform issues an `interval` of 5 seconds and codes that live 15
+minutes.
+
+Any other status is a failure, and so is a `200` missing a field: the gateway
+starts no attempt and tells the operator otari.ai is unavailable, without
+repeating the platform's body. That covers `429` (too many requests, with
+`Retry-After`), `503`, and the `422` a malformed body gets, such as a
+`gateway_name` over 100 characters, which the gateway cuts to 100 before
+sending.
 
 ## Poll for the key
 
@@ -78,17 +86,24 @@ Request body:
 | `api_key` | string | The API key issued to this gateway. |
 | `api_base` | string | The inference root the key is for, such as `https://api.otari.ai/api/v1`. |
 
-**The key is returned once.** A second poll with the same `device_code` does not
-return it again. `api_base` is held to the transport rule above.
+**The key is returned once.** A poll after the one that delivered it answers
+`expired_token`, so the gateway stores the key in the step that receives it and
+does not poll again. `api_key` has the form `otk_v1_<region>_...`, which the
+gateway does not parse, and `api_base` is the region's host followed by
+`/api/v1`. `api_base` is held to the transport rule above.
 
 `400` response, with one field:
 
 | `error` | Meaning | The gateway |
 |---|---|---|
 | `authorization_pending` | Nobody has approved or declined yet. | Polls again after `interval`. |
-| `slow_down` | The gateway polled too soon. | Adds 5 seconds to `interval` for the rest of the attempt, then polls again. |
-| `expired_token` | The codes expired before they were approved. | Ends the attempt as expired. |
+| `slow_down` | The gateway polled too soon (the platform answers this to polls less than 4 seconds apart). | Adds 5 seconds to `interval` for the rest of the attempt, then polls again. The platform does not grow the interval itself. |
+| `expired_token` | The codes expired before the key was collected. An approval does not extend their lifetime. | Ends the attempt as expired. |
 | `access_denied` | The operator declined. | Ends the attempt as denied. |
+
+A `429` (with a `{"detail": ...}` body) is read as `slow_down`: the gateway adds
+5 seconds to `interval` and waits at least the seconds `Retry-After` names, up
+to 300, before the next poll. The attempt stays pending.
 
 Any other answer (another status, another `error`, a body that is not JSON) is
 not an outcome. The gateway keeps the attempt pending and polls again after

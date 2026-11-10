@@ -64,6 +64,8 @@ MAX_GATEWAY_NAME_LENGTH = 100
 SLOW_DOWN_SECONDS = 5
 _TIMEOUT_SECONDS = 10
 _MAX_INTERVAL_SECONDS = 60
+# The longest a ``Retry-After`` on a poll is honored for.
+_MAX_RETRY_AFTER_SECONDS = 300
 _MAX_EXPIRES_SECONDS = 24 * 60 * 60
 
 STARTS_PER_WINDOW = 10
@@ -98,6 +100,13 @@ class _PollRefusal(BaseModel):
     error: PollError
 
 
+@dataclass(frozen=True)
+class PollDelay:
+    """otari.ai asked for fewer polls: a ``slow_down``, or a 429 with the seconds its ``Retry-After`` named."""
+
+    retry_after: int | None = None
+
+
 class PlatformProtocolError(Exception):
     """otari.ai could not be reached, or answered outside the contract."""
 
@@ -115,25 +124,28 @@ class PlatformClient:
         Raises:
             PlatformProtocolError: no answer, or one outside the contract.
         """
-        status, body = await self._post("/connect/device", {"gateway_name": gateway_name})
+        status, body, _ = await self._post("/connect/device", {"gateway_name": gateway_name})
         if status != 200:
             raise PlatformProtocolError
         return _parsed(_DeviceGrant, body)
 
-    async def exchange(self, device_code: str) -> _IssuedKey | PollError:
+    async def exchange(self, device_code: str) -> _IssuedKey | PollError | PollDelay:
         """Ask otari.ai for the key, or learn why there is none yet.
 
         Raises:
             PlatformProtocolError: no answer, or one outside the contract.
         """
-        status, body = await self._post("/connect/token", {"device_code": device_code})
+        status, body, retry_after = await self._post("/connect/token", {"device_code": device_code})
         if status == 200:
             return _parsed(_IssuedKey, body)
         if status == 400:
-            return _parsed(_PollRefusal, body).error
+            error = _parsed(_PollRefusal, body).error
+            return PollDelay() if error == "slow_down" else error
+        if status == 429:
+            return PollDelay(retry_after)
         raise PlatformProtocolError
 
-    async def _post(self, path: str, payload: dict[str, str]) -> tuple[int, bytes]:
+    async def _post(self, path: str, payload: dict[str, str]) -> tuple[int, bytes, int | None]:
         try:
             async with (
                 asyncio.timeout(_TIMEOUT_SECONDS),
@@ -148,7 +160,9 @@ class PlatformClient:
         if response.status_code not in (200, 400):
             # The status only: the body is otari.ai's and may echo the request.
             logger.warning("otari.ai answered %s to %s", response.status_code, path)
-        return response.status_code, response.content
+        retry = response.headers.get("Retry-After", "")
+        retry_after = int(retry) if retry.isascii() and retry.isdecimal() and len(retry) <= 6 else None
+        return response.status_code, response.content, retry_after
 
 
 def _parsed[T: BaseModel](shape: type[T], body: bytes) -> T:
@@ -255,13 +269,14 @@ class PlatformConnectService:
             return pending
         if answer == "authorization_pending":
             return pending
-        if answer == "slow_down":
+        if isinstance(answer, PollDelay):
             slower = min(interval + SLOW_DOWN_SECONDS, _MAX_INTERVAL_SECONDS)
+            wait = max(slower, min(answer.retry_after or 0, _MAX_RETRY_AFTER_SECONDS))
             async with self.uow:
-                await self.attempts.slow_down(attempt_id, slower, _now() + timedelta(seconds=slower))
+                await self.attempts.slow_down(attempt_id, slower, _now() + timedelta(seconds=wait))
             return pending
-        if answer == "expired_token" or answer == "access_denied":
-            outcome = PLATFORM_CONNECT_EXPIRED if answer == "expired_token" else PLATFORM_CONNECT_DENIED
+        if not isinstance(answer, _IssuedKey):
+            outcome = PLATFORM_CONNECT_DENIED if answer == "access_denied" else PLATFORM_CONNECT_EXPIRED
             async with self.uow:
                 await self.attempts.finish(attempt_id, outcome)
             return PlatformConnectStatusPublic(status=outcome)
