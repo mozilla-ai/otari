@@ -161,7 +161,7 @@ export function McpServerDialog({
   const isPerUser = mode === "per_user"
   const typedToken = !isPerUser && token.trim() !== ""
   // A user's own token travels to a per-user server, so it needs https as one with a token does.
-  const urlReason = urlProblem(url, typedToken || isPerUser)
+  const urlReason = urlProblem(url, typedToken, isPerUser)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there

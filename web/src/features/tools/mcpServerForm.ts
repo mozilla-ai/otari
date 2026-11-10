@@ -24,6 +24,7 @@ export function parseAllowedTools(raw: string): string[] | null {
 export function urlProblem(
   raw: string,
   willHaveToken: boolean,
+  isPerUser = false,
 ): string | undefined {
   const trimmed = raw.trim()
   if (trimmed === "") return undefined
@@ -35,6 +36,9 @@ export function urlProblem(
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return "An MCP endpoint is reached over http or https."
+  }
+  if (isPerUser && parsed.protocol !== "https:") {
+    return "A server each user signs in to needs an https URL, so their own tokens are not sent in the clear."
   }
   if (willHaveToken && parsed.protocol !== "https:") {
     return "A server with an authorization token needs an https URL, so the token is not sent in the clear."
