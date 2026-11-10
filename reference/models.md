@@ -144,6 +144,10 @@ rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
+Where that rate is a models.dev one nobody set, a completion whose provider
+states what it charged is billed at that charge instead, which OpenRouter's
+does; see [Keeping the defaults current](https://docs.otari.ai/self-hosting/configuration#keeping-the-defaults-current).
+
 An unknown price is reported differently per surface:
 
 | Surface | Unknown rate (including an unset cache rate in `pricing`) | Source field |

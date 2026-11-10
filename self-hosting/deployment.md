@@ -102,7 +102,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Railway](https://github.com/mozilla-ai/otari/blob/763579f85396d9c516c83c8bab51317525effa3e/deploy/railway/README.md): that page owns its image tag,
+- [Railway](https://github.com/mozilla-ai/otari/blob/11976d60b2c20738b81fbec6d48a7fe508955ac8/deploy/railway/README.md): that page owns its image tag,
   variables, platform limits and maintenance steps.
 
 ## Optional services
@@ -112,7 +112,6 @@ Compose profiles start the bundled service backends:
 ```bash
 docker compose --profile code-exec up -d
 docker compose --profile web-search up -d
-docker compose --profile guardrails up -d
 docker compose --profile object-storage up -d
 ```
 

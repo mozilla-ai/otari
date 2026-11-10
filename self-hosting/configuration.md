@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/763579f85396d9c516c83c8bab51317525effa3e/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/11976d60b2c20738b81fbec6d48a7fe508955ac8/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -806,7 +806,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/763579f85396d9c516c83c8bab51317525effa3e/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/11976d60b2c20738b81fbec6d48a7fe508955ac8/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1040,6 +1040,17 @@ the dashboard, `seed` for one a catalog update copied from models.dev for a
 model a hosted provider serves, and `migration` for one an upgrade wrote. It is
 null on a rate stored before origins were recorded. A catalog update moves only
 a `seed` rate.
+
+A `seed` rate and a models.dev default are one headline price per model, so a
+completion whose provider states what it charged is settled at that charge
+instead, and its usage row and inline `pricing_source` read `reported`. Only
+OpenRouter states one: its `usage.cost`, plus `cost_details.upstream_inference_cost`
+on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
+depends on the upstream it routes a request to, which no single rate matches.
+A rate set in this file, through the pricing API or on the dashboard still
+prices the completion. The hold placed before the request is still estimated
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
 
 ### A public catalog
 
@@ -1771,7 +1782,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/763579f85396d9c516c83c8bab51317525effa3e/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/11976d60b2c20738b81fbec6d48a7fe508955ac8/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

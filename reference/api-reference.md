@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/763579f85396d9c516c83c8bab51317525effa3e/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/11976d60b2c20738b81fbec6d48a7fe508955ac8/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -167,8 +167,10 @@ carries neither.
 The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
-`deployment` (a rate stored on this gateway), or `defaults` (the bundled or
-accepted models.dev snapshot).
+`deployment` (a rate stored on this gateway), `defaults` (the bundled or
+accepted models.dev snapshot), or `reported` (the charge the provider stated,
+which settles a completion in place of a rate nobody set; see
+[Configuration](https://docs.otari.ai/self-hosting/configuration#keeping-the-defaults-current)).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
