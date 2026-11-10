@@ -2428,9 +2428,15 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
-def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
+def get_routing_service(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
+) -> RoutingService:
     """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
-    return RoutingService(config, get_usage_service(uow), get_api_key_service(uow), uow=uow)
+    return RoutingService(
+        config, get_usage_service(uow), get_api_key_service(uow), uow=uow, organizations=organizations
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]

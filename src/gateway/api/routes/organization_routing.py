@@ -370,11 +370,9 @@ async def set_organization_routing_policy(
             email=current_identity.email,
             organization_id=workspace.organization_id,
         )
-        # The organization's first stored policy is its first route.
-        organization_workspaces = await OrganizationService(
-            db, membership_listener=None
-        ).get_workspace_ids_in_organization(workspace.organization_id)
-        if current_identity.email is not None and await routing.stored_policy_count(organization_workspaces) == 1:
+        if current_identity.email is not None and await routing.is_first_policy_in_organization(
+            workspace.organization_id
+        ):
             await growth.record_activation(
                 background_tasks=background_tasks,
                 event=GrowthActivationEvent.FIRST_ROUTE_CONFIGURED,
