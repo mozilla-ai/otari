@@ -14,6 +14,8 @@ import { useModels } from "@/shared/api/models"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 /**
  * The step between "a provider is configured" and "this dashboard has something
@@ -98,6 +100,7 @@ function SetupFlow({
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
   const models = useModels(true, workspaceId)
+  const { recordEvent } = useTelemetry()
   const baseUrl = resolveSnippetBaseUrl()
 
   // Every way out retires the guide on the server; this hides the sheet while
@@ -121,9 +124,26 @@ function SetupFlow({
   // offer no one was ever shown. The sheet and the payoff are never the same
   // render (`experience_eligible` goes false as `status` becomes activated), so
   // the effect has always run by the time the branch below reads it.
+  // The same commit is where the offer is counted as shown, once per mount.
   useEffect(() => {
-    if (isOffered) wasOffered.current = true
-  }, [isOffered])
+    if (!isOffered || wasOffered.current) return
+    wasOffered.current = true
+    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, {
+      workspace_id: workspaceId,
+    })
+  }, [isOffered, workspaceId, recordEvent])
+  // A first request landing while the sheet was up retires it too.
+  const reportedActivation = useRef(false)
+  useEffect(() => {
+    if (!isActivated || !wasOffered.current || reportedActivation.current) {
+      return
+    }
+    reportedActivation.current = true
+    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
+      workspace_id: workspaceId,
+      reason: "activated",
+    })
+  }, [isActivated, workspaceId, recordEvent])
 
   if (isFinished) return null
 
@@ -145,9 +165,17 @@ function SetupFlow({
 
   if (!isOffered) return null
 
+  const retire = (reason: "skipped" | "left") => {
+    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
+      workspace_id: workspaceId,
+      reason,
+    })
+    dismiss.mutate(workspaceId)
+  }
+
   const leave = () => {
     setIsClosed(true)
-    dismiss.mutate(workspaceId)
+    retire("left")
   }
 
   const checkNow = async () => {
@@ -191,7 +219,7 @@ function SetupFlow({
       isSkipping={dismiss.isPending}
       onCreateKey={() => createKey.mutate(workspaceId)}
       onCheckNow={() => void checkNow()}
-      onSkip={() => dismiss.mutate(workspaceId)}
+      onSkip={() => retire("skipped")}
       onLeave={leave}
     />
   )

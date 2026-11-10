@@ -40,6 +40,8 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
@@ -249,6 +251,10 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const [now, setNow] = useState(() => Date.now())
   // The window a timeline selection asked for, until its list lands.
   const pendingSelection = useRef("")
+  const { recordEvent } = useTelemetry()
+  // How the next session is being opened. A session already named by the
+  // address when it changes, with nothing on this page asking, came by a link.
+  const openedVia = useRef<"list" | "timeline" | "link">("link")
 
   const query = url.get("q")
   const page = Math.max(0, url.getNumber("page"))
@@ -351,6 +357,11 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
+  useEffect(() => {
+    if (!peekId) return
+    recordEvent(TELEMETRY_EVENTS.SESSION_OPENED, { source: openedVia.current })
+    openedVia.current = "link"
+  }, [peekId, recordEvent])
   // An owner of the organization may open a private session by break-glass. What
   // it opened is held here for the session it opened, never polled over, and
   // dropped once the peek shows anything else or closes, so seeing it again takes
@@ -406,13 +417,16 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     [openSummary, shown],
   )
   // A trace is keyed by its workspace and its id, so the URL keeps both.
-  const openPeek = (id: string) =>
+  const openPeek = (id: string) => {
+    // The open one pressed again changes nothing, so nothing is recorded.
+    if (id !== peekId) openedVia.current = "list"
     url.patch({
       peek: id,
       peek_workspace:
         rows.find((session) => session.trace_id === id)?.workspace_id ?? "",
       span: "",
     })
+  }
   const previous = openIndex > 0 ? rows[openIndex - 1].trace_id : null
   const next =
     openIndex >= 0 && openIndex < rows.length - 1
@@ -438,6 +452,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     }
     pendingSelection.current = ""
     if (listed.length !== 1) return
+    openedVia.current = "timeline"
     patch({
       peek: listed[0].trace_id,
       peek_workspace: listed[0].workspace_id,
