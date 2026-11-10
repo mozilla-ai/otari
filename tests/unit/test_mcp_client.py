@@ -892,3 +892,23 @@ async def test_attached_servers_share_one_time_budget(
         assert pool.openai_tools == []
 
     assert asyncio.get_running_loop().time() - started < 0.8, "five hung servers cost one budget, not five deadlines"
+
+
+@pytest.mark.asyncio
+async def test_a_slow_named_server_spends_none_of_the_attached_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_BUDGET_S", 0.1)
+    connected: list[str] = []
+
+    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, *_: object) -> _ConnectedServer:
+        if not cfg.attached:
+            await asyncio.sleep(0.2)
+        connected.append(cfg.name)
+        return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
+
+    monkeypatch.setattr(MCPClientPool, "_connect", fake_connect)
+    named = McpServerConfig(name="named", url="https://93.184.216.34/mcp")
+
+    async with MCPClientPool([named, _ATTACHED]):
+        pass
+
+    assert connected == ["named", "attached"]

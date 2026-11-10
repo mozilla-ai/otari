@@ -248,13 +248,17 @@ class MCPClientPool:
 
     async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
         loop = asyncio.get_running_loop()
-        attached_by = loop.time() + ATTACHED_CONNECT_BUDGET_S
+        # The attached servers' budget starts with the first of them, so a slow named server spends none of it.
+        attached_by: float | None = None
         async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
-                deadline = min(ATTACHED_CONNECT_DEADLINE_S, attached_by - loop.time()) if cfg.attached else None
+                deadline: float | None = None
+                if cfg.attached:
+                    attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
+                    deadline = min(ATTACHED_CONNECT_DEADLINE_S, attached_by - loop.time())
                 try:
                     if deadline is not None and deadline <= 0:
                         raise TimeoutError

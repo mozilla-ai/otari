@@ -212,8 +212,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   own user, so a key can use it only when its `user_id` is that person's:
   create the key through the dashboard's key page for that person, not under
   another user id. A key created without a user belongs to the shared
-  `default` user, which is nobody's account: it cannot use a per-user server
-  and is told it does not exist.
+  `default` user, which is nobody's account: it cannot use a per-user server.
+  Listing leaves the server out for it, a model request that names the server
+  gets a stand-in saying the key belongs to nobody, and an attached one is left
+  out of its requests.
 - **How a user signs in.** Through the
   [MCP authorization flow](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization):
   Otari reads the server's protected-resource metadata and its authorization
