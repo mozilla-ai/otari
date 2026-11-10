@@ -13,6 +13,7 @@ import {
   useSelectedWorkspace,
 } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import {
   activationAttempt,
   bootstrap,
@@ -20,6 +21,12 @@ import {
   workspaceActivation,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
@@ -167,9 +174,19 @@ function mintCalls(fetchMock: ReturnType<typeof mockApi>) {
   )
 }
 
+/** The guide events recorded so far, in order, with their properties. */
+function guideEvents() {
+  return recordEvent.mock.calls.filter(
+    ([event]) =>
+      event === TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN ||
+      event === TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+  )
+}
+
 describe("SetupGuide", () => {
   beforeEach(() => {
     resetSetupConfetti()
+    resetTelemetrySpy()
   })
 
   afterEach(() => {
@@ -658,5 +675,179 @@ describe("SetupGuide", () => {
         String(input).includes("/activation/dismiss"),
       ),
     ).toBe(false)
+  })
+
+  describe("telemetry", () => {
+    it("records the sheet shown once, with its workspace, under StrictMode's doubled effects", async () => {
+      mockApi()
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      await renderWithRouter(
+        <StrictMode>
+          <QueryClientProvider client={client}>
+            <DeploymentProvider value={bootstrap()}>
+              <SelectedWorkspaceProvider>
+                <SetupGuide canServeRequests />
+              </SelectedWorkspaceProvider>
+            </DeploymentProvider>
+          </QueryClientProvider>
+        </StrictMode>,
+      )
+
+      await screen.findByRole("heading", { name: "Send your first request" })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+      ])
+    })
+
+    it("records Skip once the guide is retired, so a failed Skip and its retry are one dismissal", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let refusals = 1
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss") && refusals > 0) {
+          refusals -= 1
+          return Response.json({ detail: "try again" }, { status: 500 })
+        }
+        return answer(input, init)
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(await screen.findByRole("button", { name: "Skip" }))
+      await screen.findByText(/try again/)
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+      ])
+      await user.click(screen.getByRole("button", { name: "Skip" }))
+
+      await waitFor(() =>
+        expect(guideEvents()).toEqual([
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN,
+            { workspace_id: WORKSPACE },
+          ],
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+            { workspace_id: WORKSPACE, reason: "skipped" },
+          ],
+        ]),
+      )
+    })
+
+    it("records one dismissal for a showing the first request retires while Skip is in flight", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss")) await held
+        return answer(input, init)
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(await screen.findByRole("button", { name: "Skip" }))
+      fetchMock.setActivation(
+        workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      )
+      await user.click(screen.getByRole("button", { name: "Check now" }))
+      await screen.findByRole("heading", {
+        name: "Your first call went through",
+      })
+      await act(async () => {
+        release()
+        await held
+      })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+        [
+          TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+          { workspace_id: WORKSPACE, reason: "activated" },
+        ],
+      ])
+    })
+
+    it("records leaving for a guidance link as a dismissal", async () => {
+      mockApi({
+        activation: workspaceActivation({
+          status: "failed",
+          latest_attempt: activationAttempt({
+            status: "failed",
+            error_category: "policy",
+          }),
+        }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("link", { name: "Open budgets" }),
+      )
+
+      expect(recordEvent).toHaveBeenCalledWith(
+        TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+        { workspace_id: WORKSPACE, reason: "left" },
+      )
+    })
+
+    it("records the first request landing as a dismissal by activation", async () => {
+      const fetchMock = mockApi()
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await screen.findByRole("heading", { name: "Send your first request" })
+      fetchMock.setActivation(
+        workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      )
+      await user.click(await screen.findByRole("button", { name: "Check now" }))
+      await screen.findByRole("heading", {
+        name: "Your first call went through",
+      })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+        [
+          TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+          { workspace_id: WORKSPACE, reason: "activated" },
+        ],
+      ])
+    })
+
+    it("records nothing for a workspace that had already activated on arrival", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      })
+      await renderGuide()
+
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some(([input]) =>
+            String(input).includes("/activation"),
+          ),
+        ).toBe(true),
+      )
+      // Let the read settle and its render commit, so silence is an answer
+      // rather than a look taken before the guide knew anything.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+      expect(guideEvents()).toEqual([])
+    })
   })
 })

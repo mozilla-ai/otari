@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
@@ -14,6 +14,8 @@ import { useModels } from "@/shared/api/models"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 /**
  * The step between "a provider is configured" and "this dashboard has something
@@ -98,6 +100,7 @@ function SetupFlow({
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
   const models = useModels(true, workspaceId)
+  const { recordEvent } = useTelemetry()
   const baseUrl = resolveSnippetBaseUrl()
 
   // Every way out retires the guide on the server; this hides the sheet while
@@ -121,9 +124,32 @@ function SetupFlow({
   // offer no one was ever shown. The sheet and the payoff are never the same
   // render (`experience_eligible` goes false as `status` becomes activated), so
   // the effect has always run by the time the branch below reads it.
+  // The same commit is where the offer is counted as shown, once per mount.
   useEffect(() => {
-    if (isOffered) wasOffered.current = true
-  }, [isOffered])
+    if (!isOffered || wasOffered.current) return
+    wasOffered.current = true
+    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, {
+      workspace_id: workspaceId,
+    })
+  }, [isOffered, workspaceId, recordEvent])
+  // One showing is retired once, whichever way out lands first: a poll that
+  // finds the first request can arrive while a Skip is still in flight.
+  const retired = useRef(false)
+  const recordRetired = useCallback(
+    (reason: "skipped" | "left" | "activated") => {
+      if (retired.current) return
+      retired.current = true
+      recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
+        workspace_id: workspaceId,
+        reason,
+      })
+    },
+    [workspaceId, recordEvent],
+  )
+  // A first request landing while the sheet was up retires it too.
+  useEffect(() => {
+    if (isActivated && wasOffered.current) recordRetired("activated")
+  }, [isActivated, recordRetired])
 
   if (isFinished) return null
 
@@ -145,8 +171,15 @@ function SetupFlow({
 
   if (!isOffered) return null
 
+  // Recorded once the server has retired the guide, so a Skip that fails and
+  // is pressed again is one dismissal rather than two.
+  const skip = () =>
+    dismiss.mutate(workspaceId, { onSuccess: () => recordRetired("skipped") })
+
+  // Recorded on the press: the sheet closes at once and the link navigates.
   const leave = () => {
     setIsClosed(true)
+    recordRetired("left")
     dismiss.mutate(workspaceId)
   }
 
@@ -191,7 +224,7 @@ function SetupFlow({
       isSkipping={dismiss.isPending}
       onCreateKey={() => createKey.mutate(workspaceId)}
       onCheckNow={() => void checkNow()}
-      onSkip={() => dismiss.mutate(workspaceId)}
+      onSkip={skip}
       onLeave={leave}
     />
   )

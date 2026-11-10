@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import BackgroundTasks
+
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
@@ -62,6 +64,7 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.schemas.providers import (
@@ -72,7 +75,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
-from gateway.services.catalog import offered_model_types
+from gateway.services.catalog import KeyOwner, offered_model_types, record_served_models
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
@@ -122,16 +125,19 @@ def _quantized(value: Decimal | None) -> Decimal | None:
 
 
 def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool:
-    """Whether a stored rate still says what today's community default says.
+    """Whether a stored rate still says what today's community default says, per the same unit.
 
     Compared at the rate column's own scale, because the stored value has been
     through it and the freshly resolved one has not, so an exact comparison
     would report a difference the database cannot hold and reprice every model
-    on every refresh.
+    on every refresh. The unit counts: the same number per image and per token
+    are two prices.
     """
     for field in _RATE_FIELDS:
         if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
             return False
+    if (stored.unit or "token") != (default.unit or "token"):
+        return False
     return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
 
@@ -207,6 +213,7 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.unit = default.unit or "token"
     row.rates = rates_of(default)
 
 
@@ -488,7 +495,14 @@ class OrgProviderModelService:
             await self.models.delete_row(row)
         await self.refresh_overlay()
 
-    async def add_provider_key(self, *, user: User, request: OrgProviderKeyCreateRequest) -> OrgProviderKeyPublic:
+    async def add_provider_key(
+        self,
+        *,
+        user: User,
+        request: OrgProviderKeyCreateRequest,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> OrgProviderKeyPublic:
         """Create a provider key and offer everything the credential reaches.
 
         One use case, so one method: a key starts with its real catalog rather
@@ -503,6 +517,9 @@ class OrgProviderModelService:
         endpoint, unreachable, credential refused) is already answered rather
         than raised, and a database failure is logged against the key and leaves
         an empty list the Refresh models button fills.
+
+        With ``growth``, the key is reported as ``PROVIDER_KEY_ADDED`` once both
+        steps are done.
         """
         key = await self.provider_keys.create_key_for_user(user=user, request=request)
         try:
@@ -513,6 +530,16 @@ class OrgProviderModelService:
             # authorization or not-found error on a key this call just created
             # would be a bug worth surfacing rather than swallowing.
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
+        # Last, so nothing an adapter does can stand between the durable key and its models.
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.PROVIDER_KEY_ADDED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=key.organization_id,
+                details={"provider": key.provider},
+            )
         return key
 
     async def refresh_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
@@ -759,11 +786,16 @@ class OrgProviderModelService:
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
-    @staticmethod
-    async def _dial(key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
-        """Ask the provider what it serves on this key. Never raises, never echoes the key."""
+    async def _dial(self, key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
+        """Ask the provider what it serves on this key, and keep what its engine says.
+
+        Never raises, never echoes the key.
+
+        Kept under the key and its organization: another organization can list a
+        different server under the same prefix.
+        """
         api_key = credential.get("api_key")
-        return await test_provider_credentials(
+        discovery = await test_provider_credentials(
             key.provider,
             api_key=api_key if isinstance(api_key, str) else None,
             api_base=key.api_base,
@@ -772,3 +804,12 @@ class OrgProviderModelService:
             declared=False,
             timeout=timeout,
         )
+        if discovery.error is None:
+            await record_served_models(
+                key.selector_prefix,
+                discovery.models,
+                discovery.engine_settings,
+                owner=KeyOwner(organization_id=key.organization_id, key_id=key.id),
+                uow=self.uow,
+            )
+        return discovery

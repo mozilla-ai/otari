@@ -26,6 +26,7 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, get_db, init_db, reset_db
 from gateway.core.unit_of_work import (
+    InsideUnitOfWorkError,
     OutsideUnitOfWorkError,
     UnitOfWork,
     UnitOfWorkRolledBackError,
@@ -245,6 +246,42 @@ async def test_the_session_is_unavailable_outside_a_block(notes_database: None) 
             pass
         with pytest.raises(OutsideUnitOfWorkError):
             _ = session_for(uow)
+
+
+@pytest.mark.asyncio
+async def test_release_commits_without_an_open_block(notes_database: None) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        await _write(session, "a")
+
+        assert await uow.release() is True
+
+        assert await _committed_bodies() == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_release_answers_false_when_the_commit_fails(
+    notes_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The answer is the only way a caller learns that the release rolled its staged work back."""
+
+    async def _failed_release(session: AsyncSession) -> bool:
+        return False
+
+    monkeypatch.setattr("gateway.core.unit_of_work.release_session", _failed_release)
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+
+        assert await uow.release() is False
+
+
+@pytest.mark.asyncio
+async def test_release_refuses_while_a_block_is_open(notes_database: None) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        async with uow:
+            with pytest.raises(InsideUnitOfWorkError):
+                await uow.release()
 
 
 @pytest.mark.asyncio

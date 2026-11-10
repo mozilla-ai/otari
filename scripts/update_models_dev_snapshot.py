@@ -66,14 +66,21 @@ def main() -> int:
     parser.add_argument("--input-version", choices=("v2", "v1"), default="v2", help="which document --input holds")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--date", help="generated_at (YYYY-MM-DD); defaults to today")
+    parser.add_argument("--base-url", help="where to fetch from; defaults to the gateway's default base URL")
     args = parser.parse_args()
 
     module = _load_document_module()
+    try:
+        base_url = module.normalize_models_dev_base_url(args.base_url or module.MODELS_DEV_BASE_URL)
+    except ValueError as exc:
+        # The value is left out: ``_meta.source`` is committed, so a credential in it must not reach the snapshot.
+        print(f"--base-url {exc}", file=sys.stderr)
+        return 2
     if args.input:
         (source,) = (source for source in module.MODELS_DEV_SOURCES if source.name == args.input_version)
         attempts = [(source, lambda: json.loads(args.input.read_text("utf-8")))]
     else:
-        attempts = [(source, partial(_fetch, source.url)) for source in module.MODELS_DEV_SOURCES]
+        attempts = [(source, partial(_fetch, source.url_for(base_url))) for source in module.MODELS_DEV_SOURCES]
     for source, load in attempts:
         if (catalog := _read(source, load)) is not None:
             break
@@ -81,7 +88,7 @@ def main() -> int:
         return 1
 
     generated_at = args.date or datetime.now(UTC).date().isoformat()
-    document = module.catalog_document(catalog, source=source.url, generated_at=generated_at)
+    document = module.catalog_document(catalog, source=source.url_for(base_url), generated_at=generated_at)
     models = sum(1 for _ in catalog.models())
     args.output.write_text(json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n", "utf-8")
     print(f"wrote {args.output} ({args.output.stat().st_size} bytes, {models} models)")

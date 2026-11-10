@@ -20,7 +20,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, MetaData, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -106,9 +106,16 @@ def _reset_engine(database_url: str) -> Engine:
 
 
 def _build_reset_plan(database_url: str) -> _ResetPlan:
-    """Record the schema's tables, and whatever the migrations seeded into them."""
+    """Record the schema's tables, in an order safe to reinsert, and whatever the migrations seeded."""
     with _reset_engine(database_url).connect() as conn:
-        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        metadata = MetaData()
+        metadata.reflect(conn)
+        # A seeded row in a child table can reference a seeded row in a parent table, so
+        # reinsertion needs that same order. Table-name order gives no such guarantee.
+        # NOTE: ``organization`` and ``user`` reference each other, so no foreign-key order exists
+        # for that pair and SQLAlchemy warns and orders them by name, which seeds them in the
+        # direction they need.
+        tables = [table.name for table in metadata.sorted_tables if table.name != "alembic_version"]
         seeds = tuple(
             (table, rows)
             for table in tables
@@ -450,7 +457,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig, *, base_url: str = "http://testserver") -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -459,6 +466,9 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
+
+    ``base_url`` is the address requests are sent to, which sets the scheme the
+    server sees.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
@@ -474,7 +484,7 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     app.dependency_overrides = {get_db: override_get_db}
 
     try:
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url=base_url) as test_client:
             yield test_client
     finally:
         dispose_async_engine(async_engine)
