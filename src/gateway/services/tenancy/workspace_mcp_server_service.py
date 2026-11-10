@@ -795,21 +795,6 @@ def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
     return row.credential_mode == McpCredentialMode.PER_USER and (access is None or access.user_id is None)
 
 
-async def _caller_token(row: WorkspaceMcpServer, access: McpAccess | None, tokens: McpUserTokens) -> str | None:
-    """The token a caller's calls to a server carry: the workspace's, or on a per-user server their own.
-
-    Raises:
-        McpSignInRequiredError: the server is per-user and the caller's user has not signed in to it.
-        McpConnectionUnavailableError: that user's token has expired and cannot be renewed right now.
-        SecretDecryptionError: a stored token will not decrypt.
-    """
-    if row.credential_mode != McpCredentialMode.PER_USER:
-        return _stored_token(row)
-    if access is None or access.user_id is None:
-        raise WorkspaceMcpServerNotFoundError(row.id)
-    return await tokens.token_for(row, access.user_id)
-
-
 async def resolve_workspace_mcp_server(
     db: AsyncSession,
     *,
@@ -865,11 +850,12 @@ async def resolve_workspace_mcp_server(
     if _needs_a_user(row, access):
         return None
     per_user = row.credential_mode == McpCredentialMode.PER_USER
-    return ResolvedMcpServer(
+    # Built before the token is read: reading one may release the session, and a release whose commit
+    # fails rolls back, which expires the row.
+    resolved = ResolvedMcpServer(
         id=row.id,
         name=row.name,
         url=row.url,
-        authorization_token=await _caller_token(row, access, tokens or McpUserTokens(McpUserConnectionRepository(db))),
         # A user's token changes at every renewal, which is not a change to the server's configuration.
         credential_revision=McpCredentialMode.PER_USER if per_user else None,
         enabled=row.enabled,
@@ -878,6 +864,11 @@ async def resolve_workspace_mcp_server(
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
+    reader = tokens or McpUserTokens(McpUserConnectionRepository(db))
+    # A per-user server reached here has a caller with a user: `_needs_a_user` answered for the rest.
+    user_id = access.user_id if access is not None else None
+    token = await reader.token_for(McpServerRef.of(row), user_id) if per_user and user_id else _stored_token(row)
+    return resolved.model_copy(update={"authorization_token": token})
 
 
 async def list_reachable_mcp_servers(
