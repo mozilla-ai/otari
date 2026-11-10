@@ -183,7 +183,7 @@ it("polls while pending and reports the approval once", async () => {
 })
 
 it("does not report a connection that was made before the page opened", async () => {
-  mockConnect([{ status: "connected" }])
+  const requests = mockConnect([{ status: "connected" }])
   const onConnected = renderCard()
 
   expect(await screen.findByText(/^Connected\./)).toBeInTheDocument()
@@ -191,6 +191,8 @@ it("does not report a connection that was made before the page opened", async ()
   expect(
     screen.getByRole("button", { name: "Connect again" }),
   ).toBeInTheDocument()
+  // One read, however the provider lists were refreshed around it.
+  expect(requests).toEqual(["GET /platform/connect"])
 })
 
 it.each([
