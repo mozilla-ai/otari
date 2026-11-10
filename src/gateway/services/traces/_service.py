@@ -74,6 +74,9 @@ ERASURE_KEPT_FOR = MAX_WRITE_AGE + timedelta(hours=1)
 
 # How many spans' content one block clears when a workspace's content is deleted.
 CLEAR_CONTENT_BATCH = 5_000
+# How many users' barrier rows one block forgets. Smaller than the batch above,
+# because each row it holds is one a write of that user's spans waits on.
+FORGET_ERASURES_BATCH = 1_000
 
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
@@ -124,8 +127,9 @@ class TraceService:
         users' erasure rows (and, where it keeps content, its workspaces'
         generations), create the traces not stored yet, read their owners, insert
         the spans, grow the totals. Each runs in key order, so two writers sharing traces lock them in
-        the same order. Where it keeps content, it also asks whether its users are
-        still members of their workspaces, all at once.
+        the same order. Where it keeps content, it also asks which of its sessions may
+        have content kept, all at once: those whose user is still a member of a
+        workspace that still keeps it.
         """
         written_at = datetime.now(UTC)
         # Sealed before the block, so a key source's round trip holds no connection.
@@ -139,9 +143,10 @@ class TraceService:
             generations = await self._barriers.lock(
                 {trace.workspace_id for trace, held in zip(traces, sealed, strict=True) if held}
             )
-            # Asked under the user's lock, which removing a member takes too: content is
-            # kept only for someone who is still a member as it is stored.
-            members = await self._owners.members(
+            # Asked under both locks, which removing a member and turning the workspace's
+            # content off each take too: content is kept only for someone who is still a
+            # member of a workspace that still keeps it as it is stored.
+            keeping = await self._owners.content_kept_for(
                 {(trace.workspace_id, trace.user_id) for trace, held in zip(traces, sealed, strict=True) if held}
             )
             new_traces: dict[TraceKey, dict[str, Any]] = {}
@@ -172,7 +177,7 @@ class TraceService:
                             trace,
                             span,
                             held
-                            if _current(trace, generations) and (trace.workspace_id, trace.user_id) in members
+                            if _current(trace, generations) and (trace.workspace_id, trace.user_id) in keeping
                             else {},
                         ),
                     )
@@ -322,15 +327,10 @@ class TraceService:
             share = None
             if break_glass is not None:
                 await self._break_glass.record(
-                    kind=break_glass.kind,
-                    organization_id=break_glass.organization_id,
+                    break_glass,
                     workspace_id=row.workspace_id,
                     trace_id=row.trace_id,
                     session_user_id=row.user_id,
-                    reader_user_id=break_glass.reader_user_id,
-                    reader_email=break_glass.reader_email,
-                    reason=break_glass.reason,
-                    reference=break_glass.reference,
                 )
                 # Ids only: the reason is the reader's own prose, and stays in the record.
                 logger.info(
@@ -411,9 +411,25 @@ class TraceService:
         return tuple(_break_glass_read(row) for row in rows[:limit]), len(rows) > limit
 
     async def expire_erasures(self, *, now: datetime) -> int:
-        """Forget users erased longer ago than any of their spans could still be waiting, and those never erased."""
-        async with self._uow:
-            return await self._erasures.forget_erased_before(now - ERASURE_MARGIN - ERASURE_KEPT_FOR)
+        """Forget users erased longer ago than any of their spans could still be waiting, and those never erased.
+
+        A batch per block, as clearing a workspace's content goes, so a write holding
+        the row of a user it stores for waits for one batch rather than for every user
+        who has written a trace since the last pass. Each batch starts past the last
+        user the previous one took, so writers remaking rows behind the sweep cannot
+        keep it from finishing.
+        """
+        cutoff = now - ERASURE_MARGIN - ERASURE_KEPT_FOR
+        forgotten = 0
+        after: str | None = None
+        while True:
+            async with self._uow:
+                batch, after = await self._erasures.forget_erased_before(
+                    cutoff, limit=FORGET_ERASURES_BATCH, after=after
+                )
+            forgotten += batch
+            if after is None:
+                return forgotten
 
     async def share_content(
         self,
@@ -426,6 +442,11 @@ class TraceService:
     ) -> ContentShare:
         """Let ``audience`` read what the session was about until the share ends. Its own user only.
 
+        An audience already reading keeps the share it is reading through, so
+        sharing twice leaves one share to end rather than two, only the newer of
+        which anyone can see. Its note becomes the one given here, so the reason
+        its owner last stated is the reason its readers are shown.
+
         Raises:
             TraceNotFoundError: the scope holds no such trace.
             TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
@@ -437,10 +458,16 @@ class TraceService:
             # again here, so a share is never made by someone whose membership has
             # just ended, however long ago this request resolved their scope. Taken
             # first, so on SQLite the block writes before it reads and waits its turn.
+            # The lock is also what makes the read below decisive: only this session's
+            # own user shares it, so no other request can add one in between.
             await self._erasures.lock([str(reader.user_id)])
             row = await self._owned(scope, trace_id, workspace_id)
             if not await self._owners.is_member(row.workspace_id, row.user_id):
                 raise TraceContentShareForbiddenError
+            running = await self._shares.active(row.workspace_id, row.trace_id, (audience,))
+            if running is not None:
+                await self._shares.renote(running, note)
+                return _share(running)
             share = await self._shares.add(
                 workspace_id=row.workspace_id,
                 trace_id=row.trace_id,

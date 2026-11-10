@@ -52,7 +52,7 @@ from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
@@ -129,7 +129,7 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
@@ -300,7 +300,8 @@ class _ResponsesAdapter:
         )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
-        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
+        # By alias, so a JSON schema format's ``schema`` keeps its wire name rather than its field name, ``schema_``.
+        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
@@ -654,6 +655,7 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    body = result.model_dump(exclude_none=True)
+    # By alias, as each streamed event is (see ``format_chunk``).
+    body = result.model_dump(exclude_none=True, by_alias=True)
     await idempotency.complete(body, response)
     return body

@@ -46,6 +46,7 @@ def test_every_kind_renders() -> None:
         (status.HTTP_401_UNAUTHORIZED, "authentication_error"),
         (status.HTTP_403_FORBIDDEN, "permission_error"),
         (status.HTTP_404_NOT_FOUND, "not_found_error"),
+        (status.HTTP_413_CONTENT_TOO_LARGE, "request_too_large"),
         (status.HTTP_429_TOO_MANY_REQUESTS, "rate_limit_error"),
         (status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"),
         (status.HTTP_502_BAD_GATEWAY, "api_error"),
@@ -64,6 +65,7 @@ def test_a_flattened_error_renders_the_type_its_status_has_always_given(status_c
         (ErrorKind.NOT_FOUND, "not_found_error"),
         (ErrorKind.PERMISSION, "permission_error"),
         (ErrorKind.RATE_LIMIT, "rate_limit_error"),
+        (ErrorKind.REQUEST_TOO_LARGE, "request_too_large"),
     ],
 )
 def test_a_declared_kind_renders_its_own_type(kind: ErrorKind, expected: str) -> None:

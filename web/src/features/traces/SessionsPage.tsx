@@ -517,11 +517,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <SearchField
               label="Search sessions"
-              placeholder="Search by ID, name, agent or user"
+              placeholder="Search ID, name, agent or user"
               value={query}
               onChange={(value) => url.patch({ q: value, page: 0 })}
               maxLength={SEARCH_MAX_LENGTH}
-              className="w-72 max-w-full"
+              // The row's width on a phone, short of Refresh, so the
+              // placeholder fits.
+              className="w-72 max-w-full max-sm:w-auto max-sm:min-w-0 max-sm:flex-1"
             />
             <div className="ml-auto flex items-center gap-3">
               <RefreshButton onRefresh={refresh} />
@@ -549,7 +551,6 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
               }
             />
           </TableScrollFrame>
-          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -562,6 +563,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
             hasNextFallback={traces.data?.has_more ?? false}
             label="Sessions"
           />
+          {isOwner ? <BreakGlassLog /> : null}
         </div>
       </div>
 

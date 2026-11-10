@@ -112,6 +112,7 @@ export function WorkspaceGuardrailsPage() {
         <TableScrollFrame className="otari-guardrail-mandates-table">
           <DataTable
             ariaLabel="Guardrails running in this workspace"
+            mobileLayout="cards"
             columns={columns}
             rows={running}
             getRowKey={(row) => row.id}

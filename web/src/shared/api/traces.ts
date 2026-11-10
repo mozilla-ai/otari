@@ -8,6 +8,7 @@ import {
 import type {
   TraceBreakGlassReadList,
   TraceContentPolicy,
+  TraceContentReadList,
   TraceContentShare,
   TraceContentShareCreate,
   TraceContentShareList,
@@ -184,6 +185,11 @@ export function useTrace(traceId: string, workspaceId = "") {
       ),
     enabled: scope.isReady && traceId !== "",
     staleTime: 5_000,
+    // Dropped as soon as nothing renders it, rather than held for the default few
+    // minutes: this payload carries the session's prompts, commands and file paths
+    // where the reader may open them, and a share the owner ended in between would
+    // otherwise be painted from the cache before the refetch answered.
+    gcTime: 0,
     refetchInterval: (query) =>
       query.state.data?.state === "active" ? 5_000 : false,
   })
@@ -223,16 +229,24 @@ function sharesPath(
   return `${SHARE_BASE}/${encodeURIComponent(traceId)}/shares${tail}${query}`
 }
 
+function shareReadsPath(
+  traceId: string,
+  workspaceId: string,
+  shareId: string,
+  page: Record<string, string>,
+): string {
+  const params = new URLSearchParams(page)
+  if (workspaceId) params.set("workspace_id", workspaceId)
+  const share = `${encodeURIComponent(traceId)}/shares/${encodeURIComponent(shareId)}`
+  return `${SHARE_BASE}/${share}/reads?${params.toString()}`
+}
+
 const SHARES_PAGE = 20
 
 // The shares the session has had, a page at a time, running ones first, with
 // the newest reads made through each. Only the session's own user may ask, so
 // it is asked only for them.
-export function useTraceShares(
-  traceId: string,
-  workspaceId: string,
-  enabled: boolean,
-) {
+export function useTraceShares(traceId: string, workspaceId: string) {
   return useInfiniteQuery({
     queryKey: [TRACES, "shares", traceId, workspaceId],
     meta: workspaceMeta(workspaceId),
@@ -246,7 +260,36 @@ export function useTraceShares(
       ),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * SHARES_PAGE : undefined,
-    enabled: enabled && traceId !== "",
+    enabled: traceId !== "",
+    staleTime: 10_000,
+  })
+}
+
+const SHARE_READS_PAGE = 50
+
+// Every read through one share, a page at a time. A share's own entry carries
+// only its newest few, so this is how the owner reaches the rest. Only the
+// session's own user may ask, so it is asked only for them.
+export function useShareReads(
+  traceId: string,
+  workspaceId: string,
+  shareId: string,
+  enabled: boolean,
+) {
+  return useInfiniteQuery({
+    queryKey: [TRACES, "shares", traceId, workspaceId, shareId, "reads"],
+    meta: workspaceMeta(workspaceId),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceContentReadList>(
+        shareReadsPath(traceId, workspaceId, shareId, {
+          skip: String(pageParam),
+          limit: String(SHARE_READS_PAGE),
+        }),
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * SHARE_READS_PAGE : undefined,
+    enabled: enabled && traceId !== "" && shareId !== "",
     staleTime: 10_000,
   })
 }
@@ -322,7 +365,7 @@ const BREAK_GLASS_PAGE = 50
 
 // The organization's owners' break-glass openings, newest first, a page at a
 // time, so every opening stays reachable however many follow it. Owners only.
-export function useBreakGlassLog(enabled: boolean) {
+export function useBreakGlassLog() {
   return useInfiniteQuery({
     queryKey: [TRACES, "break-glass"],
     initialPageParam: 0,
@@ -335,7 +378,6 @@ export function useBreakGlassLog(enabled: boolean) {
       ),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * BREAK_GLASS_PAGE : undefined,
-    enabled,
     staleTime: 30_000,
   })
 }

@@ -11,6 +11,7 @@ import { type ReactNode, useState } from "react"
 
 import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { allowsFieldAutoFocus } from "@/design-system/helpers/autoFocus"
 
 /** One choice in a `ComboBoxField`. `isDisabled` shows a choice that exists but cannot be taken. */
 export interface ComboBoxOption {
@@ -227,7 +228,7 @@ export function ComboBoxField({
       <ComboBox.InputGroup>
         <Input
           placeholder={placeholder}
-          autoFocus={autoFocus}
+          autoFocus={autoFocus && allowsFieldAutoFocus()}
           aria-describedby={isInvalid ? undefined : describedBy}
           // A picker is never a credential field, so a password manager
           // offering to fill it is wrong at every call site rather than at some.

@@ -44,7 +44,7 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
-from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally, is_tool_error
 from gateway.services.traces import RequestTrace, ToolSpans
 from gateway.types.code_execution import ResultBlock
 
@@ -156,6 +156,14 @@ class SandboxFiles(Protocol):
         ...
 
 
+# What the model sees for a call that carried no code. It carries the sentinel, so
+# the call is counted as a failure and never billed, and the model can try again.
+EMPTY_CODE_TEXT = (
+    f"{TOOL_ERROR_SENTINEL} invalid_input: the call had no code, so nothing was run. "
+    "Call the tool again with the Python code to run."
+)
+
+
 def code_execution_tool_definition() -> dict[str, Any]:
     """The OpenAI-shaped function definition the model is given for code execution.
 
@@ -200,6 +208,9 @@ class CodeExecution:
 
     code: str
     result: ResultBlock | None
+    # True for a call refused before it reached the sandbox because it had no code,
+    # so a loop can report a bad input rather than an unreachable sandbox.
+    invalid_input: bool = False
     # Produced filename -> the ``file_id`` it was stored under in ``/v1/files``,
     # for the files a bridge collected. A produced file with no entry here is
     # one the caller cannot download, so a native block does not announce it.
@@ -541,6 +552,14 @@ class SandboxBackend:
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         code = str(arguments.get("code") or "")
         started = datetime.now(UTC)
+        if not code.strip():
+            # Nothing to run: an exit status from an empty program would read as a
+            # run that worked. Refused before admission, so it spends no budget.
+            self._executions.append(CodeExecution(code=code, result=None, invalid_input=True))
+            if self._tally is not None:
+                self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
+            self._spans.record(started, ok=False, arguments=arguments)
+            return EMPTY_CODE_TEXT
         # The sandbox is the deployment's, whichever backend runs it.
         if self._tally is not None and not await self._tally.admit(CODE_EXECUTION_TOOL_NAME, deployment_paid=True):
             self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)

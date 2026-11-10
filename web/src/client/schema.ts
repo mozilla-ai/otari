@@ -3462,6 +3462,29 @@ export interface paths {
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
     };
+    "/api/v1/organizations/me/keys/{key_id}/end-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Key End Users
+         * @description List the end users of one of the caller's service keys, oldest first.
+         *
+         *     The caller's own key, or for an owner or admin one of the organization's service keys; any other answers 404.
+         *     A read, so a viewer may list the end users of a key billed to them. A deleted end user is not listed.
+         */
+        get: operations["organization-keys-list_own_key_end_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
         parameters: {
             query?: never;
@@ -4496,7 +4519,8 @@ export interface paths {
          *
          *     A session's content is private to its own user. A share lets its audience read
          *     it until you end it or lose the workspace, and each read through it is recorded for you.
-         *     Only the session's own user can share it.
+         *     Only the session's own user can share it. Sharing with an audience that already
+         *     has a running share returns that share, with the note given here.
          */
         post: operations["organization-traces-share_trace_content"];
         delete?: never;
@@ -12424,6 +12448,8 @@ export interface components {
          *     on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
          */
         GuardrailConfig: {
+            /** Credential */
+            credential?: string | null;
             /**
              * Mode
              * @default monitor
@@ -27206,6 +27232,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-list_own_key_end_users": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Only end users on this budget. */
+                budget_id?: string | null;
+                /** @description Only end users that are, or are not, blocked. */
+                blocked?: boolean | null;
+                /** @description Only the end user the service names with this `user` value: zero or one. */
+                external_id?: string | null;
+                /** @description Also count every matching end user, in the Otari-Total-Count response header. */
+                include_total?: boolean;
+            };
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"][];
                 };
             };
             /** @description Validation Error */

@@ -143,6 +143,7 @@ from gateway.core.error_codes import (
     PROVIDER_ERROR,
     PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
+    REQUEST_TOO_LARGE,
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     UPSTREAM_RATE_LIMITED,
@@ -541,6 +542,7 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+PROVIDER_REQUEST_TOO_LARGE_DETAIL = "The provider refused the request as too large (reduce the request size)"
 
 
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
@@ -575,6 +577,7 @@ class ErrorKind(Enum):
     NOT_FOUND = auto()
     PERMISSION = auto()
     RATE_LIMIT = auto()
+    REQUEST_TOO_LARGE = auto()
 
 
 # An error flattened into an ``HTTPException`` no longer carries its kind, so a
@@ -584,6 +587,7 @@ _STATUS_ERROR_KINDS = {
     status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
     status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
     status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
     status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
 }
 
@@ -921,6 +925,13 @@ def classify_provider_error(
         return ProviderErrorMapping(
             status.HTTP_429_TOO_MANY_REQUESTS, _upstream_message_detail(exc, PROVIDER_RATE_LIMITED_DETAIL)
         )
+    # A 413 refuses the request for its size, so it fails the same way on every
+    # retry and the provider's sentence (the limit, the size requested) is what
+    # tells the caller how far to shrink it.
+    if status_code == 413:
+        return ProviderErrorMapping(
+            status.HTTP_413_CONTENT_TOO_LARGE, _upstream_message_detail(exc, PROVIDER_REQUEST_TOO_LARGE_DETAIL)
+        )
     return None
 
 
@@ -942,6 +953,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(UNSUPPORTED_CONTENT)
     if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
         return error_headers(UNSUPPORTED_PARAMETER)
+    if status_code == status.HTTP_413_CONTENT_TOO_LARGE and upstream_exception_shape(exc)[1] == 413:
+        return error_headers(REQUEST_TOO_LARGE)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
         return error_headers(missing.code)
@@ -4033,15 +4046,19 @@ def merge_guardrail_layers(
     operator who named a URL meant the check to go there, not to be answered
     here.
 
+    A caller's own credential is kept only for a profile no layer mandates: a
+    mandate replaces the caller's entry, URL included, and the caller's secret
+    was meant for the caller's URL.
+
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map, an empty mandated set
+    mandated anything, alongside the caller's credentials, an empty mandated set
     and no in-process entries: that is the shape `apply_input_guardrails` treats
     as "no guardrails ran", and it is what keeps a deployment that configures
     nothing behaving exactly as it did.
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:
-        return EffectiveGuardrails(requested, {}, frozenset(), {})
+        return EffectiveGuardrails(requested, _caller_credentials(requested, frozenset()), frozenset(), {})
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
@@ -4061,7 +4078,21 @@ def merge_guardrail_layers(
             mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
             in_process.pop(guardrail.profile, None)
+    credentials |= _caller_credentials(requested, mandated)
     return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
+
+
+def _caller_credentials(requested: list[GuardrailConfig] | None, mandated: Collection[str]) -> dict[str, str]:
+    """The credentials the caller sent, keyed by profile, for the profiles no layer mandates.
+
+    Keying by profile is sound because a request body may not name a profile
+    twice when one of its entries carries a credential (``RequestedGuardrails``).
+    """
+    return {
+        guardrail.profile: guardrail.credential.get_secret_value()
+        for guardrail in requested or []
+        if guardrail.credential is not None and guardrail.profile not in mandated
+    }
 
 
 def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) -> dict[str, InProcessGuardrail | None]:

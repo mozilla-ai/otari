@@ -46,6 +46,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_ERROR_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
+    PROVIDER_REQUEST_TOO_LARGE_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_error_message,
@@ -211,6 +212,41 @@ def test_rate_limit_message_is_still_redacted() -> None:
     assert "Quota exceeded" in mapping.detail
     assert "proj-a1b2c3d4" not in mapping.detail
     assert "internal.upstream" not in mapping.detail
+
+
+def test_request_too_large_carries_the_upstream_message() -> None:
+    """A 413 refuses the request for its size and fails the same way on every
+    retry, so it is the caller's 413 with the provider's sentence (the limit and
+    the size requested) rather than a retryable 502."""
+    exc = _ParamError(413, None, "Request too large: Limit 8000, Requested 10974, please reduce your message size")
+    assert classify_provider_error(exc) == (
+        413,
+        "Request too large: Limit 8000, Requested 10974, please reduce your message size",
+    )
+
+
+def test_request_too_large_message_is_still_redacted() -> None:
+    exc = _ParamError(413, None, "Request too large in organization org_01abc23 via https://internal.upstream/v1")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 413
+    assert "Request too large" in mapping.detail
+    assert "org_01abc23" not in mapping.detail
+    assert "internal.upstream" not in mapping.detail
+
+
+def test_request_too_large_carries_a_code_and_no_retry_after() -> None:
+    exc = _rate_limited_with("23")
+    exc.status_code = 413  # type: ignore[attr-defined]
+    assert provider_error_headers(exc, 413) == {"Otari-Error-Code": "request_too_large"}
+    assert refusal_code(exc) == "request_too_large"
+
+
+def test_request_too_large_falls_back_to_a_fixed_detail() -> None:
+    mapping = classify_provider_error(_ParamError(413, None, "413"))
+    assert mapping is not None
+    assert mapping.status_code == 413
+    assert mapping.detail == PROVIDER_REQUEST_TOO_LARGE_DETAIL
 
 
 @pytest.mark.parametrize(

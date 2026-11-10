@@ -182,9 +182,9 @@ async def apply_input_guardrails(
     caller's organization mandates and any a routing policy mandates (see
     :func:`gateway.api.routes._pipeline.merge_guardrail_layers`, which is where
     the merge happens so every completion endpoint enforces a mandate alike).
-    ``credentials`` carries the bearer credential an organization entry stores
-    for the endpoint it names, keyed by profile; it never comes from the request
-    body. ``mandated`` names the profiles a layer above the caller supplied,
+    ``credentials`` carries the bearer credential for the endpoint an entry
+    names, keyed by profile: an organization's stored one, or the caller's own
+    for a profile no layer mandates. ``mandated`` names the profiles a layer above the caller supplied,
     which is what decides whether a URL that fails its safety check is the
     caller's malformed request (a 400 naming their own URL) or a stored entry
     being unevaluable (governed by its ``mode`` / ``on_unavailable``, with the

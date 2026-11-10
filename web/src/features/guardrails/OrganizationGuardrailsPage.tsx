@@ -339,6 +339,7 @@ export function OrganizationGuardrailsPage() {
             <TableScrollFrame className="otari-guardrail-definitions-table">
               <DataTable
                 ariaLabel="Guardrails you have configured"
+                mobileLayout="cards"
                 columns={definitionColumns}
                 rows={defined}
                 getRowKey={(row) => row.id}
@@ -352,6 +353,7 @@ export function OrganizationGuardrailsPage() {
             <TableScrollFrame className="otari-guardrail-mandates-table">
               <DataTable
                 ariaLabel="Where they run"
+                mobileLayout="cards"
                 columns={mandateColumns}
                 rows={entries}
                 getRowKey={(row) => row.id}

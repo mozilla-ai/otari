@@ -198,6 +198,7 @@ export function AutomaticFallbacks({
         <TableScrollFrame className="otari-fallbacks-table">
           <DataTable
             ariaLabel="Automatic fallback"
+            mobileLayout="cards"
             columns={columns}
             rows={fallbacks}
             getRowKey={(row) => row.id}

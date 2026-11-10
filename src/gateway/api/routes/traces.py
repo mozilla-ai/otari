@@ -336,7 +336,8 @@ async def share_trace_content(
 
     A session's content is private to its own user. A share lets its audience read
     it until you end it or lose the workspace, and each read through it is recorded for you.
-    Only the session's own user can share it.
+    Only the session's own user can share it. Sharing with an audience that already
+    has a running share returns that share, with the note given here.
     """
     return share_public(
         await traces.share_content(scope, trace_id, audience=body.audience, note=body.note, workspace_id=workspace_id)

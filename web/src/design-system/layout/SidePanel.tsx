@@ -69,7 +69,7 @@ export function SidePanel({
             aria-label={label}
             className={`otari-side-panel ${
               isExpanded ? "otari-side-panel--expanded" : ""
-            } flex h-full flex-col border-border border-l bg-surface p-0 shadow-xl`}
+            } flex h-full flex-col border-border bg-surface p-0 shadow-xl md:border-l`}
           >
             <header className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-border border-b px-4">
               <div className="flex min-w-0 items-center gap-2">{heading}</div>

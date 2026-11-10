@@ -424,10 +424,9 @@ class ResolvedOrganizationGuardrail:
     should ride into a streaming response that outlives the handler.
 
     The credential is carried beside the config rather than on it because
-    :class:`GuardrailConfig` is a *request body* model. A credential field there
-    would be one a caller could set, which would turn the guardrail list into a
-    way to make this gateway send a secret to an endpoint of the caller's
-    choosing.
+    :class:`GuardrailConfig` is a *request body* model, whose ``credential`` is
+    the caller's own. Keeping a stored secret off it means no merge can leave
+    one on an entry whose URL the caller chose.
 
     ``definition_id`` is set when this organization runs the guardrail itself,
     and it is the whole of what the request path needs: the runner holds the

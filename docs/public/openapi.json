@@ -9455,6 +9455,20 @@
       "GuardrailConfig": {
         "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
+          "credential": {
+            "anyOf": [
+              {
+                "format": "password",
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
+          },
           "mode": {
             "default": "monitor",
             "enum": [
@@ -40521,6 +40535,150 @@
         ]
       }
     },
+    "/api/v1/organizations/me/keys/{key_id}/end-users": {
+      "get": {
+        "description": "List the end users of one of the caller's service keys, oldest first.\n\nThe caller's own key, or for an owner or admin one of the organization's service keys; any other answers 404.\nA read, so a viewer may list the end users of a key billed to them. A deleted end user is not listed.",
+        "operationId": "organization-keys-list_own_key_end_users",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only end users on this budget.",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users on this budget.",
+              "title": "Budget Id"
+            }
+          },
+          {
+            "description": "Only end users that are, or are not, blocked.",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only end users that are, or are not, blocked.",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Only the end user the service names with this `user` value: zero or one.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user the service names with this `user` value: zero or one.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching end user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EndUserPublic"
+                  },
+                  "title": "Response Organization-Keys-List Own Key End Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Key End Users",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
     "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
       "get": {
         "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
@@ -44275,7 +44433,7 @@
         ]
       },
       "post": {
-        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it. Sharing with an audience that already\nhas a running share returns that share, with the note given here.",
         "operationId": "organization-traces-share_trace_content",
         "parameters": [
           {

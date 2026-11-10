@@ -23,6 +23,7 @@ test.describe.configure({ mode: "serial" })
 
 const PROVIDER = "parity-provider"
 const KEY_NAME = "parity-key"
+const SERVICE_KEY_NAME = "parity-service-key"
 const BUDGET = "parity-budget"
 const POLICY = "parity-chain"
 
@@ -304,6 +305,62 @@ test.describe("api keys", () => {
     await expect(confirmKey).toContainText(KEY_NAME)
     await confirmKey.getByRole("button", { name: "Delete permanently" }).click()
     await expect(row(page, "API keys", KEY_NAME)).toHaveCount(0)
+  })
+
+  test("caps a service key's end users and lists them", async ({ page }) => {
+    await login(page)
+    await openPage(page, "API keys", "API keys")
+
+    await page.getByRole("button", { name: "Create key" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByLabel("Name").fill(SERVICE_KEY_NAME)
+    const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
+    await ownerBox.fill(PARITY.users.heavy)
+    await dismissComboBoxInDialog(ownerBox)
+    await dialog.getByRole("button", { name: "Advanced" }).click()
+    await dialog.getByText("Service key", { exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Max end users" }).fill("3")
+    await dialog.getByRole("button", { name: "Create key" }).click()
+    await dialog.getByRole("button", { name: /saved this key/i }).click()
+
+    const key = row(page, "API keys", SERVICE_KEY_NAME)
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^Edit/ }).click()
+    const edit = page.getByRole("dialog", { name: "Edit key" })
+    await expect(
+      edit.getByRole("textbox", { name: "Max end users" }),
+    ).toHaveValue("3")
+    await edit.getByRole("textbox", { name: "Max end users" }).fill("")
+    await edit.getByRole("button", { name: "Save" }).click()
+    await expect(edit).toBeHidden()
+
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^Edit/ }).click()
+    await expect(
+      page
+        .getByRole("dialog", { name: "Edit key" })
+        .getByRole("textbox", { name: "Max end users" }),
+    ).toHaveValue("")
+    await page.keyboard.press("Escape")
+
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^End users/ }).click()
+    const endUsers = page.getByRole("dialog", { name: "End users" })
+    await expect(endUsers).toContainText("No end users yet.")
+    // The footer's Close, not the header's icon of the same accessible name.
+    await endUsers.getByRole("button", { name: "Close" }).last().click()
+    await expect(endUsers).toBeHidden()
+
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^Disable/ }).click()
+    await expect(key).toContainText("Disabled")
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^Delete/ }).click()
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete permanently" })
+      .click()
+    await expect(row(page, "API keys", SERVICE_KEY_NAME)).toHaveCount(0)
   })
 })
 

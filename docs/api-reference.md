@@ -213,11 +213,11 @@ apply to its type is left out:
 |---|---|
 | `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
 | `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
-| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, and an MCP call that returned a tool error, are `failed`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code (which never reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
-| `code` | The code a code execution ran. |
+| `code` | The code the model sent a code execution. A `failed` one may never have run. |
 | `stdout`, `stderr`, `exit_code` | What an ended code execution printed and its exit status, absent when the run never reached the sandbox. |
 | `file_ids` | The [Files API](files.md) IDs of the files a code execution produced. |
 | `server`, `name` | The MCP server and the tool the model called on it. |
@@ -868,7 +868,7 @@ output, with no model involved. It is admitted, priced and budgeted as an
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. |
+| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. Code that is empty or only whitespace is a `422`. |
 | `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
 | `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
 | `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
@@ -1060,6 +1060,7 @@ moderations, rerank) classify a provider failure the same way:
 | OpenAI's 403 with error type `invalid_request_error` (logprobs requested from a model that does not return them, an embedding model sent to chat) | 400 | | OpenAI's sentence | No |
 | Unknown model | 404 | | | No |
 | The provider has no such operation for the model (rerank on a chat model), or its SDK has no parameter for a field the caller sent | 400 | | Names the operation or the field | No |
+| Refuses the request for its size (its own 413, such as a prompt over a tokens-per-minute limit) | 413 | `request_too_large` | The provider's sentence | No |
 | Rate limit | 429 | `upstream_rate_limited`; the provider's `Retry-After` when it sent one | | After waiting |
 | Refuses the gateway's own credential (its 401, or a 403 that is not a rejection of the request) | 424 | `provider_credential_rejected` | | No |
 | Timeout | 504 | | | Yes |
@@ -1127,6 +1128,7 @@ at the top level of the body.
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](configuration.md#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `request_too_large` | 413 | The provider refused the request for its size, such as a prompt over a tokens-per-minute limit | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `unsupported_parameter` | 400 | The provider cannot express a parameter the request carries for the model, such as `response_format` on a model with no JSON mode. Sent only when Otari's provider library refuses the parameter and names it; a provider's own 400 for it carries the provider's message and no code. A routing policy moves on to its next candidate first, and answers with this code, `detail` naming the parameters, when every candidate refused one | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |

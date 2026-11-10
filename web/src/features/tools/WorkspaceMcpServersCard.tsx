@@ -354,6 +354,7 @@ export function WorkspaceMcpServersCard({
       <TableScrollFrame className="otari-mcp-table">
         <DataTable
           ariaLabel={`MCP servers for ${selected.name}`}
+          mobileLayout="cards"
           columns={columns}
           rows={rows}
           getRowKey={(row) => row.id}

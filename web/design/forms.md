@@ -184,8 +184,8 @@ who knows an id reaches the row named for a person.
 ## Field height is a property of the place, not of the field
 
 A field is **36px**. Inside a named dense place it is **32px**, and below `md`
-every place raises it to **44px**, so the dense size is a desktop size the phone
-layout takes back off. Three places exist:
+every field, in a place or not, is **44px**, so both desk sizes are sizes the
+phone layout takes back off. Three places exist:
 
 | Place | Component that puts it on |
 | --- | --- |
@@ -194,11 +194,15 @@ layout takes back off. Three places exist:
 | `.otari-settings` | `layout/SettingsGroup`, and only with `bounded` |
 
 `.otari-settings` differs from the other two in one way worth knowing: on a
-phone its field also gains block padding and 16px type, where a toolbar's keeps
-the dense 4px and 14px. That is because the row's control stops sharing the row
-and stacks full width under its label there, so it is a form field again rather
-than one of a strip of small ones, and iOS zooms the page when a field under
-16px takes focus.
+phone its field also gains block padding, where a toolbar's keeps the dense 4px.
+That is because the row's control stops sharing the row and stacks full width
+under its label there, so it is a form field again rather than one of a strip
+of small ones.
+
+Type is not a place's to choose on a touch screen: every text field there is
+16px whatever its class says (`globals.css`, the text-entry floor), because iOS
+zooms the page into a smaller one on focus, and an iPhone held sideways is wider
+than the 640px step at which HeroUI's own fields drop to 14px.
 
 **No call site picks a height.** A page says "this row is a toolbar" and every
 control in it agrees on a size, which is what stopped the six pages with a filter

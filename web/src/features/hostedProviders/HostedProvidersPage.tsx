@@ -671,6 +671,7 @@ export function HostedProvidersPage() {
           <TableScrollFrame className="otari-hosted-providers-table">
             <DataTable
               ariaLabel="Hosted providers"
+              mobileLayout="cards"
               columns={columns}
               rows={tableRows}
               // The kind and the name, not the id: a configured provider has no
