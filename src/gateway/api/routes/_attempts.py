@@ -30,6 +30,7 @@ from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     PROVIDER_CREDENTIAL_REJECTED,
     REQUEST_TOO_LARGE,
+    STRUCTURED_OUTPUT_FAILED,
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     error_code_of,
@@ -111,6 +112,11 @@ def no_attempt_accepts_images_detail(tried: int) -> str:
     return f"None of the models tried accepts image content ({tried} attempts)."
 
 
+def structured_output_failed_for_every_attempt_detail(tried: int) -> str:
+    """400 detail for a request whose schema no attempt's model produced matching output for."""
+    return f"None of the models tried produced output matching the requested schema ({tried} attempts)."
+
+
 def no_attempt_accepts_parameters_detail(parameters: Sequence[str], tried: int) -> str:
     """400 detail for a request carrying a parameter that no attempt's provider can express."""
     return f"None of the models tried accepts {', '.join(parameters)} ({tried} attempts)."
@@ -170,6 +176,12 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_images_detail(len(errors)),
             headers=error_headers(UNSUPPORTED_CONTENT),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {STRUCTURED_OUTPUT_FAILED}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=structured_output_failed_for_every_attempt_detail(len(errors)),
+            headers=error_headers(STRUCTURED_OUTPUT_FAILED),
         )
     if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
         from gateway.api.routes._pipeline import unsupported_parameter_name
