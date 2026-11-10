@@ -48,6 +48,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
   const { recordEvent } = useTelemetry()
   const { terms_url } = useDeployment()
   const [slug, setSlug] = useState<string>()
+  const [organizationName, setOrganizationName] = useState<string>()
   const [failure, setFailure] = useState<{
     message: string
     returnHash: string
@@ -71,6 +72,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     const stored = takeSsoState()
     const returnHash = takeSsoReturnHash()
     setSlug(stored.slug)
+    setOrganizationName(stored.organizationName ?? undefined)
     const providerError = params.get("error")
     const state = params.get("state")
     const code = params.get("code")
@@ -126,10 +128,15 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
           recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
             authentication_method: AUTHENTICATION_METHOD,
           })
-          rememberCompany({
-            name: stored.organizationName ?? stored.slug,
-            slug: stored.slug,
-          })
+          if (stored.organizationName) {
+            // A slug is never stored as the name, which is the whole point of
+            // remembering the pair. A direct link carries no name, so that
+            // sign-in is simply not remembered.
+            rememberCompany({
+              name: stored.organizationName,
+              slug: stored.slug,
+            })
+          }
           login()
           if (result.passwordRemoved) {
             setPasswordRemoved({ returnHash })
@@ -204,6 +211,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     return (
       <SsoTermsStep
         slug={slug}
+        organizationName={organizationName}
         termsUrl={terms_url}
         returnHash={failure.returnHash}
       />
@@ -231,10 +239,13 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
  */
 function SsoTermsStep({
   slug,
+  organizationName,
   termsUrl,
   returnHash,
 }: {
   slug: string
+  /** Carried from the refused attempt, so the second one still remembers the company by name. */
+  organizationName: string | undefined
   termsUrl: string
   /** The page the refused sign-in started from, which the second attempt keeps. */
   returnHash: string
@@ -254,6 +265,7 @@ function SsoTermsStep({
       const started = await leaveForSsoConnection(slug, {
         termsAccepted: true,
         returnHash,
+        organizationName,
       })
       if (!started.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {

@@ -106,6 +106,17 @@ describe("SsoCallbackPage", () => {
     )
   })
 
+  it("remembers nothing when the round trip carried no name", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(SLUG_KEY, "acme")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(sessionBody()))
+
+    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+    expect(window.localStorage.getItem(COMPANY_KEY)).toBeNull()
+  })
+
   it("forwards the iss the redirect carried, and substitutes none of its own", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     window.sessionStorage.setItem(SLUG_KEY, "acme")
@@ -329,6 +340,53 @@ describe("SsoCallbackPage", () => {
       expect(window.sessionStorage.getItem(RETURN_KEY)).toBe(
         "#/organization/billing",
       )
+    })
+
+    it("keeps the company name across the retry, so it is not remembered by its slug", async () => {
+      window.sessionStorage.setItem(STATE_KEY, "the-state")
+      window.sessionStorage.setItem(SLUG_KEY, "acme")
+      window.sessionStorage.setItem(NAME_KEY, "Acme")
+      const assign = vi.fn()
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...realLocation, assign },
+      })
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          jsonResponse(
+            {
+              detail: "Accept the terms of service to continue",
+              code: "terms_not_accepted",
+            },
+            400,
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            authorization_url: "https://idp.acme.example/authorize?x=1",
+            state: "the-next-state",
+          } satisfies SsoAuthorizeResponse),
+        )
+      const user = userEvent.setup()
+
+      renderWithTerms("#/auth/sso/callback?code=the-code&state=the-state")
+
+      await screen.findByRole("heading", {
+        name: "Accept the terms to continue",
+      })
+      await user.click(
+        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Continue signing in" }),
+      )
+
+      await waitFor(() =>
+        expect(assign).toHaveBeenCalledWith(
+          "https://idp.acme.example/authorize?x=1",
+        ),
+      )
+      expect(window.sessionStorage.getItem(NAME_KEY)).toBe("Acme")
     })
   })
 
