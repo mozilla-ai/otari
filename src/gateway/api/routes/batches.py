@@ -64,9 +64,9 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.inference import (
-    DeploymentCharge,
     admit_deployment_paid,
     billed_model,
+    deferred_charge,
     describe_port_error,
 )
 from gateway.services.log_writer import LogWriter
@@ -934,13 +934,13 @@ async def retrieve_batch_results(
         )
         # Charged once, with the claim that accounts a recorded batch once.
         if deployment_paid and record is not None and origin_organization_id is not None:
-            charge = DeploymentCharge(
-                billing=billing_port_on(raw_request, db),
+            charge = deferred_charge(
+                billing_port_on(raw_request, db),
                 organization_id=origin_organization_id,
-                api_key_id=record.api_key_id if record is not None else api_key_id,
-                actor_user_id=None,
-                request_id=None,
-                billed=billed_model(provider_enum, batch_model),
+                api_key_id=record.api_key_id,
+                creator_user_id=record.user_id,
+                provider=provider_enum,
+                model=record.model,
             )
             await charge.settle(
                 cost,

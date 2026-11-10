@@ -18,7 +18,7 @@ from any_llm import LLMProvider
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError
 from gateway.services import model_catalog_service
-from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model
+from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model, deferred_charge
 from gateway.types.models_dev import parse_catalog
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -294,6 +294,45 @@ def test_a_model_is_open_weight_only_where_the_catalog_says_so(
     assert billed_model(provider, model) == BilledModel(
         provider=LLMProvider(provider).value, model=model, open_weights=open_weights
     )
+
+
+def test_a_deferred_job_is_charged_to_its_creator_on_the_model_it_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A batch or video settled later bills its creator, its requested model and its implementation."""
+    catalog = parse_catalog(
+        {
+            "deepinfra": {
+                "id": "deepinfra",
+                "models": {"Wan-AI/Wan2.1": {"id": "Wan-AI/Wan2.1", "open_weights": True}},
+            }
+        }
+    )
+    monkeypatch.setattr(model_catalog_service, "_fallback", lambda: catalog)
+    billing = cast(BillingPort, _Billing())
+
+    charge = deferred_charge(
+        billing,
+        organization_id=ORGANIZATION_ID,
+        api_key_id="key-1",
+        creator_user_id=str(IDENTITY_ID),
+        provider=LLMProvider.DEEPINFRA,
+        model="Wan-AI/Wan2.1",
+    )
+
+    assert charge.actor_user_id == IDENTITY_ID
+    assert charge.billed == BilledModel(provider="deepinfra", model="Wan-AI/Wan2.1", open_weights=True)
+    assert charge.api_key_id == "key-1"
+
+
+def test_a_deferred_job_whose_creator_names_no_identity_is_charged_to_no_one() -> None:
+    charge = deferred_charge(
+        cast(BillingPort, _Billing()),
+        organization_id=ORGANIZATION_ID,
+        api_key_id=None,
+        creator_user_id="service-user",
+        provider="openai",
+        model="gpt-4o",
+    )
+    assert charge.actor_user_id is None
 
 
 def test_with_no_catalog_no_model_is_open_weight() -> None:

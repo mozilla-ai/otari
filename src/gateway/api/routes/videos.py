@@ -61,7 +61,7 @@ from gateway.services.inference import (
     VIDEO_BILLING,
     DeploymentCharge,
     VideoJobService,
-    billed_model,
+    deferred_charge,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing import PriceFacts, estimate_video_cost, video_rate
@@ -326,13 +326,13 @@ async def _retrieve(
     if job.status == "completed" and record.accounted_at is None:
         deployment_charge = None
         if deployment_paid and organization_id is not None:
-            deployment_charge = DeploymentCharge(
-                billing=billing_port_on(raw_request, db),
+            deployment_charge = deferred_charge(
+                billing_port_on(raw_request, db),
                 organization_id=organization_id,
                 api_key_id=record.api_key_id,
-                actor_user_id=None,
-                request_id=None,
-                billed=billed_model(record.provider, record.model),
+                creator_user_id=record.user_id,
+                provider=provider,
+                model=record.model,
             )
         await _settle(
             record,

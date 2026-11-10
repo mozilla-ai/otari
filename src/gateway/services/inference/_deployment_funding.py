@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from any_llm import LLMProvider
 
 
-def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
+def actor_user_id_for(user_id: str | None) -> uuid.UUID | None:
     """The billed user as the dashboard identity it names, where it names one.
 
     A key a member minted for themselves carries their identity's uuid as its
@@ -138,6 +138,32 @@ class DeploymentCharge:
             )
 
 
+def deferred_charge(
+    billing: BillingPort,
+    *,
+    organization_id: uuid.UUID,
+    api_key_id: str | None,
+    creator_user_id: str | None,
+    provider: "str | LLMProvider",
+    model: str,
+) -> DeploymentCharge:
+    """What a job settled after its request returned (a batch, a video) is charged through.
+
+    Built from what the job recorded when it was admitted, never from whoever
+    retrieves it: the creator is who a plan covers, ``model`` is the model
+    requested, and ``provider`` is the implementation the catalog lists, not a
+    hosted instance's name.
+    """
+    return DeploymentCharge(
+        billing=billing,
+        organization_id=organization_id,
+        api_key_id=api_key_id,
+        actor_user_id=actor_user_id_for(creator_user_id),
+        request_id=None,
+        billed=billed_model(provider, model),
+    )
+
+
 def organization_slot_key(organization_id: uuid.UUID) -> str:
     """Where an organization's deployment-paid calls in flight are counted."""
     return f"organization:{organization_id}:concurrent"
@@ -176,7 +202,7 @@ async def admit_deployment_paid(
     """
     if not deployment_paid or organization_id is None:
         return None
-    actor_user_id = _actor_user_id(user_id)
+    actor_user_id = actor_user_id_for(user_id)
     await billing.apply_due_credit(organization_id=organization_id)
     await billing.require_funds_on_deposit(
         organization_id=organization_id, billed=billed, tools=tools, actor_user_id=actor_user_id

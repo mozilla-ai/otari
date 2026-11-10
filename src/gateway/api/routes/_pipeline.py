@@ -1793,6 +1793,10 @@ async def _admit_or_refuse(
         detail = str(exc.detail)
         await _record_funding_refusal(ctx, resolved, adapter=adapter, detail=detail, status_code=exc.status_code)
         raise adapter.error(exc.status_code, detail, ErrorKind.RATE_LIMIT, headers=dict(exc.headers or {})) from exc
+    except asyncio.CancelledError:
+        # A client that disconnects while waiting for a slot; nothing was dispatched.
+        await release_reservation(ctx)
+        raise
     ctx.deployment_charge = charge
 
 
@@ -4238,7 +4242,9 @@ async def prepare_gateway_tools(
 
     admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
     if backends.billing is not None:
-        await _admit_tool_funding(adapter, ctx, backends.billing, admitted.values())
+        unfunded = await _admit_tool_funding(adapter, ctx, backends.billing, admitted)
+        answers = {**answers, **unfunded}
+        admitted = {claimed: answer for claimed, answer in admitted.items() if claimed not in unfunded}
 
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
@@ -4407,58 +4413,88 @@ async def _admit_tool_funding(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     billing: BillingPort,
-    admitted: Iterable[_AdmittedTools],
-) -> None:
-    """Pass a request that may run a gateway tool on the deployment's account through the funding gate.
+    admitted: Mapping[frozenset[str], _AdmittedTools],
+) -> dict[frozenset[str], _ToolRefusal]:
+    """Pass the gateway tools each answer may run on the deployment's account through the funding gate.
 
     The model's gate (:func:`_admit_or_refuse`) only sees the model call, so a
     request whose organization pays for its model would otherwise run searches
     and sandboxes on the deployment's account with nothing paid in. The gate is
-    the same one, and so is the refusal. Sets ``ctx.tool_funding``, which
-    settlement charges those calls through.
+    the same one, asked once per distinct set of tools, so a fallback whose tools
+    cannot be funded is skipped (returned as refused) without refusing a head
+    that needs none of them. Refuses the request only where no answer is left.
+    Sets ``ctx.tool_funding``, which settlement charges those calls through.
     """
-    paid = [
-        tool
-        for answer in admitted
-        for tool in admitted_tools(code_execution=answer.code.use_sandbox, web=answer.web_access)
-        if tool.deployment_paid
-    ]
-    if not paid:
-        return
-    tool_key = gateway_tool_pricing_key(paid[0].name)
-    try:
-        funding = await admit_deployment_paid(
-            billing,
-            deployment_paid=True,
-            organization_id=ctx.organization_id,
-            billed=None,
-            api_key_id=ctx.api_key_id,
-            user_id=ctx.user_id,
-            request_id=ctx.request_id,
-            tools=frozenset(gateway_tool_pricing_key(tool.name) for tool in paid),
-        )
-    except InsufficientFundsError as exc:
+    paid_by_answer: dict[frozenset[str], list[Any]] = {}
+    for claimed, answer in admitted.items():
+        paid = [
+            tool
+            for tool in admitted_tools(code_execution=answer.code.use_sandbox, web=answer.web_access)
+            if tool.deployment_paid
+        ]
+        if paid:
+            paid_by_answer[claimed] = paid
+    if not paid_by_answer:
+        return {}
+    funding: DeploymentCharge | None = None
+    verdicts: dict[frozenset[str], InsufficientFundsError | None] = {}
+    unfunded: dict[frozenset[str], _ToolRefusal] = {}
+    last_refusal: tuple[str, InsufficientFundsError] | None = None
+    for claimed, paid in paid_by_answer.items():
+        tool_keys = frozenset(gateway_tool_pricing_key(tool.name) for tool in paid)
+        if tool_keys not in verdicts:
+            try:
+                funding = (
+                    await admit_deployment_paid(
+                        billing,
+                        deployment_paid=True,
+                        organization_id=ctx.organization_id,
+                        billed=None,
+                        api_key_id=ctx.api_key_id,
+                        user_id=ctx.user_id,
+                        request_id=ctx.request_id,
+                        tools=tool_keys,
+                    )
+                    or funding
+                )
+                verdicts[tool_keys] = None
+            except InsufficientFundsError as exc:
+                verdicts[tool_keys] = exc
+            except Exception as exc:
+                logger.error(
+                    "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",
+                    ctx.organization_id,
+                    ctx.request_id,
+                    describe_port_error(exc),
+                )
+                await _discard_failed_funding_check(ctx.db)
+                await _refuse_tool_funding(
+                    ctx,
+                    adapter,
+                    gateway_tool_pricing_key(paid[0].name),
+                    FUNDS_CHECK_UNAVAILABLE_DETAIL,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+                raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+        refusal = verdicts[tool_keys]
+        if refusal is not None:
+            last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal)
+            unfunded[claimed] = _ToolRefusal(
+                adapter.error(
+                    402, refusal.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+                )
+            )
+    if last_refusal is not None and len(unfunded) == len(admitted):
+        tool_key, refused = last_refusal
         logger.info(
             "Gateway tools refused for insufficient funds: organization=%s request_id=%s",
             ctx.organization_id,
             ctx.request_id,
         )
-        await _refuse_tool_funding(ctx, adapter, tool_key, exc.public_message, status.HTTP_402_PAYMENT_REQUIRED)
+        await _refuse_tool_funding(ctx, adapter, tool_key, refused.public_message, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, exc.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
-        ) from exc
-    except Exception as exc:
-        logger.error(
-            "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",
-            ctx.organization_id,
-            ctx.request_id,
-            describe_port_error(exc),
-        )
-        await _discard_failed_funding_check(ctx.db)
-        await _refuse_tool_funding(
-            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
-        )
-        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+            402, refused.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+        ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.
     if funding is not None and not await release_session(ctx.db):
@@ -4468,10 +4504,15 @@ async def _admit_tool_funding(
             ctx.request_id,
         )
         await _refuse_tool_funding(
-            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+            ctx,
+            adapter,
+            gateway_tool_pricing_key(next(iter(paid_by_answer.values()))[0].name),
+            FUNDS_CHECK_UNAVAILABLE_DETAIL,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
         )
         raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
     ctx.tool_funding = funding
+    return unfunded
 
 
 async def _refuse_tool_funding(
