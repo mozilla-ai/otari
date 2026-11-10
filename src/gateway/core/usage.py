@@ -215,10 +215,17 @@ def provider_reported_cost_of(usage: CompletionUsage, provider: str | None) -> f
     if extras.get("is_byok") is True:
         details = extras.get("cost_details")
         parts.append(details.get("upstream_inference_cost") if isinstance(details, dict) else None)
-    amounts = [part for part in parts if isinstance(part, int | float) and not isinstance(part, bool)]
+    amounts = [
+        part
+        for part in parts
+        if isinstance(part, int | float) and not isinstance(part, bool) and math.isfinite(part) and part >= 0
+    ]
     if len(amounts) != len(parts):
         return None
-    total = math.fsum(amounts)
+    try:
+        total = math.fsum(amounts)
+    except OverflowError:
+        return None
     return total if math.isfinite(total) else None
 
 
