@@ -269,7 +269,14 @@ constraint-dependencies = [
 # real incompatibility. An override replaces a declared specifier instead of
 # narrowing it, so the ceiling is named here. An open floor would strip a future
 # cap that does mean something. Remove this once xai-sdk allows packaging 26.
-override-dependencies = ["packaging>=26.3,<27"]
+# together declares filelock<4 and only imports FileLock. That class is unchanged
+# in 4.2. A constraint cannot lift the cap. 4.2.7 is the newest 4.2 release
+# outside the 7-day publish window. 4.2.1 is the first release that closes the
+# open advisories.
+override-dependencies = [
+    "packaging>=26.3,<27",
+    "filelock>=4.2.7,<4.2.8",
+]
 
 [tool.uv.workspace]
 members = ["cli", "any-search", "any-fetch"]
