@@ -183,7 +183,7 @@ def test_the_search_matches_a_selector_too(priced: TestClient, master_header: di
     """A picker is typed into by somebody who knows the selector they will send,
     not only the name the catalog prints."""
 
-    body = _get(priced, f"{API_ROOT}/catalog/models?search=fireworks", headers=master_header)
+    body = _get(priced, f"{API_ROOT}/catalog/models?search={_FIREWORKS_GLM}", headers=master_header)
 
     assert [model["id"] for model in body["models"]] == ["z-ai/glm-5.3"]
 

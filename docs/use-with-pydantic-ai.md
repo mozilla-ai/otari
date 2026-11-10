@@ -164,4 +164,4 @@ models from other families lose their own capabilities.
 ## See also
 
 - [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md)
-- [Agent traces](traces.md): what Otari records about an agent's runs.
+- [Sessions](sessions.md): what Otari records about an agent's runs.

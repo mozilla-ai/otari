@@ -167,8 +167,10 @@ carries neither.
 The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
-`deployment` (a rate stored on this gateway), or `defaults` (the bundled or
-accepted models.dev snapshot).
+`deployment` (a rate stored on this gateway), `defaults` (the bundled or
+accepted models.dev snapshot), or `reported` (the charge the provider stated,
+which settles a completion in place of a rate nobody set; see
+[Configuration](configuration.md#keeping-the-defaults-current)).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
@@ -1247,7 +1249,7 @@ and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Agent traces
 
-The sessions [Agent traces](traces.md) describes are read on these routes.
+The sessions [Sessions](sessions.md) describes are read on these routes.
 
 | Endpoint | Who |
 | --- | --- |

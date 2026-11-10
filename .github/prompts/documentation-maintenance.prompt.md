@@ -47,7 +47,7 @@ Keep documentation and AI guidance synchronized with the current repository.
 
 ## Validation Commands
 
-- `uv run pytest tests/unit/test_docs_links.py tests/unit/test_docs_style.py tests/unit/test_dashboard_doc.py tests/unit/test_frontend_rule_coverage.py`
+- `uv run pytest tests/unit/test_docs_links.py tests/unit/test_docs_style.py tests/unit/test_run_the_dashboard_doc.py tests/unit/test_frontend_rule_coverage.py`
 - `make lint`
 - `make openapi-check`, if you touched a route
 

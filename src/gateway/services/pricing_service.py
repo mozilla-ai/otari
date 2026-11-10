@@ -16,6 +16,7 @@ from gateway.log_config import logger
 from gateway.models.pricing import (
     MODEL_KIND,
     OPERATOR_ORIGIN,
+    SEED_ORIGIN,
     ModelPricing,
     OrganizationModelPricing,
     PriceSource,
@@ -274,6 +275,7 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "token",
         rates=override.rates,
+        origin=override.origin,
     )
 
 
@@ -768,6 +770,16 @@ class ResolvedPricing(NamedTuple):
     source: PriceSource
     reference: str | None = None
     effective_at: datetime | None = None
+
+
+def is_estimated_rate(resolved: ResolvedPricing) -> bool:
+    """Whether nobody chose ``resolved``: a models.dev default, or a rate seeded from one.
+
+    Such a rate is one headline price for the model, so a charge the provider
+    states for the call is the better figure, as on an aggregator whose price
+    moves with the upstream it routes to.
+    """
+    return resolved.source == "defaults" or resolved.pricing.origin == SEED_ORIGIN
 
 
 class PricingProvenance(NamedTuple):

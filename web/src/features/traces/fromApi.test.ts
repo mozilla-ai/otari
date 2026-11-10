@@ -573,7 +573,7 @@ describe("toTrace", () => {
     )
     const byId = new Map(trace.observations.map((o) => [o.id, o]))
     const docs =
-      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about"
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about"
 
     expect(byId.get("prompt-1")?.explain?.sentence).toBe(
       "A turn the agent took.",
@@ -622,7 +622,7 @@ describe("toTrace", () => {
     const trace = toTrace(traceSummary(), traceDetail())
     const byId = new Map(trace.observations.map((o) => [o.id, o]))
     const docs =
-      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about"
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about"
 
     expect(byId.get("req-1")?.noInput).toEqual({
       sentence: "Its prompt is not shown.",
@@ -658,7 +658,7 @@ describe("toTrace", () => {
     expect(byId.get("llm-1")?.noInput).toEqual({
       sentence: "Its prompt is not shown.",
       docsHref:
-        "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+        "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
     })
     expect(byId.has("req-2")).toBe(false)
     expect(byId.get("llm-2")?.noInput).toEqual({

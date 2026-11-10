@@ -20,6 +20,7 @@ import hashlib
 import math
 import re
 import secrets
+import zlib
 from dataclasses import dataclass
 from email.utils import unquote
 from typing import Any
@@ -164,12 +165,13 @@ async def _send(
     so an answer that arrived is always returned: a refresh token the server rotated is not lost
     to a deadline that fires while the connection closes.
     """
-    await _checked(url, label)
     body = bytearray()
     client = _http_client(timeout)
     response: httpx.Response | None = None
     try:
         async with asyncio.timeout(deadline):
+            # Inside the deadline: the check resolves the host, and a renewal holds a row lock meanwhile.
+            await _checked(url, label)
             # Identity, so the raw stream is the body: httpx's decoded iterator closes the response
             # when it ends, which would put closing inside the deadline.
             request = client.build_request(
@@ -191,11 +193,40 @@ async def _send(
     finally:
         # Shielded: closing is not allowed to undo an answer already read.
         await asyncio.shield(_close(client, response))
+    content = _decoded(bytes(body), response.headers.get("content-encoding"), label)
     try:
-        payload = httpx.Response(200, content=bytes(body)).json()
+        payload = httpx.Response(200, content=content).json()
     except ValueError:
         payload = None
     return response, payload if isinstance(payload, dict) else None
+
+
+def _decoded(body: bytes, encoding: str | None, label: str) -> bytes:
+    """An answer's body as sent before ``Content-Encoding``, which a server may apply though identity was asked for.
+
+    gzip and deflate are read, to the same size bound as the raw body. Any other encoding is a
+    failure, which leaves a refresh's old token in place rather than reading garbage as an answer.
+    """
+    encoding = (encoding or "identity").strip().lower()
+    if encoding in ("", "identity"):
+        return body
+    if encoding in ("gzip", "x-gzip"):
+        wbits_options = [16 + zlib.MAX_WBITS]
+    elif encoding == "deflate":
+        # RFC 9110 means zlib-wrapped; some servers send it raw.
+        wbits_options = [zlib.MAX_WBITS, -zlib.MAX_WBITS]
+    else:
+        raise McpOAuthDiscoveryError(f"The {label} answered in an encoding the gateway does not read")
+    for wbits in wbits_options:
+        inflater = zlib.decompressobj(wbits)
+        try:
+            content = inflater.decompress(body, _MAX_RESPONSE_BYTES + 1)
+        except zlib.error:
+            continue
+        if len(content) > _MAX_RESPONSE_BYTES or inflater.unconsumed_tail:
+            raise McpOAuthDiscoveryError(f"The {label} answered with more than the gateway reads")
+        return content
+    raise McpOAuthDiscoveryError(f"The {label} answered with a body that does not decode")
 
 
 async def _close(client: httpx.AsyncClient, response: httpx.Response | None) -> None:
@@ -402,11 +433,7 @@ async def _discover(server_url: str) -> McpOAuthMetadata:
 async def _metadata(
     document: dict[str, Any], *, scope: str | None, resource: str | None, issuer: str | None
 ) -> McpOAuthMetadata:
-    """Read an authorization server's metadata, checking every endpoint the gateway or a browser will be sent to.
-
-    Every endpoint comes from this one document, whose ``issuer`` the caller has checked is the one
-    it was fetched for, so the token endpoint is always one the issuer itself named.
-    """
+    """Read an authorization server's metadata, checking every endpoint the gateway or a browser will be sent to."""
     authorization_endpoint = _string(document, "authorization_endpoint")
     token_endpoint = _string(document, "token_endpoint")
     if authorization_endpoint is None or token_endpoint is None:

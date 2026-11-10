@@ -5,17 +5,21 @@ the commit to the caller.
 """
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, delete, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import McpUserConnection
 from gateway.repositories.base_repository import BaseRepository
+
+# The most connections one removal reads to revoke; the rest are counted.
+REVOCABLE_PAGE = 500
 
 
 class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never]):
@@ -72,25 +76,61 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return list(rows.scalars().all())
 
-    async def revocable_for_server(self, server_id: uuid.UUID, *, limit: int = 500) -> list[McpUserConnection]:
-        """Up to ``limit`` of a server's connections whose authorization server can be asked to end them."""
-        rows = await self.db.execute(
-            select(McpUserConnection)
-            .where(McpUserConnection.server_id == server_id, McpUserConnection.revocation_endpoint.is_not(None))
-            .order_by(McpUserConnection.created_at, McpUserConnection.id)
-            .limit(limit)
-        )
-        return list(rows.scalars().all())
+    async def revocable(
+        self,
+        *,
+        server_ids: Collection[uuid.UUID] | None = None,
+        user_id: str | None = None,
+        limit: int | None = None,
+    ) -> tuple[list[McpUserConnection], int]:
+        """Up to ``limit`` connections whose authorization server can be asked to end them, and how many there are.
 
-    async def revocable_for_user(self, user_id: str, *, limit: int = 500) -> list[McpUserConnection]:
-        """Up to ``limit`` of a user's connections on any server whose authorization server can be asked to end them."""
+        Narrowed to these servers, to this user, or both. A removal that ends more than ``limit``
+        revokes the first ``limit`` and counts the rest, rather than holding them all in memory.
+        """
+        if server_ids is not None and not server_ids:
+            return [], 0
+        limit = limit or REVOCABLE_PAGE
+        conditions: list[ColumnElement[bool]] = [McpUserConnection.revocation_endpoint.is_not(None)]
+        if server_ids is not None:
+            conditions.append(McpUserConnection.server_id.in_(list(server_ids)))
+        if user_id is not None:
+            conditions.append(McpUserConnection.user_id == user_id)
         rows = await self.db.execute(
             select(McpUserConnection)
-            .where(McpUserConnection.user_id == user_id, McpUserConnection.revocation_endpoint.is_not(None))
+            .where(*conditions)
             .order_by(McpUserConnection.created_at, McpUserConnection.id)
             .limit(limit)
         )
-        return list(rows.scalars().all())
+        found = list(rows.scalars().all())
+        if len(found) < limit:
+            return found, len(found)
+        total = (
+            await self.db.execute(select(func.count()).select_from(McpUserConnection).where(*conditions))
+        ).scalar_one()
+        return found, total
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        """Run ``callback`` once the transaction this repository writes in commits, and never if it rolls back.
+
+        For work that must not happen before the removal it follows is durable, such as asking an
+        authorization server to end tokens, from code that does not own the commit.
+        """
+        session = self.db.sync_session
+        settled = False
+
+        def committed(_session: Session) -> None:
+            nonlocal settled
+            if not settled:
+                settled = True
+                callback()
+
+        def rolled_back(_session: Session) -> None:
+            nonlocal settled
+            settled = True
+
+        event.listen(session, "after_commit", committed)
+        event.listen(session, "after_rollback", rolled_back)
 
     async def count_for_server(self, server_id: uuid.UUID) -> int:
         """How many users are connected to a server."""

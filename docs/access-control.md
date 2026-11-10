@@ -14,7 +14,7 @@ shows how those pieces fit together. Each one has its own page with the steps.
 | API key | A workload credential bound to one user and one workspace | [API keys](api-keys.md) |
 | Service key and end user | A key whose requests bill the people an application serves | [Track spend per end user](end-users.md) |
 | Budget | A spend, token or request limit over a period | [Budgets](budgets.md) |
-| Provider key | The organization's credential for an upstream LLM provider | [Provider keys](provider-keys.md) |
+| Provider key | The organization's credential for an upstream LLM provider | [Model providers](model-providers.md) |
 | Operator | Runs a self-hosted deployment as a whole | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
 
 ## How they relate
@@ -37,6 +37,22 @@ shows how those pieces fit together. Each one has its own page with the steps.
 Organization roles stop at their organization. On a self-hosted deployment,
 [operators](sign-in.md#deployment-wide-account-administration) act on the whole
 deployment.
+
+## What a page shows depends on who is signed in
+
+- **Spend & budgets.** An organization owner or admin manages their
+  organization's budgets and ceilings. A deployment operator also sees the
+  deployment's own budgets and the gateway users assigned to them.
+- **API keys.** An operator manages every key in the organization and picks each
+  key's owner. A member sees only their own keys, always billed to themselves and
+  never budget-exempt. An operator, or an organization owner or admin, can cap a
+  key's spend from its create and edit forms, and the Budget column shows each
+  key's spend against its limit. Where the deployment enables it, a key's actions
+  menu offers **Workload identity…**; see
+  [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key).
+- **Overview and Routing** show an operator their active organization only. What
+  the Overview flags for each role is in
+  [What needs attention](review-usage-and-requests.md#what-needs-attention).
 
 ## How a request is attributed
 

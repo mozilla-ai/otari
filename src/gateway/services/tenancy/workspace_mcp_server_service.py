@@ -111,6 +111,7 @@ from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
     McpConnectionService,
     McpRevocation,
+    McpServerRef,
     McpUserTokens,
     StoredMcpOAuthClient,
     require_per_user_support,
@@ -517,28 +518,31 @@ def _own_client(client_id: str | None, client_secret: str | None) -> dict[str, o
 
 
 def _edited_client(
-    current: StoredMcpOAuthClient | None, client_id: object, client_secret: object
+    current: StoredMcpOAuthClient | None, client_id: object, client_secret: object, *, moves_host: bool = False
 ) -> tuple[dict[str, object] | None, bool, bool]:
     """A per-user server's stored client after an edit: the client, whether to store it, and whether it is another one.
 
     Each of the two fields is left alone when omitted or null, cleared by ``""``, and set by a value.
     Clearing the ID goes back to the client Otari registers itself. A new secret on the same ID is
     the same client, so it keeps the users' connections: their grants name the client, not its secret.
+    An edit that ``moves_host`` keeps no stored secret, even under the same ID: it was issued for the
+    old host, and the new host's token endpoint would be sent it. Only a secret in the edit is kept.
     """
-    own = current if current is not None and not current.dynamic else None
+    stored = current if current is not None and not current.dynamic else None
+    own = stored.model_copy(update={"encrypted_secret": None}) if moves_host and stored is not None else stored
     target_id = own.client_id if own is not None else None
     if isinstance(client_id, str):
         target_id = client_id or None
     if target_id is None:
         if isinstance(client_secret, str) and client_secret:
             raise McpConnectionSetupError("oauth_client_secret needs oauth_client_id")
-        return None, own is not None, own is not None
+        return None, stored is not None, stored is not None
     same_client = own is not None and own.client_id == target_id
     encrypted_secret = own.encrypted_secret if own is not None and same_client else None
     if isinstance(client_secret, str):
         encrypted_secret = _encrypted(client_secret) if client_secret else None
     edited = StoredMcpOAuthClient(client_id=target_id, encrypted_secret=encrypted_secret)
-    return edited.model_dump(), edited != own, not same_client
+    return edited.model_dump(), edited != stored, not same_client
 
 
 def _origin(url: str) -> str:
@@ -559,14 +563,17 @@ class WorkspaceMcpConnectionEligibility:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    async def hold(self, workspace_id: uuid.UUID) -> None:
+        """Take the workspace lock a member's removal and the workspace's deletion take first."""
+        await WorkspaceRepository(self.db).lock(workspace_id)
+
     async def may_connect(self, workspace_id: uuid.UUID, user_id: str) -> bool:
         """A live user who, when they are a dashboard account, can still reach the workspace.
 
         A dashboard account reaches it as an active member of it, or as an owner or admin of its
         organization. A request-plane user that is no dashboard account belongs to no workspace,
-        so only its deletion ends its connections.
+        so only its deletion ends its connections. Locks the user's row as their deletion does.
         """
-        await WorkspaceRepository(self.db).lock(workspace_id)
         if user_id not in await lock_live_users(self.db, [user_id]):
             return False
         try:
@@ -575,13 +582,15 @@ class WorkspaceMcpConnectionEligibility:
             return True
         if str(identity) != user_id:
             return True
-        if await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], [identity]):
+        # Locked as read: an organization's removal of the person changes these rows without the
+        # workspace lock, and must wait for this sign-in, or be seen by it.
+        if await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], [identity], lock=True):
             return True
         workspace = await WorkspaceRepository(self.db).get(workspace_id)
         if workspace is None:
             return False
         managers = await OrganizationMemberRepository(self.db).active_with_roles(
-            workspace.organization_id, {identity}, MANAGEMENT_ROLES
+            workspace.organization_id, {identity}, MANAGEMENT_ROLES, lock=True
         )
         return identity in managers
 
@@ -778,7 +787,8 @@ def _renewer(
     """What the call path asks for a new token with when the server refuses one, on a per-user server only."""
     if row.credential_mode != McpCredentialMode.PER_USER or access is None or access.user_id is None:
         return None
-    return partial(tokens.renew_rejected, row, access.user_id)
+    # A copy: the call runs after the request's session may have been released, which can expire the row.
+    return partial(tokens.renew_rejected, McpServerRef.of(row), access.user_id)
 
 
 async def _caller_token(row: WorkspaceMcpServer, access: McpAccess | None, tokens: McpUserTokens) -> str | None:
@@ -1016,12 +1026,14 @@ class WorkspaceMcpServerService:
             raise RuntimeError("WorkspaceMcpServerService was built without the config per-user mode reads")
         require_per_user_support(self.config)
 
-    async def _revocations(self, server: WorkspaceMcpServer) -> list[McpRevocation]:
+    async def _revocations(self, server: WorkspaceMcpServer) -> tuple[list[McpRevocation], int]:
         """What to ask the authorization server to end once this server's connections are deleted.
 
-        Read while the server still holds the client the tokens were issued to.
+        Read while the server still holds the client the tokens were issued to. Also how many it
+        leaves unread past the page one removal reads.
         """
-        return revocations_for(server, await McpUserConnectionRepository(self.db).revocable_for_server(server.id))
+        rows, total = await McpUserConnectionRepository(self.db).revocable(server_ids=[server.id])
+        return revocations_for(server, rows), total - len(rows)
 
     async def _end_connections(self, server: WorkspaceMcpServer) -> None:
         """Stage the end of every user's connection to a server, and of the client Otari registered for it.
@@ -1249,17 +1261,18 @@ class WorkspaceMcpServerService:
             server.encrypted_token = _encrypted(new_token)
 
         another_client = store_client = False
+        moves_host = url_changed and _origin(fields["url"]) != _origin(server.url)
         if per_user:
             client, store_client, another_client = _edited_client(
-                stored_oauth_client(server), new_client_id, new_client_secret
+                stored_oauth_client(server), new_client_id, new_client_secret, moves_host=moves_host
             )
         ends_connections = was_per_user and (mode_changed or url_changed or another_client)
-        revocations = await self._revocations(server) if ends_connections else []
+        revocations, unread = await self._revocations(server) if ends_connections else ([], 0)
         if store_client:
             server.oauth_client = client
         # A manager's client, and its secret, were for the old host: a new origin does not inherit them.
         names_a_client = isinstance(new_client_id, str) and bool(new_client_id)
-        if url_changed and _origin(fields["url"]) != _origin(server.url) and not names_a_client:
+        if moves_host and not names_a_client:
             server.oauth_client = None
         for field, value in fields.items():
             setattr(server, field, value)
@@ -1283,7 +1296,7 @@ class WorkspaceMcpServerService:
             await self._end_connections(server)
 
         await self.db.commit()
-        revoke_in_background(revocations)
+        revoke_in_background(revocations, unread=unread)
         if connection_changed:
             await self._record_check(server, user)
         else:
@@ -1598,13 +1611,13 @@ class WorkspaceMcpServerService:
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
-        revocations = await self._revocations(server)
+        revocations, unread = await self._revocations(server)
         # Staged here as well as cascaded by the foreign keys, so the tokens go where a database enforces none.
         await McpUserConnectionRepository(self.db).remove_for_server(server.id)
         await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
         await self.db.delete(server)
         await self.db.commit()
-        revoke_in_background(revocations)
+        revoke_in_background(revocations, unread=unread)
 
     async def _visible_workspace_id(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         workspace = await authorization.resolve_visible_workspace(

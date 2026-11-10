@@ -106,7 +106,7 @@ deployment can turn enforcement off entirely; see
 These are settled after the fact, so do not treat them as a hard real-time cap:
 
 - **Imported usage** never counts toward a budget; see
-  [Importing external usage](external-usage.md).
+  [Import usage from outside Otari](external-usage.md).
 - **Batches** settle dollars only. A batch counts as the one request that created
   it and adds no tokens to a token cap, however many prompts it carried. Cap
   batch-heavy workloads in dollars, not tokens.

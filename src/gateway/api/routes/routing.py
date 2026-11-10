@@ -612,6 +612,17 @@ async def explain_policy(
     with reasons, which is the part that catches a "failover" policy that has
     quietly compiled down to a single attempt.
     """
+    return explain_in_workspace(request, config, workspace_id=request.workspace_id)
+
+
+def explain_in_workspace(
+    request: ExplainRequest, config: GatewayConfig, *, workspace_id: uuid.UUID | None
+) -> ExplainResponse:
+    """The body of ``explain_policy``, with ``name`` and the candidates resolved in ``workspace_id``.
+
+    Public so the tenant-scoped router can compile in a workspace it resolved
+    itself, rather than one the request names.
+    """
     if request.name is None and request.spec is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -627,7 +638,7 @@ async def explain_policy(
     else:
         assert request.name is not None
         name = request.name
-        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=request.workspace_id)
+        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=workspace_id)
         if resolved is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found")
         spec = resolved
@@ -640,7 +651,7 @@ async def explain_policy(
         spec,
         user_id=request.user_id,
         allowlist=request.allowed_models,
-        workspace_id=request.workspace_id,
+        workspace_id=workspace_id,
     )
     try:
         plan = compile_policy(
@@ -652,7 +663,7 @@ async def explain_policy(
             allowlist=request.allowed_models,
             budget=BudgetState(used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd),
             router_ordering=weighted_ordering,
-            workspace_id=request.workspace_id,
+            workspace_id=workspace_id,
         )
     except NoEligibleCandidatesError as exc:
         return ExplainResponse(

@@ -7,7 +7,9 @@ DNS resolver, and the HTTP client is one on a mock transport.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
+import zlib
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -399,6 +401,54 @@ async def test_an_answer_read_inside_the_deadline_is_returned_even_if_closing_ru
     )
 
     assert (tokens.access_token, tokens.refresh_token) == ("at", "rotated")
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+async def test_a_compressed_answer_is_read_though_identity_was_asked_for(wire: _Wire, encoding: str) -> None:
+    """A token endpoint that compresses anyway must not lose a rotated refresh token to unreadable JSON."""
+    raw = json.dumps({"access_token": "at", "refresh_token": "rotated"}).encode()
+    body = gzip.compress(raw) if encoding == "gzip" else zlib.compress(raw)
+    wire.on("POST", f"{ISSUER}/token", httpx.Response(200, content=body, headers={"Content-Encoding": encoding}))
+
+    tokens = await _mcp_oauth.refresh(
+        f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None
+    )
+
+    assert (tokens.access_token, tokens.refresh_token) == ("at", "rotated")
+    assert wire.requests[0].headers["Accept-Encoding"] == "identity"
+
+
+async def test_an_answer_in_an_unknown_encoding_fails_for_now_and_keeps_the_old_token(wire: _Wire) -> None:
+    wire.on("POST", f"{ISSUER}/token", httpx.Response(200, content=b"\x00\x01", headers={"Content-Encoding": "br"}))
+
+    with pytest.raises(McpOAuthTokenError, match="encoding") as raised:
+        await _mcp_oauth.refresh(f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None)
+
+    assert raised.value.is_permanent is False
+
+
+async def test_a_compressed_answer_is_held_to_the_size_bound(wire: _Wire) -> None:
+    bomb = gzip.compress(b"{" + b" " * (_mcp_oauth._MAX_RESPONSE_BYTES * 2) + b"}")
+    wire.on("POST", f"{ISSUER}/token", httpx.Response(200, content=bomb, headers={"Content-Encoding": "gzip"}))
+
+    with pytest.raises(McpOAuthTokenError, match="more than"):
+        await _mcp_oauth.refresh(f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None)
+
+
+async def test_the_address_check_counts_against_the_deadline(monkeypatch: pytest.MonkeyPatch, wire: _Wire) -> None:
+    """A slow resolver must not hold a renewal's row lock past its deadline."""
+
+    async def slow_check(url: str, *, has_authorization_token: bool, label: str = "MCP server") -> None:
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(_mcp_oauth, "validate_mcp_url", slow_check)
+
+    with pytest.raises(McpOAuthTokenError, match="in time"):
+        await _mcp_oauth.refresh(
+            f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None, deadline=0.05
+        )
+
+    assert wire.requests == []
 
 
 async def test_an_authorization_server_without_s256_is_refused(wire: _Wire) -> None:

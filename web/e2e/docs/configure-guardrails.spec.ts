@@ -23,7 +23,7 @@ test("configure and mandate a guardrail", async ({ page }) => {
   await expect(
     definition.getByRole("button", { name: "Configure guardrail" }),
   ).toBeVisible()
-  await docScreenshot(definition, "manage-guardrails-configure")
+  await docScreenshot(definition, "configure-guardrails-configure")
   await definition.getByRole("button", { name: "Cancel" }).click()
   await definition.getByRole("button", { name: "Discard" }).click()
 
@@ -40,5 +40,5 @@ test("configure and mandate a guardrail", async ({ page }) => {
   await expect(
     mandate.getByRole("checkbox", { name: "Default workspace" }),
   ).toBeVisible()
-  await docScreenshot(mandate, "manage-guardrails-mandate")
+  await docScreenshot(mandate, "configure-guardrails-mandate")
 })
