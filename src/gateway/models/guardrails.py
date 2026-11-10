@@ -8,8 +8,8 @@ it. So it lives in its own top-level ``guardrails`` field — modelled like
 ``mcp_servers`` (see :mod:`gateway.models.mcp`) — rather than inside ``tools``.
 
 The gateway extracts this field, runs the configured checks against the
-operator-controlled guardrails service (``otari-anyguardrails-container``,
-which exposes ``POST /validate``), and strips the field before forwarding the
+operator-controlled guardrails service (which exposes ``POST /validate``),
+and strips the field before forwarding the
 request upstream. Omit the field entirely → no guardrail runs.
 
 Also holds the organization guardrail tables.

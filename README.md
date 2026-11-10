@@ -118,11 +118,11 @@ docker compose pull
 docker compose up -d
 ```
 
-Compose runs Otari with PostgreSQL. Optional profiles add the code sandbox,
-web search, and guardrail services:
+Compose runs Otari with PostgreSQL. Optional profiles add the code sandbox
+and web search services:
 
 ```bash
-docker compose --profile code-exec --profile web-search --profile guardrails up -d
+docker compose --profile code-exec --profile web-search up -d
 ```
 
 The dashboard is served at `http://localhost:8000/`. To store provider keys

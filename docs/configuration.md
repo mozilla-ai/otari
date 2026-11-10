@@ -1041,6 +1041,17 @@ model a hosted provider serves, and `migration` for one an upgrade wrote. It is
 null on a rate stored before origins were recorded. A catalog update moves only
 a `seed` rate.
 
+A `seed` rate and a models.dev default are one headline price per model, so a
+completion whose provider states what it charged is settled at that charge
+instead, and its usage row and inline `pricing_source` read `reported`. Only
+OpenRouter states one: its `usage.cost`, plus `cost_details.upstream_inference_cost`
+on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
+depends on the upstream it routes a request to, which no single rate matches.
+A rate set in this file, through the pricing API or on the dashboard still
+prices the completion. The hold placed before the request is still estimated
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
+
 ### A public catalog
 
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's

@@ -11,6 +11,8 @@ A guardrail can monitor matching requests or block them, and can be applied to t
 
 Every field, header and state is in the [Guardrails reference](guardrails-reference.md).
 
+On a deployment you run, a guardrail can also come from a service of your own that `guardrails_url` points at, which can be any service that speaks the [guardrails service contract](guardrails-reference.md#what-a-guardrails-service-answers).
+
 ## Configure a guardrail
 
 Only organization owners and admins can add, edit, or delete guardrails.

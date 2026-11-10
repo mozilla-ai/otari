@@ -45,7 +45,7 @@ def price_video(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = 
 
 
 def charged_as_reported(cost: float | None) -> UsageCharge | None:
-    """A video billed at the provider's own ``cost`` in USD, or ``None`` when it states no usable one.
+    """A call billed at the provider's own ``cost`` in USD, or ``None`` when it states no usable one.
 
     No meter and no line: no rate priced it, so there is nothing to explain.
     """

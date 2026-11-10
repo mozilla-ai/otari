@@ -520,8 +520,7 @@ def _require_url_for_credential(url: str | None, has_credential: bool) -> None:
     """Refuse a credential on an entry that names no endpoint of its own.
 
     The entry would then be sent to the deployment's ``guardrails_url``, which
-    this repository's own compose file makes ``http://anyguardrails:8000``, so
-    the bearer would cross the wire in clear. Naming the endpoint is what routes
+    may be plain ``http``, so the bearer could cross the wire in clear. Naming the endpoint is what routes
     it through :func:`_validate_url`, whose ``has_authorization_token`` arm
     refuses ``http`` outright; requiring one here is what makes the field's
     "sent over https" contract true rather than conditional on how the operator
