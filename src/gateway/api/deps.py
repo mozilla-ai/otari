@@ -1356,6 +1356,20 @@ def get_growth_signal_port(
     return container.resolve(GrowthSignalPort, db)
 
 
+def get_person_growth_signal_port(
+    growth: Annotated[GrowthSignalPort, Depends(get_growth_signal_port)],
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+) -> GrowthSignalPort | None:
+    """The growth-signal adapter for a write a person made, or ``None`` when a header master key made it.
+
+    A header master key is the deployment's credential, not a person's, even once
+    the bootstrap operator it resolves to holds an address, so automation and
+    smoke traffic on a tenant route report nothing. ``verify_master_key`` answers
+    the raw key only for a header credential, and ``None`` for a dashboard session.
+    """
+    return None if master_key is not None else growth
+
+
 # The adapter writes and does not commit, so it shares the session of the Unit of Work whose block commits its writes.
 def get_identity_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1629,6 +1643,7 @@ BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
+PersonGrowthSignalPortDep = Annotated[GrowthSignalPort | None, Depends(get_person_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
@@ -2453,9 +2468,15 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
-def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
+def get_routing_service(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
+) -> RoutingService:
     """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
-    return RoutingService(config, get_usage_service(uow), get_api_key_service(uow))
+    return RoutingService(
+        config, get_usage_service(uow), get_api_key_service(uow), uow=uow, organizations=organizations
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -2949,6 +2970,7 @@ __all__ = [
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",
+    "PersonGrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",

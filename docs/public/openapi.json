@@ -14538,7 +14538,7 @@
         "type": "object"
       },
       "OAuthSessionResponse": {
-        "description": "A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
+        "description": "A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).\n\nThe three fields ``POST /api/v1/auth/session`` answers, deliberately, so the\ndashboard's sign-in path does not care which credential got it here, and two\nonly a provider sign-in can produce: ``password_removed`` and ``new_account``.",
         "properties": {
           "active_organization_id": {
             "anyOf": [
@@ -14558,6 +14558,12 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "new_account": {
+            "default": false,
+            "description": "Whether this sign-in created the account, or is the first way in to one nobody had claimed. False for a sign-in to an account that was already usable.",
+            "title": "New Account",
+            "type": "boolean"
           },
           "password_removed": {
             "default": false,

@@ -16,6 +16,6 @@ Otari tracks API request metadata, including token consumption, model and provid
 
 ## **AI Requests**
 
-Prompts and responses are processed to route requests to the selected AI providers. If agent session content is enabled, Otari may also store prompts, tool-related information, and data evaluated by guardrail checks. Model responses are not stored. Data handling and retention policies may vary depending on the AI provider and your workspace configuration.
+Prompts and responses are processed to route requests to the selected AI providers. If agent session content is enabled, Otari may also store prompts, tool-related information, and data evaluated by guardrail checks, and, where your workspace has turned it on, model responses. Otari also stores a model response when you ask it to: a response to a request sent with an idempotency key is kept for a limited period so the request can be safely retried, and a Playground conversation you choose to save keeps its replies until you delete it. Data handling and retention policies may vary depending on the AI provider and your workspace configuration.
 
 For more information about how we collect, process, store, and protect your data, please refer to our [Privacy Policy](https://otari.ai/privacy).

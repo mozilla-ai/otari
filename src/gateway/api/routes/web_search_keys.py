@@ -9,9 +9,9 @@ which any member reads and the workspace's owners and admins change.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, WebSearchKeyServiceDep, verify_master_key
+from gateway.api.deps import CurrentIdentity, PersonGrowthSignalPortDep, WebSearchKeyServiceDep, verify_master_key
 from gateway.schemas.tools import (
     OrgWebSearchKeyCreateRequest,
     OrgWebSearchKeyPublic,
@@ -48,14 +48,20 @@ async def list_org_web_search_keys(
 
 @org_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_org_web_search_key(
-    service: WebSearchKeyServiceDep, current_identity: CurrentIdentity, body: OrgWebSearchKeyCreateRequest
+    service: WebSearchKeyServiceDep,
+    current_identity: CurrentIdentity,
+    body: OrgWebSearchKeyCreateRequest,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> OrgWebSearchKeyPublic:
     """Add a search or fetch key to the caller's organization. Organization owners and admins only.
 
     A new key serves no workspace until the organization makes it its default for the key's kind, or a
     workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
     """
-    return await service.create_key(user=current_identity, request=body)
+    return await service.create_key(
+        user=current_identity, request=body, growth=growth, background_tasks=background_tasks
+    )
 
 
 @org_router.patch("/{key_id}")
