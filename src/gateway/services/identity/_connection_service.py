@@ -451,6 +451,10 @@ class OIDCConnectionService:
 
         Leaves out the deployment's own operator, who enforcement never refuses and so needs no
         exception, and any owner whose only way in is the connection itself.
+
+        NOTE: The first exclusion is scoped to a deployment operator, not to whoever owns the
+        organization, so an organization on a deployment somebody else operates keeps its own
+        owners as candidates.
         """
         memberships = await self._organizations.members.get_active_by_organization_with_users(organization.id)
         operator_ids = await self._organizations.deployment_operator_ids([account for _, account in memberships])
