@@ -438,6 +438,10 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
+export type ExplainPolicyRequest = Omit<Schemas["ExplainRequest"], "spec"> & {
+  spec?: PolicySpec
+}
+export type ExplainPolicyResponse = Schemas["ExplainResponse"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails

@@ -11,6 +11,7 @@ from gateway.core.settings.tools import ALL_SEARCH_TOOLS
 from gateway.services.model_access import (
     effective_allowlist,
     effective_tool_allowlist,
+    intersect_allowlists,
     is_allowlist_subset,
     is_model_allowed,
     is_tool_allowed,
@@ -417,3 +418,27 @@ def test_an_undated_name_behind_an_alias_does_not_name_the_dated_builds(workspac
     assert refusal.code == MODEL_NOT_FOUND
     assert "20250101" not in refusal.detail
     assert "20250601" not in refusal.detail
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "allowed", "refused"),
+    [
+        (None, ["openai:*"], ["openai:gpt-5"], ["anthropic:claude"]),
+        (["openai:*"], None, ["openai:gpt-5"], ["anthropic:claude"]),
+        (["openai:*"], ["openai:gpt-5"], ["openai:gpt-5"], ["openai:gpt-4o"]),
+        (["openai:gpt-*"], ["openai:gpt-5*", "anthropic:*"], ["openai:gpt-5-mini"], ["openai:gpt-4o", "anthropic:x"]),
+        (["openai:gpt-5"], ["anthropic:*"], [], ["openai:gpt-5", "anthropic:x"]),
+    ],
+)
+def test_intersect_allowlists_permits_exactly_what_both_permit(
+    first: list[str] | None, second: list[str] | None, allowed: list[str], refused: list[str]
+) -> None:
+    both = intersect_allowlists(first, second)
+    for key in allowed:
+        assert is_model_allowed(both, key), key
+    for key in refused:
+        assert not is_model_allowed(both, key), key
+
+
+def test_intersect_allowlists_of_two_unrestricted_lists_is_unrestricted() -> None:
+    assert intersect_allowlists(None, None) is None

@@ -41,8 +41,8 @@ class OrganizationGuardrailCredentialNeedsUrlError(TenancyValidationError):
     """A credential was stored on an entry that names no endpoint of its own.
 
     Without a ``url`` the credential rides to whatever the deployment's
-    ``guardrails_url`` points at, which the shipped compose file makes a
-    same-host ``http://`` sidecar, so the bearer would cross the wire in clear.
+    ``guardrails_url`` points at, which may be plain ``http://``, so the bearer
+    could cross the wire in clear.
     Naming the endpoint is what puts it through ``validate_mcp_url``, which
     refuses ``http`` once a credential is in play, so requiring one here is what
     makes "a credential is sent over https" true rather than aspirational.

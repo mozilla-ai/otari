@@ -90,6 +90,9 @@ _ACCESS_NOTE_MAX_NAMES = 20
 # The note is system text, so a tool name enters it only if it cannot carry instructions; a server lists any string.
 _NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
+# The most of one tool result the model reads; a server can return any amount, and the rest would
+# crowd out the conversation or overflow the model's context window.
+MCP_RESULT_MAX_CHARS = 100_000
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
@@ -423,7 +426,7 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        flattened = _result_text(result)
+        flattened = _bounded(_result_text(result))
         rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
@@ -437,11 +440,10 @@ class MCPClientPool:
         """Execute a tool call against its owning MCP server and flatten the result to text.
 
         MCP supports rich content blocks (image, embedded resource, structured data). This
-        flattener concatenates text blocks verbatim and renders non-text blocks as a brief
-        ``[type=…]`` placeholder so the model can at least see that *something* came back.
-        For tools that return images or large embedded resources, this is intentionally
-        lossy — fine for the current text-tool use case, but a future improvement is to
-        pass image content through as multimodal message blocks when the model supports it.
+        flattener concatenates text blocks and embedded text resources, renders other
+        blocks as a brief placeholder, and cuts the whole to :data:`MCP_RESULT_MAX_CHARS`.
+        Images are lossy; a future improvement is to pass them through as multimodal
+        message blocks when the model supports it.
 
         The call is recorded on the request's tally (see
         :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
@@ -535,3 +537,13 @@ def _render_content_block(block: Any) -> str:
 def _result_text(result: CallToolResult) -> str:
     """An MCP result as the text the model reads, without the error marker the loop adds."""
     return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)
+
+
+def _bounded(text: str) -> str:
+    """``text`` cut to :data:`MCP_RESULT_MAX_CHARS`, with a note saying how much the model is not shown."""
+    if len(text) <= MCP_RESULT_MAX_CHARS:
+        return text
+    return (
+        f"{text[:MCP_RESULT_MAX_CHARS]}\n[truncated: the tool returned {len(text)} characters; "
+        f"only the first {MCP_RESULT_MAX_CHARS} are shown]"
+    )
