@@ -190,7 +190,9 @@ uses:
 - `supported_parameters`: `tools` and `tool_choice` for a model that calls
   tools, `response_format` for one with structured output, and `reasoning` for
   a reasoning model. It names only the parameters models.dev records a flag
-  for, not every parameter the model takes.
+  for, not every parameter the model takes. `response_format` is left out where
+  Otari cannot send it to the provider, as on Bedrock for every model but
+  Anthropic's.
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
