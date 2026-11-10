@@ -88,6 +88,7 @@ class OIDCConnectionService:
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
+        self._pending_states = repositories.pending_states
         self._organizations = organizations
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
@@ -287,7 +288,7 @@ class OIDCConnectionService:
         is disabled.
         """
         async with self._uow:
-            provider = await pending_flow_provider(self._connections.db, state)
+            provider = await pending_flow_provider(self._pending_states, state)
             if provider is None or not provider.startswith(OIDC_PROVIDER_PREFIX):
                 return None
             try:
@@ -305,7 +306,7 @@ class OIDCConnectionService:
             client = client_for(
                 connection,
                 metadata,
-                db=self._connections.db,
+                pending=self._pending_states,
                 redirect_uri=redirect_uri,
                 allow_private_hosts=allow_private_hosts,
             )
@@ -319,7 +320,7 @@ class OIDCConnectionService:
             return client_for(
                 connection,
                 metadata,
-                db=self._connections.db,
+                pending=self._pending_states,
                 redirect_uri=redirect_uri,
                 allow_private_hosts=allow_private_hosts,
             )

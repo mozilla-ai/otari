@@ -40,6 +40,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion
+from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services import oauth_service
 
 
@@ -693,7 +694,7 @@ class TestDatabaseStateStore:
             async def flush(self) -> None:
                 return None
 
-        return oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), provider)
+        return oauth_service.DatabaseStateStore(OAuthPendingStateRepository(cast("AsyncSession", _Session())), provider)
 
     @pytest.mark.asyncio
     async def test_a_row_that_asked_for_openid_without_a_nonce_is_refused(self) -> None:
@@ -732,7 +733,9 @@ class TestDatabaseStateStore:
             async def flush(self) -> None:
                 return None
 
-        store = oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), "google")
+        store = oauth_service.DatabaseStateStore(
+            OAuthPendingStateRepository(cast("AsyncSession", _Session())), "google"
+        )
         await store.save(
             PendingState(
                 state="a-state",
@@ -748,7 +751,7 @@ class TestDatabaseStateStore:
     @pytest.mark.asyncio
     async def test_database_state_store_refuses_carried_state(self) -> None:
         """A pending state carrying apron-auth context is refused, because no column holds it."""
-        store = oauth_service.DatabaseStateStore(fake_db(), "google")
+        store = oauth_service.DatabaseStateStore(OAuthPendingStateRepository(fake_db()), "google")
         state = PendingState(
             state="s",
             redirect_uri="https://otari.example.com/auth/google/callback",

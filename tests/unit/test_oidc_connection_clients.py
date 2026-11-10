@@ -25,6 +25,7 @@ from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.identity import OIDCConnection
+from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services.identity import _connection_clients
 from gateway.services.identity._connection_clients import (
     ConnectionCredentialCheck,
@@ -142,8 +143,9 @@ class _UntouchedSession:
         raise AssertionError("the pending-state store must not be flushed before the issuer is validated")
 
 
-def _untouched_db() -> AsyncSession:
-    return cast("AsyncSession", _UntouchedSession())
+def _untouched_pending() -> OAuthPendingStateRepository:
+    """A pending-state repository whose session refuses every call, for the paths that take none."""
+    return OAuthPendingStateRepository(cast("AsyncSession", _UntouchedSession()))
 
 
 class _SelectOnlySession:
@@ -200,7 +202,7 @@ def test_the_cache_drops_the_least_recently_used_past_its_bound() -> None:
 async def test_pending_flow_provider_does_not_consume_the_row() -> None:
     session = _SelectOnlySession("oidc:some-connection-id")
 
-    result = await pending_flow_provider(cast("AsyncSession", session), "a-state")
+    result = await pending_flow_provider(OAuthPendingStateRepository(cast("AsyncSession", session)), "a-state")
 
     assert result == "oidc:some-connection-id"
     assert len(session.statements) == 1
@@ -211,7 +213,7 @@ async def test_pending_flow_provider_does_not_consume_the_row() -> None:
 async def test_pending_flow_provider_answers_none_for_an_unknown_state() -> None:
     session = _SelectOnlySession(None)
 
-    result = await pending_flow_provider(cast("AsyncSession", session), "a-state")
+    result = await pending_flow_provider(OAuthPendingStateRepository(cast("AsyncSession", session)), "a-state")
 
     assert result is None
 
@@ -233,7 +235,7 @@ def test_the_built_config_does_not_require_iss_when_the_provider_does_not_advert
 @pytest.mark.asyncio
 async def test_a_callback_naming_another_issuer_is_refused_before_any_state_is_read() -> None:
     client = client_for(
-        _connection(), _metadata(), db=_untouched_db(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
+        _connection(), _metadata(), pending=_untouched_pending(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
     )
     callback = AuthorizationCallback(code="a-code", state="a-state", iss="https://attacker.example")
 
@@ -244,7 +246,7 @@ async def test_a_callback_naming_another_issuer_is_refused_before_any_state_is_r
 @pytest.mark.asyncio
 async def test_a_callback_naming_the_right_issuer_passes_the_issuer_check() -> None:
     client = client_for(
-        _connection(), _metadata(), db=_untouched_db(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
+        _connection(), _metadata(), pending=_untouched_pending(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
     )
     callback = AuthorizationCallback(code="a-code", state="a-state", iss=_ISSUER)
 
@@ -261,7 +263,7 @@ async def test_a_callback_naming_the_right_issuer_with_no_iss_at_all_is_refused_
     client = client_for(
         _connection(),
         _metadata(iss_parameter_supported=True),
-        db=_untouched_db(),
+        pending=_untouched_pending(),
         redirect_uri=_REDIRECT_URI,
         allow_private_hosts=False,
     )
@@ -273,7 +275,7 @@ async def test_a_callback_naming_the_right_issuer_with_no_iss_at_all_is_refused_
 
 def test_client_for_returns_a_stored_state_client() -> None:
     client = client_for(
-        _connection(), _metadata(), db=_untouched_db(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
+        _connection(), _metadata(), pending=_untouched_pending(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
     )
 
     assert isinstance(client, StoredStateClient)
@@ -284,7 +286,7 @@ def test_client_for_uses_the_memoized_handler() -> None:
     handler = identity_handler_for(metadata, allow_private_hosts=False)
 
     client = client_for(
-        _connection(), metadata, db=_untouched_db(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
+        _connection(), metadata, pending=_untouched_pending(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
     )
 
     assert client._identity_handler is handler

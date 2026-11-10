@@ -26,9 +26,9 @@ from apron_auth import (
 )
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import oidc
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.identity import OIDCConnection, oidc_flow_provider
+from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.oauth_service import DatabaseStateStore, pending_flow_provider, provider_refused_the_code
 from gateway.services.secret_box import decrypt_secret
@@ -128,7 +128,7 @@ def client_for(
     connection: OIDCConnection,
     metadata: DiscoveredProvider,
     *,
-    db: AsyncSession,
+    pending: OAuthPendingStateRepository,
     redirect_uri: str,
     allow_private_hosts: bool,
 ) -> StoredStateClient:
@@ -146,7 +146,7 @@ def client_for(
     """
     config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
     handler = identity_handler_for(metadata, allow_private_hosts=allow_private_hosts)
-    state_store = DatabaseStateStore(db, oidc_flow_provider(connection.id))
+    state_store = DatabaseStateStore(pending, oidc_flow_provider(connection.id))
     return StoredStateClient(
         config,
         state_store,

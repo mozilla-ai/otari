@@ -62,9 +62,7 @@ from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
 from fastapi import Response
-from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import (
@@ -75,7 +73,8 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion, ProviderIdentity
-from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
+from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS
+from gateway.repositories.identity.oauth_pending_state_repository import OAuthPendingStateRepository
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
@@ -215,22 +214,19 @@ def callback_landing_target(config: GatewayConfig, provider: str, query: str) ->
 
 
 class DatabaseStateStore:
-    """apron-auth's ``StateStore``, backed by ``oauth_pending_state``.
+    """apron-auth's ``StateStore``, over the authorizations this deployment holds in flight.
 
-    Two methods and no repository, because it is not the shape a repository
-    serves: apron-auth calls these, and each is a single statement against one
-    table. A caller outside this module builds one with a provider value of its
-    own, such as an organization's own OIDC connection, so the table is shared
-    rather than owned by the built-in sign-in alone.
+    A caller outside this module builds one with a provider value of its own, such as an
+    organization's own OIDC connection, so the table is shared rather than owned by the built-in
+    sign-in alone.
 
-    Rows are staged on the caller's transaction and never committed here. The
-    caller owns the commit boundary, which is what lets a callback that fails
-    after consuming a state roll the consumption back and leave the person a
-    flow to retry.
+    Rows are staged on the caller's transaction and never committed here. The caller owns the
+    commit boundary, which is what lets a callback that fails after consuming a state roll the
+    consumption back and leave the person a flow to retry.
     """
 
-    def __init__(self, db: AsyncSession, provider: str) -> None:
-        self._db = db
+    def __init__(self, pending: OAuthPendingStateRepository, provider: str) -> None:
+        self._pending = pending
         self._provider = provider
 
     async def save(self, state: PendingState) -> None:
@@ -244,19 +240,16 @@ class DatabaseStateStore:
         now = datetime.now(UTC)
         # The sweep rides here rather than on a scheduler because this is the
         # only write the table takes, so it is the only place that can grow it.
-        await self._db.execute(delete(OAuthPendingState).where(col(OAuthPendingState.expires_at) <= now))
-        self._db.add(
-            OAuthPendingState(
-                state_hash=state_hash(state.state),
-                provider=self._provider,
-                code_verifier=state.code_verifier,
-                nonce=state.nonce,
-                openid_requested=state.openid_requested,
-                redirect_uri=state.redirect_uri,
-                expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
-            )
+        await self._pending.delete_expired(now)
+        await self._pending.stage(
+            state_hash=state_hash(state.state),
+            provider=self._provider,
+            code_verifier=state.code_verifier,
+            nonce=state.nonce,
+            openid_requested=state.openid_requested,
+            redirect_uri=state.redirect_uri,
+            expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
         )
-        await self._db.flush()
 
     async def consume(self, state_key: str) -> PendingState | None:
         """Claim one pending authorization, or answer ``None``.
@@ -275,41 +268,26 @@ class DatabaseStateStore:
         that transaction from committing, so the row survives for the callback
         it was minted for.
         """
-        row = (
-            await self._db.execute(
-                delete(OAuthPendingState)
-                .where(col(OAuthPendingState.state_hash) == state_hash(state_key))
-                .returning(
-                    col(OAuthPendingState.provider),
-                    col(OAuthPendingState.code_verifier),
-                    col(OAuthPendingState.nonce),
-                    col(OAuthPendingState.openid_requested),
-                    col(OAuthPendingState.redirect_uri),
-                    col(OAuthPendingState.created_at),
-                    col(OAuthPendingState.expires_at),
-                )
-            )
-        ).first()
-        if row is None:
+        claimed = await self._pending.claim(state_hash(state_key))
+        if claimed is None:
             return None
-        provider, code_verifier, nonce, openid_requested, redirect_uri, created_at, expires_at = row
-        if provider != self._provider:
-            logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
+        if claimed.provider != self._provider:
+            logger.warning("OAuth state minted for %s was returned to %s", claimed.provider, self._provider)
             return None
-        if expires_at <= datetime.now(UTC):
+        if claimed.expires_at <= datetime.now(UTC):
             return None
-        if nonce is None and openid_requested:
+        if claimed.nonce is None and claimed.openid_requested:
             # The library refuses a state whose nonce and flag disagree, as a nonce failure. Refused
             # here instead, as a state no longer pending, so the person is told to start again.
-            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", provider)
+            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", claimed.provider)
             return None
         return PendingState(
             state=state_key,
-            redirect_uri=redirect_uri,
-            code_verifier=code_verifier,
-            nonce=nonce,
-            openid_requested=openid_requested,
-            created_at=created_at.timestamp(),
+            redirect_uri=claimed.redirect_uri,
+            code_verifier=claimed.code_verifier,
+            nonce=claimed.nonce,
+            openid_requested=claimed.openid_requested,
+            created_at=claimed.created_at.timestamp(),
         )
 
 
@@ -324,7 +302,7 @@ def state_hash(state: str) -> str:
     return hashlib.sha256(state.encode()).hexdigest()
 
 
-async def pending_flow_provider(db: AsyncSession, state: str) -> str | None:
+async def pending_flow_provider(pending: OAuthPendingStateRepository, state: str) -> str | None:
     """The provider of the pending authorization ``state`` names, without consuming it.
 
     A caller that must resolve which client's credentials to spend before it can build the client
@@ -332,10 +310,7 @@ async def pending_flow_provider(db: AsyncSession, state: str) -> str | None:
     is still enforced by the conditional DELETE ``DatabaseStateStore.consume`` performs, and a wrong
     guess here only fails the exchange that follows.
     """
-    result = await db.execute(
-        select(col(OAuthPendingState.provider)).where(col(OAuthPendingState.state_hash) == state_hash(state))
-    )
-    return result.scalar_one_or_none()
+    return await pending.get_provider(state_hash(state))
 
 
 def browser_token_for(flow_cookie: str | None, state: str) -> str | None:
@@ -629,7 +604,7 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession) -> StoredSta
     )
     return StoredStateClient(
         _provider_config(config, provider, client_id, client_secret),
-        DatabaseStateStore(db, provider),
+        DatabaseStateStore(OAuthPendingStateRepository(db), provider),
         identity_handler=identity_handler,
     )
 

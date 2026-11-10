@@ -430,7 +430,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/budgets/_scoped_enforcement.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
-    "gateway/services/identity/_connection_clients.py",
     "gateway/services/maintenance_mode_service.py",
     "gateway/services/master_key_service.py",
     "gateway/services/merged_catalog_service.py",
@@ -1603,8 +1602,8 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tenancy.OAuthPendingState": {
-        "repository": None,
-        "baseline": ("gateway/services/oauth_service.py",),
+        "repository": "gateway/repositories/identity/oauth_pending_state_repository.py",
+        "baseline": (),
     },
     "gateway.models.tenancy.Organization": {
         "repository": "gateway/repositories/tenancy/organization_repository.py",
