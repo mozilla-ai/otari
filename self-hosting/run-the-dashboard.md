@@ -186,7 +186,8 @@ sign-in method is in [Sign-in and accounts](sign-in.md).
 
 With `terms_url` set, the signup page asks the person to accept the terms
 first, and so does the invitation page before "Accept and sign in with a
-provider instead". A provider sign-in that would create an account without
+provider instead". With `privacy_url` set too, the box links the privacy policy
+beside the terms. A provider sign-in that would create an account without
 them stops on the return page, asks for the terms, and starts the sign-in again.
 
 Mail is optional: when an invitation email does not go out, the inviter gets
@@ -214,4 +215,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/6c54933f2dd64f4805bfe23edd0ac8ba36990186/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/28e27a436ac39208342285ae1c9ce41a9425dcd4/web/README.md).

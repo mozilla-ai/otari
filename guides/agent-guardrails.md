@@ -266,8 +266,8 @@ To run it on every pull request:
    and its verifier scripts, since that job runs the pull request's code.
 
 Otari's own repository does this in
-[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/6c54933f2dd64f4805bfe23edd0ac8ba36990186/.github/workflows/otari-guardrails-check.yml)
-and [`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/6c54933f2dd64f4805bfe23edd0ac8ba36990186/.github/workflows/otari-guardrails-judges.yml).
+[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/28e27a436ac39208342285ae1c9ce41a9425dcd4/.github/workflows/otari-guardrails-check.yml)
+and [`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/28e27a436ac39208342285ae1c9ce41a9425dcd4/.github/workflows/otari-guardrails-judges.yml).
 
 ## Reporting to Otari
 

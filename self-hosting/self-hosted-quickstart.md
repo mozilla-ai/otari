@@ -2,7 +2,7 @@
 
 In this tutorial you run Otari on your own machine with Docker Compose, connect
 it to OpenAI, and send your first request through it. For a throwaway container
-with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/6c54933f2dd64f4805bfe23edd0ac8ba36990186/README.md#quickstart) instead.
+with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/28e27a436ac39208342285ae1c9ce41a9425dcd4/README.md#quickstart) instead.
 
 You need:
 
