@@ -29,10 +29,11 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc_identity_provider
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
+from gateway.models.tenancy import DOMAIN_PROOF_TTL, DashboardSession, Organization, User
 from gateway.repositories.identity import IdentityRepositories, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
+from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity import OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.organizations import OrganizationClaimedDomains
@@ -191,6 +192,38 @@ async def _insert_in_another_session(db: AsyncSession, organization_id: uuid.UUI
             await other.commit()
     finally:
         await other_engine.dispose()
+
+
+async def _enforce_in_another_session(db: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Turn enforcement on the way a concurrent administrator would, committing it."""
+    other_engine = create_async_engine(db.get_bind().engine.url)
+    try:
+        async with AsyncSession(other_engine, expire_on_commit=False) as other:
+            await other.execute(
+                update(Organization)
+                .where(col(Organization.id) == organization_id)
+                .values(sso_required=True, sso_break_glass_waived=True)
+            )
+            await other.commit()
+    finally:
+        await other_engine.dispose()
+
+
+async def _with_a_live_session(db: AsyncSession, user: User) -> None:
+    db.add(
+        DashboardSession(
+            token_hash=hash_session_token(f"otari-sess-{user.id}"),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    await db.commit()
+
+
+async def _live_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
+    result = await db.execute(select(DashboardSession.token_hash).where(col(DashboardSession.user_id) == user_id))
+    return len(result.scalars().all())
 
 
 def _request(**overrides: Any) -> OIDCConnectionRequest:
@@ -713,6 +746,51 @@ async def test_test_for_user_refuses_a_connection_deleted_while_discovery_is_out
 
     with pytest.raises(OIDCConnectionNotFoundError):
         await _connection_service(async_db).test_for_user(user=admin)
+
+
+async def test_save_revokes_the_live_session_of_a_member_the_enforcement_refuses(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The NOTE on ``save_for_user``: storing a connection ends the sessions enforcement locks out."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    member = await create_member(async_db, organization, role="member", full_name="Ben Member")
+    await _with_a_live_session(async_db, member)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization.id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _live_sessions(async_db, member.id) == 0
+
+
+async def test_enforcement_turned_on_while_discovery_is_out_still_revokes(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The switch is read inside the transaction that writes, not before the issuer is dialed."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    member = await create_member(async_db, organization, role="member", full_name="Ben Member")
+    await _with_a_live_session(async_db, member)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+
+    async def _discover_then_enforce(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        await _enforce_in_another_session(async_db, organization_id)
+        return DiscoveredProvider(resolved_issuer=issuer, document=_document(issuer), discovered_at=datetime.now(UTC))
+
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.discover_connection_metadata", _discover_then_enforce)
+
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _live_sessions(async_db, member.id) == 0
 
 
 # =============================================================================

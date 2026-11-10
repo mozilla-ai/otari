@@ -182,8 +182,7 @@ class OIDCConnectionService:
             else:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.for_organization(organization.id)
-            if organization.sso_required:
-                await self._revoke_blocked_sessions(organization, connection)
+            await self._revoke_blocked_sessions(organization, connection)
             return self._to_public(connection, domains)
 
     async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
@@ -608,8 +607,12 @@ class OIDCConnectionService:
         ]
 
     async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
-        """End the live session of every active member this organization's enforcement now refuses."""
-        if not organization.sso_required:
+        """End the live session of every active member this organization's enforcement now refuses.
+
+        The switch is read from the row rather than taken off ``organization``, whose attribute
+        holds whatever was true when the caller resolved it.
+        """
+        if not await self._organizations.organizations.is_sso_enforced(organization.id):
             return
         refused = await self.members_enforcement_would_refuse(organization, connection)
         if refused:
