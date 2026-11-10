@@ -1348,7 +1348,7 @@ def test_a_first_sign_in_links_the_account_to_the_provider_identity(
 
     assert _links(db_session, user_id) == [("google", "ada-subject")]
     link = db_session.execute(select(OAuthIdentityLink)).scalar_one()
-    assert (link.email_at_link, link.email_assertion_at_link) == ("ada@example.com", EmailAssertion.VERIFIED)
+    assert (link.asserted_email, link.email_assertion) == ("ada@example.com", EmailAssertion.VERIFIED)
 
 
 def test_one_account_holds_a_link_at_each_provider(
@@ -1839,7 +1839,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
     store gave back, unless ``id_token_nonce`` names another.
     """
     endpoint = _TokenEndpoint()
-    consume = oauth_service._DatabaseStateStore.consume
+    consume = oauth_service.DatabaseStateStore.consume
 
     async def _consume(self: Any, state_key: str) -> Any:
         pending = await consume(self, state_key)
@@ -1862,7 +1862,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
         endpoint.revoked.append(token.get_secret_value())
         return True
 
-    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
+    monkeypatch.setattr(oauth_service.DatabaseStateStore, "consume", _consume)
     monkeypatch.setattr(StoredStateClient, "_token_request", _token_request)
     monkeypatch.setattr(StoredStateClient, "fetch_identity", _fetch_identity)
     monkeypatch.setattr(StoredStateClient, "revoke_token", _revoke_token)

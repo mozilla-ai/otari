@@ -36,7 +36,7 @@ dependencies = [
     # this edition follows, so the two do not keep separate copies of a protocol
     # neither of us owns. What stays ours is which providers are configured,
     # which scopes are asked for, and how a fetched identity maps onto a user.
-    "apron-auth>=0.23.0,<0.24.0",
+    "apron-auth>=0.24.0,<0.25.0",
     "asyncpg>=0.32.0",
     # Password hashing for the dashboard sign-in (docs/access-control.md).
     # The library directly rather than passlib, which the platform wraps it in:
@@ -269,7 +269,14 @@ constraint-dependencies = [
 # real incompatibility. An override replaces a declared specifier instead of
 # narrowing it, so the ceiling is named here. An open floor would strip a future
 # cap that does mean something. Remove this once xai-sdk allows packaging 26.
-override-dependencies = ["packaging>=26.3,<27"]
+# together declares filelock<4 and only imports FileLock. That class is unchanged
+# in 4.2. A constraint cannot lift the cap. 4.2.7 is the newest 4.2 release
+# outside the 7-day publish window. 4.2.1 is the first release that closes the
+# open advisories.
+override-dependencies = [
+    "packaging>=26.3,<27",
+    "filelock>=4.2.7,<4.2.8",
+]
 
 [tool.uv.workspace]
 members = ["cli", "any-search", "any-fetch"]

@@ -14586,6 +14586,169 @@
         "title": "OAuthSessionResponse",
         "type": "object"
       },
+      "OIDCConnectionDomain": {
+        "description": "One of the organization's email domains.",
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the domain's claim is turned on.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "proof_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the domain's DNS proof stops being acted on, or None when it has never been verified.",
+            "title": "Proof Expires At"
+          }
+        },
+        "required": [
+          "domain",
+          "proof_expires_at",
+          "enabled"
+        ],
+        "title": "OIDCConnectionDomain",
+        "type": "object"
+      },
+      "OIDCConnectionPublic": {
+        "description": "An organization's own sign-in connection, as its admins see it.\n\nCarries ``client_secret_last4`` and never the secret itself.",
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret_last4": {
+            "title": "Client Secret Last4",
+            "type": "string"
+          },
+          "default_role": {
+            "title": "Default Role",
+            "type": "string"
+          },
+          "discovered_at": {
+            "description": "When the provider's configuration was last read.",
+            "format": "date-time",
+            "title": "Discovered At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domains": {
+            "description": "Every one of the organization's email domains, each with its DNS proof's expiry and whether its claim is enabled. Only a domain that is both enabled and has an unexpired proof admits a sign-in.",
+            "items": {
+              "$ref": "#/components/schemas/OIDCConnectionDomain"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "description": "The organization's own claim.",
+            "title": "Issuer",
+            "type": "string"
+          },
+          "resolved_issuer": {
+            "description": "What discovery confirmed the issuer to be.",
+            "title": "Resolved Issuer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "issuer",
+          "resolved_issuer",
+          "client_id",
+          "client_secret_last4",
+          "display_name",
+          "default_role",
+          "enabled",
+          "discovered_at",
+          "domains"
+        ],
+        "title": "OIDCConnectionPublic",
+        "type": "object"
+      },
+      "OIDCConnectionRequest": {
+        "description": "What an organization administrator submits to configure its own sign-in connection.",
+        "properties": {
+          "client_id": {
+            "description": "The OAuth client ID this deployment authenticates with.",
+            "maxLength": 255,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OAuth client secret. Stored encrypted and never served back. Leave it out to keep the one already stored, which is refused unless the issuer and the client ID are both unchanged.",
+            "title": "Client Secret"
+          },
+          "default_role": {
+            "default": "member",
+            "description": "The role given to a person's first sign-in through this connection.",
+            "enum": [
+              "member",
+              "viewer"
+            ],
+            "title": "Default Role",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "The identity provider's name, as shown to people signing in.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Whether this connection currently admits sign-in.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "issuer": {
+            "description": "The identity provider's issuer URL, as the organization's own claim.",
+            "maxLength": 250,
+            "title": "Issuer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issuer",
+          "client_id",
+          "display_name"
+        ],
+        "title": "OIDCConnectionRequest",
+        "type": "object"
+      },
       "OfferingUsage": {
         "description": "What the viewer's organization actually paid for one offering, last 30 days.\n\nThe listed rate is what a token costs; this is what the tokens cost, which is\nlower wherever prompt caching hit. Absent for a visitor and for an offering\nthe organization never called.",
         "properties": {
@@ -17628,6 +17791,200 @@
           "count"
         ],
         "title": "OrganizationScopedBudgetsPublic",
+        "type": "object"
+      },
+      "OrganizationSsoEnforcementPublic": {
+        "description": "The caller's organization's current sign-in enforcement, as its admins see it.",
+        "properties": {
+          "break_glass_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One of the organization's own owners who keeps a non-SSO sign-in route, where the organization named one.",
+            "title": "Break Glass User Id"
+          },
+          "break_glass_waived": {
+            "description": "Whether the organization has explicitly waived naming a break-glass owner.",
+            "title": "Break Glass Waived",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Whether this organization requires sign-in through its own connection.",
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required",
+          "break_glass_user_id",
+          "break_glass_waived"
+        ],
+        "title": "OrganizationSsoEnforcementPublic",
+        "type": "object"
+      },
+      "OrganizationSsoEnforcementRequest": {
+        "description": "What an organization administrator submits to require, or stop requiring, sign-in through its own connection.",
+        "properties": {
+          "break_glass_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One of the organization's own owners who keeps a non-SSO sign-in route when required is true.",
+            "title": "Break Glass User Id"
+          },
+          "break_glass_waived": {
+            "default": false,
+            "description": "Whether the organization explicitly waives a break-glass owner when enforcement is required.",
+            "title": "Break Glass Waived",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Whether this organization requires sign-in through its own connection.",
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required"
+        ],
+        "title": "OrganizationSsoEnforcementRequest",
+        "type": "object"
+      },
+      "OrganizationSsoPreflightMemberPublic": {
+        "description": "One active member who holds no sign-in link to the caller's organization's own connection.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's sign-in address, or null for an identity with none.",
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's display name, or null when none is set.",
+            "title": "Full Name"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "full_name"
+        ],
+        "title": "OrganizationSsoPreflightMemberPublic",
+        "type": "object"
+      },
+      "OrganizationSsoPreflightPublic": {
+        "description": "What requiring sign-in through the caller's organization's own connection would cost today.\n\n``affected_count`` is exact: every active member holding no sign-in link to this connection, who\nwould get a new account the first time they use it. ``affected_members`` samples those people,\nbounded in size; ``affected_members_truncated`` says whether the sample leaves any out.\n\n``break_glass_candidates`` is who may be named as the exception, so naming one of them is never\nrefused. It leaves out the deployment's own operator, who is never subject to enforcement and so\nneeds no exception.",
+        "properties": {
+          "affected_count": {
+            "description": "How many active members hold no sign-in link to this connection.",
+            "title": "Affected Count",
+            "type": "integer"
+          },
+          "affected_members": {
+            "description": "A sample of the affected members, for recognizing who they are.",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSsoPreflightMemberPublic"
+            },
+            "title": "Affected Members",
+            "type": "array"
+          },
+          "affected_members_truncated": {
+            "description": "Whether affected_members leaves out some of the members affected_count counts.",
+            "title": "Affected Members Truncated",
+            "type": "boolean"
+          },
+          "break_glass_candidates": {
+            "description": "The owners who may be named to keep a route in that does not depend on this connection. An owner this connection provisioned is not among them, because exempting an account that cannot sign in without the connection keeps no route open.",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSsoPreflightMemberPublic"
+            },
+            "title": "Break Glass Candidates",
+            "type": "array"
+          },
+          "total_members": {
+            "description": "The organization's active membership count.",
+            "title": "Total Members",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_members",
+          "break_glass_candidates",
+          "affected_count",
+          "affected_members",
+          "affected_members_truncated"
+        ],
+        "title": "OrganizationSsoPreflightPublic",
+        "type": "object"
+      },
+      "OrganizationSsoPublic": {
+        "description": "An organization's own OIDC connection, and what to register at the provider.",
+        "properties": {
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OIDCConnectionPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's own connection, or null until one is saved."
+          },
+          "enforcement": {
+            "$ref": "#/components/schemas/OrganizationSsoEnforcementPublic",
+            "description": "The organization's current sign-in enforcement. Independent of whether a connection exists."
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The absolute callback address to register at the identity provider, whether or not a connection is saved yet. Null where this deployment has no public address of its own configured, because there is no address to register until it has one.",
+            "title": "Redirect Uri"
+          }
+        },
+        "required": [
+          "redirect_uri",
+          "connection",
+          "enforcement"
+        ],
+        "title": "OrganizationSsoPublic",
         "type": "object"
       },
       "OutputShape": {
@@ -23118,6 +23475,167 @@
           "content"
         ],
         "title": "SpanPublic",
+        "type": "object"
+      },
+      "SsoAuthorizeResponse": {
+        "description": "Where to send the browser, and the state to check when it comes back.",
+        "properties": {
+          "authorization_url": {
+            "description": "The identity provider's consent screen to navigate to.",
+            "title": "Authorization Url",
+            "type": "string"
+          },
+          "state": {
+            "description": "An opaque CSRF value to keep for the length of the redirect and send back with the authorization code. The response also sets an HttpOnly cookie that the callback requires, so the exchange can only be completed from the browser this call was made from.",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "state"
+        ],
+        "title": "SsoAuthorizeResponse",
+        "type": "object"
+      },
+      "SsoCallbackRequest": {
+        "description": "The authorization code a provider handed the browser, for a sign-in through one organization's own connection.\n\nNo ``slug``: the pending authorization the ``state`` names already resolves to one connection,\nso a browser cannot redeem a code against a connection other than the one that minted the state.",
+        "properties": {
+          "code": {
+            "description": "The authorization code from the provider's redirect.",
+            "maxLength": 2048,
+            "title": "Code",
+            "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this connection's issuer when its discovery document advertises the parameter; a provider that does not advertise it sends none.",
+            "title": "Iss"
+          },
+          "state": {
+            "description": "The 'state' from the provider's redirect, as issued by /authorize.",
+            "maxLength": 512,
+            "title": "State",
+            "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the person accepted this deployment's terms before going to the provider. Required where the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has claimed yet; ignored otherwise.",
+            "title": "Terms Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "SsoCallbackRequest",
+        "type": "object"
+      },
+      "SsoLookupRequest": {
+        "description": "An address to resolve an organization's own sign-in connection from.",
+        "properties": {
+          "email": {
+            "description": "The address to resolve an organization from.",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SsoLookupRequest",
+        "type": "object"
+      },
+      "SsoLookupResponse": {
+        "description": "Whether an organization's own connection admits a sign-in at this address.\n\nAn unknown domain, one no organization has proven, and a proven one whose organization holds\nno enabled connection all answer alike: ``found`` is false and the other two fields are null,\nso the response cannot be read as a directory of which organizations use Otari.",
+        "properties": {
+          "found": {
+            "description": "Whether an organization's own connection admits a sign-in at this address.",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "organization_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's own name, set only when found.",
+            "title": "Organization Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's slug, to start the sign-in with, set only when found.",
+            "title": "Slug"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "title": "SsoLookupResponse",
+        "type": "object"
+      },
+      "SsoSessionPublic": {
+        "description": "A dashboard session minted by signing in through an organization's own connection.",
+        "properties": {
+          "active_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none.",
+            "title": "Active Organization Id"
+          },
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "password_removed": {
+            "default": false,
+            "description": "Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then.",
+            "title": "Password Removed",
+            "type": "boolean"
+          },
+          "user_id": {
+            "description": "The identity this session speaks for.",
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "active_organization_id"
+        ],
+        "title": "SsoSessionPublic",
         "type": "object"
       },
       "StoredCountryDatabasePublic": {
@@ -32061,6 +32579,157 @@
         ]
       }
     },
+    "/api/v1/auth/sso/callback": {
+      "post": {
+        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the organization's connection resolves to. A refusal is\ncounted as a failed sign-in, and a sign-in that creates the account, or is the first way in to\none, is reported to ``GrowthSignalPort`` once it has committed.\n\n**Maintenance mode freezes this.** A frozen deployment makes no outbound call and spends\nnobody's authorization code.",
+        "operationId": "auth-callback_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoCallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoSessionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Callback Sso",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/lookup": {
+      "post": {
+        "description": "Say whether an organization's own connection admits a sign-in at this address.\n\nAn unknown domain, one no organization has proven, and a proven one whose organization holds\nno enabled connection all answer alike: ``found`` is false and nothing else is named.",
+        "operationId": "auth-lookup_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoLookupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Lookup Sso",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/authorize": {
+      "get": {
+        "description": "Start a sign-in through the organization's own connection at ``slug``.\n\nAn unknown slug and a slug naming an organization with no enabled connection answer alike\n(404), so this surface cannot be read as a directory of which organizations use Otari.\n\nNOTE: This GET writes. It records a pending authorization and sets an HttpOnly cookie, both\nscoped to this router's own path.",
+        "operationId": "auth-authorize_sso",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoAuthorizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Authorize Sso",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/verify-email": {
       "post": {
         "description": "Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.\n\nOne refusal for a link that is unknown, expired or spent and for a password\nthat does not match, and a refusal consumes nothing. Refusals are counted\nper client IP and answer 429 once over the limit, so a held link cannot be\nused to guess its password; a verification that succeeds is never counted.",
@@ -39455,7 +40124,7 @@
     },
     "/api/v1/organizations/me": {
       "delete": {
-        "description": "Delete the caller's active organization, if it has no usage, and move the caller out of it.\n\nOwners and admins only. Its workspaces, memberships, invitations and\norganization-level settings go with it. Refused for the deployment's default\norganization, for the only organization the caller belongs to, and for one\nwhose workspaces still hold usage, API keys, aliases or routing policies, so\na deletion never takes spend history with it.\n\nAnswers with the caller's context in the organization they are moved to,\ntheir oldest other one.",
+        "description": "Delete the caller's active organization, if it has no usage, and move the caller out of it.\n\nOwners and admins only. Its workspaces, memberships, invitations and\norganization-level settings go with it. Refused for the deployment's default\norganization, for the only organization the caller belongs to, and for one\nwhose workspaces still hold usage, API keys, aliases or routing policies, so\na deletion never takes spend history with it.\n\nAnswers with the caller's context in the organization they are moved to: the\noldest of their other memberships that admits them. One requiring sign-in\nthrough its own connection admits a member who holds a link to it, and the\naccount its enforcement exempts, and nobody else.",
         "operationId": "organizations-delete_active_organization",
         "responses": {
           "200": {
@@ -41956,7 +42625,7 @@
     },
     "/api/v1/organizations/me/memberships": {
       "get": {
-        "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nroster.",
+        "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nmemberships. An organization whose own SSO enforcement refuses the caller is left off.",
         "operationId": "organizations-list_caller_organization_memberships",
         "parameters": [
           {
@@ -43847,9 +44516,211 @@
         ]
       }
     },
+    "/api/v1/organizations/me/sso": {
+      "delete": {
+        "description": "Remove the caller's organization's own sign-in connection. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet, and with 400 while\nthe organization still requires sign-in through it: turn that requirement off first.",
+        "operationId": "organization-sso-delete_organization_sso",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "get": {
+        "description": "Read the caller's organization's own sign-in connection. Owners and admins only.\n\n``connection`` is null until the organization saves one.",
+        "operationId": "organization-sso-get_organization_sso",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "put": {
+        "description": "Discover the submitted issuer and save the caller's organization's own sign-in connection.\n\nOwners and admins only. Replaces any existing connection. The client secret is\nencrypted at rest and never served back.",
+        "operationId": "organization-sso-put_organization_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OIDCConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/enforcement": {
+      "put": {
+        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRequiring sign-in is refused with 404 when the organization has not configured a connection yet,\nand with 400 before anybody has signed in through the connection, when it names no owner who keeps\nanother way in and waives none, or when the account it names could not sign in while the\nconnection is unavailable. An account named at all must be one of the organization's own active\nowners, whether or not sign-in is being required. Turning enforcement off has no other\nprecondition.",
+        "operationId": "organization-sso-put_organization_sso_enforcement",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationSsoEnforcementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Organization Sso Enforcement",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/preflight": {
+      "get": {
+        "description": "Report who requiring sign-in through the caller's organization's own connection would affect.\n\nOwners and admins only. Refused with 404 when the organization has not configured a connection yet.",
+        "operationId": "organization-sso-get_organization_sso_preflight",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPreflightPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Sso Preflight",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/test": {
+      "post": {
+        "description": "Re-discover the caller's organization's own issuer and store the result. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet.",
+        "operationId": "organization-sso-test_organization_sso",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
     "/api/v1/organizations/me/switch": {
       "post": {
-        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
+        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists, and for one whose own SSO enforcement refuses the caller.",
         "operationId": "organizations-switch_active_organization",
         "requestBody": {
           "content": {
