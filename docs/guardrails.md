@@ -14,9 +14,7 @@ A guardrail can be asked for in three places:
 [How the layers compose](#how-the-layers-compose) says which setting wins.
 Guardrails work on `/api/v1/chat/completions`, `/api/v1/messages` and
 `/api/v1/responses`. Every field, header and state is in the
-[Inference Guardrails reference](guardrails-reference.md). On a deployment you
-run, the profiles a request can name come from a guardrails service; see
-[Run the guardrails service](guardrails-service.md).
+[Inference Guardrails reference](guardrails-reference.md).
 
 ## Using a guardrail
 
@@ -198,8 +196,12 @@ memory, so a request never waits for a vendor connection.
 - **A failed build is not retried** until the definition changes, since retrying
   a wrong credential cannot help. A build that only timed out is retried.
 - **Errors never expose credentials.** The log names the guardrail, the
-  definition's id and the error type only. A missing vendor SDK is covered in
-  [Run the guardrails service](guardrails-service.md#when-a-definition-fails-to-build-on-import).
+  definition's id and the error type only.
+- **A missing vendor SDK fails the build.** A definition can save and then fail
+  to build when an install left out an SDK the
+  [catalog](guardrails-reference.md#the-guardrail-catalog) needs, such as a plain
+  `pip install` that skipped `any-guardrail`'s extras. The log shows the full
+  `ImportError`, naming the extra to install.
 
 ## Which guardrails Otari can run itself
 
