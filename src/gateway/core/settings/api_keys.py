@@ -195,6 +195,17 @@ class ApiKeySettings(BaseModel):
         ),
     )
 
+    federation_audiences: Annotated[list[str], Shown(SettingsGroup.GENERAL)] = Field(
+        default_factory=list,
+        description=(
+            "The audiences this deployment answers to. A workload identity token must name one of them in its "
+            "'aud' claim, which is what proves it was minted for this deployment and not for another service at "
+            "the same issuer. Required once an identity token can authenticate at all, and a deployment that "
+            "answers to more than one name lists each. A key's federation rule still names the audience its own "
+            "tokens carry."
+        ),
+    )
+
     federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
         description=(
@@ -220,6 +231,21 @@ class ApiKeySettings(BaseModel):
             "token it was exchanged for. Between 60 and 3600."
         ),
     )
+
+    @field_validator("federation_audiences")
+    @classmethod
+    def _audiences_are_named_once(cls, value: list[str]) -> list[str]:
+        named: list[str] = []
+        for entry in value:
+            audience = entry.strip()
+            if not audience:
+                msg = "federation_audiences must name an audience in every entry"
+                raise ValueError(msg)
+            if audience in named:
+                msg = f"federation audience '{audience}' is listed more than once"
+                raise ValueError(msg)
+            named.append(audience)
+        return named
 
     @field_validator("federation_issuers", mode="before")
     @classmethod

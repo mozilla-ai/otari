@@ -402,17 +402,12 @@ export interface paths {
          * Authorize
          * @description Start an OAuth sign-in: where to send the browser, and the state to keep.
          *
-         *     A GET that writes, which is the one thing to know about it. It records the
-         *     authorization it is about to start (the state's hash, the PKCE verifier the
-         *     exchange will need, and the digest of a flow secret it sets as an HttpOnly
-         *     cookie) so the callback has something to check against, and that record is
-         *     the whole reason the callback can refuse a code this deployment never asked
-         *     for, or one presented from a browser other than the one that asked.
+         *     Safe to repeat. Each call keeps the sign-ins the browser already has in
+         *     flight, up to a few at once, after which the oldest is dropped.
          *
-         *     Still safe to repeat: each call mints its own state, and only the one the
-         *     browser kept is the one it sends back. The rows the others leave expire on
-         *     their own and are swept by the next call. The cookie is reused when the
-         *     browser already holds one, so a second tab does not break the first.
+         *     NOTE: This GET writes. It records the authorization and sets an HttpOnly
+         *     cookie, and that pair is what lets the callback refuse a code this
+         *     deployment never asked for, or one presented from another browser.
          */
         get: operations["auth-authorize"];
         put?: never;
@@ -14981,10 +14976,8 @@ export interface components {
          *     what this server sends to a provider.
          *
          *     ``state`` is required, and is what binds this callback to an authorization
-         *     request this deployment actually made: it is claimed from
-         *     ``oauth_pending_state`` before the code is sent anywhere, and the row it
-         *     claims is what carries the PKCE verifier the exchange needs. The flow
-         *     cookie ``/authorize`` set travels alongside and binds it to the browser.
+         *     request this deployment actually made. The flow cookie carries the token
+         *     that state names, so it binds the callback to the browser as well.
          */
         OAuthCallbackRequest: {
             /**
