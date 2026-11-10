@@ -8,7 +8,7 @@ same cycle its existing one does and needs the same named, altered constraint to
 ``batch_alter_table`` keeps every statement here valid on SQLite too.
 
 Revision ID: 10727bf67704
-Revises: b7c3e9d1a4f8
+Revises: 6ce7c98ae7ea
 Create Date: 2026-11-05
 """
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "10727bf67704"
-down_revision: str | Sequence[str] | None = "b7c3e9d1a4f8"
+down_revision: str | Sequence[str] | None = "6ce7c98ae7ea"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

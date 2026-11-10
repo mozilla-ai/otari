@@ -12,7 +12,7 @@ connection is named by its issuer URL instead, which does not fit in 50 or
 plain ``ALTER COLUMN`` on PostgreSQL, so one form works on both engines.
 
 Revision ID: 086a7895681c
-Revises: 012b723efd0d
+Revises: b7c3e9d1a4f8
 Create Date: 2026-11-03
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "086a7895681c"
-down_revision: str | Sequence[str] | None = "012b723efd0d"
+down_revision: str | Sequence[str] | None = "b7c3e9d1a4f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
