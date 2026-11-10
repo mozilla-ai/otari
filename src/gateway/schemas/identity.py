@@ -139,7 +139,11 @@ class UpdateAvatarRequest(BaseModel):
 
 
 class OIDCConnectionRequest(BaseModel):
-    """What an organization administrator submits to configure its own sign-in connection."""
+    """What an organization administrator submits to configure its own sign-in connection.
+
+    Whether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only
+    way to change it, so storing a connection can neither pause nor resume one.
+    """
 
     issuer: str = Field(
         max_length=MAX_OIDC_ISSUER_LENGTH,
@@ -161,7 +165,12 @@ class OIDCConnectionRequest(BaseModel):
     default_role: OrganizationDomainRole = Field(
         default="member", description="The role given to a person's first sign-in through this connection."
     )
-    enabled: bool = Field(default=True, description="Whether this connection currently admits sign-in.")
+
+
+class OIDCConnectionEnabledRequest(BaseModel):
+    """What an organization administrator submits to pause or resume sign-in through its connection."""
+
+    enabled: bool = Field(description="Whether this connection admits sign-in.")
 
 
 class OIDCConnectionDomain(BaseModel):
@@ -374,6 +383,7 @@ __all__ = [
     "MailedLinkRequest",
     "MailedLinkStatusResponse",
     "OIDCConnectionDomain",
+    "OIDCConnectionEnabledRequest",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
     "OrganizationSsoEnforcementPublic",

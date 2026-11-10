@@ -475,6 +475,7 @@ POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dash
 # configure sign-in for.
 GET /api/v1/organizations/me/sso                                # dashboard-only
 PUT /api/v1/organizations/me/sso                                 # dashboard-only
+PATCH /api/v1/organizations/me/sso                               # dashboard-only
 POST /api/v1/organizations/me/sso/test                           # dashboard-only
 DELETE /api/v1/organizations/me/sso                              # dashboard-only
 GET /api/v1/organizations/me/sso/preflight                       # dashboard-only

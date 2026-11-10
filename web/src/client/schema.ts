@@ -4478,7 +4478,16 @@ export interface paths {
         delete: operations["organization-sso-delete_organization_sso"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Organization Sso
+         * @description Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Writes the one field, so the issuer is neither re-read nor re-submitted and the stored client
+         *     secret stands. Refused with 404 when the organization has not saved a connection yet, and with
+         *     409 when pausing a connection the organization still requires sign-in through: stop requiring
+         *     it first.
+         */
+        patch: operations["organization-sso-patch_organization_sso"];
         trace?: never;
     };
     "/api/v1/organizations/me/sso/enforcement": {
@@ -14962,6 +14971,17 @@ export interface components {
             proof_expires_at: string | null;
         };
         /**
+         * OIDCConnectionEnabledRequest
+         * @description What an organization administrator submits to pause or resume sign-in through its connection.
+         */
+        OIDCConnectionEnabledRequest: {
+            /**
+             * Enabled
+             * @description Whether this connection admits sign-in.
+             */
+            enabled: boolean;
+        };
+        /**
          * OIDCConnectionPublic
          * @description An organization's own sign-in connection, as its admins see it.
          *
@@ -15008,6 +15028,9 @@ export interface components {
         /**
          * OIDCConnectionRequest
          * @description What an organization administrator submits to configure its own sign-in connection.
+         *
+         *     Whether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only
+         *     way to change it, so storing a connection can neither pause nor resume one.
          */
         OIDCConnectionRequest: {
             /**
@@ -15032,12 +15055,6 @@ export interface components {
              * @description The identity provider's name, as shown to people signing in.
              */
             display_name: string;
-            /**
-             * Enabled
-             * @description Whether this connection currently admits sign-in.
-             * @default true
-             */
-            enabled: boolean;
             /**
              * Issuer
              * @description The identity provider's issuer URL, as the organization's own claim.
@@ -29612,6 +29629,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "organization-sso-patch_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCConnectionEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

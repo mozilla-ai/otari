@@ -416,6 +416,66 @@ def test_put_then_test_then_delete_round_trip(
     assert gone.json()["connection"] is None
 
 
+def test_patch_pauses_and_resumes_without_resubmitting_the_credentials(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """The point of the route: the body carries one field and the stored secret survives it.
+
+    Discovery is deliberately not stubbed, because this route must never reach a provider.
+    """
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-pause")
+        owner_token = _identity(session, email="owner@acme-pause.test", organization_id=organization.id, role="owner")
+        session.add(_connection(organization.id))
+        session.commit()
+    finally:
+        session.close()
+
+    paused = _call(client, owner_token, "PATCH", _ENDPOINT, json={"enabled": False})
+    assert paused.status_code == status.HTTP_200_OK, paused.text
+    assert paused.json()["connection"]["enabled"] is False
+    assert paused.json()["connection"]["client_secret_last4"] == _SECRET[-4:]
+
+    resumed = _call(client, owner_token, "PATCH", _ENDPOINT, json={"enabled": True})
+    assert resumed.status_code == status.HTTP_200_OK, resumed.text
+    assert resumed.json()["connection"]["enabled"] is True
+
+
+def test_patch_refuses_404_with_no_connection_saved(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-pause-none")
+        owner_token = _identity(
+            session, email="owner@acme-pause-none.test", organization_id=organization.id, role="owner"
+        )
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "PATCH", _ENDPOINT, json={"enabled": False})
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_patch_refuses_a_caller_who_is_only_a_member(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-pause-member")
+        member_token = _identity(
+            session, email="member@acme-pause-member.test", organization_id=organization.id, role="member"
+        )
+        session.add(_connection(organization.id))
+        session.commit()
+    finally:
+        session.close()
+
+    response = _call(client, member_token, "PATCH", _ENDPOINT, json={"enabled": False})
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
+
+
 def _enforcement_body(**overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"required": True, "break_glass_user_id": None, "break_glass_waived": True}
     body.update(overrides)
@@ -448,6 +508,35 @@ def test_enforcement_succeeds_with_a_proven_connection_and_a_waiver(
         assert stored.sso_break_glass_waived is True
     finally:
         session.close()
+
+
+def test_patch_refuses_409_while_the_organization_requires_the_connection(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """Pausing a required connection would leave the organization admitting nobody.
+
+    The switch is set on the row rather than through its own route, which ends the caller's
+    session: enforcement signs out every member holding no link to the connection.
+    """
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-pause-required")
+        owner_token = _identity(
+            session, email="owner@acme-pause-required.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        organization.sso_required = True
+        organization.sso_break_glass_waived = True
+        session.add(organization)
+        session.commit()
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "PATCH", _ENDPOINT, json={"enabled": False})
+    assert response.status_code == status.HTTP_409_CONFLICT, response.text
+
+    still_enabled = _call(client, owner_token, "GET", _ENDPOINT)
+    assert still_enabled.json()["connection"]["enabled"] is True
 
 
 def test_enforcement_refuses_404_with_no_connection_saved(

@@ -19,7 +19,6 @@ def _request(issuer: str) -> OIDCConnectionRequest:
         client_secret="a-client-secret",
         display_name="Example IdP",
         default_role="member",
-        enabled=True,
     )
 
 
@@ -39,3 +38,8 @@ def test_an_issuer_one_character_too_long_to_name_a_provider_is_refused() -> Non
     """Refused at the boundary: a longer one reaches the provider column's limit after discovery."""
     with pytest.raises(ValidationError):
         _request(_issuer_of(MAX_OIDC_ISSUER_LENGTH + 1))
+
+
+def test_the_request_carries_no_sign_in_setting() -> None:
+    """Whether a connection admits sign-in has one writer, and a field here would give it two."""
+    assert "enabled" not in OIDCConnectionRequest.model_fields
