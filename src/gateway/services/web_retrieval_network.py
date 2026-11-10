@@ -540,6 +540,17 @@ class TrustedProxyAsyncHTTPTransport(PinnedAsyncHTTPTransport):
             )
 
 
+class PinnedFederationTransport(PinnedAsyncHTTPTransport):
+    """Validate and pin a federation request's destination, whatever its method.
+
+    Federation reads a discovery document and a key set with GET and spends an authorization code at
+    the token endpoint with POST, so both are admitted.
+    Address validation and pinning are unchanged.
+    """
+
+    allowed_methods = frozenset({"GET", "POST"})
+
+
 class CheckedFederationTransport(httpx.AsyncBaseTransport):
     """Send a discovery or key set request only to a URL that passes the outbound checks.
 
@@ -550,7 +561,7 @@ class CheckedFederationTransport(httpx.AsyncBaseTransport):
     def __init__(self, *, allow_private_hosts: bool) -> None:
         self._allow_private_hosts = allow_private_hosts
         self._transport: httpx.AsyncBaseTransport = (
-            httpx.AsyncHTTPTransport(trust_env=False) if allow_private_hosts else PinnedAsyncHTTPTransport()
+            httpx.AsyncHTTPTransport(trust_env=False) if allow_private_hosts else PinnedFederationTransport()
         )
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:

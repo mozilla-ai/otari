@@ -27,6 +27,7 @@ PRIVATE_REDIRECT_URL = f"https://{PRIVATE_REDIRECT_HOST}/internal"
 PLAIN_HTTP_HOST = "plain.issuer.example.com"
 PLAIN_HTTP_URL = f"http://{PLAIN_HTTP_HOST}/discovery"
 FETCH_URL = "https://federation.example.com/fetch"
+TOKEN_URL = f"https://{SAFE_HOST}/token"
 
 
 @pytest.mark.asyncio
@@ -73,6 +74,37 @@ async def test_checked_federation_transport_refuses_plain_http(monkeypatch: pyte
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(httpx.ConnectError):
             await client.get(PLAIN_HTTP_URL)
+
+
+@pytest.mark.asyncio
+async def test_checked_federation_transport_sends_a_token_post_to_the_pinned_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A code exchange is a POST, and it reaches the address the check admitted like every other hop.
+
+    The inner transport is the one the checked transport builds for itself, so this fails both when
+    POST is refused and when the transport chosen for federation is the retrieval one.
+    """
+    sent: list[httpx.Request] = []
+
+    async def resolve(_self: object, _host: str, _port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={"access_token": "t"})
+
+    monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
+    monkeypatch.setattr(PinnedAsyncHTTPTransport, "_build_transport", lambda _self: httpx.MockTransport(respond))
+
+    async with httpx.AsyncClient(transport=CheckedFederationTransport(allow_private_hosts=False)) as client:
+        response = await client.post(TOKEN_URL, data={"grant_type": "authorization_code"})
+
+    assert response.status_code == 200
+    assert sent[0].method == "POST"
+    assert sent[0].url.host == "93.184.216.34"
+    assert sent[0].headers["host"] == SAFE_HOST
+    assert b"grant_type=authorization_code" in sent[0].content
 
 
 class _ChunkStream(httpx.AsyncByteStream):
