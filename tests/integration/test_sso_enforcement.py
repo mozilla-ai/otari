@@ -96,20 +96,25 @@ def _connection_service(
 
 
 async def _add_connection(
-    db: AsyncSession, organization_id: uuid.UUID, *, first_sign_in_at: datetime | None
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    *,
+    first_sign_in_at: datetime | None,
+    issuer: str = _ISSUER,
+    enabled: bool = True,
 ) -> OIDCConnection:
     connection = OIDCConnection(
         organization_id=organization_id,
-        issuer=_ISSUER,
-        resolved_issuer=_ISSUER,
+        issuer=issuer,
+        resolved_issuer=issuer,
         client_id="a-client-id",
         encrypted_client_secret=encrypt_secret("a-client-secret"),
         client_secret_last4="cret",
         display_name="Acme SSO",
-        discovery_document={"issuer": _ISSUER},
+        discovery_document={"issuer": issuer},
         discovered_at=datetime.now(UTC),
         first_sign_in_at=first_sign_in_at,
-        enabled=True,
+        enabled=enabled,
     )
     db.add(connection)
     await db.flush()
@@ -1152,6 +1157,72 @@ async def test_a_link_at_a_provider_nobody_configured_is_not_a_route_in(async_db
         )
 
     assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_a_link_at_a_connection_nobody_can_use_is_not_a_route_in(async_db: AsyncSession) -> None:
+    """A link naming an organization's own connection is a way in only while a connection serves it.
+
+    The organization administers that provider rather than the deployment, so the deployment's own
+    list of offered providers says nothing about it. What says something is whether any enabled
+    connection still resolves to the issuer the link names.
+    """
+    other_issuer = "https://other-sso.example.com"
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    elsewhere = await create_organization(async_db, slug=f"other-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    owner.hashed_password = None
+    async_db.add(owner)
+    async_db.add(
+        OAuthIdentityLink(
+            provider=oidc_identity_provider(other_issuer),
+            subject="other-subject",
+            user_id=owner.id,
+            email_at_link=owner.email,
+            email_assertion_at_link=EmailAssertion.VERIFIED,
+        )
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _add_connection(async_db, elsewhere.id, first_sign_in_at=None, issuer=other_issuer, enabled=False)
+    await async_db.commit()
+
+    with pytest.raises(SsoBreakGlassRouteRequiredError):
+        await _connection_service(async_db).set_sso_enforcement_for_user(
+            user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+        )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_a_link_at_a_connection_somebody_can_use_is_a_route_in(async_db: AsyncSession) -> None:
+    """The same link, while an enabled connection resolves to that issuer, is the way in."""
+    other_issuer = "https://other-sso.example.com"
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    elsewhere = await create_organization(async_db, slug=f"other-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    owner.hashed_password = None
+    async_db.add(owner)
+    async_db.add(
+        OAuthIdentityLink(
+            provider=oidc_identity_provider(other_issuer),
+            subject="other-subject",
+            user_id=owner.id,
+            email_at_link=owner.email,
+            email_assertion_at_link=EmailAssertion.VERIFIED,
+        )
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _add_connection(async_db, elsewhere.id, first_sign_in_at=None, issuer=other_issuer, enabled=True)
+    await async_db.commit()
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is True
 
 
 async def test_a_link_at_a_configured_provider_is_a_route_in(async_db: AsyncSession) -> None:

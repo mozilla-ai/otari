@@ -104,6 +104,7 @@ class OIDCConnectionService:
         offered_providers: frozenset[str],
     ) -> None:
         self._uow = uow
+        self._repositories = repositories
         self._connections = repositories.connections
         self._links = repositories.links
         self._passkeys = repositories.passkeys
@@ -452,8 +453,7 @@ class OIDCConnectionService:
                 provider=provider,
                 passkey_rp_id=self._passkey_rp_id,
                 offered_providers=self._offered_providers,
-                links=self._links,
-                passkeys=self._passkeys,
+                repositories=self._repositories,
             ):
                 continue
             candidates.append(
@@ -550,8 +550,7 @@ class OIDCConnectionService:
             provider=oidc_identity_provider(connection.resolved_issuer),
             passkey_rp_id=self._passkey_rp_id,
             offered_providers=self._offered_providers,
-            links=self._links,
-            passkeys=self._passkeys,
+            repositories=self._repositories,
         ):
             raise SsoBreakGlassRouteRequiredError
 
