@@ -529,7 +529,7 @@ With `OTARI_URL` set, each check sends one span per gate that applied to the age
 
 What each gate is and says goes separately, once per version of the guardrail, to the server `OTARI_URL` names: its id, type, enforcement, when it runs, whether it is yours or the repository's, and its `message`. The server keeps it.
 
-A gate's span covers the time it took. A judge or verifier gate is timed by its own run; any other gate, from when `otari hook` started, since what it waits on is the hook starting and reading the evidence. A judge gate run with `claude` also carries the model it ran on and the tokens it used. Otari books them as the session's usage, under the source `otari-hook`, and prices them like the session's own requests (see [Agent traces](../../docs/traces.md#claude-code-without-routing)). A judge run with Codex carries no usage yet.
+A gate's span covers the time it took. A judge or verifier gate is timed by its own run; any other gate, from when `otari hook` started, since what it waits on is the hook starting and reading the evidence. A judge gate run with `claude` also carries the model it ran on and the tokens it used. Otari books them as the session's usage, under the source `otari-hook`, and prices them like the session's own requests (see [Claude Code without routing](../../docs/sessions-reference.md#claude-code-without-routing)). A judge run with Codex carries no usage yet.
 
 A report is written to `~/.otari/outbox/`, under the server and key it is for, and a separate process sends it with that same key. One the server cannot take yet, a rejected key included, waits there for the next check, for up to a day. The API key is read from the environment when it is sent and never written to the outbox.
 

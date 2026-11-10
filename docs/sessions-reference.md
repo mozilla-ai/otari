@@ -1,81 +1,11 @@
-# Agent traces
+# Sessions reference
 
-Otari records an **agent trace** for the completions it serves. Capture is
-best-effort: it can be turned off, and spans are dropped when the writer is
-full (see [Settings](trace-storage.md#settings)). A trace is the
-whole session an agent ran: its turns, and inside each turn every request, LLM
-call, routing attempt, guardrail check, MCP connection and tool call, with their
-timing and cost. It answers what an agent run did and cost, not only what one
-call did.
-
-A trace holds names, ids, timings, token counts, sizes, outcomes and costs. It
+How Otari builds, prices and protects the sessions [Sessions](sessions.md) shows.
+A session holds names, ids, timings, token counts, sizes, outcomes and costs. It
 records no model or tool output, and no prompt, command or file path unless a
-workspace chooses to keep them (see
-[Keeping what a span was about](#keeping-what-a-span-was-about)).
-
-## Reading traces
-
-Open **Overview** and pick the **Sessions** tab. It lists sessions in the
-selected time range and applies the user, API key, model and status filters the
-other tabs share. The tab is offered where the deployment records traces, which
-is the default.
-
-- Search finds a session by any part of its name, id, agent or user.
-- The chart counts sessions per hour or day as succeeded or failed.
-- Click a session to open it in a side panel, as a tree of its turns, LLM calls
-  and tool calls, as a timeline, or as a flat log.
-- From the **Requests** tab, **View trace** in a request's detail opens its
-  session on that LLM call.
-- A model filter matches sessions with an LLM call on that model.
-- The Levels column counts each session's errors, tool errors included; a tool
-  error alone does not fail a session (see
-  [Sessions and failures](#sessions-and-failures)).
-- Click Last activity, Levels, Latency, Tokens or Total cost to sort; click again
-  to reverse.
-
-The same reads are on the API: see [Agent traces](api-reference.md#agent-traces)
-in the API reference.
-
-### At a glance
-
-Before you pick a span, a session's panel opens on **At a glance**: how long the
-session took and what it cost, each split into parts, then what filled the
-model's context window, then the gates its hooks ran and what they decided.
-
-- **Time** splits the session into model requests, hooks, running tools, waiting
-  for you to approve a call, and idle time between turns. Long idle time is drawn
-  shorter, marked `//`, with the true figure beside it.
-- **Cost** splits the total by meter (fresh input, output, cache reads, cache
-  writes) when requests were priced by the token, and shows what the cache saved.
-  Requests priced whole, as a routed request is, have no split. A session with
-  nothing priced says so rather than showing $0.00.
-- **Cost by tool** estimates what each tool's calls cost, with a subagent's calls
-  listed under the call that ran it. Use it before moving a tool's work, or a
-  subagent, to a smaller model.
-
-A tool call's cost is an estimate, marked `≈`, because providers bill requests,
-not tool calls. It adds up the tool's share of the output that called it, how
-much its result grew the next request's context, and the cost of re-reading that
-result on later requests until the context is compacted. Calls made together
-share the estimate equally. A subagent's own requests are counted exactly.
-
-### The context map
-
-The context map shows what fills the model's context window, as blocks sized by
-tokens, with the unused part as **Free**. It reads the session's last LLM call,
-and also names the fullest call when that was an earlier one. Hover, focus or tap
-a block to see its tokens and share of the window.
-
-- **Every call** is split into cache reads, cache writes and fresh input.
-- **A request Otari served itself** is also split into system prompt, tool
-  definitions, files, messages and tool results. That split is an estimate
-  (Otari counts characters, then scales them to the exact token count), and the
-  map says so. An image, audio clip or document counts as about 1,000 tokens.
-
-When the model is not in the catalog, the window size is unknown and the map
-shows no free space. To build the estimate a span stores eight numbers, never
-text, as `otari.context.*` attributes (characters per part, tool count and
-message count).
+workspace chooses to keep them. Capture is best-effort: it can be turned off, and
+spans are dropped when the writer is full (see [Settings](trace-storage.md#settings)).
+The same reads are on the API: see [Agent traces](api-reference.md#agent-traces).
 
 ## What makes a session
 
@@ -109,7 +39,7 @@ Usage groups spend by the same sessions: a request's usage row records its
 session's trace id as `source_label`, so a session in one view finds its match in
 the other. A request with no session reads as "(no session)".
 
-## Sessions from your own agent
+## Grouping your own agent's requests
 
 Claude Code and Codex are recognized automatically. For your own agent:
 
@@ -165,6 +95,47 @@ which usually carries on. An MCP tool that answers with an error, or fails in
 transport, counts as a tool error; a failed connection to the MCP server fails
 the session. The error count and the error filter still include tool errors.
 
+## At a glance
+
+Before you pick a span, a session's panel opens on **At a glance**: how long the
+session took and what it cost, each split into parts, then what filled the
+model's context window, then the gates its hooks ran and what they decided.
+
+- **Time** splits the session into model requests, hooks, running tools, waiting
+  for you to approve a call, and idle time between turns. Long idle time is drawn
+  shorter, marked `//`, with the true figure beside it.
+- **Cost** splits the total by meter (fresh input, output, cache reads, cache
+  writes) when requests were priced by the token, and shows what the cache saved.
+  Requests priced whole, as a routed request is, have no split. A session with
+  nothing priced says so rather than showing $0.00.
+- **Cost by tool** estimates what each tool's calls cost, with a subagent's calls
+  listed under the call that ran it. Use it before moving a tool's work, or a
+  subagent, to a smaller model.
+
+A tool call's cost is an estimate, marked `≈`, because providers bill requests,
+not tool calls. It adds up the tool's share of the output that called it, how
+much its result grew the next request's context, and the cost of re-reading that
+result on later requests until the context is compacted. Calls made together
+share the estimate equally. A subagent's own requests are counted exactly.
+
+## The context map
+
+The context map shows what fills the model's context window, as blocks sized by
+tokens, with the unused part as **Free**. It reads the session's last LLM call,
+and also names the fullest call when that was an earlier one. Hover, focus or tap
+a block to see its tokens and share of the window.
+
+- **Every call** is split into cache reads, cache writes and fresh input.
+- **A request Otari served itself** is also split into system prompt, tool
+  definitions, files, messages and tool results. That split is an estimate
+  (Otari counts characters, then scales them to the exact token count), and the
+  map says so. An image, audio clip or document counts as about 1,000 tokens.
+
+When the model is not in the catalog, the window size is unknown and the map
+shows no free space. To build the estimate a span stores eight numbers, never
+text, as `otari.context.*` attributes (characters per part, tool count and
+message count).
+
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to Otari (see
@@ -195,33 +166,7 @@ its model traffic through Otari. Set it up with
   subscription, this is what the requests are worth at API prices, not what was
   charged.
 
-## Keeping what a span was about
-
-By default a trace keeps no prompt, command or file path. A workspace can keep
-them where the deployment allows it; otherwise the setting says so and cannot be
-turned on. On a deployment you run, [Store agent traces](trace-storage.md) says
-how to allow it. Content is stored encrypted.
-
-### Turn it on for a workspace
-
-A workspace owner or admin, or an organization owner or admin:
-
-1. Open **Workspaces** and click the workspace.
-2. On its **General** tab, turn on **Keep what agent sessions were about**.
-3. Where the deployment also keeps tool output, **Keep what tools returned** is
-   shown too, on by default. Turn it off to keep prompts but not tool output.
-
-Turning content off keeps nothing new from then on. Deleting content removes what
-is already stored and keeps the sessions. Over the API, these are
-`PATCH /api/v1/workspaces/{id}` with `trace_content_enabled` or
-`trace_content_tool_output`, and `DELETE /api/v1/workspaces/{id}/trace-content`.
-
-Content is kept only for sessions sent with an API key that belongs to a current
-member of the workspace (or an owner or admin of the organization). Mint tracing
-keys for real members: a key with no user, or one minted for a billing user with
-no dashboard identity, keeps no content.
-
-### What the client must send
+## What the client must send
 
 The workspace setting is not enough on its own; the client has to send content
 too:
@@ -243,7 +188,7 @@ A span shows what it was about as its input and what a tool returned as its
 output. Content that no key the deployment holds can open reads back empty (see
 [How content is sealed](trace-storage.md#how-content-is-sealed)).
 
-### Who reads content
+## Who reads content
 
 A session's content is private to the user it belongs to. Other members, admins,
 organization owners and the deployment's operator still see the session (its

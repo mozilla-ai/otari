@@ -49,10 +49,10 @@ Two more headers are useful:
 
 - `Otari-Conversation-Id` makes a headless run its own session in the
   dashboard's **Sessions** list, in place of Claude Code's own session id. See
-  [Sessions from your own agent](traces.md#sessions-from-your-own-agent).
+  [Sessions from your own agent](sessions.md#collect-sessions).
 - `Otari-Trace-Content: keep` keeps each turn's prompt, tool arguments and, where
   allowed, tool output, if the deployment and the workspace keep content. See
-  [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+  [Keeping what a span was about](sessions.md#keep-what-a-session-was-about).
 
 Setting `ANTHROPIC_CUSTOM_HEADERS` again replaces it, so put several headers in
 one value, one per line:
@@ -185,7 +185,7 @@ To keep that, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 }
 ```
 
-See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+See [Keeping what a span was about](sessions.md#keep-what-a-session-was-about).
 
 Do not both route and export the same session: each turn and its cost would
 appear twice.

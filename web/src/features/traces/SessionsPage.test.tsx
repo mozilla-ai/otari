@@ -312,7 +312,7 @@ describe("SessionsPage", () => {
       within(peek).getByRole("link", { name: /How to keep it/ }),
     ).toHaveAttribute(
       "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
     )
 
     await user.click(within(peek).getByRole("button", { name: "Log View" }))
@@ -441,7 +441,7 @@ describe("SessionsPage", () => {
       within(peek).getByRole("link", { name: /How to keep it/ }),
     ).toHaveAttribute(
       "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
     )
   })
 

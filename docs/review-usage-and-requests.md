@@ -9,7 +9,7 @@ range and one set of filters:
 
 - **Usage**: spend, tokens and requests over time, with breakdowns.
 - **Requests**: the per-request log.
-- **Sessions**: agent sessions; see [Agent traces](traces.md).
+- **Sessions**: agent sessions; see [Sessions](sessions.md).
 
 The time range and the model, user, API key and status filters stay in place when
 you switch tabs, and are kept in the URL. Clicking a chart bar narrows the range

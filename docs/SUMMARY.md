@@ -32,8 +32,7 @@
 ## Observe
 
 * [Review usage and requests](review-usage-and-requests.md)
-* [Track spend per end user](end-users.md)
-* [Agent traces](traces.md)
+* [Sessions](sessions.md)
 * [Importing external usage](external-usage.md)
 
 ## Control
@@ -44,6 +43,7 @@
 * [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 * [Create a multi-provider routing](create-a-multi-provider-routing.md)
 * [Configure guardrails](configure-guardrails.md)
+* [Track spend per end user](end-users.md)
 
 ## Organize
 
@@ -85,6 +85,7 @@
 
 * [Models](models.md)
 * [Routing policies](routing.md)
+* [Sessions reference](sessions-reference.md)
 * [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)

@@ -108,9 +108,9 @@ POST /otlp/v1/metrics   content-free coding-agent outcome metrics
 - Otari records usage from spans that carry the OpenTelemetry GenAI token
   attributes. It never keeps response or tool output; prompts, commands and file
   paths are kept only where trace content is on and the client sends them (see
-  [Keeping what a span was about](traces.md#keeping-what-a-span-was-about)).
+  [Keeping what a span was about](sessions.md#keep-what-a-session-was-about)).
 - The spans also appear on the key's agent trace; see
-  [Agent traces](traces.md#instrumented-agents).
+  [Agent traces](sessions-reference.md#instrumented-agents).
 
 Emitters disagree on whether cached tokens are part of the input count. Otari
 reads OpenLLMetry's Anthropic spans as counting them in, OpenLIT's as counting

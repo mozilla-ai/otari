@@ -299,7 +299,7 @@ or turn it checked.
 
 - `OTARI_HOOK_REPORT_CONTENT=1` also sends the command or paths a gate checked,
   kept only where the workspace keeps content (see
-  [Keeping what a span was about](../../docs/traces.md#keeping-what-a-span-was-about)).
+  [Keeping what a span was about](../../docs/sessions.md#keep-what-a-session-was-about)).
 - `OTARI_HOOK_REPORT=off` turns reporting off.
 
 What a report carries, and the server's limits, are under

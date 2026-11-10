@@ -477,7 +477,7 @@ remote tool name, and final arguments to its authorization or approval record.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
-Each execution is recorded in the workspace's [agent traces](traces.md) as a
+Each execution is recorded in the workspace's [sessions](sessions.md) as a
 step with one tool span: the tool, its server, whether it ran, and which rule
 decided the call (the key's rule, its user's rule, the server's default policy,
 or the server's own tool list). A call the rules refuse is recorded too, as a
