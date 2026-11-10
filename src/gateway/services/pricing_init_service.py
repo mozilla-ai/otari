@@ -1,5 +1,6 @@
 """Pricing initialization from configuration."""
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -27,8 +28,10 @@ from gateway.types.price_rates import dump_rates, load_rates
 from gateway.types.tool_charges import InstanceRateKey
 
 
-async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when require_pricing is on but no pricing is configured.
+async def warn_if_require_pricing_without_pricing(
+    config: GatewayConfig, db: AsyncSession, level: int = logging.WARNING
+) -> None:
+    """Warn at startup, at ``level``, when require_pricing is on but no pricing is configured.
 
     With ``require_pricing=True`` (the default), any model lacking a pricing
     entry is rejected with HTTP 402 — so a deployment with zero pricing rows
@@ -60,15 +63,17 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     if count > 0:
         return
     if not config.default_pricing:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled but no model pricing is configured: ALL billable requests "
             f"will be rejected with HTTP 402. Add pricing (config `pricing` section or POST {API_ROOT}/pricing), "
-            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models."
+            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models.",
         )
     else:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402.",
         )
 
 

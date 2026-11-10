@@ -242,6 +242,17 @@ test("reset password", async ({ page }) => {
   await captureScreenshot(page, "reset-password")
 })
 
+test("first-run setup", async ({ page }) => {
+  // Where the link in the gateway's first-run log lands. The key is only spent
+  // on submit, so any value renders the form on this unclaimed deployment.
+  await page.goto("/#/setup?key=not-a-real-key")
+  await expect(
+    page.getByRole("heading", { name: "Set up Otari" }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/#\/setup$/)
+  await captureScreenshot(page, "setup")
+})
+
 test("sign-in screen offering OAuth", async ({ page }) => {
   // The buttons are absent on the unstubbed fixture, which is what the plain
   // "sign-in" capture above already shows. This is the other state.

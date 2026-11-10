@@ -117,6 +117,7 @@
 ## Protocols
 
 * [Code-execution protocol](code-execution-protocol.md)
+* [Platform connect protocol](platform-connect-protocol.md)
 
 # Privacy
 

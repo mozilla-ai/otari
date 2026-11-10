@@ -4,9 +4,11 @@ import re
 import shutil
 import subprocess
 import sys
+import warnings
 
 import click
 import uvicorn
+from sqlalchemy.exc import SAWarning
 from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
@@ -35,6 +37,10 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
     raise click.BadParameter(
         f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) or a numeric level such as 20."
     )
+
+
+# What a container health check, a load balancer or an orchestrator polls.
+HEALTH_PROBE_PATHS = tuple(f"{API_ROOT}/health{suffix}" for suffix in ("", "/liveness", "/readiness"))
 
 
 @click.group()
@@ -102,6 +108,9 @@ def serve(
     except ValueError as e:
         raise click.ClickException(str(e)) from e
     setup_logger(level=log_level)
+    if log_level > logging.DEBUG:
+        # SQLAlchemy's advice to developers, printed raw to stderr among the startup lines.
+        warnings.filterwarnings("ignore", category=SAWarning)
 
     if host:
         gateway_config.host = host
@@ -134,7 +143,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
-            log_config=uvicorn_log_config(),
+            log_config=uvicorn_log_config(log_level, probe_paths=HEALTH_PROBE_PATHS),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")
