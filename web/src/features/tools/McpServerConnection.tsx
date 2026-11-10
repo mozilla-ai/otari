@@ -32,7 +32,7 @@ import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
 // omits this one unless it changed.
 
 /** A URL's scheme and host, which an OAuth client is bound to; the whole text when it does not parse. */
-function hostOf(url: string): string {
+function getOrigin(url: string): string {
   try {
     const parsed = new URL(url.trim())
     return `${parsed.protocol}//${parsed.host}`
@@ -138,7 +138,7 @@ export function McpServerConnection({
   const willDropClient =
     server.oauth_client_id !== null &&
     clientIdField === undefined &&
-    hostOf(body.url ?? server.url) !== hostOf(server.url)
+    getOrigin(body.url ?? server.url) !== getOrigin(server.url)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // The gateway checks the server again when its URL or token changes.
