@@ -982,6 +982,12 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
+
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then

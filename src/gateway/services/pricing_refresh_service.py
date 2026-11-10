@@ -91,6 +91,7 @@ def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
 class _PendingSnapshot:
     index: ModelsDevPriceIndex
     raw_snapshot: str
+    catalog: ModelsDevCatalog
 
 
 class PricingRefreshError(Exception):
@@ -210,7 +211,7 @@ def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
     index = _parse_snapshot(raw_snapshot)
     if not any(entry.priced for entry in index.entries()):
         raise PricingRefreshError("The models.dev data prices no models")
-    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot)
+    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot, catalog=catalog)
 
 
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
@@ -231,7 +232,9 @@ async def prepare_price_refresh(
     """Fetch and persist a new snapshot until an operator confirms it.
 
     Works whether or not ``models_dev_metadata`` is on; ``config`` only decides
-    whether the download also warms the metadata cache.
+    whether the download also becomes the catalog of model facts every worker
+    serves, so the kinds and details the dashboard shows are as new as the
+    prices it previews. Storing it never fails the preview.
     """
 
     try:
@@ -244,6 +247,15 @@ async def prepare_price_refresh(
 
     fetched_at = datetime.now(UTC)
     preview = _build_preview(current_index(), latest.index, fetched_at, latest.raw_snapshot)
+    if config is not None and config.models_dev_metadata:
+        try:
+            await store_models_dev_catalog(session, latest.catalog)
+        except DATABASE_ERRORS as exc:
+            await session.rollback()
+            logger.warning(
+                "Unable to store the models.dev catalog fetched for the price refresh (%s)",
+                describe_database_error(exc),
+            )
     pending_row = await session.get(PricingSnapshot, MODELS_DEV_PENDING_SOURCE)
     if pending_row is None:
         session.add(PricingSnapshot(source=MODELS_DEV_PENDING_SOURCE, snapshot=latest.raw_snapshot))
