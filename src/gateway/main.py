@@ -132,6 +132,7 @@ from gateway.services.providers import (
     load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
     load_workspace_hosted_access_at_startup,
+    new_platform_connect_rate_limiter,
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
@@ -1493,6 +1494,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         app.state.verification_failure_rate_limiter = None
 
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    app.state.platform_connect_rate_limiter = new_platform_connect_rate_limiter()
 
     if config.public_catalog_rate_limit_per_minute is not None:
         app.state.public_catalog_rate_limiter = RateLimiter(config.public_catalog_rate_limit_per_minute)
