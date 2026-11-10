@@ -931,6 +931,42 @@ async def test_a_dead_grant_ends_the_connection_and_asks_for_a_new_sign_in(
     assert len(wire.refreshes) == 1, "a connection that is gone is not renewed again"
 
 
+async def test_a_refused_client_of_a_managers_keeps_every_connection_until_it_is_fixed(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A manager who saves a wrong client secret has a setting to fix, and nobody signs in again for it."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="right")
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    user_id = str(world.member.id)
+    wire.refresh_error = McpOAuthTokenError("refused", status_code=401, error_code="invalid_client")
+
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.token_for(await _row(async_db, world.server.id), user_id)
+
+    assert await _connection(async_db, world.server.id, user_id) is not None
+    wire.refresh_error = None
+    assert await tokens.token_for(await _row(async_db, world.server.id), user_id) == "renewed-2"
+
+
+async def test_a_refused_client_otari_registered_ends_its_grants_and_is_registered_again(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    user_id = str(world.member.id)
+    wire.refresh_error = McpOAuthTokenError("refused", status_code=401, error_code="invalid_client")
+
+    with pytest.raises(McpSignInRequiredError):
+        await tokens.token_for(await _row(async_db, world.server.id), user_id)
+
+    assert await _connection(async_db, world.server.id, user_id) is None
+    assert (await _row(async_db, world.server.id)).oauth_client is None
+    await _sign_in(async_db, config, world, world.member)
+    assert len(wire.registrations) == 2
+
+
 async def test_a_renewal_that_fails_for_now_keeps_the_connection(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
 ) -> None:

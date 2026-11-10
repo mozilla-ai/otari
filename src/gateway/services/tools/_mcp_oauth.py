@@ -65,18 +65,23 @@ class McpOAuthTokenError(McpOAuthError):
 
     @property
     def is_permanent(self) -> bool:
-        """Whether sending the same refresh token again cannot succeed.
+        """Whether the grant itself is gone, so sending the same refresh token again cannot succeed.
 
-        True for the RFC 6749 section 5.2 codes that end a grant, and for a 401, which that section
-        reserves for a refused client. A 5xx, a 429, an unclassified 400 or a malformed answer may
-        yet succeed.
+        Only ``invalid_grant`` says so (RFC 6749 section 5.2). A refused client, a 5xx, a 429, an
+        unclassified 400 or a malformed answer may yet succeed with the same token.
         """
-        return self.status_code == 401 or self.error_code in _PERMANENT_REFRESH_ERRORS
+        return self.error_code == "invalid_grant"
+
+    @property
+    def refuses_client(self) -> bool:
+        """Whether the authorization server refused the client and not the grant.
+
+        ``invalid_client`` or ``unauthorized_client``. A bare 401 is not read as one: a proxy in
+        front of the token endpoint answers the same way.
+        """
+        return self.error_code in ("invalid_client", "unauthorized_client")
 
 
-_PERMANENT_REFRESH_ERRORS = frozenset(
-    {"invalid_grant", "invalid_client", "unauthorized_client", "unsupported_grant_type"}
-)
 _OAUTH_ERROR_CODE = re.compile(r"[\x20-\x21\x23-\x5b\x5d-\x7e]{1,64}")
 
 

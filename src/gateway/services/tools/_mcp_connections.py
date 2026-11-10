@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import secrets
 import uuid
 import weakref
@@ -71,6 +72,8 @@ CALLBACK_PATH = "/mcp-connections/callback"
 # The dashboard route that finishes a sign-in a dashboard session started.
 DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
+# An OAuth ``error`` code as RFC 6749 section 4.1.2.1 spells one, and short.
+_SAFE_ERROR = re.compile(r"[a-z0-9_.-]{1,64}")
 
 
 class StoredMcpOAuthClient(BaseModel):
@@ -204,6 +207,32 @@ class FlowLanding:
     known: bool
     # A dashboard session started it, so that session's dashboard finishes it.
     needs_dashboard: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackOutcome:
+    """Where an authorization server's redirect lands in the dashboard, as the callback page's query.
+
+    One of: a sign-in the dashboard still has to finish (``state`` and ``code``), one finished here
+    (``connected``, with ``return_to`` when it named one), or a refusal (``error``).
+    """
+
+    state: str | None = None
+    code: str | None = None
+    connected: uuid.UUID | None = None
+    return_to: str | None = None
+    error: str | None = None
+
+    def query(self) -> dict[str, str]:
+        """The outcome as query parameters, leaving out what it does not carry."""
+        fields = {
+            "state": self.state,
+            "code": self.code,
+            "connected": str(self.connected) if self.connected else None,
+            "return_to": self.return_to,
+            "error": self.error,
+        }
+        return {name: value for name, value in fields.items() if value}
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +408,31 @@ class McpConnectionService:
         logger.info("MCP OAuth client registered server_id=%s", server_id)
         return registered
 
+    async def receive_callback(self, *, state: str | None, code: str | None, error: str | None) -> CallbackOutcome:
+        """Decide what an authorization server's redirect comes to. It carries no credential of ours.
+
+        A sign-in a dashboard session started is finished by that session's own dashboard, so its
+        code is passed on and nothing is spent here. One started outside a session is finished
+        here, on its state alone. A redirect that reports a refusal drops the sign-in it names.
+        """
+        if not state:
+            return CallbackOutcome(error="invalid_request")
+        if error or not code:
+            await self.abandon(state)
+            # A short code the authorization server chose; anything else is not passed on.
+            return CallbackOutcome(error=error if error and _SAFE_ERROR.fullmatch(error) else "invalid_request")
+        landing = await self.landing(state)
+        if not landing.known:
+            return CallbackOutcome(error="unknown_state")
+        if landing.needs_dashboard:
+            return CallbackOutcome(state=state, code=code)
+        try:
+            done = await self.complete(state=state, code=code)
+        except (McpConnectionFlowError, McpConnectionUpstreamError) as exc:
+            logger.info("MCP sign-in callback refused reason=%s", type(exc).__name__)
+            return CallbackOutcome(error="sign_in_failed")
+        return CallbackOutcome(connected=done.server_id, return_to=done.return_to)
+
     async def landing(self, state: str) -> FlowLanding:
         """What a callback's ``state`` names, without consuming it."""
         async with self._uow:
@@ -450,7 +504,7 @@ class McpConnectionService:
                 resource=pending.resource,
             )
         except McpOAuthTokenError as exc:
-            if exc.error_code == "invalid_client" or exc.status_code == 401:
+            if exc.refuses_client:
                 await self._forget_registered_client(pending.server_id, pending.client_id)
             raise McpConnectionUpstreamError(f"Could not finish the sign-in: {exc}") from None
         async with self._uow:
@@ -643,7 +697,12 @@ class McpUserTokens:
                 logger.warning("MCP token renewal timed out server_id=%s", server.id)
                 return _Refreshed()
             except McpOAuthTokenError as exc:
-                if not exc.is_permanent:
+                # A refused client is a setting to fix, which then renews every connection again.
+                # Only a client Otari registered itself has nobody to fix it: it is replaced at the
+                # next sign-in, so its grants end here.
+                registered = stored_oauth_client(server)
+                gone = exc.is_permanent or (exc.refuses_client and registered is not None and registered.dynamic)
+                if not gone:
                     logger.warning(
                         "MCP token renewal failed server_id=%s status=%s error=%s",
                         server.id,
@@ -652,6 +711,13 @@ class McpUserTokens:
                     )
                     return _Refreshed()
                 await connections.remove(connection)
+                if not exc.is_permanent:
+                    # The refused client goes too, or the next sign-in would be sent through it.
+                    servers = WorkspaceMcpServerRepository(uow)
+                    row = await servers.find(server.id, lock=True)
+                    held = stored_oauth_client(row) if row is not None else None
+                    if row is not None and held is not None and held.dynamic and held.client_id == client.client_id:
+                        row.oauth_client = None
                 logger.info(
                     "MCP connection ended server_id=%s user_id=%s reason=%s",
                     server.id,
@@ -673,6 +739,7 @@ class McpUserTokens:
 
 __all__ = [
     "CALLBACK_PATH",
+    "CallbackOutcome",
     "DASHBOARD_CALLBACK_ROUTE",
     "CompletedConnection",
     "FlowLanding",

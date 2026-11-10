@@ -1541,7 +1541,7 @@ class WorkspaceMcpServerService:
         user_id = str(user.id)
         if user_id not in await provision_attribution_users(self.db, [user_id]):
             raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot hold a connection")
-        await self.db.commit()
+        # The row minted above is committed by the connection service's first block, on this same session.
         url = await self._connection_service().start(
             server_id=server.id, user_id=user_id, return_to=return_to, identity_id=user.id
         )

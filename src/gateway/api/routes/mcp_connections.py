@@ -13,17 +13,17 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import RedirectResponse
 
 from gateway.api.deps import (
     CurrentIdentity,
     McpConnectionServiceDep,
     WorkspaceMcpServerServiceDep,
+    get_config,
     verify_master_key,
 )
-from gateway.exceptions import TenancyError
-from gateway.log_config import logger
+from gateway.core.config import GatewayConfig
 from gateway.schemas.tools import (
     McpConnectionComplete,
     McpConnectionCompleted,
@@ -168,42 +168,19 @@ async def complete_mcp_connection(
 
 @callback_router.get("/callback", include_in_schema=False)
 async def mcp_connection_callback(
-    request: Request,
     connections: McpConnectionServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
     state: Annotated[str | None, Query(max_length=512)] = None,
     code: Annotated[str | None, Query(max_length=4096)] = None,
     error: Annotated[str | None, Query(max_length=256)] = None,
 ) -> RedirectResponse:
     """Receive an authorization server's redirect and send the browser on into the dashboard.
 
-    A sign-in a dashboard session started is finished by that session's own
-    dashboard, so the code is passed on to its page and nothing is spent
-    here. One started outside a session is finished here, on its state alone.
-    Either way the browser ends on a dashboard page: a person is here because
-    an authorization server sent them, so a refusal is shown there too.
+    The browser always ends on the dashboard's own page: a person is here
+    because an authorization server sent them, so a refusal is shown there too.
     """
-    config = request.app.state.config
-
-    def land(**params: str) -> RedirectResponse:
-        return RedirectResponse(
-            url=config.ui_link(f"{DASHBOARD_CALLBACK_ROUTE}?{urlencode(params)}"),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
-    if not state:
-        return land(error="invalid_request")
-    if error or not code:
-        await connections.abandon(state)
-        # A short code the authorization server chose; the page shows a message of its own for it.
-        return land(error=error if error and error.isascii() and error.isprintable() else "invalid_request")
-    landing = await connections.landing(state)
-    if not landing.known:
-        return land(error="unknown_state")
-    if landing.needs_dashboard:
-        return land(state=state, code=code)
-    try:
-        done = await connections.complete(state=state, code=code)
-    except TenancyError as exc:
-        logger.info("MCP sign-in callback refused status=%s", exc.status_code)
-        return land(error="sign_in_failed")
-    return land(connected=str(done.server_id), **({"return_to": done.return_to} if done.return_to else {}))
+    outcome = await connections.receive_callback(state=state, code=code, error=error)
+    return RedirectResponse(
+        url=config.ui_link(f"{DASHBOARD_CALLBACK_ROUTE}?{urlencode(outcome.query())}"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )

@@ -512,7 +512,9 @@ async def test_a_refresh_keeps_the_token_it_sent_when_none_is_issued(wire: _Wire
     ("answer", "permanent"),
     [
         (httpx.Response(400, json={"error": "invalid_grant", "error_description": "secret detail"}), True),
-        (httpx.Response(401), True),
+        # A refused client, or a bare 401 from whatever sits in front, says nothing about the grant.
+        (httpx.Response(401), False),
+        (httpx.Response(401, json={"error": "invalid_client"}), False),
         (httpx.Response(400, json={"error": "temporarily_unavailable"}), False),
         (httpx.Response(503), False),
         (httpx.Response(429), False),
@@ -527,6 +529,7 @@ async def test_a_refused_refresh_says_whether_the_grant_is_gone(
         await _mcp_oauth.refresh(f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None)
 
     assert raised.value.is_permanent is permanent
+    assert raised.value.refuses_client is (raised.value.error_code == "invalid_client")
     assert "secret detail" not in str(raised.value)
 
 
