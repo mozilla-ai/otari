@@ -1006,7 +1006,9 @@ serves, with their history; the cleanup never runs on a schedule.
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
 An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
-from `models_dev_base_url`. The default is Mozilla.ai's fork of models.dev,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
 which publishes the same documents at the same paths, built from models.dev's
 catalog plus the models it does not list yet; each of those is also offered to
 models.dev, and leaves the fork once it lands there. `https://models.dev` reads

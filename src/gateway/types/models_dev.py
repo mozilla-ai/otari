@@ -545,7 +545,19 @@ class _Reader:
             last_updated=self.text(raw, "last_updated", path),
             cost=self.cost(raw, path),
             type=None,
+            pricing=self.stored_pricing(raw, path),
         )
+
+    def stored_pricing(self, raw: dict[str, Any], path: str) -> ModelsDevPricing | None:
+        """The v2 price block a stored snapshot keeps beside its v1 fields, in :func:`catalog_document`'s encoding."""
+        value = raw.get("pricing")
+        if value is None:
+            return None
+        try:
+            return _stored_pricing(value)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            self.note(f"{path}.pricing", "a stored price block")
+            return None
 
     def model_v2(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:
         modalities = self.mapping(raw, "modalities", path) or {}
@@ -1169,14 +1181,19 @@ def _model_document(key: str, model: ModelsDevModel) -> dict[str, Any]:
         document["cost"] = cost
     if model.context_window is not None:
         document["limit"] = {"context": model.context_window}
+    if model.pricing is not None:
+        document["pricing"] = _encoded(model.pricing)
     return document
 
 
 def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
     """The catalog as a stored price snapshot: each provider's id, name and doc, and each model's price fields.
 
-    The snapshot keeps the document's own shape, so :func:`parse_catalog` reads
-    it back, and a stored or bundled snapshot is read like a live download.
+    The snapshot keeps the v1 document's shape, so :func:`parse_catalog` reads
+    it back, and a stored or bundled snapshot is read like a live download. The
+    v1 shape prices tokens only, so a model's v2 price block travels beside it
+    under ``pricing``: that is where a per-second, per-image or per-character
+    rate lives, and a snapshot without it would price no media model.
     """
     document: dict[str, Any] = {}
     for key, provider in catalog.providers.items():
