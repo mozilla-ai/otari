@@ -6,7 +6,9 @@ from gateway.exceptions import TenancyError, TenancyForbiddenError, TenancyNotFo
 
 SEALING_UNAVAILABLE = "Memory can't store anything right now. Try again later."
 MODEL_UNAVAILABLE = "Memory can't search or store right now. Try again later."
-MEMORY_OFF = "Memory is off for this workspace. A workspace owner or admin can turn it on."
+MEMORY_OFF = (
+    "Memory is off for this workspace. Its organization's owners or admins, and then the workspace's, can turn it on."
+)
 WORKSPACE_SCOPE_OFF = "Shared workspace memory is off for this workspace. Use the member scope instead."
 ENTRY_NOT_FOUND = "No memory entry with that id."
 READ_ONLY = "Workspace viewers can search memory but not change it."

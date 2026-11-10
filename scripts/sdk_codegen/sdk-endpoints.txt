@@ -535,6 +535,8 @@ DELETE /api/v1/workspaces/{workspace_id}/code-execution-policy               # d
 GET /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
 PUT /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/memory                              # dashboard-only
+GET /api/v1/organizations/me/memory                                          # dashboard-only
+PUT /api/v1/organizations/me/memory                                          # dashboard-only
 # Which hosted providers, and which of their models, a workspace keeps: the same
 # administrator-side surface. An SDK caller sees its effect as a 403 or a model
 # missing from `/models`, never the row.

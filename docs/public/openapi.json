@@ -17330,6 +17330,46 @@
         "title": "OrganizationMembershipContextPublic",
         "type": "object"
       },
+      "OrganizationMemoryPublic": {
+        "description": "An organization's memory switch. Memory runs in a workspace while this, and the workspace's, are on.",
+        "properties": {
+          "deployment_enabled": {
+            "description": "Whether this deployment offers memory at all.",
+            "title": "Deployment Enabled",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "deployment_enabled",
+          "enabled"
+        ],
+        "title": "OrganizationMemoryPublic",
+        "type": "object"
+      },
+      "OrganizationMemoryUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OrganizationMemoryUpdate",
+        "type": "object"
+      },
       "OrganizationModelPricingCreate": {
         "description": "Create one rate override for a model, or a search or fetch instance, for a period.",
         "properties": {
@@ -30421,6 +30461,11 @@
             "title": "Hide External",
             "type": "boolean"
           },
+          "organization_enabled": {
+            "description": "Whether the workspace's organization has memory on.",
+            "title": "Organization Enabled",
+            "type": "boolean"
+          },
           "proposals_waiting": {
             "description": "Proposals the consolidator has not decided yet.",
             "title": "Proposals Waiting",
@@ -30461,6 +30506,7 @@
         "required": [
           "workspace_id",
           "deployment_enabled",
+          "organization_enabled",
           "enabled",
           "workspace_scope_enabled",
           "write_policy",
@@ -44037,6 +44083,84 @@
         "summary": "List Caller Organization Memberships",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/memory": {
+      "get": {
+        "description": "The caller's organization's memory switch. Its owners and admins only.",
+        "operationId": "memory-get_organization_memory",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMemoryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Memory",
+        "tags": [
+          "memory"
+        ]
+      },
+      "put": {
+        "description": "Turn memory on or off for every workspace of the caller's organization. Off deletes nothing.\n\nOn lets each workspace's managers turn it on for their workspace; off stops recall in all of them at once.",
+        "operationId": "memory-set_organization_memory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationMemoryUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMemoryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Organization Memory",
+        "tags": [
+          "memory"
         ]
       }
     },

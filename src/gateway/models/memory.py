@@ -246,6 +246,24 @@ class MemoryRead(Base):
     )
 
 
+class MemoryOrganizationSettings(Base):
+    """An organization's memory switch. No row is the default: memory off in every workspace of it.
+
+    Memory runs in a workspace only while the deployment, its organization and the workspace all have it on,
+    so an organization's owners can stop it in every workspace at once.
+    """
+
+    __tablename__ = "memory_organization_settings"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now(), onupdate=lambda: datetime.now(UTC)
+    )
+
+
 class MemoryWorkspaceSettings(Base):
     """A workspace's memory switches. No row is the default: memory off."""
 
@@ -257,6 +275,11 @@ class MemoryWorkspaceSettings(Base):
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    # The workspace's organization, kept beside its switches so memory reads the organization's switch
+    # without reaching into tenancy's tables.
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True
     )
     enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Member entries come with ``enabled``; the shared workspace memory is a second switch.

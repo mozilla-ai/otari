@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from gateway.api.deps import build_memory_service
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.memory import MemoryWorkspaceSettings
+from gateway.models.memory import MemoryOrganizationSettings, MemoryWorkspaceSettings
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.usage import UsageLog
@@ -49,6 +49,7 @@ def _key(
     *,
     member: bool = True,
     memory_on: bool = True,
+    organization_on: bool = True,
     workspace_role: str = "member",
 ) -> dict[str, str]:
     """A key for a member of the default workspace's organization (or for a billing user with no person behind it)."""
@@ -72,9 +73,15 @@ def _key(
         if session.get(MemoryWorkspaceSettings, workspace.id) is None:
             session.add(
                 MemoryWorkspaceSettings(
-                    workspace_id=workspace.id, enabled=memory_on, workspace_scope_enabled=True, write_policy="auto"
+                    workspace_id=workspace.id,
+                    organization_id=workspace.organization_id,
+                    enabled=memory_on,
+                    workspace_scope_enabled=True,
+                    write_policy="auto",
                 )
             )
+        if session.get(MemoryOrganizationSettings, workspace.organization_id) is None:
+            session.add(MemoryOrganizationSettings(organization_id=workspace.organization_id, enabled=organization_on))
         session.commit()
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     resp = client.post(
@@ -308,3 +315,28 @@ def test_an_agents_key_cannot_change_the_switches(
 
     assert memory_client.put(switches, json={"enabled": True}, headers=headers).status_code in (401, 403)
     assert memory_client.delete(switches, headers=headers).status_code in (401, 403)
+
+
+def test_an_organizations_managers_switch_memory_for_all_its_workspaces(
+    memory_client: TestClient,
+    headers: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    organization = f"{API_ROOT}/organizations/me/memory"
+    switches = f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory"
+    assert memory_client.get(organization, headers=master_key_header).json()["enabled"] is True
+
+    off = memory_client.put(organization, json={"enabled": False}, headers=master_key_header)
+    assert off.status_code == 200 and off.json()["enabled"] is False
+    assert memory_client.get(switches, headers=master_key_header).json()["organization_enabled"] is False
+    assert _call(memory_client, headers, "memory_search", query="deploy")["isError"] is True
+
+    memory_client.put(organization, json={"enabled": True}, headers=master_key_header)
+    assert _call(memory_client, headers, "memory_search", query="deploy")["isError"] is False
+
+
+def test_an_agents_key_cannot_switch_its_organization(memory_client: TestClient, headers: dict[str, str]) -> None:
+    response = memory_client.put(f"{API_ROOT}/organizations/me/memory", json={"enabled": True}, headers=headers)
+
+    assert response.status_code in (401, 403)

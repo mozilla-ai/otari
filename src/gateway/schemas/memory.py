@@ -93,6 +93,7 @@ class WorkspaceMemoryPublic(BaseModel):
 
     workspace_id: uuid.UUID
     deployment_enabled: bool = Field(description="Whether this deployment offers memory at all.")
+    organization_enabled: bool = Field(description="Whether the workspace's organization has memory on.")
     enabled: bool = Field(description="Memory on for this workspace: each member's own entries.")
     workspace_scope_enabled: bool = Field(description="The memory every member's agents share.")
     write_policy: MemoryWritePolicy = Field(
@@ -121,3 +122,17 @@ class WorkspaceMemoryErased(BaseModel):
     proposals: int
     reads: int
     keys: int
+
+
+class OrganizationMemoryPublic(BaseModel):
+    """An organization's memory switch. Memory runs in a workspace while this, and the workspace's, are on."""
+
+    organization_id: uuid.UUID
+    deployment_enabled: bool = Field(description="Whether this deployment offers memory at all.")
+    enabled: bool
+
+
+class OrganizationMemoryUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool

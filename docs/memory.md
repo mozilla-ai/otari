@@ -24,7 +24,17 @@ under a data key of its workspace.
    `OTARI_SECRET_KEY`, or `trace_content_key_backend` and its KMS key. Without a
    key, memory stores nothing.
 
-2. Turn it on for a workspace. An organization owner or admin, or an owner or
+2. Turn it on for the organization. Its owners and admins set one switch for
+   every workspace of it; with it off, memory runs in none of them, whatever
+   their own switches say, and nothing is deleted:
+
+   ```bash
+   curl -X PUT "$OTARI_URL/api/v1/organizations/me/memory" \
+     -H "Authorization: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+     -d '{"enabled": true}'
+   ```
+
+3. Turn it on for a workspace. An organization owner or admin, or an owner or
    admin of the workspace, sets its switches:
 
    ```bash

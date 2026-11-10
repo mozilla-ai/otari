@@ -2149,6 +2149,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/memory/read_repository.py",
         "baseline": (),
     },
+    "gateway.models.memory.MemoryOrganizationSettings": {
+        "repository": "gateway/repositories/memory/organization_settings_repository.py",
+        "baseline": (),
+    },
     "gateway.models.memory.MemoryWorkspaceSettings": {
         "repository": "gateway/repositories/memory/settings_repository.py",
         "baseline": (),

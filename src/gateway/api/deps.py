@@ -2310,23 +2310,34 @@ class _MemoryUsage:
 
 
 class _MemoryManagers:
-    """The workspace management check every workspace policy uses, for memory's switches."""
+    """The management checks every workspace and organization policy uses, for memory's switches."""
 
-    def __init__(self, access: WorkspaceAccess) -> None:
+    def __init__(self, organizations: OrganizationService, access: WorkspaceAccess) -> None:
+        self._organizations = organizations
         self._access = access
 
-    async def require_manager(self, user: TenancyUser, workspace_id: uuid.UUID) -> None:
+    async def require_manager(self, user: TenancyUser, workspace_id: uuid.UUID) -> uuid.UUID:
         workspace = await self._access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._access.require_workspace_management_access(user=user, workspace=workspace)
+        return workspace.organization_id
+
+    async def require_organization_manager(self, user: TenancyUser) -> uuid.UUID:
+        organization = await self._organizations.get_active_organization_for_user(user)
+        await self._organizations.require_active_organization_management_access(user=user, organization=organization)
+        return organization.id
 
 
 def build_memory_service(
-    uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys, access: WorkspaceAccess | None = None
+    uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys, db: AsyncSession | None = None
 ) -> MemoryService:
     """Build the memory service on a request's Unit of Work, or the consolidator's own.
 
-    ``access`` is the request's workspace checks; the consolidator has no caller to check and passes none.
+    ``db`` is the request's session, for the management checks; the consolidator has no caller to check.
     """
+    managers = None
+    if db is not None:
+        organizations = OrganizationService(db, membership_listener=None)
+        managers = _MemoryManagers(organizations, WorkspaceAccess(db, organizations))
     return MemoryService(
         uow,
         MemoryRepositories.on(uow),
@@ -2334,7 +2345,7 @@ def build_memory_service(
         MemoryModels(config),
         _MemoryUsage(UsageLogRepository(uow)),
         config,
-        _MemoryManagers(access) if access is not None else None,
+        managers,
     )
 
 
@@ -2355,9 +2366,7 @@ def get_memory_service(
     keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
 ) -> MemoryService:
     """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
-    return build_memory_service(
-        uow, config, keys, WorkspaceAccess(db, OrganizationService(db, membership_listener=None))
-    )
+    return build_memory_service(uow, config, keys, db)
 
 
 async def get_memory_caller(

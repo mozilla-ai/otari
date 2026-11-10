@@ -28,6 +28,7 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         self,
         workspace_id: uuid.UUID,
         *,
+        organization_id: uuid.UUID,
         enabled: bool,
         workspace_scope_enabled: bool,
         write_policy: MemoryWritePolicy,
@@ -37,8 +38,9 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         """Stage the workspace's switches, creating its row the first time."""
         row = await self.of_workspace(workspace_id)
         if row is None:
-            row = MemoryWorkspaceSettings(workspace_id=workspace_id)
+            row = MemoryWorkspaceSettings(workspace_id=workspace_id, organization_id=organization_id)
             self.db.add(row)
+        row.organization_id = organization_id
         row.enabled = enabled
         row.workspace_scope_enabled = workspace_scope_enabled
         row.write_policy = write_policy
@@ -47,14 +49,14 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         await self.db.flush()
         return row
 
-    async def enabled_workspaces(self) -> Sequence[uuid.UUID]:
-        """Every workspace that has memory on, which the consolidator visits."""
+    async def enabled_workspaces(self) -> Sequence[tuple[uuid.UUID, uuid.UUID]]:
+        """Every workspace that has memory on itself, with its organization, whose own switch the caller checks."""
         result = await self.db.execute(
-            select(MemoryWorkspaceSettings.workspace_id)
+            select(MemoryWorkspaceSettings.workspace_id, MemoryWorkspaceSettings.organization_id)
             .where(MemoryWorkspaceSettings.enabled.is_(True))
             .order_by(MemoryWorkspaceSettings.workspace_id)
         )
-        return result.scalars().all()
+        return [(workspace_id, organization_id) for workspace_id, organization_id in result.all()]
 
     async def all(self) -> Sequence[MemoryWorkspaceSettings]:
         """Every workspace that has set its switches, on or off: retention runs for both."""

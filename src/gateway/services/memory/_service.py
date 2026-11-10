@@ -57,13 +57,17 @@ FlagReason = Literal["wrong", "stale", "duplicate", "unsafe"]
 
 
 class WorkspaceManagers(Protocol):
-    """Who may change a workspace's memory: its organization's owners and admins, and its own.
+    """Who may change memory's switches: an organization's owners and admins, and a workspace's own.
 
     The builder in ``api/deps`` implements it with the tenancy checks every workspace policy uses.
     """
 
-    async def require_manager(self, user: User, workspace_id: uuid.UUID) -> None:
-        """Raise unless ``user`` manages the workspace; a workspace they cannot see reads as missing."""
+    async def require_manager(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
+        """The workspace's organization, unless ``user`` does not manage it; one they cannot see reads as missing."""
+        ...
+
+    async def require_organization_manager(self, user: User) -> uuid.UUID:
+        """The caller's active organization, unless they are not one of its owners or admins."""
         ...
 
 
@@ -120,10 +124,17 @@ class Swept:
 
 
 @dataclass(frozen=True)
+class OrganizationMemory:
+    organization_id: uuid.UUID
+    enabled: bool
+
+
+@dataclass(frozen=True)
 class WorkspaceMemory:
-    """A workspace's memory switches, and how much it holds."""
+    """A workspace's memory switches, its organization's, and how much it holds."""
 
     workspace_id: uuid.UUID
+    organization_enabled: bool
     enabled: bool
     workspace_scope_enabled: bool
     write_policy: MemoryWritePolicy
@@ -308,32 +319,53 @@ class MemoryService:
 
     # -- What workspace managers call ----------------------------------------
 
+    async def organization_memory(self, user: User) -> OrganizationMemory:
+        """The caller's organization's switch. Its owners and admins only."""
+        organization_id = await self._managers_or_fail().require_organization_manager(user)
+        async with self._uow:
+            return OrganizationMemory(organization_id, await self._repos.organizations.enabled(organization_id))
+
+    async def change_organization_switch(self, user: User, *, enabled: bool) -> OrganizationMemory:
+        """Turn memory on or off for every workspace of the caller's organization. Off deletes nothing.
+
+        On lets each workspace's managers turn it on for their workspace; off stops recall in all of them at once.
+        """
+        organization_id = await self._managers_or_fail().require_organization_manager(user)
+        async with self._uow:
+            await self._repos.organizations.put(organization_id, enabled=enabled)
+        logger.info("Memory was turned %s for organization %s", "on" if enabled else "off", organization_id)
+        return OrganizationMemory(organization_id, enabled)
+
     async def workspace_memory(self, user: User, workspace_id: uuid.UUID) -> WorkspaceMemory:
         """The workspace's switches and what it holds. Reading them takes the same role as changing them."""
-        await self._require_manager(user, workspace_id)
+        organization_id = await self._managers_or_fail().require_manager(user, workspace_id)
         async with self._uow:
-            return await self._workspace_memory(workspace_id)
+            return await self._workspace_memory(workspace_id, organization_id)
 
     async def change_switches(self, user: User, workspace_id: uuid.UUID, change: SwitchChange) -> WorkspaceMemory:
-        """Set the workspace's switches. Turning memory off stops recall at once and deletes nothing."""
-        await self._require_manager(user, workspace_id)
+        """Set the workspace's switches. Turning memory off stops recall at once and deletes nothing.
+
+        A workspace can be switched on while its organization has memory off; it runs once both are on.
+        """
+        organization_id = await self._managers_or_fail().require_manager(user, workspace_id)
         async with self._uow:
             await self._repos.settings.put(
                 workspace_id,
+                organization_id=organization_id,
                 enabled=change.enabled,
                 workspace_scope_enabled=change.workspace_scope_enabled,
                 write_policy=change.write_policy,
                 hide_external=change.hide_external,
                 retention_days=change.retention_days,
             )
-            return await self._workspace_memory(workspace_id)
+            return await self._workspace_memory(workspace_id, organization_id)
 
     async def erase(self, user: User, workspace_id: uuid.UUID) -> Swept:
         """Delete everything the workspace's memory holds, its data keys last.
 
         With the keys gone, no backup taken before opens what was deleted. The switches stay as they were.
         """
-        await self._require_manager(user, workspace_id)
+        await self._managers_or_fail().require_manager(user, workspace_id)
         async with self._uow:
             entries = await self._repos.entries.delete_all(workspace_id)
             proposals = await self._repos.proposals.delete_all(workspace_id)
@@ -343,16 +375,17 @@ class MemoryService:
         logger.info("Memory of workspace %s was erased by a manager", workspace_id)
         return Swept(entries, proposals, reads, len(keys))
 
-    async def _require_manager(self, user: User, workspace_id: uuid.UUID) -> None:
+    def _managers_or_fail(self) -> WorkspaceManagers:
         if self._managers is None:
             msg = "this memory service was built without workspace management checks"
             raise RuntimeError(msg)
-        await self._managers.require_manager(user, workspace_id)
+        return self._managers
 
-    async def _workspace_memory(self, workspace_id: uuid.UUID) -> WorkspaceMemory:
+    async def _workspace_memory(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> WorkspaceMemory:
         settings = await self._repos.settings.of_workspace(workspace_id)
         return WorkspaceMemory(
             workspace_id=workspace_id,
+            organization_enabled=await self._repos.organizations.enabled(organization_id),
             enabled=settings is not None and settings.enabled,
             workspace_scope_enabled=settings is not None and settings.workspace_scope_enabled,
             write_policy=settings.write_policy if settings is not None else "review",
@@ -401,9 +434,11 @@ class MemoryService:
     # -- The consolidator ---------------------------------------------------
 
     async def workspaces_with_memory(self) -> list[uuid.UUID]:
-        """Every workspace that has memory on."""
+        """Every workspace that has memory on, and whose organization has it on too."""
         async with self._uow:
-            return list(await self._repos.settings.enabled_workspaces())
+            workspaces = await self._repos.settings.enabled_workspaces()
+            organizations = await self._repos.organizations.enabled_among({org for _, org in workspaces})
+        return [workspace_id for workspace_id, organization_id in workspaces if organization_id in organizations]
 
     async def consolidate(self, workspace_id: uuid.UUID, *, limit: int) -> int:
         """Decide up to ``limit`` of the workspace's pending proposals; how many were decided.
@@ -413,10 +448,9 @@ class MemoryService:
         first is skipped.
         """
         async with self._uow:
-            settings = await self._repos.settings.of_workspace(workspace_id)
-            if settings is None or not settings.enabled:
+            switches = await self._switches_if_on(workspace_id)
+            if switches is None:
                 return 0
-            switches = _Switches(settings.workspace_scope_enabled, settings.hide_external, settings.write_policy)
             proposals = await self._store.pending_proposals(workspace_id, limit=limit)
         decided = 0
         for proposal in proposals:
@@ -519,9 +553,18 @@ class MemoryService:
     # -- Shared steps -------------------------------------------------------
 
     async def _switches(self, workspace_id: uuid.UUID) -> _Switches:
+        switches = await self._switches_if_on(workspace_id)
+        if switches is None:
+            raise MemoryOffError
+        return switches
+
+    async def _switches_if_on(self, workspace_id: uuid.UUID) -> _Switches | None:
+        """The workspace's switches while it and its organization both have memory on; None otherwise."""
         settings = await self._repos.settings.of_workspace(workspace_id)
         if settings is None or not settings.enabled:
-            raise MemoryOffError
+            return None
+        if not await self._repos.organizations.enabled(settings.organization_id):
+            return None
         return _Switches(settings.workspace_scope_enabled, settings.hide_external, settings.write_policy)
 
     async def _visible_entry(self, caller: MemoryCaller, switches: _Switches, entry_id: uuid.UUID) -> OpenedEntry:

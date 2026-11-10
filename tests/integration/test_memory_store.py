@@ -51,7 +51,14 @@ async def tenants(async_db: AsyncSession) -> Tenants:
     async_db.add_all([alice, bob])
     await async_db.flush()
     for workspace_id in (first.id, second.id):
-        async_db.add(MemoryWorkspaceSettings(workspace_id=workspace_id, enabled=True, workspace_scope_enabled=True))
+        async_db.add(
+            MemoryWorkspaceSettings(
+                workspace_id=workspace_id,
+                organization_id=organization.id,
+                enabled=True,
+                workspace_scope_enabled=True,
+            )
+        )
     await async_db.commit()
     return Tenants(first.id, second.id, alice.id, bob.id)
 

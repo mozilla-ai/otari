@@ -4,6 +4,7 @@ from typing import Self
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.memory.entry_repository import EntryRepository
 from gateway.repositories.memory.key_repository import KeyRepository
+from gateway.repositories.memory.organization_settings_repository import OrganizationSettingsRepository
 from gateway.repositories.memory.proposal_repository import ProposalRepository
 from gateway.repositories.memory.read_repository import ReadRepository
 from gateway.repositories.memory.settings_repository import SettingsRepository
@@ -20,6 +21,7 @@ class MemoryRepositories:
     signals: SignalRepository
     reads: ReadRepository
     settings: SettingsRepository
+    organizations: OrganizationSettingsRepository
 
     @classmethod
     def on(cls, uow: UnitOfWork) -> Self:
@@ -31,4 +33,5 @@ class MemoryRepositories:
             signals=SignalRepository(uow),
             reads=ReadRepository(uow),
             settings=SettingsRepository(uow),
+            organizations=OrganizationSettingsRepository(uow),
         )

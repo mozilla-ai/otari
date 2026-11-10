@@ -26,7 +26,14 @@ from gateway.exceptions.memory_exceptions import (
     NotYoursToForgetError,
     WorkspaceScopeOffError,
 )
-from gateway.models.memory import MemoryEntry, MemoryKey, MemoryProposal, MemoryRead, MemoryWorkspaceSettings
+from gateway.models.memory import (
+    MemoryEntry,
+    MemoryKey,
+    MemoryOrganizationSettings,
+    MemoryProposal,
+    MemoryRead,
+    MemoryWorkspaceSettings,
+)
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.memory import MemoryRepositories
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
@@ -111,9 +118,14 @@ async def tenants(async_db: AsyncSession) -> Tenants:
     for workspace_id in (workspace.id, other.id):
         async_db.add(
             MemoryWorkspaceSettings(
-                workspace_id=workspace_id, enabled=True, workspace_scope_enabled=True, write_policy="auto"
+                workspace_id=workspace_id,
+                organization_id=organization.id,
+                enabled=True,
+                workspace_scope_enabled=True,
+                write_policy="auto",
             )
         )
+    async_db.add(MemoryOrganizationSettings(organization_id=organization.id, enabled=True))
     await async_db.commit()
 
     def caller(person: TenancyUser, *, manager: bool = False) -> MemoryCaller:
@@ -515,3 +527,20 @@ async def test_a_data_key_that_seals_nothing_is_deleted_but_never_the_newest(
 
     assert swept.keys == 1
     assert len((await async_db.execute(select(MemoryKey))).scalars().all()) == 1
+
+
+async def test_an_organization_with_memory_off_stops_it_in_every_workspace(
+    memory: Memory, tenants: Tenants, async_db: AsyncSession
+) -> None:
+    await _learn(memory, tenants.alice, DEPLOY)
+    await memory().propose(
+        tenants.alice, text="Run make test first", kind="procedure", scope="workspace", external=False
+    )
+    await async_db.execute(update(MemoryOrganizationSettings).values(enabled=False))
+    await async_db.commit()
+
+    with pytest.raises(MemoryOffError):
+        await memory().search(tenants.alice, DEPLOY, limit=5)
+    assert await memory().workspaces_with_memory() == []
+    assert await memory().consolidate(tenants.workspace, limit=20) == 0
+    assert len((await async_db.execute(select(MemoryEntry))).scalars().all()) == 1

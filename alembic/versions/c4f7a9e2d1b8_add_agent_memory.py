@@ -7,7 +7,10 @@
 - ``memory_proposals``: what agents offered, sealed, deleted once decided.
 - ``memory_signals``: each member's confirmation or flag of an entry.
 - ``memory_reads``: who recalled which entries, with no content.
-- ``memory_workspace_settings``: each workspace's switches. No row is memory off.
+- ``memory_organization_settings``: each organization's switch. No row is memory off
+  in every workspace of it.
+- ``memory_workspace_settings``: each workspace's switches, beside its organization.
+  No row is memory off.
 
 On PostgreSQL every table but the settings is put under row-level security,
 forced so that the owner the app connects as is held to it too: a row is visible
@@ -36,6 +39,7 @@ MEMORY_ENTRIES = "memory_entries"
 MEMORY_PROPOSALS = "memory_proposals"
 MEMORY_SIGNALS = "memory_signals"
 MEMORY_READS = "memory_reads"
+MEMORY_ORGANIZATION_SETTINGS = "memory_organization_settings"
 MEMORY_WORKSPACE_SETTINGS = "memory_workspace_settings"
 
 # The tables a workspace's rows are fenced in, in the order they are created.
@@ -190,8 +194,18 @@ def upgrade() -> None:
     op.create_index("ix_memory_reads_workspace_read_at", MEMORY_READS, ["workspace_id", "read_at"])
 
     op.create_table(
+        MEMORY_ORGANIZATION_SETTINGS,
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
+        _timestamp("updated_at"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organization.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("organization_id"),
+    )
+
+    op.create_table(
         MEMORY_WORKSPACE_SETTINGS,
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
         sa.Column("enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("workspace_scope_enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("write_policy", sa.String(length=16), server_default="review", nullable=False),
@@ -201,8 +215,10 @@ def upgrade() -> None:
         sa.CheckConstraint("write_policy IN ('auto', 'review')", name="check_memory_settings_write_policy"),
         sa.CheckConstraint("retention_days IS NULL OR retention_days > 0", name="check_memory_settings_retention"),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspace.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organization.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("workspace_id"),
     )
+    op.create_index("ix_memory_workspace_settings_organization_id", MEMORY_WORKSPACE_SETTINGS, ["organization_id"])
 
     if op.get_bind().dialect.name == "postgresql":
         for table in FENCED_TABLES:
@@ -216,7 +232,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Dropping a table drops its policies with it.
+    op.drop_index("ix_memory_workspace_settings_organization_id", table_name=MEMORY_WORKSPACE_SETTINGS)
     op.drop_table(MEMORY_WORKSPACE_SETTINGS)
+    op.drop_table(MEMORY_ORGANIZATION_SETTINGS)
     op.drop_index("ix_memory_reads_workspace_read_at", table_name=MEMORY_READS)
     op.drop_index("ix_memory_reads_reader_user_id", table_name=MEMORY_READS)
     op.drop_table(MEMORY_READS)

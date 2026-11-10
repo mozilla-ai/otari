@@ -39,6 +39,8 @@ from gateway.schemas.memory import (
     EntryWithVersions,
     FlagArguments,
     Forgotten,
+    OrganizationMemoryPublic,
+    OrganizationMemoryUpdate,
     ProposalAccepted,
     ProposeArguments,
     RecalledEntry,
@@ -294,6 +296,7 @@ def _workspace_public(memory: WorkspaceMemory, config: GatewayConfig) -> Workspa
     return WorkspaceMemoryPublic(
         workspace_id=memory.workspace_id,
         deployment_enabled=config.memory_enabled,
+        organization_enabled=memory.organization_enabled,
         enabled=memory.enabled,
         workspace_scope_enabled=memory.workspace_scope_enabled,
         write_policy=memory.write_policy,
@@ -356,6 +359,42 @@ async def erase_workspace_memory(
     )
 
 
+# The caller's active organization: its owners and admins turn memory on or off for every workspace of it.
+organization_router = APIRouter(
+    prefix="/organizations/me/memory", tags=["memory"], dependencies=[Depends(verify_master_key)]
+)
+
+
+@organization_router.get("")
+async def get_organization_memory(
+    service: MemoryServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OrganizationMemoryPublic:
+    """The caller's organization's memory switch. Its owners and admins only."""
+    memory = await service.organization_memory(current_identity)
+    return OrganizationMemoryPublic(
+        organization_id=memory.organization_id, deployment_enabled=config.memory_enabled, enabled=memory.enabled
+    )
+
+
+@organization_router.put("")
+async def set_organization_memory(
+    service: MemoryServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    body: OrganizationMemoryUpdate,
+) -> OrganizationMemoryPublic:
+    """Turn memory on or off for every workspace of the caller's organization. Off deletes nothing.
+
+    On lets each workspace's managers turn it on for their workspace; off stops recall in all of them at once.
+    """
+    memory = await service.change_organization_switch(current_identity, enabled=body.enabled)
+    return OrganizationMemoryPublic(
+        organization_id=memory.organization_id, deployment_enabled=config.memory_enabled, enabled=memory.enabled
+    )
+
+
 async def _consolidate(config: GatewayConfig) -> None:
     # A worker is handed the config alone, so it binds its own ports the way the app does,
     # overlay included: memory is sealed and opened under the same key source either way.
@@ -372,6 +411,6 @@ FEATURE = CoreFeature(
     name="memory",
     surface=None,
     enabled=lambda config: config.memory_enabled,
-    routers=lambda config: (router, workspace_router),
+    routers=lambda config: (router, workspace_router, organization_router),
     worker=_consolidate,
 )

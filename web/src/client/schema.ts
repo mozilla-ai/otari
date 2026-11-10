@@ -4050,6 +4050,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Memory
+         * @description The caller's organization's memory switch. Its owners and admins only.
+         */
+        get: operations["memory-get_organization_memory"];
+        /**
+         * Set Organization Memory
+         * @description Turn memory on or off for every workspace of the caller's organization. Off deletes nothing.
+         *
+         *     On lets each workspace's managers turn it on for their workspace; off stops recall in all of them at once.
+         */
+        put: operations["memory-set_organization_memory"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/model-overrides/{selector}": {
         parameters: {
             query?: never;
@@ -16756,6 +16782,29 @@ export interface components {
             workspace_memberships?: components["schemas"]["CallerWorkspaceMembershipPublic"][];
         };
         /**
+         * OrganizationMemoryPublic
+         * @description An organization's memory switch. Memory runs in a workspace while this, and the workspace's, are on.
+         */
+        OrganizationMemoryPublic: {
+            /**
+             * Deployment Enabled
+             * @description Whether this deployment offers memory at all.
+             */
+            deployment_enabled: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+        };
+        /** OrganizationMemoryUpdate */
+        OrganizationMemoryUpdate: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
          * OrganizationModelPricingCreate
          * @description Create one rate override for a model, or a search or fetch instance, for a period.
          */
@@ -22509,6 +22558,11 @@ export interface components {
              * @description Keep entries resting on outside content out of recall.
              */
             hide_external: boolean;
+            /**
+             * Organization Enabled
+             * @description Whether the workspace's organization has memory on.
+             */
+            organization_enabled: boolean;
             /**
              * Proposals Waiting
              * @description Proposals the consolidator has not decided yet.
@@ -29717,6 +29771,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-get_organization_memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMemoryPublic"];
+                };
+            };
+        };
+    };
+    "memory-set_organization_memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationMemoryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMemoryPublic"];
                 };
             };
             /** @description Validation Error */
