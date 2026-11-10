@@ -45,7 +45,7 @@ test("an organization admin gives their own key a federation rule and reads its 
   await memberPage.goto("/")
   await memberPage.getByLabel("Email").fill(email)
   await memberPage.getByLabel("Password").fill(password)
-  await memberPage.getByRole("button", { name: "Sign in" }).click()
+  await memberPage.getByRole("button", { name: "Sign in", exact: true }).click()
   await expect(
     memberPage.getByRole("navigation", { name: "Sidebar" }),
   ).toBeVisible()

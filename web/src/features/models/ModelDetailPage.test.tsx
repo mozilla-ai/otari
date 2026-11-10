@@ -21,8 +21,15 @@ import type {
 import { ModelDetailPage } from "@/features/models/ModelDetailPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 const CAPABILITIES = {
   reasoning: true,
@@ -456,6 +463,21 @@ describe("ModelDetailPage", () => {
     expect(byText("global.zai.glm-5.3")).toHaveLength(1)
     expect(byText("us.zai.glm-5.3")).toHaveLength(1)
     expect(byText("zai-org/GLM-5.3")).toHaveLength(1)
+  })
+
+  it("records the press with the model it was for", async () => {
+    resetTelemetrySpy()
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+
+    expect(recordEvent).toHaveBeenCalledExactlyOnceWith(
+      TELEMETRY_EVENTS.USE_MODEL_CLICKED,
+      { model: "z-ai/glm-5.3", signed_in: true },
+    )
   })
 
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {

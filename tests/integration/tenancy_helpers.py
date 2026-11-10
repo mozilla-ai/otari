@@ -62,6 +62,27 @@ class _NoBlockedAddresses:
 NO_BLOCKED_ADDRESSES = _NoBlockedAddresses()
 
 
+async def no_sso_enforcement(_organization: Organization) -> bool:
+    """A ``blocked`` predicate that refuses nothing, for a test that is not about SSO enforcement."""
+    return False
+
+
+class _NoSsoEnforcement:
+    """An ``SsoEnforcement`` that refuses no membership, for a test that is not about it."""
+
+    async def refuses_every_membership(self, *, user: User) -> bool:
+        return False
+
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        return False
+
+    async def revoke_refused_sessions(self, *, organization: Organization) -> None:
+        return None
+
+
+NO_SSO_ENFORCEMENT = _NoSsoEnforcement()
+
+
 def claim_writes(db: AsyncSession) -> dict[str, Any]:
     """Build the Unit of Work and the organization service a claim writes through, as the claim routes do."""
     writes = membership_writes(db)

@@ -302,7 +302,7 @@ class LastOrganizationError(TenancyValidationError):
     """Deleting this organization would leave the caller in none."""
 
     def __init__(self) -> None:
-        super().__init__("You cannot delete the only organization you belong to")
+        super().__init__("Deleting this organization would leave you with no organization to act in")
 
 
 class DefaultOrganizationDeletionError(TenancyValidationError):

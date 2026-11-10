@@ -80,6 +80,7 @@ describe("nav registry", () => {
       "Workspaces",
       "Members & roles",
       "Email domains",
+      "Single sign-on",
       "Spend & budgets",
       "Providers",
       "Guardrails",
@@ -250,6 +251,7 @@ describe("nav registry", () => {
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
+      ["Single sign-on", "organizations"],
     ])
     // One row. An organization's rates are set on Providers, beside the models
     // they price, and `/organization/pricing` is a redirect, which a rail row

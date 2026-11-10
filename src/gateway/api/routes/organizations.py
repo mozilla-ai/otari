@@ -28,7 +28,7 @@ hang off it.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
@@ -36,7 +36,9 @@ from gateway.api.deps import (
     IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
+    OIDCConnectionServiceDep,
     OrganizationDomainServiceDep,
+    PersonGrowthSignalPortDep,
     get_config,
     verify_master_key,
 )
@@ -55,6 +57,7 @@ from gateway.models.tenancy import (
     CallerOrganizationMembershipsPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
+    Organization,
     OrganizationCreateRequest,
     OrganizationDomainCreateRequest,
     OrganizationDomainPublic,
@@ -134,9 +137,10 @@ async def create_organization(
 async def get_active_organization_context(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Get the caller's active organization and their standing in it."""
-    return await service.get_active_membership_context_for_user(current_identity)
+    return await service.get_active_membership_context_for_user(current_identity, sso_enforcement=connections)
 
 
 @router.patch("/me")
@@ -172,6 +176,7 @@ async def update_active_organization(
 async def delete_active_organization(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Delete the caller's active organization, if it has no usage, and move the caller out of it.
 
@@ -181,15 +186,18 @@ async def delete_active_organization(
     whose workspaces still hold usage, API keys, aliases or routing policies, so
     a deletion never takes spend history with it.
 
-    Answers with the caller's context in the organization they are moved to,
-    their oldest other one.
+    Answers with the caller's context in the organization they are moved to: the
+    oldest of their other memberships that admits them. One requiring sign-in
+    through its own connection admits a member who holds a link to it, and the
+    account its enforcement exempts, and nobody else.
     """
-    return await service.delete_active_organization_for_user(user=current_identity)
+    return await service.delete_active_organization_for_user(user=current_identity, sso_enforcement=connections)
 
 
 @router.get("/me/memberships")
 async def list_caller_organization_memberships(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -200,18 +208,24 @@ async def list_caller_organization_memberships(
     organizations: this is what an organization switcher renders, and one row
     carries ``is_active_organization`` so it can mark the current one. Not to be
     confused with ``GET /me/members``, which is the active organization's
-    roster.
+    memberships. An organization whose own SSO enforcement refuses the caller is left off.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.list_organization_memberships_for_user(
         user=current_identity,
         skip=skip,
         limit=limit,
+        blocked=blocked,
     )
 
 
 @router.post("/me/switch")
 async def switch_active_organization(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     body: SwitchActiveOrganizationRequest,
 ) -> OrganizationMembershipContextPublic:
@@ -221,11 +235,16 @@ async def switch_active_organization(
     This changes which organization every later request is scoped to, so
     workspaces, keys, budgets and usage all follow it. Answers 404 for an
     organization the caller holds no active membership in, whether or not it
-    exists.
+    exists, and for one whose own SSO enforcement refuses the caller.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.switch_active_organization_for_user(
         user=current_identity,
         organization_id=body.organization_id,
+        blocked=blocked,
     )
 
 
@@ -282,6 +301,7 @@ async def create_active_organization_member(
 @router.patch("/me/members/{organization_member_id}")
 async def update_active_organization_member(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     body: ActiveOrganizationMemberUpdateRequest,
@@ -291,6 +311,7 @@ async def update_active_organization_member(
         user=current_identity,
         organization_member_id=organization_member_id,
         request=body,
+        sso_enforcement=connections,
     )
 
 
@@ -395,6 +416,8 @@ async def invite_active_organization_member(
     mail_limit: InvitationMailLimitDep,
     body: InviteOrganizationMemberRequest,
     identities: IdentityServiceDep,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> InviteOrganizationMemberResultPublic:
     """Invite an address to the caller's active organization by email.
 
@@ -413,6 +436,8 @@ async def invite_active_organization_member(
         config=config,
         mail_limit=mail_limit,
         blocked_addresses=identities,
+        growth=growth,
+        background_tasks=background_tasks,
     )
 
 
@@ -424,6 +449,8 @@ async def bulk_invite_active_organization_members(
     mail_limit: InvitationMailLimitDep,
     body: BulkInviteOrganizationMembersRequest,
     identities: IdentityServiceDep,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> BulkInviteOrganizationMembersResultPublic:
     """Invite several addresses to the caller's active organization at once.
 
@@ -440,6 +467,8 @@ async def bulk_invite_active_organization_members(
         config=config,
         mail_limit=mail_limit,
         blocked_addresses=identities,
+        growth=growth,
+        background_tasks=background_tasks,
     )
 
 

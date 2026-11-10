@@ -17,6 +17,7 @@ from gateway.api.deps import (
     GrowthSignalPortDep,
     IdentityServiceDep,
     MembershipOrganizationServiceDep,
+    OIDCConnectionServiceDep,
     OrganizationServiceDep,
     get_config,
     get_db,
@@ -76,6 +77,7 @@ async def request_reset(
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: OrganizationServiceDep,
     identities: IdentityServiceDep,
+    connections: OIDCConnectionServiceDep,
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
     throttle_public_auth(request)
@@ -85,6 +87,7 @@ async def request_reset(
             config,
             organizations=organizations,
             blocked_addresses=identities,
+            sso_enforcement=connections,
             background_tasks=background_tasks,
             email=body.email,
         )
@@ -102,6 +105,7 @@ async def confirm_reset(
     growth: GrowthSignalPortDep,
     organizations: MembershipOrganizationServiceDep,
     identities: IdentityServiceDep,
+    connections: OIDCConnectionServiceDep,
 ) -> None:
     """Complete a password reset, or choose a first password. Single-use: the token stops working after this.
 
@@ -113,6 +117,7 @@ async def confirm_reset(
         config,
         organizations=organizations,
         blocked_addresses=identities,
+        sso_enforcement=connections,
         token=body.token,
         new_password=body.new_password,
         terms_accepted=body.terms_accepted,

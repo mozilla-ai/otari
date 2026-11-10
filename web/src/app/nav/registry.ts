@@ -11,6 +11,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiLogIn,
   FiMessageSquare,
   FiRepeat,
   FiServer,
@@ -286,6 +287,14 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Email domains",
         surface: "organizations",
         icon: FiAtSign,
+      },
+      // Below the domains it admits through, since BYO OIDC reuses their
+      // DNS proofs rather than carrying its own.
+      {
+        to: "/organization/sso",
+        label: "Single sign-on",
+        surface: "organizations",
+        icon: FiLogIn,
       },
     ],
   },

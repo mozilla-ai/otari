@@ -105,9 +105,10 @@ def test_the_bundled_snapshot_is_the_whole_catalog_and_stays_bounded() -> None:
 def test_the_bundled_prices_are_those_a_stored_price_snapshot_of_it_gives() -> None:
     stored = ModelsDevPriceIndex.from_document(json.loads(json.dumps(_bundled_prices())))
 
-    # A price snapshot is the v1 trim, which carries no cost block and so no slot read
-    # out of one; the text prices are what it keeps.
-    bundled = [replace(entry, pricing=None, slot_columns=None) for entry in load_bundled_index().entries()]
+    # The snapshot keeps each model's v2 price block, so a per-second or per-image
+    # rate reads back with its slot, not only the token prices.
+    bundled = list(load_bundled_index().entries())
+    assert any(entry.slot_columns is not None for entry in bundled)
     assert sorted(bundled, key=lambda entry: entry.reference) == sorted(
         stored.entries(), key=lambda entry: entry.reference
     )
@@ -158,7 +159,7 @@ def test_the_release_script_cuts_a_snapshot_from_v2_and_names_a_damaged_model(tm
     assert "models.dev v2 catalog read with" in result.stderr
     assert "p.models.bad.cost.text.input.price: expected a number" in result.stderr
     snapshot = _snapshot(tmp_path)
-    assert snapshot["_meta"]["source"] == "https://models.dev/experimental/v2.0/api.json?type=all"
+    assert snapshot["_meta"]["source"] == "https://mozilla-ai.github.io/models.dev/experimental/v2.0/api.json?type=all"
     assert set(snapshot["p"]["models"]) == {*models}
     assert snapshot["p"]["models"]["m0"]["cost"] == {"input": 1, "output": 2}
 
@@ -168,7 +169,7 @@ def test_the_release_script_reads_a_saved_v1_document(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     snapshot = _snapshot(tmp_path)
-    assert snapshot["_meta"]["source"] == "https://models.dev/api.json"
+    assert snapshot["_meta"]["source"] == "https://mozilla-ai.github.io/models.dev/api.json"
     assert snapshot["p"]["models"]["m"]["cost"] == {"input": 1, "output": 2}
 
 
