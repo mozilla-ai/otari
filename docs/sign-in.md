@@ -48,8 +48,9 @@ domain; see [Email-domain auto-join](members.md#email-domain-auto-join).
 ### Dashboard sessions and identity
 
 The first operator signs in with the master key, which Otari exchanges for an
-opaque, HttpOnly session cookie. Once the operator sets an email and password,
-the dashboard signs in with those; the master key stays an API credential and
+opaque, HttpOnly session cookie. The setup link a first run prints carries a
+generated master key and asks only for the email and password. Once the
+operator sets an email and password, the dashboard signs in with those; the master key stays an API credential and
 recovery path.
 
 The email and password form appears whenever any active identity has a

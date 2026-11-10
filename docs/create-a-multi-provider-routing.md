@@ -166,7 +166,9 @@ When you're done, remove the `fallback-test` key. If the workspace was pinned to
 ## Automatic fallback
 
 **Routing** lists each policy with its main model, its backups in order, and who
-it applies to. Below the policies, **Automatic fallback** lists every model your
+it applies to. A policy's **Test** section shows the models a request would try,
+in order, and any left out with the reason, without sending one; see
+[Explain a policy](routing.md#explain-a-policy). Below the policies, **Automatic fallback** lists every model your
 organization sent requests to in the last 30 days, most requested first, by
 catalog id (see [Catalog spellings](models.md#catalog-spellings)). Each row shows:
 

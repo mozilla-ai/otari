@@ -46,6 +46,9 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
+// Not under ROUTING_POLICIES: `useRoutingSyncing` holds every Save while that
+// head is fetching, and a plan being compiled is no reason to.
+export const ROUTING_EXPLAIN = "routing-explain"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
@@ -88,6 +91,9 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
+// Not under HOSTED_PROVIDERS: a pending read asks otari.ai, so a provider edit
+// must not fire one.
+export const PLATFORM_CONNECT = "platform-connect"
 // What a provider says it serves on the stored key, and what a catalog update
 // would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm

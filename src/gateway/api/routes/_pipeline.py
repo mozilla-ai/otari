@@ -4653,7 +4653,8 @@ async def _admit_web_access(
     except WebSearchPolicyResolutionFailedError as exc:
         raise adapter.error(status.HTTP_503_SERVICE_UNAVAILABLE, exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
-        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+        headers = error_headers(exc.error_code) if exc.error_code is not None else None
+        raise adapter.error(403, exc.message, ErrorKind.PERMISSION, headers=headers) from exc
     except (
         WebSearchOptionRefusedError,
         WebSearchCredentialRefusedError,

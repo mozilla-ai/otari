@@ -48,6 +48,12 @@ from gateway.services.providers._missing_credential import (
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client, owned_endpoint_sdk_client
+from gateway.services.providers._platform_connect import (
+    PLATFORM_PROVIDER_NAME,
+    PlatformClient,
+    PlatformConnectService,
+    new_platform_connect_rate_limiter,
+)
 from gateway.services.providers._provider_clients import (
     acompletion,
     amessages,
@@ -85,6 +91,9 @@ __all__ = [
     "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
+    "PLATFORM_PROVIDER_NAME",
+    "PlatformClient",
+    "PlatformConnectService",
     "PriceUpdates",
     "ProviderEndpointService",
     "ResolvedHostedProvider",
@@ -108,6 +117,7 @@ __all__ = [
     "load_workspace_hosted_access_at_startup",
     "missing_provider_credential",
     "narrow_hosted_models",
+    "new_platform_connect_rate_limiter",
     "normalize_api_base",
     "organization_to_serve",
     "owned_endpoint_http_client",

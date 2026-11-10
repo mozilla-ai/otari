@@ -9,6 +9,9 @@ Otari publishes `mzdotai/otari` on Docker Hub. For local setup, use the
   and single-node local use.
 - Keep a strong master key in a secret store.
 - Set and back up `OTARI_SECRET_KEY`, which encrypts stored provider credentials.
+  Only a SQLite deployment generates one for itself, in a file beside the
+  database (see
+  [Runtime provider management](configuration.md#runtime-provider-management)).
 - Set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value. Without it,
   provider copies of attached files are off (see
   [Provider copies](configuration.md#provider-copies)).
