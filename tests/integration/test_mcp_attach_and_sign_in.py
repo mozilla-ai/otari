@@ -14,6 +14,7 @@ from typing import Any, cast
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+import httpx2
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -572,3 +573,42 @@ def test_an_attached_server_that_is_down_is_left_out_and_a_named_one_still_fails
     assert response.status_code == 200, response.text
     assert _tool_names(sent[0]) == ["read_file"], "the request goes on without the server that is down"
     assert refused.status_code >= 500, refused.text
+
+
+def test_a_named_server_that_refuses_an_ended_sign_in_offers_a_new_one_instead_of_failing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    mcp: _Mcp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user's token was revoked at the server, and there is nothing to renew it with."""
+    key = _key(client, master_key_header)
+    server_id = _server(client, master_key_header, _workspace(test_db, key), "jira", credential_mode="per_user")
+    test_db.add(
+        McpUserConnection(
+            server_id=uuid.UUID(server_id),
+            user_id="alice",
+            encrypted_access_token=encrypt_secret(USER_TOKEN),
+            client_id="dynamic",
+            client_auth_method=AUTH_METHOD_NONE,
+            token_endpoint=f"{ISSUER}/token",
+        )
+    )
+    test_db.commit()
+
+    async def refused() -> None:
+        request = httpx2.Request("POST", PUBLIC_URL)
+        raise BaseExceptionGroup(
+            "refused", [httpx2.HTTPStatusError("401", request=request, response=httpx2.Response(401, request=request))]
+        )
+
+    monkeypatch.setattr(mcp, "initialize", refused)
+    with _scripted("gateway.services.mcp_loop.acompletion", [_round("sign_in_to_jira"), _round(None)]) as sent:
+        response = _chat(client, key, mcp_server_ids=[server_id])
+
+    assert response.status_code == 200, response.text
+    assert _tool_names(sent[0]) == ["sign_in_to_jira"]
+    assert LINK_PREFIX in _tool_results(sent[1])[0]
+    test_db.expire_all()
+    assert test_db.execute(select(McpUserConnection)).first() is None, "the ended connection was removed"

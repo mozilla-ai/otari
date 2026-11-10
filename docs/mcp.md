@@ -239,7 +239,9 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   token the MCP server refuses with a 401, such as one revoked at the provider
   early or one that states no expiry, is renewed once and the call retried
   once; with no refresh token, or a grant the provider ended, the connection is
-  removed and the caller is told `mcp_sign_in_required`.
+  removed. A caller-run route then answers `mcp_sign_in_required`, and in a
+  completion the model is handed a
+  [sign-in link](#signing-in-from-the-conversation) instead.
 - **What ends a connection.** The user disconnecting, a manager removing it,
   deleting the server, deleting the user, the user leaving the workspace, and a
   change to the server's URL, its OAuth client or its credential mode. Otari

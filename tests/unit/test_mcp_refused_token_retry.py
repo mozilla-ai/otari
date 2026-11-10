@@ -115,7 +115,7 @@ async def test_the_managed_loop_renews_a_refused_token_once(monkeypatch: pytest.
     tried: list[str] = []
     renew = _Renewer()
 
-    async def fake_open(self: MCPClientPool, stack: AsyncExitStack, cfg: McpServerConfig) -> Any:
+    async def fake_open(self: MCPClientPool, stack: AsyncExitStack, cfg: McpServerConfig, *_: object) -> Any:
         tried.append(cfg.authorization_token or "")
         if cfg.authorization_token == "stale":
             raise _refused()
@@ -130,16 +130,21 @@ async def test_the_managed_loop_renews_a_refused_token_once(monkeypatch: pytest.
     assert (tried, renew.asked) == (["stale", "renewed"], ["stale"])
 
 
-async def test_the_managed_loop_says_sign_in_required_when_the_sign_in_ended(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_open(self: MCPClientPool, stack: AsyncExitStack, cfg: McpServerConfig) -> Any:
+async def test_the_managed_loop_offers_a_sign_in_when_the_sign_in_ended(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The request goes on without the server, and the pool names it so the model can offer a new sign-in."""
+
+    async def fake_open(self: MCPClientPool, stack: AsyncExitStack, cfg: McpServerConfig, *_: object) -> Any:
         raise _refused()
 
     monkeypatch.setattr(MCPClientPool, "_open", fake_open)
     config = McpServerConfig(name="drive", url=URL, authorization_token="stale", renew_token=_Renewer(answer=None))
 
-    with pytest.raises(McpSignInRequiredError):
-        async with MCPClientPool([config]):
-            pass
+    async with MCPClientPool([config]) as pool:
+        assert pool.openai_tools == []
+        [(signed_out, refusal)] = pool.signed_out
+
+    assert signed_out.name == "drive"
+    assert isinstance(refusal, McpSignInRequiredError)
 
 
 async def test_a_request_cannot_send_its_own_renewer() -> None:
@@ -167,4 +172,4 @@ async def test_a_request_cannot_send_its_own_renewer() -> None:
             access=McpAccess(),
         )
 
-    assert admitted is not None and admitted[0].renew_token is None
+    assert admitted.servers is not None and admitted.servers[0].renew_token is None
