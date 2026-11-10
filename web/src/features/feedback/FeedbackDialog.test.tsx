@@ -208,7 +208,7 @@ describe("FeedbackDialog", () => {
     await screen.findByRole("heading", { name: "Thank you!" })
   })
   const consent = (email: string) =>
-    `By sending, you agree we can reply by email to ${email} about this message only.`
+    `By sending, you agree we can email ${email} about this message only.`
 
   it("names no address when the account has none, and sends the message alone", async () => {
     const { fetch, user } = setup()
@@ -251,9 +251,7 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Our team will reply by email to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("We’ll email you at ada@example.com.")
   })
 
   it("names and sends the address showing when Send is pressed", async () => {
@@ -289,9 +287,7 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Our team will reply by email to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("We’ll email you at ada@example.com.")
   })
 
   it("sends on Cmd+Enter from the field, as the button promises", async () => {
@@ -355,7 +351,7 @@ describe("FeedbackDialog", () => {
     // A pixel floor on the sheet would outlast a rotation to a shorter viewport.
     expect(thanks?.style.minHeight).toBe("")
     expect(thanks).toHaveClass(
-      "[@media(width>=640px)_and_(height>=640px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]",
+      "[@media(width>639px)_and_(height>639px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]",
     )
   })
 

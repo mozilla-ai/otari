@@ -176,11 +176,12 @@ export function FeedbackDialog({
             className="otari-form-dialog otari-form-dialog--md relative flex flex-col p-0 outline-none"
           >
             {returnFocusRef ? <RestoreFocus target={returnFocusRef} /> : null}
-            {/* A way out that needs no Escape and no backdrop: the sheet's
-                only one on a touch screen. Its own row on the sheet, which is
-                by height as well as by width; in the floating frame's corner,
-                beside the field. */}
-            <div className="flex shrink-0 justify-end pt-1.5 pr-2.5 pl-4 [@media(width>=640px)_and_(height>=640px)]:absolute [@media(width>=640px)_and_(height>=640px)]:top-3 [@media(width>=640px)_and_(height>=640px)]:right-3 [@media(width>=640px)_and_(height>=640px)]:z-10 [@media(width>=640px)_and_(height>=640px)]:p-0">
+            {/* Close, at every size. On the sheet (a narrow or a short
+                screen) it is a touch screen's only way out, so it gets its own
+                row; on the floating frame it sits in the corner, beside the
+                field. Its query is the sheet's, negated, so no size gets
+                neither. */}
+            <div className="flex shrink-0 justify-end pt-1.5 pr-2.5 pl-4 [@media(width>639px)_and_(height>639px)]:absolute [@media(width>639px)_and_(height>639px)]:top-3 [@media(width>639px)_and_(height>639px)]:right-3 [@media(width>639px)_and_(height>639px)]:z-10 [@media(width>639px)_and_(height>639px)]:p-0">
               <Button
                 aria-label="Close"
                 isIconOnly
@@ -202,7 +203,7 @@ export function FeedbackDialog({
                       } as CSSProperties)
                     : undefined
                 }
-                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>=640px)_and_(height>=640px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]"
+                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>639px)_and_(height>639px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}
@@ -223,7 +224,7 @@ export function FeedbackDialog({
                     className="text-muted max-w-100 text-base text-balance max-sm:max-w-80"
                   >
                     {sentTo
-                      ? `Our team will reply by email to ${sentTo}.`
+                      ? `We’ll email you at ${sentTo}.`
                       : "Our team has your message."}
                   </p>
                 </div>
@@ -251,7 +252,7 @@ export function FeedbackDialog({
                 <Modal.Heading id={headingId} className="sr-only">
                   Contact
                 </Modal.Heading>
-                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1 [@media(width>=640px)_and_(height>=640px)]:pr-16">
+                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1 [@media(width>639px)_and_(height>639px)]:pr-16">
                   <ErrorBanner error={notSent} />
                   {/* Native, as the playground composer's is: the shared
                       `TextArea` brings a visible label, a caption row and a
@@ -287,8 +288,8 @@ export function FeedbackDialog({
                     data-feedback-part="consent"
                     className="text-caption shrink-0 px-6 pb-5 break-words max-sm:px-4 max-sm:pb-3"
                   >
-                    By sending, you agree we can reply by email to {shareable}{" "}
-                    about this message only.
+                    By sending, you agree we can email {shareable} about this
+                    message only.
                   </p>
                 ) : null}
                 <footer
