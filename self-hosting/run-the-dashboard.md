@@ -2,8 +2,7 @@
 
 A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
-the deployment view, and deployment-wide settings. What any signed-in person
-sees is in [Admin dashboard](https://docs.otari.ai/guides/dashboard/dashboard).
+the deployment view, and deployment-wide settings.
 
 ## Sign-in and secrets
 
@@ -173,7 +172,7 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 Set `activation_guide: false` to turn off the Overview's
-[setup guide](https://docs.otari.ai/guides/dashboard/dashboard#the-setup-guide) for the deployment.
+setup guide for the deployment.
 
 ## Signup and terms
 
@@ -215,4 +214,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/98a752e9873a7496db84cb9801755a3bc5c63004/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/web/README.md).

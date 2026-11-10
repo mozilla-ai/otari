@@ -1,6 +1,6 @@
 # Store agent traces
 
-How a deployment you run captures, keeps and seals [agent traces](https://docs.otari.ai/guides/observability/traces).
+How a deployment you run captures, keeps and seals [sessions](https://docs.otari.ai/guides/observe/sessions).
 What a trace records, and how a workspace chooses to keep what its sessions
 were about, is on that page; this one covers the settings and keys behind it.
 
@@ -15,7 +15,7 @@ A trace keeps no prompt, command or file path unless the deployment allows it:
 3. To also keep what tools returned, set `OTARI_TRACE_CONTENT_TOOL_OUTPUT=true`.
 
 Each workspace then turns content on for itself; see
-[Keeping what a span was about](https://docs.otari.ai/guides/observability/traces#keeping-what-a-span-was-about).
+[Keeping what a span was about](https://docs.otari.ai/guides/observe/sessions#keep-what-a-session-was-about).
 
 Content reads back empty once no configured key opens it. Keep a rotated-out
 key in `OTARI_SECRET_KEY`, or in `trace_content_kms_previous_key_ids`, for as
@@ -148,7 +148,7 @@ Content an earlier replica stored after the upgrade began can be removed with
 | `trace_capture_enabled` | `true` | Record traces and serve the read API. Requires restart. |
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
-| `trace_content_enabled` | `false` | Let workspaces keep what an instrumented agent says a span was about; see [Keeping what a span was about](https://docs.otari.ai/guides/observability/traces#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | `false` | Let workspaces keep what an instrumented agent says a span was about; see [Keeping what a span was about](https://docs.otari.ai/guides/observe/sessions#keep-what-a-session-was-about). |
 | `trace_content_tool_output` | `false` | Also keep what each tool returned on a routed request that keeps content, unless the workspace turned it off. |
 | `trace_platform_break_glass_enabled` | `false` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. |
 

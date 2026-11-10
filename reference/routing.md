@@ -205,7 +205,7 @@ service cannot run or gives no verdict; `monitor` lets the request continue and
 records the skipped check. Only input checks can be mandated by a policy.
 
 Organization-mandated and request-provided guardrails compose with policy
-guardrails. See [Guardrails](https://docs.otari.ai/guides/guardrails/guardrails).
+guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
 
 ## Explain a policy
 
@@ -256,7 +256,7 @@ harness runs the subagent with its own provider credentials.
 The fields and errors are in the
 [API reference](api-reference.md#routing-recommendations), and the Claude Code
 plugin that asks is in
-[Use with Claude Code](https://docs.otari.ai/guides/agents-and-frameworks/use-with-claude-code#let-otari-choose-a-subagents-model).
+[Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code#let-otari-choose-a-subagents-model).
 
 ### Subagent routers
 

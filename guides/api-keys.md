@@ -28,7 +28,7 @@ budget of its own. In the key's create or edit form, either:
 - set a **Limit (USD)** and how often it **Resets**.
 
 The key's owner's budget still applies too. The page's **Budget** column shows
-each key's spend this period against its limit. See [Budgets](https://docs.otari.ai/learn/budgets).
+each key's spend this period against its limit. See [Budgets](budgets.md).
 
 ## Mismatched `user` fields
 
@@ -117,7 +117,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/98a752e9873a7496db84cb9801755a3bc5c63004/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/docs/public/openapi.json).
 
 ### Model and search tool access
 

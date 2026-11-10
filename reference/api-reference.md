@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/98a752e9873a7496db84cb9801755a3bc5c63004/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -65,7 +65,7 @@ An API key reaches:
 - the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
   `/providers/catalog`, `/tool-settings/guardrails/catalog`,
   `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
-- for a [service key](https://docs.otari.ai/guides/organizations-and-access/end-users), the end-user routes.
+- for a [service key](https://docs.otari.ai/guides/control/end-users), the end-user routes.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
 and everything under `/api/v1/organizations/me`, takes the master key or a
@@ -298,7 +298,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](https://docs.otari.ai/guides/agents-and-frameworks/use-with-claude-code#tag-claude-code-traffic)), sends
+[Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```
@@ -346,10 +346,10 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [Mismatched `user` fields](https://docs.otari.ai/guides/organizations-and-access/api-keys#mismatched-user-fields)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](https://docs.otari.ai/guides/control/api-keys#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
-[service key](https://docs.otari.ai/guides/organizations-and-access/end-users) may name its own end
+[service key](https://docs.otari.ai/guides/control/end-users) may name its own end
 users, and a master-key request must name the user to bill. Chat Completions
 and Responses never send `user` to the provider.
 
@@ -448,7 +448,7 @@ session get `401`: neither has a key of its own.
 
 | Field | Meaning |
 |---|---|
-| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request the key bills to its own user has to pass all of them. A [service key](https://docs.otari.ai/guides/organizations-and-access/end-users) request that names an end user checks that end user's budget in place of the `scope: user` entry, and that budget is not in this report; the key and member ceilings still apply. |
+| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request the key bills to its own user has to pass all of them. A [service key](https://docs.otari.ai/guides/control/end-users) request that names an end user checks that end user's budget in place of the `scope: user` entry, and that budget is not in this report; the key and member ceilings still apply. |
 | `used_*` | What the budget gate counts: recorded use plus the holds of requests still in flight. A period that has ended reads as the fresh one the next request starts. |
 | `workspace` and `organization` caps | Shared with the rest of the workspace or organization, so `limit_*` and `used_*` are `null` and only `remaining_*` is reported. `remaining_*` still falls as the others spend, so a key that reads it over time can tell how fast the team is spending. |
 | `remaining_usd` (top level) | The fewest dollars any dollar cap on every provider leaves: how much the key can spend before one of those refuses a request with `403 budget_exceeded`. A token cap, a request cap or a cap narrowed to one provider (each listed in `limits`) can refuse sooner. `null` when no dollar cap on every provider applies. |
@@ -653,7 +653,7 @@ for it works against Otari with its base URL changed. `include_raw` and
   its user's when the key has none: unrestricted model access runs every search
   tool, and restricted model access runs only a tool named by its deprecated
   `<provider>:<tool>` entry in `allowed_models`
-  ([Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
+  ([Model and search tool access](https://docs.otari.ai/guides/control/api-keys#model-and-search-tool-access)).
 
 **Request.**
 
@@ -772,7 +772,7 @@ one; a named call runs on that tool with its own key. Either way the tool decide
 the access check, the `rate_limits` rules, the timeout and the usage row's model
 and provider. The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`, as a search does
-([Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
+([Model and search tool access](https://docs.otari.ai/guides/control/api-keys#model-and-search-tool-access)).
 
 **Which URLs.** The workspace's web-access policy applies in full: its switch, and
 its allowed and blocked domain lists, which bind the URL asked for and, on the
@@ -1123,7 +1123,7 @@ at the top level of the body.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/organizations-and-access/end-users#how-end-users-are-billed-and-capped) |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |
@@ -1249,7 +1249,7 @@ and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Agent traces
 
-The sessions [Agent traces](https://docs.otari.ai/guides/observability/traces) describes are read on these routes.
+The sessions [Sessions](https://docs.otari.ai/guides/observe/sessions) describes are read on these routes.
 
 | Endpoint | Who |
 | --- | --- |

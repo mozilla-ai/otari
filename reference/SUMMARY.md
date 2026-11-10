@@ -75,15 +75,13 @@
 
 * [Models](models.md)
 * [Routing policies](routing.md)
+* [Sessions reference](sessions-reference.md)
+* [External usage reference](external-usage-reference.md)
 * [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-* [Inference Guardrails reference](guardrails-reference.md)
-
-## Agent Guardrails
-
-* [Agent Guardrails reference](agent-guardrails-reference.md)
+* [Guardrails reference](guardrails-reference.md)
 
 ## Protocols
 

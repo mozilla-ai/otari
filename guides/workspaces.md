@@ -63,7 +63,7 @@ Organization and workspace memberships use four roles:
 
 ## Workspace-scoped spend
 
-A request's usage lands in the workspace of the API key that sent it (see [How a request is attributed](https://docs.otari.ai/guides#how-a-request-is-attributed)). A request that falls back to another model still counts as one request.
+A request's usage lands in the workspace of the API key that sent it (see [How a request is attributed](access-control.md#how-a-request-is-attributed)). A request that falls back to another model still counts as one request.
 
 ## Constraints worth knowing
 

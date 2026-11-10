@@ -1076,7 +1076,7 @@ refuse such a value when a tool is saved.
   `search` price set on the dashboard's Web search page or through the
   API); a price for one of DeepSeek's models never prices
   it. A key restricted to some models runs it when
-  [`allowed_tools`](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access), its own or its
+  [`allowed_tools`](https://docs.otari.ai/guides/control/api-keys#model-and-search-tool-access), its own or its
   user's, names it; `deepseek:*` in `allowed_models` grants DeepSeek's models
   alone. Name it apart from a DeepSeek fetch instance, such as `deepseek` and
   `deepseek-fetch`. DeepSeek's

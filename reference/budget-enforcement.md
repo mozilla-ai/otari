@@ -3,8 +3,8 @@
 How Otari enforces a budget: the forms, the limits, how holds are taken and
 settled, and what a refusal carries. 
 
-[Budgets](https://docs.otari.ai/learn/budgets) explains scopes and
-periods, and [Set a budget and ceiling](https://docs.otari.ai/how-to-guides/set-a-budget-and-ceiling) sets one up
+[Budgets](https://docs.otari.ai/guides/control/budgets) explains scopes and
+periods, and [Set a budget and ceiling](https://docs.otari.ai/guides/control/set-a-budget-and-ceiling) sets one up
 in the dashboard.
 
 Otari checks budgets before dispatch and reconciles actual cost afterwards.
@@ -106,7 +106,7 @@ deployment can turn enforcement off entirely; see
 These are settled after the fact, so do not treat them as a hard real-time cap:
 
 - **Imported usage** never counts toward a budget; see
-  [Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
+  [Import usage from outside Otari](https://docs.otari.ai/guides/observe/external-usage).
 - **Batches** settle dollars only. A batch counts as the one request that created
   it and adds no tokens to a token cap, however many prompts it carried. Cap
   batch-heavy workloads in dollars, not tokens.
@@ -130,7 +130,7 @@ scope. The `detail` distinguishes two cases:
 
 On a service key, a refusal by the end user's own budget names the end user as
 the request did (`End user 'alice'`), not by Otari's internal id, and carries it
-as `end_user` in the body; see [End users](https://docs.otari.ai/guides/organizations-and-access/end-users).
+as `end_user` in the body; see [End users](https://docs.otari.ai/guides/control/end-users).
 
 ### `Retry-After`
 

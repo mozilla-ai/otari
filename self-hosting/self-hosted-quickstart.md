@@ -2,7 +2,7 @@
 
 In this tutorial you run Otari on your own machine with Docker Compose, connect
 it to OpenAI, and send your first request through it. For a throwaway container
-with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/98a752e9873a7496db84cb9801755a3bc5c63004/README.md#quickstart) instead.
+with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/README.md#quickstart) instead.
 
 You need:
 
@@ -121,8 +121,7 @@ see your request with its model, tokens and cost. The OpenAI provider is under
 ## Next steps
 
 - [Run the dashboard](run-the-dashboard.md): sign in as the operator and set up the dashboard.
-- [Admin dashboard](https://docs.otari.ai/guides/dashboard/dashboard): manage keys, users and providers in the browser.
-- [Access control](https://docs.otari.ai/guides): give each application its own key and budget.
+- [Access control](https://docs.otari.ai/guides/control/access-control): give each application its own key and budget.
 - [Models](https://docs.otari.ai/reference/gateway/models): connect more providers and choose model names.
 - [Connect a llama.cpp server](providers/llamacpp.md): serve a model you run yourself.
 - [Routing](https://docs.otari.ai/reference/gateway/routing): fall back to another model when one fails.

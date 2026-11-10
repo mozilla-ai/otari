@@ -102,7 +102,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Railway](https://github.com/mozilla-ai/otari/blob/98a752e9873a7496db84cb9801755a3bc5c63004/deploy/railway/README.md): that page owns its image tag,
+- [Railway](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/deploy/railway/README.md): that page owns its image tag,
   variables, platform limits and maintenance steps.
 
 ## Optional services
@@ -122,7 +122,7 @@ docker compose --profile object-storage up -d
 
 A request that needs a backend you have not configured fails; ordinary
 inference is unaffected. See [Built-in tools](https://docs.otari.ai/reference/gateway/tools) and
-[Guardrails](https://docs.otari.ai/guides/guardrails/guardrails).
+[Guardrails](https://docs.otari.ai/reference/gateway/guardrails-reference).
 
 ## Upgrading from hosted or hybrid mode
 

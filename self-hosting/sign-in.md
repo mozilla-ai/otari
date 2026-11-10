@@ -38,6 +38,13 @@ Otari keeps identities for dashboard sign-in and user records for request
 attribution and per-user budgets. Deleting or deactivating a user blocks future
 access but keeps historical usage.
 
+**Account settings** holds the name you are known by in the account menu, the
+organization roster and the Overview's user column. Someone added by address has
+no name until they set one; with no name, you are shown by your sign-in address.
+
+Signing in can also add you to an organization that has proven your email
+domain; see [Email-domain auto-join](https://docs.otari.ai/guides/organize/members#email-domain-auto-join).
+
 ### Dashboard sessions and identity
 
 The first operator signs in with the master key, which Otari exchanges for an
@@ -49,6 +56,9 @@ recovery path.
 The email and password form appears whenever any active identity has a
 password, even before the operator claims the deployment. Until then, the
 master-key box is shown beside it.
+
+A link to a dashboard page opened while signed out shows the sign-in screen
+first, then that page.
 
 Sessions expire after `dashboard_session_ttl_hours` and can be revoked.
 Password changes, master-key rotation, sign-out and identity deactivation
@@ -125,7 +135,7 @@ decides, as for [signup](#signup):
   spent gets 400.
 
 **What a first sign-in replaces.** On an address that is unverified, or only
-vouched for by an organization (see [Invitations](https://docs.otari.ai/guides/organizations-and-access/members#invitations)), the
+vouched for by an organization (see [Invitations](https://docs.otari.ai/guides/organize/members#invitations)), the
 first sign-in marks it verified and removes what was set up before: the
 password, any verification or reset link, sessions signed in with that
 password, and passkeys registered from one. On an unverified address it also
@@ -192,7 +202,7 @@ What an unknown address does depends on `open_signup`:
   first proves it: by signing up (or verifying that signup), by a first
   provider sign-in, or by choosing a password through "Forgot your password?"
   while it is unverified or only vouched for (see
-  [Invitations](https://docs.otari.ai/guides/organizations-and-access/members#invitations)). An address is claimed once: someone
+  [Invitations](https://docs.otari.ai/guides/organize/members#invitations)). An address is claimed once: someone
   who already proved it and later loses their last organization keeps the
   account, and signs in to the empty state where they can create one. An
   address with a pending invitation is claimed as is and finds it under
@@ -268,7 +278,7 @@ from a forgotten password on a deployment without mail.
 - It works once, expires after `password_reset_expiry_hours`, and replaces any
   earlier reset link.
 - A password chosen through a passed-on link records the address as vouched
-  for, not proven, like an [invitation](https://docs.otari.ai/guides/organizations-and-access/members#invitations) link.
+  for, not proven, like an [invitation](https://docs.otari.ai/guides/organize/members#invitations) link.
 - It is refused for a deactivated account, one with no address, one with no
   password that signs in with a provider or passkey, and, with `open_signup`
   disabled, an unverified address no organization still has as a member or

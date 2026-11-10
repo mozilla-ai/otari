@@ -1,5 +1,5 @@
 root: ./
 
 structure:
-  readme: access-control.md
+  readme: playground.md
   summary: SUMMARY.md

@@ -349,7 +349,7 @@ curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/fed
 `GET` on the same path lists the key's rules and `DELETE .../{rule_id}`
 removes one. The key must be the caller's own, as on the rest of
 `/api/v1/organizations/me/keys`, or, for an organization owner or admin, one of
-the organization's [service keys](https://docs.otari.ai/guides/organizations-and-access/end-users#2-create-the-service-key).
+the organization's [service keys](https://docs.otari.ai/guides/control/end-users#2-create-the-service-key).
 Anyone else's answers 404, except for the deployment operator. Adding a rule as
 a plain member answers 403.
 
@@ -388,6 +388,6 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 
 ## Related documentation
 
-- [Access control](https://docs.otari.ai/guides): API keys, service keys and budgets.
+- [Access control](https://docs.otari.ai/guides/control/access-control): API keys, service keys and budgets.
 - [Configuration](configuration.md): where `federation_issuers` and `federation_member_rules` are set.
-- [Use with Claude Code](https://docs.otari.ai/guides/agents-and-frameworks/use-with-claude-code): routing Claude Code through Otari.
+- [Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code): routing Claude Code through Otari.

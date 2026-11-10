@@ -44,7 +44,7 @@ Requests matching the ceiling count toward its budget. When the budget is exhaus
 
 Multiple ceilings are enforced independently. A request is blocked when any matching ceiling is exhausted.
 
-To cap a single API key, set a budget on the key itself; see [Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend).
+To cap a single API key, set a budget on the key itself; see [Cap a key's spend](api-keys.md#cap-a-keys-spend).
 
 ## Confirm enforcement
 

@@ -66,7 +66,7 @@ describes, built for your Codex version.
 Codex can export the usage of sessions that go straight to OpenAI. This needs a
 budget-exempt key, which only a deployment's operator can create, so it works on
 a gateway you run, not on otari.ai today. See
-[Enforcement boundary](external-usage.md#enforcement-boundary).
+[Enforcement boundary](https://docs.otari.ai/reference/gateway/external-usage-reference#enforcement-boundary).
 
 Add the logs exporter to `~/.codex/config.toml`, with your gateway's URL and the
 full logs path:
@@ -84,7 +84,7 @@ exporter = { otlp-http = { endpoint = "http://localhost:8000/otlp/v1/logs", prot
 
 Imported usage never counts toward budgets. Do not export a session you also
 route, or its cost appears twice. See
-[Importing external usage](external-usage.md).
+[Import usage from outside Otari](external-usage.md).
 
 ## See also
 
