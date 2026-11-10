@@ -23,7 +23,7 @@ must hold ``full_page.markdown`` as a string; an empty string is an empty page.
 Anything else raises ``unexpected_response``. Unread fields are ignored.
 
 API: https://you.com/docs/api-reference/extract. Pricing, read 2026-11-10,
-https://ydc-preview-extract-official-launch-docs.docs.buildwithfern.com/docs/administration/billing:
+https://you.com/docs/administration/billing:
 $0.90 per 1,000 URLs; ``standard`` adds $0.50 per 1,000 PDF pages.
 """
 
