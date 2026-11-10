@@ -43,9 +43,9 @@ function canShare(email: string): boolean {
  * top bar from `md` up, and in the account menu below it.
  *
  * Not a `FormDialog`: that frame always renders a titled header and a footer
- * rule, and this one is a message, Send and Cancel. It wears the same geometry
- * classes, so it sits at the same offset and becomes the same full-screen sheet
- * below 640px, and it shares the dirty guard.
+ * rule, and this one has neither. It wears the same geometry classes, so it
+ * sits at the same offset and becomes the same full-screen sheet below 640px,
+ * and it shares the dirty guard.
  *
  * Sending swaps the compose for a thank-you in the same frame, which stays
  * until it is dismissed: a timer would take the words away from a slow reader.
@@ -176,11 +176,10 @@ export function FeedbackDialog({
             className="otari-form-dialog otari-form-dialog--md relative flex flex-col p-0 outline-none"
           >
             {returnFocusRef ? <RestoreFocus target={returnFocusRef} /> : null}
-            {/* Close, at every size. On the sheet (a narrow or a short
-                screen) it is a touch screen's only way out, so it gets its own
-                row; on the floating frame it sits in the corner, beside the
-                field. Its query is the sheet's, negated, so no size gets
-                neither. */}
+            {/* On the sheet (a narrow or a short screen) Close is a touch
+                screen's only way out, so it gets its own row; on the floating
+                frame it sits in the corner, beside the field. The query is the
+                sheet's negated, so every size gets one of the two. */}
             <div className="flex shrink-0 justify-end pt-1.5 pr-2.5 pl-4 [@media(width>639px)_and_(height>639px)]:absolute [@media(width>639px)_and_(height>639px)]:top-3 [@media(width>639px)_and_(height>639px)]:right-3 [@media(width>639px)_and_(height>639px)]:z-10 [@media(width>639px)_and_(height>639px)]:p-0">
               <Button
                 aria-label="Close"
@@ -349,7 +348,7 @@ export function FeedbackDialog({
                             IS_APPLE ? "Meta+Enter" : "Control+Enter"
                           }
                           data-feedback-send={isPending ? "pending" : "idle"}
-                          className={`relative pr-3 pl-4 max-sm:min-h-11 max-sm:w-full max-sm:px-4 pointer-coarse:px-4 ${
+                          className={`relative pr-3 pl-4 max-sm:px-4 pointer-coarse:px-4 ${
                             isPending ? "pointer-events-none" : ""
                           }`}
                         >
