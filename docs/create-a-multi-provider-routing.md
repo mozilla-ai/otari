@@ -37,7 +37,7 @@ Your application talks to Otari once. Otari handles the provider-facing complexi
 * A hosted otari.ai account
 * A workspace where you want to route requests. For more info, also consult [Manage workspaces](manage-workspaces.md).
 * Org admin access, if you want to add provider keys and manage routing policies
-* Optionally, provider accounts and API keys for two providers. Without them, otari.ai serves the requests and they are paid from your balance. For more info, also consult [Manage provider keys](manage-provider-keys.md).
+* Optionally, provider accounts and API keys for two providers. Without them, otari.ai serves the requests and they are paid from your balance. For more info, also consult [Model providers](model-providers.md).
 
 This example uses OpenAI and Anthropic because they make the routing story easy to follow. If your team uses Bedrock or Azure OpenAI instead, the flow is the same.
 
@@ -53,7 +53,7 @@ Start with bring-your-own-provider setup, because that is where multi-provider c
 6. Paste your API key.
 7. Click **Add provider key** to save it.
 8. Repeat the process to add a second provider key, for example, **Anthropic**.
-9. Make sure both keys are available to the workspace you want to use; see [Control workspace access](manage-provider-keys.md#control-workspace-access).
+9. Make sure both keys are available to the workspace you want to use; see [Control workspace access](model-providers.md#control-workspace-access).
 10. If you have multiple keys for the same provider, set the right default.
 
 At this point, Otari knows how to reach both providers without your application needing to store either key.
@@ -156,7 +156,7 @@ So far, every request has succeeded on the primary, so you haven't seen the fall
 Temporarily break the primary for the workspace you used above, then send the same request with its API key:
 
 1. In **Organization** → **Providers** → **Inference**, add an OpenAI key with an invalid value, named `fallback-test`. Leave the Anthropic key valid.
-2. Pin that workspace to `fallback-test`, as in [Control workspace access](manage-provider-keys.md#control-workspace-access). Other workspaces keep the organization's key.
+2. Pin that workspace to `fallback-test`, as in [Control workspace access](model-providers.md#control-workspace-access). Other workspaces keep the organization's key.
 3. Send the same `production-chat` request from step 4, unchanged.
 
 The request still succeeds, but the response now comes from Anthropic. OpenAI refused the key, Otari moved to the next entry, and Anthropic served the call. `Otari-Fallback` is now `true`, and `Otari-Model` names the Anthropic model. The Requests tab records both attempts.

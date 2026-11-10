@@ -35,7 +35,7 @@ in order, skipping keys it turned off:
 
 A key with its own API base URL is not in this list: requests name it by its
 own prefix (see
-[Add a key for your own endpoint](provider-keys.md#add-a-key-for-your-own-endpoint)),
+[Add a key for your own endpoint](model-providers.md#add-a-key-for-your-own-endpoint)),
 and it serves every workspace that has not turned it off.
 
 The models a key serves and its serving switches are in
@@ -49,7 +49,7 @@ Otari cannot verify this; it records the declaration. The Models page shows it
 beside each offering and filters on it (see
 [Browsing the grouped catalog](models.md#browsing-the-grouped-catalog)). A
 workspace can require it, refusing every undeclared source; see
-[Control workspace access](provider-keys.md#control-workspace-access).
+[Control workspace access](model-providers.md#control-workspace-access).
 
 Whose declaration counts depends on whose key serves the offering:
 

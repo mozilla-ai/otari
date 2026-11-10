@@ -14,7 +14,7 @@ shows how those pieces fit together. Each one has its own page with the steps.
 | API key | A workload credential bound to one user and one workspace | [API keys](api-keys.md) |
 | Service key and end user | A key whose requests bill the people an application serves | [Track spend per end user](end-users.md) |
 | Budget | A spend, token or request limit over a period | [Budgets](budgets.md) |
-| Provider key | The organization's credential for an upstream LLM provider | [Provider keys](provider-keys.md) |
+| Provider key | The organization's credential for an upstream LLM provider | [Model providers](model-providers.md) |
 | Operator | Runs a self-hosted deployment as a whole | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
 
 ## How they relate

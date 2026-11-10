@@ -6,7 +6,7 @@ icon: bolt
 
 This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears on the workspace's Overview.
 
-**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](manage-provider-keys.md).
+**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](model-providers.md).
 
 To run Otari on your own machine instead, follow the [Self-hosted quickstart](self-hosted-quickstart.md).
 
@@ -85,7 +85,7 @@ print(response.choices[0].message.content)
 You've sent your first LLM request! Now you can:
 
 - [Manage workspaces](manage-workspaces.md)
-- [Manage provider keys](manage-provider-keys.md)
+- [Model providers](model-providers.md)
 - [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 - [Create a multi-provider routing](create-a-multi-provider-routing.md)
 - [Configure guardrails](configure-guardrails.md)
