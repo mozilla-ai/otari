@@ -562,6 +562,42 @@ describe("OrganizationSsoPage", () => {
     ).toBeDisabled()
   })
 
+  it("offers a way to read the report again when it could not be read", async () => {
+    let failing = true
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflight: organizationSsoPreflight({
+        total_members: 3,
+        affected_count: 0,
+      }),
+      preflightResponse: () =>
+        failing
+          ? jsonResponse({ detail: "unavailable" }, 503)
+          : jsonResponse(
+              organizationSsoPreflight({ total_members: 3, affected_count: 0 }),
+            ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await screen.findByText(/could not be read, so it cannot be turned on/)
+
+    // Without this the only way back is a reload, because the save stays disabled.
+    failing = false
+    await user.click(screen.getByRole("button", { name: "Read it again" }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Save enforcement" }),
+      ).toBeEnabled()
+    })
+  })
+
   it("follows a policy another administrator changed, while nothing is half-filled", async () => {
     // The connection test refetches the settings, which is the refresh an administrator presses.
     let enforced = false

@@ -475,8 +475,20 @@ function EnforcementSection({
         <p className="text-caption">
           {preflight.error === null
             ? "Reading who this would affect\u2026"
-            : "Who this would affect could not be read, so it cannot be turned on yet. Try again."}
+            : "Who this would affect could not be read, so it cannot be turned on yet."}
         </p>
+      ) : null}
+      {required && report === null && preflight.error !== null ? (
+        // The report is what admits the save, so without a control the only way back is a reload.
+        <div className="flex justify-start">
+          <Button
+            variant="ghost"
+            onPress={() => void preflight.refetch()}
+            isPending={preflight.isFetching}
+          >
+            Read it again
+          </Button>
+        </div>
       ) : null}
       {required && report !== null ? (
         <div className="flex flex-col gap-3">
