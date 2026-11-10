@@ -270,6 +270,26 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
     expect(body).not.toHaveProperty("authorization_token")
   })
 
+  it("warns that moving a server to another host clears the client a manager entered", async () => {
+    const perUser = workspaceMcpServer({
+      workspace_id: WORKSPACE,
+      credential_mode: "per_user",
+      oauth_client_id: "otari-client",
+      has_oauth_client_secret: true,
+    })
+    mockMcpServerApi({ server: perUser })
+    const user = userEvent.setup()
+    await editConnection(user)
+
+    const url = screen.getByLabelText("URL")
+    await user.clear(url)
+    await user.type(url, "https://mcp.example.com/other")
+    expect(screen.queryByText(/another host/)).not.toBeInTheDocument()
+    await user.clear(url)
+    await user.type(url, "https://elsewhere.example.com/mcp")
+    expect(screen.getByText(/another host/)).toBeVisible()
+  })
+
   it("shows a per-user server's sign-in and warns before a change that ends everyone's", async () => {
     const perUser = workspaceMcpServer({
       workspace_id: WORKSPACE,

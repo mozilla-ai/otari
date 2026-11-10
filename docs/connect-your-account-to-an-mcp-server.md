@@ -49,6 +49,10 @@ then says to add an OAuth client ID.
    provider gave you one.
 4. Click **Save server**.
 
+A client ID and secret belong to one host. If you later change the server's
+**URL** to another host, saving clears them, and you enter the new host's
+client or leave it blank for Otari to register itself.
+
 ## Connect your account
 
 Anyone who can see the workspace can do this.

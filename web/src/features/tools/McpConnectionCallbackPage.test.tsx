@@ -72,6 +72,25 @@ describe("McpConnectionCallbackPage", () => {
     expect(calls[0].body).toEqual({ state: "the-state", code: "the-code" })
   })
 
+  it("sends the authorization server's iss along with the code", async () => {
+    const calls = mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: "w",
+        server_name: "drive",
+        return_to: null,
+      }),
+    )
+    renderCallback({ state: "s", code: "c", iss: "https://auth.example.com" })
+
+    expect(await screen.findByText("Server page")).toBeVisible()
+    expect(calls[0].body).toEqual({
+      state: "s",
+      code: "c",
+      iss: "https://auth.example.com",
+    })
+  })
+
   it("lands on the server's page when the sign-in named nowhere, or somewhere outside the dashboard", async () => {
     mockComplete(() =>
       Response.json({
