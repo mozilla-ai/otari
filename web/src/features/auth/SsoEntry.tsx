@@ -38,6 +38,7 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
     readRememberedCompany(),
   )
   const [isOpen, setIsOpen] = useState(false)
+  const [rememberedUnavailable, setRememberedUnavailable] = useState(false)
   const [email, setEmail] = useState("")
   const [notFound, setNotFound] = useState(false)
   const [isPending, setIsPending] = useState(false)
@@ -80,13 +81,14 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
       })
       setIsPending(false)
       // A remembered slug can go stale: the organization may have disabled or
-      // removed its connection since the last sign-in. Falling back to the
-      // address step rather than showing a bare error keeps this from being a
-      // dead end.
+      // removed its connection since the last sign-in. Dropping it leaves
+      // `remembered` null, which renders the address step, rather than the
+      // refusal `notFound` renders: that one answers an address, and this
+      // visitor typed none.
       if (caught instanceof ApiError && caught.status === 404) {
         forgetRememberedCompany()
         setRemembered(null)
-        setNotFound(true)
+        setRememberedUnavailable(true)
         return
       }
       setError(caught)
@@ -196,6 +198,12 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
             void submitAddress()
           }}
         >
+          {rememberedUnavailable ? (
+            <p className="text-body">
+              That company&rsquo;s sign-in is no longer available. Enter your
+              work email.
+            </p>
+          ) : null}
           <TextField
             value={email}
             onChange={(next) => {

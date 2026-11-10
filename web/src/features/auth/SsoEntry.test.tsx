@@ -205,11 +205,16 @@ describe("SsoEntry", () => {
     )
     await user.click(screen.getByRole("button", { name: "Continue with Acme" }))
 
+    // The address step, not a refusal naming an address nobody typed.
+    expect(await screen.findByLabelText("Work email")).toBeInTheDocument()
     expect(
-      await screen.findByText(
+      screen.getByText(/sign-in is no longer available/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(
         "We could not find a company sign-in for that address.",
       ),
-    ).toBeInTheDocument()
+    ).not.toBeInTheDocument()
     expect(
       window.localStorage.getItem("otari.dashboard.rememberedCompany"),
     ).toBeNull()
