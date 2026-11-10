@@ -80,39 +80,8 @@ class OrgProviderKeyModelRepository(
         )
         return result.scalar_one_or_none()
 
-    async def list_for_key(
-        self, org_provider_key_id: uuid.UUID, *, skip: int = 0, limit: int = 500
-    ) -> tuple[Sequence[OrgProviderKeyModel], int]:
-        """One page of a key's offered models, and how many there are in total.
-
-        ``count`` is the total rather than the page length, so a client knows
-        whether another page is owed; counted in the database rather than by
-        loading every row, because a provider can offer several hundred models.
-        """
-        rows = (
-            (
-                await self.db.execute(
-                    select(OrgProviderKeyModel)
-                    .where(col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id)
-                    .order_by(col(OrgProviderKeyModel.model))
-                    .offset(skip)
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        total = (
-            await self.db.execute(
-                select(func.count())
-                .select_from(OrgProviderKeyModel)
-                .where(col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id)
-            )
-        ).scalar_one()
-        return rows, total
-
     async def list_all_for_key(self, org_provider_key_id: uuid.UUID) -> Sequence[OrgProviderKeyModel]:
-        """Every offered row on one key, for the passes that reprice or reseed them."""
+        """Every offered row on one key, by model name, for the listing and the passes that reprice or reseed them."""
         result = await self.db.execute(
             select(OrgProviderKeyModel)
             .where(col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id)
