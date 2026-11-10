@@ -5718,14 +5718,20 @@ async def _open_tool_backends(
     """
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
-        mcp = await stack.enter_async_context(
-            MCPClientPool(
-                tool_ctx.mcp_server_configs,
-                tally=tool_ctx.tally,
-                trace=tool_ctx.trace,
-                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+        try:
+            mcp = await stack.enter_async_context(
+                MCPClientPool(
+                    tool_ctx.mcp_server_configs,
+                    tally=tool_ctx.tally,
+                    trace=tool_ctx.trace,
+                    ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+                )
             )
-        )
+        except McpSignInRequiredError as exc:
+            # A per-user server refused its token, and the user's sign-in turned out to be over.
+            raise domain_error(adapter, exc) from exc
+        except McpConnectionUnavailableError as exc:
+            raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
         except McpServerDeclarationError as exc:

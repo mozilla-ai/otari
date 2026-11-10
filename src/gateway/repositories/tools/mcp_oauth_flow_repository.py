@@ -38,6 +38,8 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         resource: str | None,
         redirect_uri: str,
         scope: str | None,
+        issuer: str | None,
+        requires_iss: bool,
         return_to: str | None,
         expires_at: datetime,
     ) -> None:
@@ -56,6 +58,8 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
                 resource=resource,
                 redirect_uri=redirect_uri,
                 scope=scope,
+                issuer=issuer,
+                requires_iss=requires_iss,
                 return_to=return_to,
                 expires_at=expires_at,
             )

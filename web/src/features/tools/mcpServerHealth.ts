@@ -74,6 +74,16 @@ const FAILURES: Record<
     label: "FAILED",
     detail: () => "The connection failed.",
   },
+  sign_in_unsupported: {
+    label: "NO SIGN-IN",
+    detail: () =>
+      "Its authorization server does not offer S256 PKCE, which signing in requires, so nobody can connect an account.",
+  },
+  sign_in_unavailable: {
+    label: "NO SIGN-IN",
+    detail: () =>
+      "Its sign-in setup could not be read, so nobody can connect an account yet. Check the URL, or that the server supports OAuth sign-in.",
+  },
 }
 
 /**

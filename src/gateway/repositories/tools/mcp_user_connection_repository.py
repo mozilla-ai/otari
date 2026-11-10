@@ -72,6 +72,26 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return list(rows.scalars().all())
 
+    async def revocable_for_server(self, server_id: uuid.UUID, *, limit: int = 500) -> list[McpUserConnection]:
+        """Up to ``limit`` of a server's connections whose authorization server can be asked to end them."""
+        rows = await self.db.execute(
+            select(McpUserConnection)
+            .where(McpUserConnection.server_id == server_id, McpUserConnection.revocation_endpoint.is_not(None))
+            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+            .limit(limit)
+        )
+        return list(rows.scalars().all())
+
+    async def revocable_for_user(self, user_id: str, *, limit: int = 500) -> list[McpUserConnection]:
+        """Up to ``limit`` of a user's connections on any server whose authorization server can be asked to end them."""
+        rows = await self.db.execute(
+            select(McpUserConnection)
+            .where(McpUserConnection.user_id == user_id, McpUserConnection.revocation_endpoint.is_not(None))
+            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+            .limit(limit)
+        )
+        return list(rows.scalars().all())
+
     async def count_for_server(self, server_id: uuid.UUID) -> int:
         """How many users are connected to a server."""
         counted = select(func.count()).select_from(McpUserConnection).where(McpUserConnection.server_id == server_id)

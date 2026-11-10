@@ -6,6 +6,7 @@ DNS resolver, and the HTTP client is one on a mock transport.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -201,6 +202,7 @@ async def test_discovery_follows_the_challenge_to_the_authorization_server(wire:
         scope="files:read",
         resource=SERVER_URL,
         token_auth_methods=("client_secret_post", "none"),
+        issuer=ISSUER,
     )
     assert "Authorization" not in wire.sent_to(SERVER_URL)[0].headers
 
@@ -326,6 +328,77 @@ async def test_metadata_with_no_issuer_is_refused_as_the_fallback_path_refuses_i
 
     with pytest.raises(McpOAuthDiscoveryError, match="own issuer"):
         await _mcp_oauth.discover(SERVER_URL)
+
+
+@pytest.mark.parametrize("methods", [None, [], ["plain"]], ids=["absent", "empty", "plain-only"])
+async def test_an_authorization_server_that_does_not_say_s256_is_refused_as_a_setup_problem(
+    wire: _Wire, methods: list[str] | None
+) -> None:
+    """The MCP authorization specification: a client refuses a server that does not advertise S256."""
+    document = _as_document(code_challenge_methods_supported=methods)
+    if methods is None:
+        del document["code_challenge_methods_supported"]
+    _publish(wire, server=document)
+
+    with pytest.raises(_mcp_oauth.McpOAuthPkceUnsupportedError, match="S256"):
+        await _mcp_oauth.discover(SERVER_URL)
+
+
+async def test_an_authorization_server_that_sends_iss_is_recorded_as_doing_so(wire: _Wire) -> None:
+    _publish(wire, server=_as_document(authorization_response_iss_parameter_supported=True))
+
+    metadata = await _mcp_oauth.discover(SERVER_URL)
+
+    assert (metadata.issuer, metadata.sends_iss) == (ISSUER, True)
+
+
+async def test_a_token_endpoint_that_does_not_answer_in_time_is_a_failure_for_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return httpx.Response(200, json={"access_token": "late"})
+
+    monkeypatch.setattr(
+        _mcp_oauth,
+        "_http_client",
+        lambda timeout: httpx.AsyncClient(transport=httpx.MockTransport(slow), follow_redirects=False),
+    )
+
+    with pytest.raises(McpOAuthTokenError, match="in time") as raised:
+        await _mcp_oauth.refresh(
+            f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None, deadline=0.05
+        )
+
+    assert raised.value.is_permanent is False
+
+
+async def test_an_answer_read_inside_the_deadline_is_returned_even_if_closing_runs_past_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deadline stops at the read: a rotated refresh token that arrived is never thrown away."""
+
+    class SlowToClose(httpx.AsyncByteStream):
+        async def __aiter__(self) -> Any:
+            yield b'{"access_token": "at", "refresh_token": "rotated"}'
+
+        async def aclose(self) -> None:
+            await asyncio.sleep(0.2)
+
+    monkeypatch.setattr(
+        _mcp_oauth,
+        "_http_client",
+        lambda timeout: httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=SlowToClose())),
+            follow_redirects=False,
+        ),
+    )
+
+    tokens = await _mcp_oauth.refresh(
+        f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None, deadline=0.1
+    )
+
+    assert (tokens.access_token, tokens.refresh_token) == ("at", "rotated")
 
 
 async def test_an_authorization_server_without_s256_is_refused(wire: _Wire) -> None:
