@@ -7,11 +7,13 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
+import { OrganizationMemorySection } from "@/features/memory/OrganizationMemorySection"
 import {
   useDeleteOrganization,
   useOrganizationContext,
   useUpdateOrganization,
 } from "@/shared/api/organizations"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { RenameOrganizationDialog } from "./RenameOrganizationDialog"
 import { canManage } from "./roles"
@@ -119,6 +121,7 @@ function DeleteOrganizationSection({ onDelete }: { onDelete: () => void }) {
 
 export function OrganizationGeneralPage() {
   const context = useOrganizationContext()
+  const hasSurface = useSurfaces()
   const update = useUpdateOrganization()
   const remove = useDeleteOrganization()
   const [isRenaming, setIsRenaming] = useState(false)
@@ -172,6 +175,8 @@ export function OrganizationGeneralPage() {
           setIsRenaming(true)
         }}
       />
+
+      {canEdit && hasSurface("memory") ? <OrganizationMemorySection /> : null}
 
       {canEdit && organization.slug !== DEFAULT_ORGANIZATION_SLUG ? (
         <DeleteOrganizationSection

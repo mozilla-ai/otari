@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext } from "@/client"
 import { OrganizationGeneralPage } from "@/features/organization/OrganizationGeneralPage"
 import { API_ROOT } from "@/shared/api/client"
-import { organization, organizationContext } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organization, organizationContext } from "@/tests/fixtures"
 
 interface Request {
   url: string
@@ -39,7 +40,11 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+  )
 }
 
 // Opens the rename dialog and hands back its scope, so an assertion about the

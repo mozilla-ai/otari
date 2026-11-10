@@ -1,0 +1,183 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import type { WorkspaceMemory } from "@/client"
+
+import { WorkspaceMemorySection } from "@/features/memory/WorkspaceMemorySection"
+import { API_ROOT } from "@/shared/api/client"
+
+const WORKSPACE = "ws-1"
+const URL = `${API_ROOT}/workspaces/${WORKSPACE}/memory`
+
+interface Sent {
+  method: string
+  body: unknown
+}
+
+function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
+  return {
+    workspace_id: WORKSPACE,
+    deployment_enabled: true,
+    organization_enabled: true,
+    enabled: true,
+    workspace_scope_enabled: false,
+    write_policy: "review",
+    offer_to_every_request: false,
+    hide_external: false,
+    retention_days: null,
+    deployment_retention_days: 180,
+    entries: { active: 3, quarantined: 1 },
+    proposals_waiting: 2,
+    ...overrides,
+  }
+}
+
+function mockApi(served: WorkspaceMemory): Sent[] {
+  const sent: Sent[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const method = (init?.method ?? "GET").toUpperCase()
+    expect(String(input)).toBe(URL)
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    if (method !== "GET") sent.push({ method, body })
+    const answer =
+      method === "DELETE"
+        ? {
+            workspace_id: WORKSPACE,
+            entries: 3,
+            proposals: 2,
+            reads: 4,
+            keys: 1,
+          }
+        : method === "PUT"
+          ? { ...served, ...body }
+          : served
+    return new Response(JSON.stringify(answer), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  })
+  return sent
+}
+
+async function renderSection(served: WorkspaceMemory, canManage = true) {
+  const sent = mockApi(served)
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceMemorySection workspaceId={WORKSPACE} canManage={canManage} />
+    </QueryClientProvider>,
+  )
+  await screen.findByRole("switch", { name: "Agent memory" })
+  return sent
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe("WorkspaceMemorySection", () => {
+  it("shows the switches and what the workspace holds", async () => {
+    await renderSection(memory())
+
+    expect(screen.getByRole("switch", { name: "Agent memory" })).toBeChecked()
+    expect(
+      screen.getByRole("switch", { name: "Review shared proposals" }),
+    ).toBeChecked()
+    expect(
+      screen.getByText(
+        "3 entries in recall, 2 proposals not decided yet, 1 flagged out of recall.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/off for this organization/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says when the organization keeps memory off", async () => {
+    await renderSection(memory({ organization_enabled: false }))
+
+    expect(
+      screen.getByText(/Memory is off for this organization/),
+    ).toBeInTheDocument()
+  })
+
+  it("asks before turning memory on, then sends every switch", async () => {
+    const sent = await renderSection(memory({ enabled: false }))
+
+    await userEvent.click(screen.getByRole("switch", { name: "Agent memory" }))
+    expect(sent).toEqual([])
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Turn on memory" }),
+    )
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({
+      method: "PUT",
+      body: {
+        enabled: true,
+        workspace_scope_enabled: false,
+        write_policy: "review",
+        offer_to_every_request: false,
+        hide_external: false,
+        retention_days: null,
+      },
+    })
+  })
+
+  it("applies a switch as it is flipped", async () => {
+    const sent = await renderSection(memory())
+
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Offer memory to every request" }),
+    )
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]?.body).toMatchObject({
+      offer_to_every_request: true,
+      enabled: true,
+    })
+  })
+
+  it("keeps a retention outside its bounds from being saved", async () => {
+    const sent = await renderSection(memory())
+    const field = screen.getByRole("textbox", { name: /Keep unused entries/ })
+
+    await userEvent.type(field, "0")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await userEvent.clear(field)
+    await userEvent.type(field, "30")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]?.body).toMatchObject({ retention_days: 30 })
+  })
+
+  it("asks before erasing, which cannot be undone", async () => {
+    const sent = await renderSection(memory())
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Erase this workspace's memory" }),
+    )
+    expect(await screen.findByText(/cannot be undone/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Erase memory" }))
+
+    await waitFor(() =>
+      expect(sent).toEqual([{ method: "DELETE", body: undefined }]),
+    )
+  })
+
+  it("lets a member read the switches and change none", async () => {
+    await renderSection(memory(), false)
+
+    expect(screen.getByRole("switch", { name: "Agent memory" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Erase this workspace's memory" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText(/Only the organization's owners and admins/),
+    ).toBeInTheDocument()
+  })
+})

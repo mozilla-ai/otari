@@ -30,6 +30,8 @@ export const RATE_LIMIT_RULES = "rate-limit-rules"
 export const MAINTENANCE_MODE_POLL_MS = 30_000
 export const TOOL_SETTINGS = "tool-settings"
 export const TOOLS = "tools"
+// The caller's organization's memory switch. A workspace's own sits under its WORKSPACES key.
+export const ORGANIZATION_MEMORY = "organization-memory"
 export const SEARCH_TOOLS = "search-tools"
 export const SEARCH_PROVIDERS = "search-providers"
 // The guardrails service's own profile list, keyed apart from TOOL_SETTINGS

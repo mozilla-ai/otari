@@ -30,6 +30,7 @@ from gateway.api.deps import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
+from gateway.core.surface import Surface
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.schemas.memory import (
     OrganizationMemoryPublic,
@@ -265,7 +266,8 @@ async def _consolidate(config: GatewayConfig) -> None:
 
 FEATURE = CoreFeature(
     name="memory",
-    surface=None,
+    # Published while the deployment offers memory, so the dashboard shows its switches only then.
+    surface=Surface("memory"),
     enabled=lambda config: config.memory_enabled,
     routers=lambda config: (router, workspace_router, organization_router),
     worker=_consolidate,

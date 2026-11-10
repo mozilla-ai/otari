@@ -104,13 +104,19 @@ function mockApi(
   return requests
 }
 
-function renderPage(url = `/workspaces/${WORKSPACE}`, workspaceId = WORKSPACE) {
+function renderPage(
+  url = `/workspaces/${WORKSPACE}`,
+  workspaceId = WORKSPACE,
+  surfaces: string[] = [],
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>
+      <DeploymentProvider
+        value={bootstrap({ surfaces: [...bootstrap().surfaces, ...surfaces] })}
+      >
         <WorkspaceDetailPage workspaceId={workspaceId} />
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -139,6 +145,20 @@ describe("WorkspaceDetailPage", () => {
       "href",
       "/workspaces",
     )
+  })
+
+  it("offers a Memory tab only where the deployment offers memory", async () => {
+    mockApi()
+    const { unmount } = renderPage()
+    await screen.findByRole("heading", { name: "Default Workspace" })
+    expect(screen.queryByRole("button", { name: "Memory" })).toBeNull()
+    unmount()
+
+    renderPage(`/workspaces/${WORKSPACE}`, WORKSPACE, ["memory"])
+
+    expect(
+      await screen.findByRole("button", { name: "Memory" }),
+    ).toBeInTheDocument()
   })
 
   it("says a workspace it cannot find is not found", async () => {

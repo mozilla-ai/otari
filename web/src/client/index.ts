@@ -691,6 +691,15 @@ export type WorkspaceCodeExecutionPolicy =
 export type UpdateWorkspaceCodeExecutionPolicyRequest =
   Schemas["WorkspaceCodeExecutionPolicyUpdate"]
 
+// Agent memory's switches: one per organization, and a workspace's own beneath it;
+// see `src/gateway/api/routes/memory.py`.
+export type OrganizationMemory = Schemas["OrganizationMemoryPublic"]
+export type UpdateOrganizationMemoryRequest =
+  Schemas["OrganizationMemoryUpdate"]
+export type WorkspaceMemory = Schemas["WorkspaceMemoryPublic"]
+export type UpdateWorkspaceMemoryRequest = Schemas["WorkspaceMemoryUpdate"]
+export type WorkspaceMemoryErased = Schemas["WorkspaceMemoryErased"]
+
 // The per-workspace web-search configuration over the deployment-wide backend;
 // see `src/gateway/services/tenancy/workspace_web_search_service.py`.
 export type WorkspaceWebSearchConfig = Schemas["WorkspaceWebSearchConfigPublic"]
