@@ -10,7 +10,8 @@ module says which rows to look up, which requests skip the check, and what the
 refusal says, as well as the refusal of a tool the organization's funds cannot pay for.
 """
 
-from collections.abc import Sequence
+import uuid
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -115,7 +116,7 @@ def admitted_tools(*, code_execution: bool, web: AdmittedWebTools) -> list[Price
     return [priced for tool in BUILTIN_TOOLS for priced in used.get(tool.name, ())]
 
 
-def deployment_paid_web_tools(config: GatewayConfig, policy: ResolvedWebSearchConfig | None) -> frozenset[Tool]:
+def _deployment_paid_web_tools(config: GatewayConfig, policy: ResolvedWebSearchConfig | None) -> frozenset[Tool]:
     """The web tools a request under ``policy`` declaring one alone would run on the deployment's account.
 
     Each is admitted as the request path admits it, its search's pages included.
@@ -133,6 +134,22 @@ def deployment_paid_web_tools(config: GatewayConfig, policy: ResolvedWebSearchCo
             continue
         paid.update(tool.type for tool in admitted_tools(code_execution=False, web=web) if tool.deployment_paid)
     return frozenset(paid)
+
+
+async def unfunded_tools(
+    config: GatewayConfig,
+    policy: ResolvedWebSearchConfig | None,
+    workspace_id: uuid.UUID,
+    funded: Callable[[uuid.UUID], Awaitable[bool]],
+) -> frozenset[Tool]:
+    """The gateway tools a request from the workspace would be refused for want of funds.
+
+    The sandbox is always the deployment's; a web tool counts only where
+    ``policy`` would run it on the deployment's account.
+    """
+    if await funded(workspace_id):
+        return frozenset()
+    return _deployment_paid_web_tools(config, policy) | {Tool.CODE_EXECUTION}
 
 
 def tools_to_price(

@@ -19,7 +19,7 @@ funds to pay for it. A master key or a dashboard session belongs to no single
 workspace and gets the deployment's answer.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -40,9 +40,9 @@ from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
-    deployment_paid_web_tools,
     fetch_resolves,
     search_resolves,
+    unfunded_tools,
     web_fetch_tool_definition,
     web_search_configured,
     web_search_declaration_forms,
@@ -116,7 +116,7 @@ class _WorkspaceSwitches:
     # What the web tools resolve on, with the workspace's own keys; ``None`` for the deployment's alone.
     search_policy: ResolvedWebSearchConfig | None = None
     # The tools that would run on the deployment's account while the organization cannot pay for them.
-    unfunded: frozenset[str] = frozenset()
+    unfunded: frozenset[Tool] = frozenset()
 
 
 async def _workspace_switches(
@@ -124,6 +124,7 @@ async def _workspace_switches(
     api_key: APIKey | None,
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    funding: WorkspaceFundingDep,
 ) -> _WorkspaceSwitches:
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
@@ -135,6 +136,7 @@ async def _workspace_switches(
             api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
         ),
         search_policy=search_policy,
+        unfunded=await unfunded_tools(config, search_policy, api_key.workspace_id, funding.funded),
     )
 
 
@@ -213,9 +215,5 @@ async def list_tools(
     provider untouched.
     """
     api_key, _ = auth
-    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
-    if api_key is not None and not await funding.funded(api_key.workspace_id):
-        # The canonical code tool runs in the deployment's sandbox; a web tool may run on the organization's key.
-        unfunded = deployment_paid_web_tools(config, switches.search_policy) | {Tool.CODE_EXECUTION}
-        switches = replace(switches, unfunded=frozenset(unfunded))
+    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, funding)
     return ToolsResponse(data=_managed_tools(config, switches))

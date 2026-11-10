@@ -32,7 +32,8 @@ Unavailable but recognized tools remain in the response with
 - `insufficient_funds`: the tool would run on the deployment's account and the
   API key's organization has no funds paid in (see
   [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A web search on
-  the organization's own search key is not affected.
+  the organization's own search key is not affected, unless the pages it reads
+  are fetched on the deployment's account.
 
 A master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.
