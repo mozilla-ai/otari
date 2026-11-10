@@ -82,7 +82,10 @@ sessions, email verification and reset, the profile, and deployment-wide
 account administration.
 
 Its tables sit in `models/tenancy.py` today, which organizations holds, except
-`oauth_identity_link` in `models/identity.py`.
+`oauth_identity_link` and `oidc_connection` in `models/identity.py`. The
+connection table is an organization's own way of signing in rather than a
+property of the organization, which is why it sits here and not with
+organizations.
 
 ### organizations
 

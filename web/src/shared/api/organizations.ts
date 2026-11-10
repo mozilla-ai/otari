@@ -21,11 +21,15 @@ import type {
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   OfferOrgProviderModelRequest,
+  OidcConnectionRequest,
   Organization,
   OrganizationContext,
   OrganizationDomain,
   OrganizationMember,
   OrganizationMembers,
+  OrganizationSso,
+  OrganizationSsoEnforcementRequest,
+  OrganizationSsoPreflight,
   OrgProviderAvailableModels,
   OrgProviderKey,
   OrgProviderModel,
@@ -52,6 +56,8 @@ import {
   ORGANIZATION_PROVIDER_AVAILABLE_MODELS,
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
+  ORGANIZATION_SSO,
+  ORGANIZATION_SSO_PREFLIGHT,
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
@@ -829,6 +835,10 @@ function invalidateOrganizationDomains(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_DOMAINS] })
+  // The SSO settings name the domains that admit sign-in, so a domain removed,
+  // paused or newly proven leaves that read describing admission it no longer
+  // grants until it is asked again.
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
 }
 
 export function useCreateOrganizationDomain() {
@@ -882,6 +892,108 @@ export function useDeleteOrganizationDomain() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+// An organization's own bring-your-own OIDC connection, for signing in through
+// an identity provider the organization administers rather than Otari's own
+// sign-in methods. `redirect_uri` is served alongside the connection, so the
+// one read also tells an admin what to register before saving anything.
+//
+// There is no partial update: saving replaces the whole connection. The client
+// secret may be left out to keep the stored one, which is refused unless the
+// issuer and the client ID are both unchanged.
+
+export function useOrganizationSso(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_SSO],
+    queryFn: () => apiFetch<OrganizationSso>("/organizations/me/sso"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+// Returned rather than discarded, so a mutation settles only once the refetch has landed: a
+// caller that remounts on success would otherwise re-read the value it just replaced.
+function invalidateOrganizationSso(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  return queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+}
+
+// Storing, removing or enforcing a connection each move who enforcement would affect. Testing one
+// moves nothing.
+function invalidateOrganizationSsoAndPreflight(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  return Promise.all([
+    invalidateOrganizationSso(queryClient),
+    queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO_PREFLIGHT] }),
+  ])
+}
+
+export function useSaveOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OidcConnectionRequest) =>
+      apiFetch<OrganizationSso>("/organizations/me/sso", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
+  })
+}
+
+export function useTestOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrganizationSso>("/organizations/me/sso/test", {
+        method: "POST",
+      }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
+  })
+}
+
+export function useDeleteOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<void>("/organizations/me/sso", { method: "DELETE" }),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
+  })
+}
+
+// Who requiring sign-in through the connection would affect today: every
+// active member holding no sign-in link to it. Read before the enforcement
+// toggle is offered, and short-lived, since a member linking moves the count.
+// Keyed on the organization, unlike the reads around it. This report names the members who would
+// lose access, and a key shared across organizations serves the previous one's report while the
+// new one is still being fetched, so the page would show one organization's people to another and
+// offer an owner from it. The settings beside it carry no names and recover on the same refetch.
+export function useOrganizationSsoPreflight(enabled = true) {
+  const context = useOrganizationContext(enabled)
+  const organizationId = context.data?.organization.id ?? null
+  return useQuery({
+    queryKey: [ORGANIZATION_SSO_PREFLIGHT, organizationId],
+    queryFn: () =>
+      apiFetch<OrganizationSsoPreflight>("/organizations/me/sso/preflight"),
+    staleTime: 15_000,
+    // Withheld until the organization is settled, so the report cannot be read under one key and
+    // then attributed to another.
+    enabled: enabled && organizationId !== null,
+  })
+}
+
+export function useSetOrganizationSsoEnforcement() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OrganizationSsoEnforcementRequest) =>
+      apiFetch<void>("/organizations/me/sso/enforcement", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
   })
 }
 

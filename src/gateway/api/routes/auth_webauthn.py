@@ -253,7 +253,7 @@ async def authenticate_passkey(
         record_auth_failure("invalid_passkey")
         raise
     try:
-        signed_in = await identities.sign_in(identity)
+        signed_in = await identities.sign_in(identity, asserted_email=None)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on a passkey sign-in", exc) from None
     await report_sign_in(growth, identity, background_tasks=background_tasks)

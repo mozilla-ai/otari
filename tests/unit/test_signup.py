@@ -731,7 +731,14 @@ def test_open_signup_stores_the_name_the_way_the_account_page_does(
     assert _name_and_organization(tmp_path, email="ada@example.com") == (stored, organization)
 
 
-def _organization_ids(tmp_path: Path, *, email: str) -> tuple[str, str | None]:
+def _master_key_organization_id(client: TestClient) -> str:
+    """The organization the deployment's own key acts in, which is the one doing the inviting."""
+    context = client.get(f"{API_ROOT}/organizations/me", headers={"Otari-Key": MASTER_KEY})
+    assert context.status_code == 200, context.text
+    return str(context.json()["organization"]["id"])
+
+
+def _organization_ids(tmp_path: Path, *, email: str) -> tuple[str | None, str | None]:
     engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
     with engine.begin() as connection:
         row = connection.execute(
@@ -739,7 +746,10 @@ def _organization_ids(tmp_path: Path, *, email: str) -> tuple[str, str | None]:
             {"email": email},
         ).one()
     engine.dispose()
-    return (str(uuid.UUID(str(row[0]))), str(uuid.UUID(str(row[1]))) if row[1] is not None else None)
+    return (
+        str(uuid.UUID(str(row[0]))) if row[0] is not None else None,
+        str(uuid.UUID(str(row[1]))) if row[1] is not None else None,
+    )
 
 
 @pytest.mark.parametrize("ending", ["revoked", "removed"])
@@ -761,7 +771,7 @@ def test_open_signup_gives_an_identity_nobody_still_wants_an_organization_of_its
                 headers={"Otari-Key": MASTER_KEY},
             )
             _remove(client, str(added.json()["organization_member_id"]))
-        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        inviting_organization = _master_key_organization_id(client)
 
         token = _captured_verification_link(caplog, client, email="ada@example.com")
         assert (
@@ -789,7 +799,7 @@ def test_open_signup_gives_an_identity_nobody_still_wants_its_own_organization_t
             f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
             headers={"Otari-Key": MASTER_KEY},
         )
-        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        inviting_organization = _master_key_organization_id(client)
         gateway_logger.addHandler(caplog.handler)
         caplog.set_level(logging.INFO, logger="gateway")
         try:
@@ -928,7 +938,7 @@ def test_open_signup_gives_an_identity_whose_invitation_was_revoked_before_verif
     """Signup claimed the address while the invitation waited; verifying it is when nobody wants it any more."""
     with _client(tmp_path, open_signup=True) as client:
         invitation = _invite(client, email="ada@example.com")
-        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        inviting_organization = _master_key_organization_id(client)
         token = _captured_verification_link(caplog, client, email="ada@example.com")
         assert _organization_ids(tmp_path, email="ada@example.com")[0] == inviting_organization
         revoked = client.delete(
@@ -963,7 +973,7 @@ def test_open_signup_gives_a_removed_vouched_member_its_own_organization_when_a_
         assert match, caplog.text
         accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": match.group(1), "password": PASSWORD})
         assert accepted.status_code == 200, accepted.text
-        inviting_organization, _ = _organization_ids(tmp_path, email="ada@example.com")
+        inviting_organization = _master_key_organization_id(client)
         _remove(client, str(invitation["organization_member_id"]))
 
         token = _reset_token(client, caplog, email="ada@example.com")
@@ -1021,6 +1031,7 @@ def test_the_context_of_a_caller_in_no_organization_says_so_without_naming_one(
     with _client(tmp_path) as client:
         membership_id = _signed_in_member(client, caplog, email="eve@example.com")
         former, _ = _organization_ids(tmp_path, email="eve@example.com")
+        assert former is not None
         _remove(client, membership_id)
 
         context = client.get(f"{API_ROOT}/organizations/me")
@@ -1030,9 +1041,13 @@ def test_the_context_of_a_caller_in_no_organization_says_so_without_naming_one(
         assert former not in context.text
 
 
-def test_removal_moves_the_active_organization_to_one_the_member_still_belongs_to(
+def test_removal_clears_the_active_organization_and_the_next_read_chooses(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Cleared rather than moved, because a removal cannot ask whether another organization admits them.
+
+    Reading their context is what chooses, so the member still lands on the one they kept.
+    """
     with _client(tmp_path) as client:
         membership_id = _signed_in_member(client, caplog, email="ada@example.com")
         created = client.post(f"{API_ROOT}/organizations", json={"name": "Ada Corp"})
@@ -1040,4 +1055,7 @@ def test_removal_moves_the_active_organization_to_one_the_member_still_belongs_t
 
         _remove(client, membership_id)
 
-        assert _organization_ids(tmp_path, email="ada@example.com")[0] == created.json()["id"]
+        assert _organization_ids(tmp_path, email="ada@example.com")[0] is None
+        context = client.get(f"{API_ROOT}/organizations/me")
+        assert context.status_code == 200, context.text
+        assert context.json()["organization"]["id"] == created.json()["id"]
