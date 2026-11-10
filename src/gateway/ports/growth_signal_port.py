@@ -1,11 +1,12 @@
 """Lifecycle notifications for whichever CRM or support messenger a build runs.
 
 The seam between the core and whichever build tells an outside vendor about a
-user's lifecycle: signup, sign-in, activation milestones, onboarding, profile
-edits, and account deletion. The core has no growth-marketing or support-messaging vendor of its
-own, and that is the point: an operator running Otari serves their own users on
-their own channels, and nothing about those users' lifecycle should reach a
-vendor the deployment never chose. So the core adapter is a Null Object, and an
+user's lifecycle: signup, sign-in, activation milestones, the product actions a
+tenant takes, onboarding, profile edits, and account deletion. The core has no
+growth-marketing or support-messaging vendor of its own, and that is the point:
+an operator running Otari serves their own users on their own channels, and
+nothing about those users' lifecycle should reach a vendor the deployment never
+chose. So the core adapter is a Null Object, and an
 overlay binds one that fans these out to the vendors it runs.
 
 Every method is fire-and-forget: it schedules work on the caller's
@@ -52,6 +53,26 @@ class GrowthActivationEvent(StrEnum):
     FIRST_REQUEST_ROUTED = "first_request_routed"
     BUDGET_RULE_SET = "budget_rule_set"
     FIRST_GUARDRAIL_CONFIGURED = "first_guardrail_configured"
+
+
+class GrowthAction(StrEnum):
+    """Something a tenant did in the product, reported every time it happens.
+
+    The every-occurrence counterpart of :class:`GrowthActivationEvent`. A
+    milestone is a first occurrence the caller derives; an action is reported
+    on each write, so whichever first, count or frequency a vendor wants is
+    its own query to run. Named for the domain, like the milestones, so the
+    vendor's event names stay the adapter's business.
+    """
+
+    API_KEY_CREATED = "api_key_created"  # pragma: allowlist secret
+    GUARDRAIL_CREATED = "guardrail_created"
+    MEMBER_INVITED = "member_invited"
+    PROVIDER_KEY_ADDED = "provider_key_added"  # pragma: allowlist secret
+    MCP_SERVER_CREATED = "mcp_server_created"
+    WEB_SEARCH_KEY_ADDED = "web_search_key_added"  # pragma: allowlist secret
+    ROUTING_POLICY_CREATED = "routing_policy_created"
+    BUDGET_CREATED = "budget_created"
 
 
 class GrowthSignalPort(Protocol):
@@ -105,28 +126,36 @@ class GrowthSignalPort(Protocol):
         decide whether to call this at all; an adapter may additionally
         de-duplicate on its own end, so a redundant call is safe.
 
-        Two are emitted. ``API_KEY_CREATED`` from
-        ``POST /v1/organizations/me/keys``, where first occurrence is the owner
-        holding no key yet, and ``FIRST_GUARDRAIL_CONFIGURED`` from
-        ``POST /v1/organizations/me/guardrails``, where it is the organization
-        mandating none yet, reported for whoever saved it. Each derivation is a
-        read of current state, not a once-per-person guarantee: deleting every
-        key or guardrail re-arms it, and two concurrent creates can both read
-        zero, so an adapter that must fire once per person de-duplicates on its
-        own end rather than relying on this.
+        Four are emitted, each from a tenant-scoped route and reported for
+        whoever made the write, once it has committed:
 
-        The other three stay uncalled, and an overlay should not expect them:
+        - ``API_KEY_CREATED`` from ``POST /v1/organizations/me/keys``, where
+          first occurrence is the owner holding no key yet.
+        - ``FIRST_GUARDRAIL_CONFIGURED`` from
+          ``POST /v1/organizations/me/guardrails``, the organization mandating
+          none yet.
+        - ``FIRST_ROUTE_CONFIGURED`` from
+          ``POST /v1/organizations/me/routing-policies``, no workspace of the
+          organization holding a stored policy before the write.
+        - ``BUDGET_RULE_SET`` from ``POST /v1/organizations/me/budgets``, the
+          organization owning no budget before the write.
 
-        - ``FIRST_ROUTE_CONFIGURED`` and ``BUDGET_RULE_SET`` would fire from
-          ``POST /v1/routing/policies`` and ``POST /v1/budgets``, which are
-          deployment-wide and gated on ``require_deployment_operator``. The
-          milestone would then name whoever holds deployment-wide authority: on
-          a multi-tenant deployment the operator running it rather than any of the
-          tenants whose activation a vendor is watching, and under a header
-          master key nobody at all, since that credential resolves to the
-          bootstrap operator, which deliberately holds no address
-          (``services/tenancy/provisioning_service``). The same reason picks the
-          member key route over the operator's ``POST /v1/keys``.
+        Each derivation is a read of current state, not a once-per-person
+        guarantee: deleting every row re-arms it, and two concurrent creates can
+        both read none, so an adapter that must fire once per person
+        de-duplicates on its own end rather than relying on this.
+
+        Their deployment-wide twins stay silent. ``POST /v1/keys``,
+        ``POST /v1/routing/policies`` and ``POST /v1/budgets`` are gated on
+        ``require_deployment_operator``, so the milestone would name whoever
+        holds deployment-wide authority: on a multi-tenant deployment the
+        operator running it rather than any of the tenants whose activation a
+        vendor is watching, and under a header master key nobody at all, since
+        that credential resolves to the bootstrap operator, which deliberately
+        holds no address (``services/tenancy/provisioning_service``).
+
+        One stays uncalled, and an overlay should not expect it:
+
         - ``FIRST_REQUEST_ROUTED`` has no moment to fire from.
           ``services/tenancy/workspace_activation_service`` derives activation
           from the first successful usage row every time the guide is read,
@@ -134,6 +163,55 @@ class GrowthSignalPort(Protocol):
           becomes activated, only a polled read that would notify on every load.
           An overlay that wants it derives it from ``UsageSignalPort``, which is
           told about each usage row as it is written.
+        """
+        ...
+
+    async def record_action(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        action: GrowthAction,
+        user_id: uuid.UUID,
+        email: str | None,
+        organization_id: uuid.UUID,
+        details: Mapping[str, str] | None = None,
+    ) -> None:
+        """Notify that a tenant did something in the product.
+
+        Called every time, once per thing created and after its write commits,
+        so a write that fails or is refused reports nothing, and neither does
+        an edit. Each action comes from one tenant-scoped route:
+
+        - ``API_KEY_CREATED`` from ``POST /v1/organizations/me/keys``.
+        - ``GUARDRAIL_CREATED`` from ``POST /v1/organizations/me/guardrails``.
+        - ``MEMBER_INVITED`` from
+          ``POST /v1/organizations/me/member-invitations`` and its ``/bulk``
+          twin, which reports one per address it invited. ``details`` carries
+          the ``role`` invited to.
+        - ``PROVIDER_KEY_ADDED`` from
+          ``POST /v1/organizations/me/provider-keys``. ``details`` carries the
+          ``provider``.
+        - ``MCP_SERVER_CREATED`` from
+          ``POST /v1/workspaces/{workspace_id}/mcp-servers``.
+        - ``WEB_SEARCH_KEY_ADDED`` from
+          ``POST /v1/organizations/me/web-search-keys``, for a search key and a
+          fetch key alike. ``details`` carries the ``provider`` and the
+          ``kind``, ``web_search`` or ``web_fetch``.
+        - ``ROUTING_POLICY_CREATED`` from
+          ``POST /v1/organizations/me/routing-policies``, when the write stores
+          a new policy rather than editing one.
+        - ``BUDGET_CREATED`` from ``POST /v1/organizations/me/budgets``.
+
+        ``details`` is categorical and nothing more: never a name, an address,
+        a URL or key material, so an adapter may forward it as it stands.
+        ``email`` is ``None`` for an identity with no address, as the bootstrap
+        operator behind a header master key is. The action still happened in
+        ``organization_id``, so it is reported, and an adapter that keys on a
+        person skips it.
+
+        The deployment-wide twins of these routes, gated on
+        ``require_deployment_operator``, report nothing, for the reason
+        :meth:`record_activation` gives.
         """
         ...
 

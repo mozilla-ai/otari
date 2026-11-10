@@ -28,11 +28,12 @@ hang off it.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
     CurrentIdentity,
+    GrowthSignalPortDep,
     IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
@@ -395,6 +396,8 @@ async def invite_active_organization_member(
     mail_limit: InvitationMailLimitDep,
     body: InviteOrganizationMemberRequest,
     identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> InviteOrganizationMemberResultPublic:
     """Invite an address to the caller's active organization by email.
 
@@ -413,6 +416,8 @@ async def invite_active_organization_member(
         config=config,
         mail_limit=mail_limit,
         blocked_addresses=identities,
+        growth=growth,
+        background_tasks=background_tasks,
     )
 
 
@@ -424,6 +429,8 @@ async def bulk_invite_active_organization_members(
     mail_limit: InvitationMailLimitDep,
     body: BulkInviteOrganizationMembersRequest,
     identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> BulkInviteOrganizationMembersResultPublic:
     """Invite several addresses to the caller's active organization at once.
 
@@ -440,6 +447,8 @@ async def bulk_invite_active_organization_members(
         config=config,
         mail_limit=mail_limit,
         blocked_addresses=identities,
+        growth=growth,
+        background_tasks=background_tasks,
     )
 
 

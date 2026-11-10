@@ -82,7 +82,7 @@ from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Organization, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.users import User
-from gateway.ports.growth_signal_port import GrowthActivationEvent
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic
@@ -414,6 +414,13 @@ async def create_own_key(
         raise database_error("create own key", exc) from None
     await db.refresh(db_key)
 
+    await growth.record_action(
+        background_tasks=background_tasks,
+        action=GrowthAction.API_KEY_CREATED,
+        user_id=identity.id,
+        email=identity.email,
+        organization_id=organization.id,
+    )
     if first_key and identity.email is not None:
         # Skipped for an identity with no address, which is the bootstrap
         # operator's normal state (`services/tenancy/provisioning_service`): the

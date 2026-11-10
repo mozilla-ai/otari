@@ -11,9 +11,9 @@ the service runs. A request reaches these servers by naming their ids in
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, WorkspaceMcpServerServiceDep, verify_master_key
+from gateway.api.deps import CurrentIdentity, GrowthSignalPortDep, WorkspaceMcpServerServiceDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerAccess,
@@ -64,6 +64,8 @@ async def create_workspace_mcp_server(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceMcpServerCreate,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> WorkspaceMcpServerPublic:
     """Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.
 
@@ -76,7 +78,13 @@ async def create_workspace_mcp_server(
     outcome is returned as `health`. A server that fails this check is still
     stored, and `health.error` says why.
     """
-    return await service.create_server(user=current_identity, workspace_id=workspace_id, request=body)
+    return await service.create_server(
+        user=current_identity,
+        workspace_id=workspace_id,
+        request=body,
+        growth=growth,
+        background_tasks=background_tasks,
+    )
 
 
 @router.patch("/{server_id}")

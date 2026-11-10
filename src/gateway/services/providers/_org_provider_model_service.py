@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import BackgroundTasks
+
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
@@ -62,6 +64,7 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.schemas.providers import (
@@ -488,7 +491,14 @@ class OrgProviderModelService:
             await self.models.delete_row(row)
         await self.refresh_overlay()
 
-    async def add_provider_key(self, *, user: User, request: OrgProviderKeyCreateRequest) -> OrgProviderKeyPublic:
+    async def add_provider_key(
+        self,
+        *,
+        user: User,
+        request: OrgProviderKeyCreateRequest,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> OrgProviderKeyPublic:
         """Create a provider key and offer everything the credential reaches.
 
         One use case, so one method: a key starts with its real catalog rather
@@ -504,7 +514,9 @@ class OrgProviderModelService:
         than raised, and a database failure is logged against the key and leaves
         an empty list the Refresh models button fills.
         """
-        key = await self.provider_keys.create_key_for_user(user=user, request=request)
+        key = await self.provider_keys.create_key_for_user(
+            user=user, request=request, growth=growth, background_tasks=background_tasks
+        )
         try:
             await self.refresh_models(user=user, key_id=key.id)
         except DATABASE_ERRORS:

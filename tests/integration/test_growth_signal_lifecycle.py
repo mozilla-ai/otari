@@ -12,17 +12,19 @@ property of the *response*, and a signal fired on an address nobody has touched
 would leak through the seam what the body refuses to say, so the untouched-address
 case asserts silence. The second key asserts silence too: ``record_activation``
 puts first-occurrence detection on the caller, and a milestone that fires on
-every key is not a milestone.
+every key is not a milestone. ``record_action`` is the opposite contract: one
+call per thing created, and none for an edit or a refused write.
 """
 
 import logging
 import re
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -33,15 +35,24 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
+from gateway.services import mcp_stateless
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.mcp_stateless import ServerCheck
+from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.password_service import hash_password
+from gateway.services.secret_box import generate_secret_key
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 _KEYS = f"{API_ROOT}/organizations/me/keys"
 _GUARDRAILS = f"{API_ROOT}/organizations/me/guardrails"
+_INVITATIONS = f"{API_ROOT}/organizations/me/member-invitations"
+_PROVIDER_KEYS = f"{API_ROOT}/organizations/me/provider-keys"
+_WEB_SEARCH_KEYS = f"{API_ROOT}/organizations/me/web-search-keys"
+_ROUTING_POLICIES = f"{API_ROOT}/organizations/me/routing-policies"
+_BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _MEMBER_EMAIL = "member@example.com"
 
 
@@ -87,6 +98,29 @@ class RecordingGrowthAdapter:
         email: str,
     ) -> None:
         self.calls.append(("activation", {"event": event, "user_id": user_id, "email": email}))
+
+    async def record_action(
+        self,
+        *,
+        background_tasks: Any,
+        action: GrowthAction,
+        user_id: uuid.UUID,
+        email: str | None,
+        organization_id: uuid.UUID,
+        details: Mapping[str, str] | None = None,
+    ) -> None:
+        self.calls.append(
+            (
+                "action",
+                {
+                    "action": action,
+                    "user_id": user_id,
+                    "email": email,
+                    "organization_id": organization_id,
+                    "details": details,
+                },
+            )
+        )
 
     async def record_onboarding_completed(self, **kwargs: Any) -> None:
         self.calls.append(("onboarding", kwargs))
@@ -390,7 +424,7 @@ def test_a_members_first_key_notifies_the_activation_and_the_second_does_not(
     assert len(growth.of("activation")) == 1, growth.calls
 
 
-def test_an_operator_with_no_address_notifies_nothing(
+def test_an_operator_with_no_address_reaches_no_milestone_and_its_key_is_an_action_without_one(
     client: TestClient,
     master_key_header: dict[str, str],
     growth: RecordingGrowthAdapter,
@@ -399,12 +433,15 @@ def test_an_operator_with_no_address_notifies_nothing(
 
     ``record_activation`` takes an ``email`` because that is what a vendor keys
     a person on, and the operator identity deliberately has none
-    (``services/tenancy/provisioning_service``), so this fires nothing rather
-    than inventing a stand-in.
+    (``services/tenancy/provisioning_service``), so no milestone fires rather
+    than inventing a stand-in. The key was still made in the organization, so
+    the action is reported with no address and the adapter decides.
     """
     response = client.post(_KEYS, json={"key_name": "operator"}, headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert growth.calls == []
+    assert growth.of("activation") == []
+    [action] = growth.of("action")
+    assert (action["action"], action["email"], action["details"]) == (GrowthAction.API_KEY_CREATED, None, None)
 
 
 # -- sign-in ----------------------------------------------------------------
@@ -597,4 +634,240 @@ def test_a_guardrail_mandated_with_the_master_key_notifies_nothing(
     )
 
     assert response.status_code == status.HTTP_201_CREATED, response.text
+    assert growth.of("activation") == []
+    assert [(action["action"], action["email"]) for action in growth.of("action")] == [
+        (GrowthAction.GUARDRAIL_CREATED, None)
+    ]
+
+
+# Every action.
+#
+# One call per thing created, after its write commits, for the admin who made
+# it, in their organization. An edit, a refused write and the deployment-wide
+# twin routes report nothing.
+
+
+@pytest.fixture
+def admin(client: TestClient, member: tuple[uuid.UUID, str], db_session_factory: Callable[[], Session]) -> uuid.UUID:
+    """The member, promoted to admin and signed in, since these routes are owners and admins only."""
+    user_id, cookie = member
+    _make_admin(db_session_factory, user_id)
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+    return user_id
+
+
+@pytest.fixture
+def secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Credentials are encrypted at rest, so a write that stores one needs a key to encrypt with."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+
+def _actions(
+    client: TestClient, growth: RecordingGrowthAdapter, user_id: uuid.UUID
+) -> list[tuple[GrowthAction, Mapping[str, str] | None]]:
+    """Each reported action with its details, after checking every one names the admin and their organization."""
+    organization = client.get(f"{API_ROOT}/organizations/me")
+    assert organization.status_code == status.HTTP_200_OK, organization.text
+    organization_id = uuid.UUID(organization.json()["organization"]["id"])
+    actions = growth.of("action")
+    for action in actions:
+        assert (action["user_id"], action["email"], action["organization_id"]) == (
+            user_id,
+            _MEMBER_EMAIL,
+            organization_id,
+        ), action
+    return [(action["action"], action["details"]) for action in actions]
+
+
+def _workspace_of(client: TestClient) -> str:
+    listed = client.get(f"{API_ROOT}/workspaces")
+    assert listed.status_code == status.HTTP_200_OK, listed.text
+    workspace_id: str = listed.json()["data"][0]["id"]
+    return workspace_id
+
+
+def test_every_key_is_an_action(client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID) -> None:
+    for name in ("first", "second"):
+        response = client.post(_KEYS, json={"key_name": name})
+        assert response.status_code == status.HTTP_200_OK, response.text
+
+    assert _actions(client, growth, admin) == [(GrowthAction.API_KEY_CREATED, None)] * 2
+
+
+def test_every_guardrail_is_an_action_and_a_refused_one_is_not(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    body = {"profile": "prompt-injection", "mode": "block", "applies_to_all_workspaces": True}
+    assert client.post(_GUARDRAILS, json=body).status_code == status.HTTP_201_CREATED
+    assert client.post(_GUARDRAILS, json={**body, "profile": "toxicity"}).status_code == status.HTTP_201_CREATED
+    # The same profile again is refused.
+    assert client.post(_GUARDRAILS, json=body).status_code == status.HTTP_409_CONFLICT
+
+    assert _actions(client, growth, admin) == [(GrowthAction.GUARDRAIL_CREATED, None)] * 2
+
+
+def test_every_invitation_is_an_action_carrying_its_role(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    single = client.post(_INVITATIONS, json={"email": "ada@example.com", "role": "admin"})
+    assert single.status_code == status.HTTP_201_CREATED, single.text
+    bulk = client.post(
+        f"{_INVITATIONS}/bulk",
+        # The member is refused, as already in the organization, so two of three are invited.
+        json={"emails": ["grace@example.com", _MEMBER_EMAIL, "ida@example.com"], "role": "member"},
+    )
+    assert bulk.status_code == status.HTTP_200_OK, bulk.text
+    assert len(bulk.json()["invited"]) == 2, bulk.text
+    # Pending already, so refused.
+    again = client.post(_INVITATIONS, json={"email": "ada@example.com", "role": "admin"})
+    assert again.status_code == status.HTTP_409_CONFLICT, again.text
+
+    assert _actions(client, growth, admin) == [
+        (GrowthAction.MEMBER_INVITED, {"role": "admin"}),
+        (GrowthAction.MEMBER_INVITED, {"role": "member"}),
+        (GrowthAction.MEMBER_INVITED, {"role": "member"}),
+    ]
+
+
+def test_a_bulk_invitation_that_invites_nobody_is_no_action(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    bulk = client.post(f"{_INVITATIONS}/bulk", json={"emails": [_MEMBER_EMAIL], "role": "member"})
+    assert bulk.status_code == status.HTTP_200_OK, bulk.text
+    assert bulk.json()["invited"] == [], bulk.text
+
+    assert growth.calls == []
+
+
+def test_every_provider_key_is_an_action_carrying_its_provider(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    admin: uuid.UUID,
+    secret_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def listed(impl_name: str, **_: object) -> ProviderDiscovery:
+        # Answered here rather than dialed: a new key lists what its credential reaches.
+        model = Model(id="a-model", object="model", created=0, owned_by=impl_name)
+        return ProviderDiscovery(provider=impl_name, models=[model], error=None)
+
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", listed)
+
+    for provider, name in (("openai", "primary"), ("anthropic", "primary")):
+        response = client.post(_PROVIDER_KEYS, json={"provider": provider, "name": name, "api_key": "sk-test-1"})
+        assert response.status_code == status.HTTP_201_CREATED, response.text
+    created = response.json()
+    duplicate = client.post(_PROVIDER_KEYS, json={"provider": "anthropic", "name": "primary", "api_key": "sk-test-2"})
+    assert duplicate.status_code == status.HTTP_409_CONFLICT, duplicate.text
+    renamed = client.patch(f"{_PROVIDER_KEYS}/{created['id']}", json={"name": "renamed"})
+    assert renamed.status_code == status.HTTP_200_OK, renamed.text
+
+    assert _actions(client, growth, admin) == [
+        (GrowthAction.PROVIDER_KEY_ADDED, {"provider": "openai"}),
+        (GrowthAction.PROVIDER_KEY_ADDED, {"provider": "anthropic"}),
+    ]
+
+
+def test_every_search_or_fetch_key_is_an_action_carrying_its_provider_and_kind(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID, secret_key: None
+) -> None:
+    search = client.post(_WEB_SEARCH_KEYS, json={"provider": "tavily", "name": "ours", "api_key": "tvly-1"})
+    assert search.status_code == status.HTTP_201_CREATED, search.text
+    fetch = client.post(
+        _WEB_SEARCH_KEYS, json={"provider": "exa", "name": "pages", "api_key": "exa-1", "kind": "fetch"}
+    )
+    assert fetch.status_code == status.HTTP_201_CREATED, fetch.text
+    unknown = client.post(_WEB_SEARCH_KEYS, json={"provider": "google", "name": "g", "api_key": "k"})
+    assert unknown.status_code == status.HTTP_400_BAD_REQUEST, unknown.text
+    renamed = client.patch(f"{_WEB_SEARCH_KEYS}/{search.json()['id']}", json={"name": "renamed"})
+    assert renamed.status_code == status.HTTP_200_OK, renamed.text
+
+    assert _actions(client, growth, admin) == [
+        (GrowthAction.WEB_SEARCH_KEY_ADDED, {"provider": "tavily", "kind": "web_search"}),
+        (GrowthAction.WEB_SEARCH_KEY_ADDED, {"provider": "exa", "kind": "web_fetch"}),
+    ]
+
+
+def test_every_mcp_server_is_an_action(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    admin: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def reachable(_server: object) -> ServerCheck:
+        # The connection check would otherwise dial the address stored below.
+        return ServerCheck(tool_names=[])
+
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", reachable)
+    servers = f"{API_ROOT}/workspaces/{_workspace_of(client)}/mcp-servers"
+
+    first = client.post(servers, json={"name": "github", "url": "https://93.184.216.34/mcp"})
+    assert first.status_code == status.HTTP_201_CREATED, first.text
+    second = client.post(servers, json={"name": "linear", "url": "https://93.184.216.35/mcp"})
+    assert second.status_code == status.HTTP_201_CREATED, second.text
+    duplicate = client.post(servers, json={"name": "github", "url": "https://93.184.216.36/mcp"})
+    assert duplicate.status_code == status.HTTP_409_CONFLICT, duplicate.text
+    edited = client.patch(f"{servers}/{first.json()['id']}", json={"enabled": False})
+    assert edited.status_code == status.HTTP_200_OK, edited.text
+
+    assert _actions(client, growth, admin) == [(GrowthAction.MCP_SERVER_CREATED, None)] * 2
+
+
+def test_every_new_routing_policy_is_an_action_and_the_first_a_milestone(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    workspace_id = _workspace_of(client)
+
+    def write(name: str, target: str, **extra: str) -> None:
+        body = {"name": name, "spec": {"select": [{"default": target}]}, "workspace_id": workspace_id, **extra}
+        response = client.post(_ROUTING_POLICIES, json=body)
+        assert response.status_code == status.HTTP_200_OK, response.text
+
+    write("fast", "openai:gpt-4o-mini")
+    write("fast", "openai:gpt-4o")
+    write("quick", "openai:gpt-4o", rename_from="fast")
+    write("careful", "anthropic:claude-3-5-haiku-latest")
+
+    assert _actions(client, growth, admin) == [(GrowthAction.ROUTING_POLICY_CREATED, None)] * 2
+    assert growth.of("activation") == [
+        {"event": GrowthActivationEvent.FIRST_ROUTE_CONFIGURED, "user_id": admin, "email": _MEMBER_EMAIL}
+    ], growth.calls
+
+
+def test_a_deployment_wide_routing_policy_reports_nothing(
+    client: TestClient, master_key_header: dict[str, str], growth: RecordingGrowthAdapter
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "fast", "spec": {"select": [{"default": "openai:gpt-4o-mini"}]}},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert growth.calls == []
+
+
+def test_every_budget_is_an_action_and_the_first_a_milestone(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    body = {"max_budget": 250.0, "reset_alignment": "calendar_month"}
+    created = client.post(_BUDGETS, json={**body, "name": "Engineering monthly"})
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    second = client.post(_BUDGETS, json={**body, "name": "Research monthly"})
+    assert second.status_code == status.HTTP_201_CREATED, second.text
+    raised = client.patch(f"{_BUDGETS}/{created.json()['budget_id']}", json={"max_budget": 500.0})
+    assert raised.status_code == status.HTTP_200_OK, raised.text
+
+    assert _actions(client, growth, admin) == [(GrowthAction.BUDGET_CREATED, None)] * 2
+    assert growth.of("activation") == [
+        {"event": GrowthActivationEvent.BUDGET_RULE_SET, "user_id": admin, "email": _MEMBER_EMAIL}
+    ], growth.calls
+
+
+def test_a_deployment_wide_budget_reports_nothing(
+    client: TestClient, master_key_header: dict[str, str], growth: RecordingGrowthAdapter
+) -> None:
+    response = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=master_key_header)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
     assert growth.calls == []

@@ -40,6 +40,7 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
+from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import func, select
@@ -62,6 +63,7 @@ from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
 from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
@@ -814,13 +816,20 @@ class WorkspaceMcpServerService:
         user: User,
         workspace_id: uuid.UUID,
         request: WorkspaceMcpServerCreate,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> WorkspaceMcpServerPublic:
-        """Register a server, encrypting its token before it is stored."""
+        """Register a server, encrypting its token before it is stored.
+
+        With ``growth``, the server is reported as ``MCP_SERVER_CREATED`` once it commits.
+        """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         await _validate_url(request.url, has_token=bool(request.authorization_token))
 
         # The workspace lock stops a concurrent create from invalidating the count below before this insert.
-        await WorkspaceRepository(self.db).lock(resolved_workspace_id)
+        workspaces = WorkspaceRepository(self.db)
+        await workspaces.lock(resolved_workspace_id)
+        organization_id = await workspaces.get_organization_id(resolved_workspace_id)
 
         count = (
             await self.db.execute(
@@ -856,6 +865,14 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
         await self.db.commit()
+        if growth is not None and background_tasks is not None and organization_id is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.MCP_SERVER_CREATED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=organization_id,
+            )
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
