@@ -27,6 +27,8 @@ otari-smoke.db
 # SQLite WAL sidecars, which sit next to any of the *.db files above.
 *.db-shm
 *.db-wal
+# The generated secret key a SQLite deployment keeps beside its database file.
+*.db.secret-key
 
 .DS_Store
 
