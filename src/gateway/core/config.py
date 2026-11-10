@@ -1020,7 +1020,10 @@ class GatewayConfig(
     )
     bootstrap_api_key: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
-        description="Create a first-use API key on startup when no API keys exist",
+        description=(
+            "Create a first-use API key on startup when no API keys exist. Left unset, a deployment that "
+            "generated its own master key creates none, since its operator starts from the setup link."
+        ),
     )
     bootstrap: Annotated[str | None, OMITTED] = Field(
         default=None,

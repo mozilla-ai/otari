@@ -102,7 +102,7 @@ def use_local_secret_key(key_file: Path, *, may_generate: bool) -> None:
                 type(exc).__name__,
             )
             return
-        logger.info("Generated a secret key for stored credentials at %s. Back it up with the database.", key_file)
+        logger.debug("Generated a secret key for stored credentials at %s. Back it up with the database.", key_file)
     try:
         Fernet(key.encode())
     except (ValueError, TypeError):

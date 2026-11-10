@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import importlib.util
+import logging
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import (
+    DATABASE_ERRORS,
     create_session,
     describe_database_error,
     dispose_db,
@@ -70,7 +72,7 @@ from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, ge
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
-from gateway.log_config import logger
+from gateway.log_config import log_plain, logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -102,7 +104,7 @@ from gateway.services.log_writer import (
     TracingLogWriter,
     create_log_writer,
 )
-from gateway.services.master_key_service import ensure_master_key
+from gateway.services.master_key_service import ensure_master_key, load_master_key_hash, startup_notice
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -798,41 +800,43 @@ def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
-def _validate_provider_account_pepper(config: GatewayConfig) -> None:
+def _validate_provider_account_pepper(config: GatewayConfig, advisory_level: int = logging.WARNING) -> None:
     """Turn provider copies off when no pepper is set, and refuse a pepper shared with another secret.
 
     The pepper keys the digest that names a provider account. A missing one only
-    warns, so a first run needs no secret invented for a feature it may never
-    use. A shared value would let a leak of one secret expose the other, and tie
-    their rotations together.
+    warns, at ``advisory_level``, so a first run needs no secret invented for a
+    feature it may never use. A shared value would let a leak of one secret
+    expose the other, and tie their rotations together.
     """
     makes_copies = config.files_enabled and config.files_provider_upload_enabled
     if not makes_copies:
         return
     pepper = config.provider_account_pepper
     if pepper is None:
-        logger.warning(
+        logger.log(
+            advisory_level,
             "OTARI_PROVIDER_ACCOUNT_PEPPER is unset, so provider copies of attached files are off: a request that "
             "asks a provider's own code execution to run over an attached file is refused. Set it to a random "
-            "value of at least 32 characters (for example `otari gen-provider-account-pepper`) to turn them on."
+            "value of at least 32 characters (for example `otari gen-provider-account-pepper`) to turn them on.",
         )
         config.files_provider_upload_enabled = False
         return
     _refuse_shared_secret("OTARI_PROVIDER_ACCOUNT_PEPPER", pepper, config)
 
 
-def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
+def _validate_provider_user_identifier_key(config: GatewayConfig, advisory_level: int = logging.WARNING) -> None:
     """Refuse an end-user identifier key that shares a value with another secret.
 
-    A missing key only warns: refusing to start would take down every deployment
-    that upgrades without one.
+    A missing key only warns, at ``advisory_level``: refusing to start would take
+    down every deployment that upgrades without one.
     """
     key = config.provider_user_identifier_key
     if key is None:
-        logger.warning(
+        logger.log(
+            advisory_level,
             "OTARI_PROVIDER_USER_IDENTIFIER_KEY, which keys the opaque end-user id sent to providers so it cannot "
             "be matched to a guessed user, is unset; set it to a random value of at least 32 characters (for "
-            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY."
+            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY.",
         )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
@@ -925,6 +929,21 @@ async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) 
         logger.exception("%s worker stopped with an unexpected error and will not run again", name)
 
 
+async def _is_first_start(config: GatewayConfig) -> bool:
+    """Whether this start is the one that will generate the deployment's master key.
+
+    Nothing is configured yet on that start, and what it prints is the setup
+    link, so the reminders about optional settings left unset wait for the next one.
+    """
+    if config.master_key:
+        return False
+    try:
+        async with create_session() as session:
+            return await load_master_key_hash(session) is None
+    except DATABASE_ERRORS:
+        return False
+
+
 async def _use_local_secret_key(config: GatewayConfig) -> None:
     """Give a SQLite deployment with no ``OTARI_SECRET_KEY`` the key kept beside its database file.
 
@@ -961,13 +980,22 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
         )
         configure_hosted_names(hosted_implementation)
-        _validate_provider_user_identifier_key(config)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
         init_db(config)
         # Before anything below reads a stored credential.
         await _use_local_secret_key(config)
+        if (
+            config.trace_content_enabled
+            and config.trace_content_key_backend == "secret_key"
+            and not secret_box_configured()
+        ):
+            logger.warning(
+                "OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept"
+            )
+        advisory_level = logging.DEBUG if await _is_first_start(config) else logging.WARNING
+        _validate_provider_user_identifier_key(config, advisory_level)
         # On a session of its own, committed before the startup session below
         # opens, so SQLite's one writer is never held twice. Before the
         # bootstrap key, which a deployment that declares its keys does not need.
@@ -981,7 +1009,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # event loop, so no request waits on it.
             await asyncio.to_thread(load_bundled_index)
             # After the overrides, so it sees the copy setting this process serves.
-            _validate_provider_account_pepper(config)
+            _validate_provider_account_pepper(config, advisory_level)
             await load_persisted_price_snapshot(session)
             # So the first request after a restart lists the stored model facts.
             await load_stored_models_dev_catalog(session)
@@ -1024,7 +1052,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Generate + persist a master key on first run when none is set,
             # so the dashboard is reachable without hand-editing config, and
             # the management API is never left unauthenticated.
-            await ensure_master_key(config, session)
+            generated_master_key = await ensure_master_key(config, session)
             # Dashboard sessions must not outlive the key they were minted
             # under: revoke them all when the master key changed across a
             # restart (e.g. OTARI_MASTER_KEY was rotated).
@@ -1052,7 +1080,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                     "The stored search and fetch tools did not load, so this start writes no config.yml tool "
                     "prices; the next start that loads them writes them."
                 )
-            await warn_if_require_pricing_without_pricing(config, session)
+            await warn_if_require_pricing_without_pricing(config, session, advisory_level)
             await warn_about_unpriced_web_tools(config, session)
             await warn_about_legacy_tool_prices(config, session)
             await warn_if_gateway_tools_lack_pricing(config, session)
@@ -1124,6 +1152,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 await trace_writer.start()
                 trace_writer_started = True
                 app.state.trace_writer = trace_writer
+            # Last, so the setup link is the final thing a first start prints. The
+            # link is a credential: shown whatever the log level, here and nowhere else.
+            log_plain(
+                *startup_notice(config, __version__, generated_master_key),
+                level=logging.INFO if generated_master_key is None else logging.CRITICAL,
+            )
             yield
         finally:
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
@@ -1278,12 +1312,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
-    if (
-        config.trace_content_enabled
-        and config.trace_content_key_backend == "secret_key"
-        and not secret_box_configured()
-    ):
-        logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a
     # provider URL carrying a query or a key never reaches httpx's own logging.

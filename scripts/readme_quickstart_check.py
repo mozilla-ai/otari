@@ -3,8 +3,8 @@
 The OSS-edition smoke and the liveness check each set the secrets they need, so
 neither notices when the one command a newcomer copies from the README stops
 starting. This runs that command, changing nothing but the image it names, and
-checks the first run the README promises: the gateway answers, prints a
-bootstrap key once, and accepts that key.
+checks the first run the README promises: the gateway answers, prints a setup
+link and nothing else, and accepts the master key that link carries.
 
 Usage: uv run --frozen --no-dev python scripts/readme_quickstart_check.py --image <tag>
 
@@ -30,9 +30,16 @@ HEALTH_TIMEOUT_SECONDS = 120
 DOCKER_TIMEOUT_SECONDS = 60
 
 _FENCE = re.compile(r"^```bash\n(.*?)^```", re.DOTALL | re.MULTILINE)
-_BOOTSTRAP_KEY = re.compile(r"Save this key now:\s*\n(tk-\S+)\s*$", re.MULTILINE)
-# The first run prints a generated master key and an API key, one per line.
+_SETUP_LINK = re.compile(r"^http\S+/#/setup\?key=(otari-mk-\S+)\s*$", re.MULTILINE)
 _PRINTED_SECRET = re.compile(r"\b(?:otari-mk-|tk-)\S+")
+# Everything a zero-config first start may print besides the setup link itself
+# and uvicorn's access log, which only starts once a request arrives.
+_NOTICE_LINES = (
+    re.compile(r"^Otari \S+ is running at http\S+$"),
+    re.compile(r"^Open this link to choose your password and finish setup:$"),
+    re.compile(r"^It is shown only once and carries your master key, so treat it like one\.$"),
+)
+_ACCESS_LOG = re.compile(r'^INFO: +\S+ - "')
 
 
 class QuickstartFailure(Exception):
@@ -62,12 +69,29 @@ def for_image(command: str, image: str) -> str:
     return command.replace(PUBLISHED_IMAGE, image)
 
 
-def bootstrap_key(log: str) -> str:
-    """Return the API key the first run printed, on its own line after the banner."""
-    match = _BOOTSTRAP_KEY.search(log)
+def setup_key(log: str) -> str:
+    """Return the master key in the setup link the first run printed, on a line of its own."""
+    match = _SETUP_LINK.search(log)
     if match is None:
-        raise QuickstartFailure("The gateway printed no bootstrap API key")
+        raise QuickstartFailure("The gateway printed no setup link")
     return match.group(1)
+
+
+def unexpected_lines(log: str) -> list[str]:
+    """The lines of a first start's output that are not its setup notice, with any key hidden.
+
+    A zero-config first start prints where it runs and the setup link, so a
+    newcomer finds the link without scrolling. Anything else is startup chatter
+    that came back, or a warning that start should not have.
+    """
+    extra = []
+    for line in log.splitlines():
+        text = line.strip()
+        if not text or _ACCESS_LOG.match(text) or _SETUP_LINK.match(text):
+            continue
+        if not any(pattern.match(text) for pattern in _NOTICE_LINES):
+            extra.append(redact(text))
+    return extra
 
 
 def _status(path: str, api_key: str | None = None) -> int:
@@ -96,12 +120,12 @@ def _await_health(process: subprocess.Popen[bytes]) -> None:
 
 
 def _await_key(log_path: Path) -> str:
-    # The key is printed during startup, but stdout reaches the file through
+    # The link is printed during startup, but stdout reaches the file through
     # the docker client, so give a moment for it to land after health answers.
     deadline = time.monotonic() + 10
     while True:
         try:
-            return bootstrap_key(log_path.read_text(encoding="utf-8", errors="replace"))
+            return setup_key(log_path.read_text(encoding="utf-8", errors="replace"))
         except QuickstartFailure:
             if time.monotonic() >= deadline:
                 raise
@@ -148,7 +172,9 @@ def check(image: str, log_path: Path) -> None:
             if (status := _status("/api/v1/models")) != 401:
                 raise QuickstartFailure(f"/api/v1/models answered {status} without a key, expected 401")
             if (status := _status("/api/v1/models", key)) != 200:
-                raise QuickstartFailure(f"/api/v1/models answered {status} with the bootstrap key, expected 200")
+                raise QuickstartFailure(f"/api/v1/models answered {status} with the setup link's key, expected 200")
+            if extra := unexpected_lines(log_path.read_text(encoding="utf-8", errors="replace")):
+                raise QuickstartFailure("The first start printed more than its setup notice:\n" + "\n".join(extra))
         finally:
             _remove(_containers_of(image) - already_there)
             try:
