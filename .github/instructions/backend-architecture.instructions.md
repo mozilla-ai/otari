@@ -64,8 +64,7 @@ the old shape.
   on that baseline. The check does not catch that case.
 - A repository may open a savepoint (`begin_nested()`) only to diagnose a
   refusal of its own write, and the check refuses one in a repository off
-  `SAVEPOINT_BASELINE`. Flag a savepoint that lets a step continue after its
-  write failed.
+  `SAVEPOINT_BASELINE`. Flag a savepoint opened so that a step can continue.
 - A repository reaches the session only through `session_for(uow)`. The check
   refuses that import anywhere else. Flag other code that reaches
   `session_for` without importing it by name.

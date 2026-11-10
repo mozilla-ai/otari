@@ -181,6 +181,7 @@ def _begin_sqlite_transactions(engine: AsyncEngine) -> None:
 
     @event.listens_for(engine.sync_engine, "savepoint")
     def _begin_before_savepoint(connection: Any, _name: str) -> None:  # noqa: ANN001, ANN202
+        """Begin unless a write already began the transaction."""
         if not connection.connection.driver_connection.in_transaction:
             connection.exec_driver_sql("BEGIN")
 

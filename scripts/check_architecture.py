@@ -628,8 +628,8 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/usage_admin_service.py",
 )
 # Repositories that open a savepoint, which DOMAINS.md allows only to diagnose a
-# refusal of the repository's own write. A module added here has been read for
-# that purpose; an entry that stops opening one fails the check until removed.
+# refusal of the repository's own write. A new one fails the check until it is
+# added here, and an entry that stops opening one fails until it is removed.
 SAVEPOINT_BASELINE = (
     "gateway/repositories/api_keys/api_key_repository.py",
     "gateway/repositories/budgets/budget_repository.py",
