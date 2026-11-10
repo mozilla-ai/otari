@@ -148,7 +148,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
 
 - **Who the user is.** The user an API key belongs to (its `user_id`). In the
   Playground it is the signed-in person, who is the same user their own keys
-  belong to. A key created without a user belongs to the shared
+  belong to. A sign-in made in the dashboard connects the signed-in person's
+  own user, so a key can use it only when its `user_id` is that person's:
+  create the key through the dashboard's key page for that person, not under
+  another user id. A key created without a user belongs to the shared
   `default` user, which is nobody's account: it cannot use a per-user server
   and is told it does not exist.
 - **How a user signs in.** Through the
@@ -169,7 +172,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   never used for another's request.
 - **Tokens are renewed for you.** An access token close to its expiry is
   refreshed before the request uses it. When the authorization server ends the
-  grant, the connection is removed and the user is asked to sign in again.
+  grant, the connection is removed and the user is asked to sign in again. Otari
+  learns this only when it next renews: a grant revoked at the provider early,
+  or one whose token states no expiry, still shows as connected until a call
+  fails, and the user then reconnects from the server's page.
 - **What ends a connection.** The user disconnecting, a manager removing it,
   deleting the server, deleting the user, the user leaving the workspace, and a
   change to the server's URL, its OAuth client or its credential mode.
@@ -190,8 +196,13 @@ or the master key:
 | `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count` | Workspace or organization owners and admins |
 | `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
 
-A sign-in is single-use, expires after ten minutes, and finishes only in the
-dashboard session that started it. No route returns a token.
+A sign-in is single-use, expires after ten minutes, and finishes only for the
+person who started it. The authorization server redirects the browser to
+`<public_base_url>/api/v1/mcp-connections/callback`, which passes `state` and
+`code` on to the dashboard and spends nothing. A client other than the
+dashboard finishes the sign-in by posting both, as JSON, to
+`POST /api/v1/mcp-connections/complete` as the same person. No route returns a
+token.
 
 #### Connection checks
 

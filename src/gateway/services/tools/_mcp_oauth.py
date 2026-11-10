@@ -82,6 +82,7 @@ class McpOAuthTokenError(McpOAuthError):
         return self.error_code in ("invalid_client", "unauthorized_client")
 
 
+_DIGITS = re.compile(r"[0-9]{1,64}")
 _OAUTH_ERROR_CODE = re.compile(r"[\x20-\x21\x23-\x5b\x5d-\x7e]{1,64}")
 
 
@@ -357,9 +358,9 @@ async def _discover(server_url: str) -> McpOAuthMetadata:
     if document is None:
         raise McpOAuthDiscoveryError("The authorization server's metadata could not be read")
     issuer = _string(document, "issuer")
-    if issuer is not None and issuer.rstrip("/") != servers[0].rstrip("/"):
-        # RFC 8414 section 3.3: metadata that names another issuer describes another server.
-        raise McpOAuthDiscoveryError("The authorization server's metadata names another issuer")
+    if issuer is None or issuer.rstrip("/") != servers[0].rstrip("/"):
+        # RFC 8414 section 3.3: the metadata must name the issuer it was fetched for, as the fallback path requires.
+        raise McpOAuthDiscoveryError("The authorization server's metadata does not name its own issuer")
     scope = challenge_scope or " ".join(_strings(resource_document, "scopes_supported")) or None
     return await _metadata(document, scope=scope, resource=resource or server_url)
 
@@ -503,8 +504,10 @@ def _error_code(payload: dict[str, Any] | None) -> str | None:
 
 def _lifetime(value: object) -> int | None:
     """A usable count of seconds, as ``expires_in`` is; None when the server stated none or nothing usable."""
-    if isinstance(value, str) and value.strip().isdigit():
-        value = int(value)
+    if isinstance(value, str):
+        # ASCII digits only: str.isdigit() also admits characters int() refuses, and int() refuses very long ones.
+        digits = value.strip()
+        value = int(digits) if _DIGITS.fullmatch(digits) else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
         return None
     # A number no clock can hold is read as the largest one that is kept.
