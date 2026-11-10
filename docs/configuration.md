@@ -1202,10 +1202,10 @@ as a price per image, and a token price is never read as a price per request.
 | Embeddings | none | Input tokens | `token`; `request` bills one request |
 | Rerank | none | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
 | Image generation and edits | `image` output | Images returned, their megapixels from the `size` asked for, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `megapixel` per megapixel, `request` per request, or `token` |
-| Audio transcription | `audio` input | The length the provider reports, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
+| Audio transcription | `audio` input | The length the provider reports, else the length of the uploaded file, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
 | Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
 | Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
-| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is recorded with no cost, which is unknown rather than free | `second` per second ([Videos](api-reference.md#videos)) |
+| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is billed what the provider charged, else 8 seconds | `second` per second ([Videos](api-reference.md#videos)) |
 
 A rate that cannot price what an endpoint reports leaves the request unpriced:
 
@@ -1238,8 +1238,16 @@ characters of its `input` and answers with its settled cost on response
 headers, since its body is audio (see
 [Request ID and inline cost](api-reference.md#request-id-and-inline-cost)).
 Moderations reserve one request. Transcription holds
-nothing before dispatch, because the audio's length is not read here, so a
-priced transcription can exceed a budget by one request's price.
+nothing before dispatch, so a priced transcription can exceed a budget by one
+request's price.
+
+A transcription model that reports tokens and no length, such as
+`gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
+length Otari reads from the uploaded file. Otari reads the length of a WAV,
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
+not its name. A file it cannot read, such as a WebM upload, gives no length,
+so that request keeps no cost at a `minute` or `second` rate. A length the
+provider reports always wins over the length read from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:

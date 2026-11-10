@@ -602,9 +602,13 @@ How a video is billed:
   writes one usage row under the `/v1/videos/completed` label with the cost,
   its `seconds` meter and the charge line. The cost folds into the owner's
   spend in dollars, except for a job started on a key exempt from budgets,
-  whose row carries the cost and whose spend stays as it was. A job whose
-  length neither the provider nor the request gives is recorded once with no
-  cost. A completed job whose model has lost its per-second price stays
+  whose row carries the cost and whose spend stays as it was.
+- A job whose length neither the provider nor the request gives is billed
+  what the provider charged for it, where the provider says (DeepInfra does).
+  That row has the cost and no meter, charge line or pricing source, because
+  no rate priced it. Where the provider gives no charge either, the job is
+  billed 8 seconds, the length the start reserved, at the per-second price.
+- A completed job whose model has lost its per-second price stays
   unbilled, and the first read after the price is back bills it. Later reads
   bill nothing, a failed job is never billed, and a job nobody reads is never
   billed.

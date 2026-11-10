@@ -7069,8 +7069,10 @@ export interface paths {
          * @description The job's status, from its record once it completed, else from the provider that runs it.
          *
          *     The first retrieval that finds the job completed bills its length at the
-         *     model's per-second video price. A key reads only the jobs its user started
-         *     in its workspace; the master key reads any job.
+         *     model's per-second video price. A job whose length neither the provider
+         *     nor the request states is billed what the provider charged for it, else
+         *     the length its reservation assumed. A key reads only the jobs its user
+         *     started in its workspace; the master key reads any job.
          */
         get: operations["videos-retrieve_video"];
         put?: never;

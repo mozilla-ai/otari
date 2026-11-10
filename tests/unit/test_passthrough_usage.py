@@ -170,6 +170,38 @@ def test_a_transcription_reports_the_length_the_provider_says_in_seconds_and_min
     )
 
 
+def test_a_token_billed_transcription_also_reports_the_length_measured_from_the_upload() -> None:
+    result = Transcription(
+        text="hi", usage=UsageTokens(input_tokens=1000, output_tokens=100, total_tokens=1100, type="tokens")
+    )
+
+    assert transcription_usage(result, measured_seconds=Decimal(6)) == ReportedUsage(
+        input_tokens=1000,
+        output_tokens=100,
+        total_tokens=1100,
+        units={"requests": 1},
+        quantities={"second": Decimal(6), "minute": Decimal(6) / Decimal(60)},
+    )
+
+
+def test_a_transcription_without_usage_reports_the_length_measured_from_the_upload() -> None:
+    assert transcription_usage(Transcription(text="hi", usage=None), measured_seconds=Decimal(30)) == ReportedUsage(
+        input_tokens=0,
+        output_tokens=0,
+        total_tokens=0,
+        units={"requests": 1},
+        quantities={"second": Decimal(30), "minute": Decimal("0.5")},
+    )
+
+
+def test_the_length_the_provider_reports_wins_over_the_length_measured() -> None:
+    result = Transcription(text="hi", usage=UsageDuration(seconds=90, type="duration"))
+
+    reported = transcription_usage(result, measured_seconds=Decimal(6))
+
+    assert reported.quantities == {"second": Decimal(90), "minute": Decimal("1.5")}
+
+
 def test_speech_reports_the_characters_spoken_and_one_request() -> None:
     assert speech_usage(12)(b"audio") == ReportedUsage(
         input_tokens=0, output_tokens=0, total_tokens=0, units={"requests": 1}, quantities={"character": 12}

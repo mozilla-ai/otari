@@ -211,12 +211,15 @@ async def test_nothing_is_folded_for_a_job_with_no_cost_or_outside_the_budget(
     fold_spend.assert_not_awaited()
 
 
-async def _settle(service: VideoJobService, workspace_id: uuid.UUID, *, reported: int | None) -> bool:
+async def _settle(
+    service: VideoJobService, workspace_id: uuid.UUID, *, reported: int | None, charged: float | None = None
+) -> bool:
     record = await service.find("video_done")
     assert record is not None
     return await service.settle_completed(
         record,
         reported_seconds=reported,
+        reported_cost=charged,
         endpoint=_ENDPOINT,
         workspace_id=workspace_id,
         organization_id=None,
@@ -275,17 +278,68 @@ async def test_a_completed_job_with_no_rate_stays_unclaimed_for_a_later_read(asy
 
 
 @pytest.mark.asyncio
-async def test_a_completed_job_whose_length_nobody_knows_is_claimed_with_no_cost(async_db: AsyncSession) -> None:
+async def test_a_completed_job_whose_length_nobody_knows_is_billed_what_the_provider_charged(
+    async_db: AsyncSession,
+) -> None:
     recorder, fold_spend = _Recorder(), AsyncMock()
     service = await _service(async_db, recorder=recorder, fold_spend=fold_spend)
+    workspace_id = await default_workspace_id(async_db)
+    await _record(service, "video_done")
+
+    settled = await _settle(service, workspace_id, reported=None, charged=0.3899126)
+
+    assert settled is True
+    usage = recorder.record.await_args_list[0].args[0]
+    assert usage.cost == Decimal("0.389913")
+    assert usage.charge is not None and (dict(usage.charge.meters), usage.charge.lines) == ({}, [])
+    assert usage.pricing is None
+    fold_spend.assert_awaited_once_with(_OWNER, Decimal("0.389913"))
+
+
+@pytest.mark.asyncio
+async def test_a_completed_job_whose_length_nobody_knows_and_with_no_charge_is_billed_for_the_assumed_length(
+    async_db: AsyncSession,
+) -> None:
+    recorder, fold_spend = _Recorder(), AsyncMock()
+    service = await _service(
+        async_db, recorder=recorder, fold_spend=fold_spend, rate=AsyncMock(return_value=_per_second(0.1))
+    )
     workspace_id = await default_workspace_id(async_db)
     await _record(service, "video_done")
 
     settled = await _settle(service, workspace_id, reported=None)
 
     assert settled is True
-    assert recorder.record.await_args_list[0].args[0].cost is None
-    fold_spend.assert_not_awaited()
+    usage = recorder.record.await_args_list[0].args[0]
+    assert usage.cost == Decimal("0.8")
+    assert usage.charge is not None and usage.charge.meters == {"seconds": 8}
+    fold_spend.assert_awaited_once_with(_OWNER, Decimal("0.8"))
+
+
+@pytest.mark.asyncio
+async def test_the_length_asked_prices_a_job_before_the_providers_charge(async_db: AsyncSession) -> None:
+    recorder = _Recorder()
+    service = await _service(async_db, recorder=recorder, rate=AsyncMock(return_value=_per_second(0.1)))
+    workspace_id = await default_workspace_id(async_db)
+    await _record(service, "video_done", seconds=5)
+
+    assert await _settle(service, workspace_id, reported=None, charged=0.39) is True
+    assert recorder.record.await_args_list[0].args[0].cost == Decimal("0.5")
+
+
+@pytest.mark.asyncio
+async def test_a_completed_job_with_no_length_no_charge_and_no_rate_stays_unclaimed(async_db: AsyncSession) -> None:
+    recorder = _Recorder()
+    service = await _service(async_db, recorder=recorder)
+    workspace_id = await default_workspace_id(async_db)
+    await _record(service, "video_done")
+
+    settled = await _settle(service, workspace_id, reported=None)
+    record = await service.find("video_done")
+
+    assert settled is False
+    recorder.record.assert_not_awaited()
+    assert record is not None and record.accounted_at is None
 
 
 @pytest.mark.asyncio
@@ -305,6 +359,7 @@ async def test_the_deployment_is_charged_the_cost_before_the_row_is_written(asyn
     settled = await service.settle_completed(
         record,
         reported_seconds=4,
+        reported_cost=None,
         endpoint=_ENDPOINT,
         workspace_id=workspace_id,
         organization_id=uuid.uuid4(),
@@ -333,6 +388,7 @@ def test_a_job_already_accounted_is_not_settled_again() -> None:
         service.settle_completed(
             record,  # type: ignore[arg-type]
             reported_seconds=4,
+            reported_cost=None,
             endpoint=_ENDPOINT,
             workspace_id=uuid.uuid4(),
             organization_id=None,
@@ -356,6 +412,7 @@ async def test_a_completed_job_is_remembered_with_its_length_and_its_video(async
         status="completed",
         seconds=5,
         outputs=[VideoOutput(b64_data="AAAA"), VideoOutput(url="https://cdn.example/v.webm", mime_type="video/webm")],
+        cost=0.3899126,
     )
 
     await service.remember_completed(record, job)
@@ -363,8 +420,24 @@ async def test_a_completed_job_is_remembered_with_its_length_and_its_video(async
 
     assert remembered is not None
     assert (remembered.id, remembered.status, remembered.seconds) == ("video_done", "completed", 5)
+    assert remembered.cost == pytest.approx(0.389913)
     assert [(o.url, o.mime_type) for o in remembered.outputs] == [("https://cdn.example/v.webm", "video/webm")]
     assert remembered.completed_at is not None and remembered.created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_providers_charge_past_what_a_cost_holds_is_not_remembered(async_db: AsyncSession) -> None:
+    service = await _service(async_db)
+    await _record(service, "video_done")
+    record = await service.find("video_done")
+    assert record is not None
+
+    await service.remember_completed(
+        record, VideoJob(id="video_done", model="veo", status="completed", outputs=[], cost=1e13)
+    )
+    remembered = service.remembered(await service.find("video_done"))  # type: ignore[arg-type]
+
+    assert remembered is not None and remembered.cost is None
 
 
 @pytest.mark.asyncio
@@ -378,3 +451,4 @@ async def test_a_completed_job_with_only_inline_data_is_remembered_without_an_ou
     remembered = service.remembered(await service.find("video_done"))  # type: ignore[arg-type]
 
     assert remembered is not None and remembered.outputs == [] and remembered.seconds is None
+    assert remembered.cost is None

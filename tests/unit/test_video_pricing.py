@@ -11,6 +11,7 @@ from gateway.services.pricing import (
     VIDEO_SECONDS,
     ModelSearchRate,
     UsageCharge,
+    charged_as_reported,
     estimate_video_cost,
     model_search_rate,
     price_video,
@@ -113,3 +114,21 @@ def test_a_video_of_no_length_costs_nothing_and_explains_nothing() -> None:
 def test_a_negative_length_cannot_be_priced() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         price_video(_rate(_PER_SECOND), -1)
+
+
+def test_a_video_billed_as_reported_costs_the_providers_charge_to_the_micro_dollar() -> None:
+    charge = charged_as_reported(0.38991260000000005)
+
+    assert charge is not None
+    assert (charge.cost, charge.meters, charge.lines) == (Decimal("0.389913"), {}, [])
+
+
+@pytest.mark.parametrize("cost", [None, -0.1, float("nan"), float("inf"), 1e12, 1e30])
+def test_a_charge_that_is_not_a_usable_cost_bills_nothing_as_reported(cost: float | None) -> None:
+    assert charged_as_reported(cost) is None
+
+
+def test_a_charge_of_the_largest_cost_is_billed_as_reported() -> None:
+    charge = charged_as_reported(999_999_999_999.0)
+
+    assert charge is not None and charge.cost == Decimal("999999999999.000000")
