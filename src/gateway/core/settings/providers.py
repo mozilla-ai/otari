@@ -21,12 +21,37 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from any_llm import LLMProvider
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from gateway.core.settings.inference import country_codes
-from gateway.core.settings_view import OMITTED
+from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+
+DEFAULT_PLATFORM_URL = "https://api.otari.ai"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def https_or_loopback_problem(url: str) -> str | None:
+    """Why ``url`` may not carry a credential, or None: it must be https, or http on this machine.
+
+    Userinfo is refused as well, so no credential is written into an address
+    that is logged or shown.
+    """
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+    except ValueError:
+        return "is not a valid URL"
+    if not host:
+        return "must be an absolute URL"
+    if parsed.username is not None or parsed.password is not None:
+        return "must carry no username or password"
+    if parsed.scheme == "https" or (parsed.scheme == "http" and host.lower() in _LOOPBACK_HOSTS):
+        return None
+    return "must use https (http is accepted for localhost only)"
+
 
 # What a ``hosted_providers:`` entry may not carry, with the reason it is refused.
 _REFUSED_KEYS = {
@@ -159,6 +184,40 @@ class ProviderSettings(BaseModel):
             "provider cannot hold keeps serving from config.yml. Also settable via OTARI_IMPORT_CONFIGURED_PROVIDERS."
         ),
     )
+
+    platform_url: Annotated[str, Shown(SettingsGroup.GENERAL)] = Field(
+        default=DEFAULT_PLATFORM_URL,
+        description=(
+            "The otari.ai address the dashboard's Connect otari.ai asks for a key, as an https URL (http is accepted "
+            "for localhost). Nothing is sent to it until an operator clicks Connect. Set it to an empty string to "
+            "remove the option and its routes. Requires restart."
+        ),
+    )
+
+    @field_validator("platform_url", mode="before")
+    @classmethod
+    def _platform_url(cls, value: Any) -> Any:
+        """Trim the address, read null as off, and refuse one a device code may not be sent to."""
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            return ""
+        parsed = urlsplit(normalized)
+        problem = https_or_loopback_problem(normalized)
+        if problem is None and (parsed.query or parsed.fragment):
+            problem = "must carry no query or fragment"
+        if problem is not None:
+            msg = f"platform_url {problem}"
+            raise ValueError(msg)
+        return normalized
+
+    @property
+    def platform_connect_available(self) -> bool:
+        """Whether this deployment offers connecting to otari.ai at all."""
+        return bool(self.platform_url)
 
     @field_validator("hosted_providers", mode="before")
     @classmethod

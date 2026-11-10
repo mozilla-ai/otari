@@ -21,9 +21,15 @@ from sqlmodel import Field, SQLModel
 
 from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import HostedPriceSource, ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import (
+    HostedModelDisabledReason,
+    HostedProvider,
+    HostedProviderModel,
+    PlatformConnectState,
+    ProviderEndpoint,
+)
 from gateway.models.secret_fields import redact_secret_like_values
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
@@ -764,7 +770,7 @@ class HostedModelUpdateRequest(SQLModel):
 class HostedModelRates(SQLModel):
     """The rates a hosted model is currently served at, and which rung of the deployment's ladder said so."""
 
-    source: PriceSource
+    source: HostedPriceSource
     input_price_per_million: float
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
@@ -772,7 +778,7 @@ class HostedModelRates(SQLModel):
     unit: str = "token"
 
     @classmethod
-    def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
+    def from_version(cls, version: ModelPricing, source: HostedPriceSource) -> HostedModelRates:
         """Read one pricing version, stored or transient, into the display shape."""
         return cls(
             source=source,
@@ -788,9 +794,10 @@ class HostedModelPublic(SQLModel):
     """One offered model, with the price the deployment currently serves it at.
 
     ``price_source`` says which rung of the deployment's ladder answered:
-    ``deployment`` for a rate an operator set, ``defaults`` for the
-    community-maintained rate, whether this surface stored it or the fallback
-    supplies it, and None when nothing prices the model yet. ``unit`` says what
+    ``deployment`` for a rate an operator set, ``provider`` for the rate the
+    provider's own listing named, ``defaults`` for the community-maintained
+    rate, whether this surface stored it or the fallback supplies it, and None
+    when nothing prices the model yet. ``unit`` says what
     the rates are per, so a per-request rate is not read as a per-token one.
     ``enabled`` is the serving switch; a model offered without a discoverable
     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
@@ -808,7 +815,7 @@ class HostedModelPublic(SQLModel):
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     unit: str | None = None
-    price_source: PriceSource | None = None
+    price_source: HostedPriceSource | None = None
     enabled: bool
     disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
@@ -1102,3 +1109,29 @@ __all__ = [
     "WorkspaceProviderModelRestrictionRequest",
     "WorkspaceProviderModelRestrictionsPublic",
 ]
+
+
+class PlatformConnectStartPublic(SQLModel):
+    """What an operator needs to approve a connection on otari.ai.
+
+    ``user_code`` is what the approval page shows back, ``verification_uri_complete``
+    the page to open, and ``expires_in`` the seconds left to approve.
+    """
+
+    user_code: str
+    verification_uri_complete: str
+    expires_in: int
+
+
+class PlatformConnectStatusPublic(SQLModel):
+    """Where the deployment's connection to otari.ai stands.
+
+    ``idle`` means no attempt. The code, the link and the seconds left are set
+    while ``pending`` and null otherwise. ``connected`` means the ``otari-ai``
+    hosted provider holds the key otari.ai issued.
+    """
+
+    status: Literal["idle"] | PlatformConnectState
+    user_code: str | None = None
+    verification_uri_complete: str | None = None
+    expires_in: int | None = None

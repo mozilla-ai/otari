@@ -52,6 +52,7 @@ from urllib.parse import ParseResult, parse_qsl, quote, urlencode, urlparse, url
 
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
+from gateway.core.settings.providers import https_or_loopback_problem
 
 
 def redact_url_secrets(value: str) -> str:
@@ -376,3 +377,14 @@ async def validate_federation_url(url: str, *, allow_private_hosts: bool = False
     if allow_private_hosts:
         return
     await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")
+
+
+def validate_credential_address(url: str, *, label: str) -> None:
+    """Refuse an address a credential travels to or a browser opens unless it is https, or http on this machine.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    _parse_safe_url(url, label=label)
+    problem = https_or_loopback_problem(url)
+    if problem is not None:
+        raise UnsafeURLError(f"{label} URL {problem}")

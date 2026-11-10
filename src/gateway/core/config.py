@@ -560,6 +560,16 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
         raise ValueError(msg) from exc
 
 
+def _default_database_url() -> str:
+    """The database a deployment that names none gets.
+
+    ``OTARI_DEFAULT_DATABASE_URL`` is how the container image points this at its
+    data volume. It ranks below the config file, unlike ``OTARI_DATABASE_URL``,
+    so an image that sets it does not override a mounted ``database_url``.
+    """
+    return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -604,7 +614,7 @@ class GatewayConfig(
     )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
-        default="sqlite:///./otari.db",
+        default_factory=_default_database_url,
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(
@@ -1010,7 +1020,10 @@ class GatewayConfig(
     )
     bootstrap_api_key: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
-        description="Create a first-use API key on startup when no API keys exist",
+        description=(
+            "Create a first-use API key on startup when no API keys exist. Left unset, a deployment that "
+            "generated its own master key creates none, since its operator starts from the setup link."
+        ),
     )
     bootstrap: Annotated[str | None, OMITTED] = Field(
         default=None,
@@ -2601,6 +2614,10 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
         os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
+# Fields an empty ``OTARI_<FIELD>`` switches off, where every other field reads an empty variable as unset.
+_EMPTY_ENV_SWITCHES_OFF = frozenset({"platform_url"})
+
+
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
 
@@ -2610,6 +2627,9 @@ def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """
     for field_name in GatewayConfig.model_fields:
         value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")
+        if value == "" and field_name in _EMPTY_ENV_SWITCHES_OFF:
+            config[field_name] = ""
+            continue
         if value is None or value == "":
             continue
         try:

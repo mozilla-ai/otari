@@ -15,6 +15,8 @@ import type {
   HostedProvider,
   HostedProviders,
   HostedProviderTestResult,
+  PlatformConnectStart,
+  PlatformConnectStatus,
   ReencryptHostedProvidersResult,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
@@ -29,6 +31,7 @@ import {
   HOSTED_PROVIDERS,
   MODELS,
   NO_RETRY,
+  PLATFORM_CONNECT,
   PRICING,
   PROVIDER_HEALTH,
   PROVIDERS,
@@ -114,13 +117,98 @@ export function useUpdateHostedProvider() {
 }
 
 export function useDeleteHostedProvider() {
+  const queryClient = useQueryClient()
   const invalidate = useInvalidateHosted()
   return useMutation({
     mutationFn: (provider: string) =>
       apiFetch<{ message: string }>(providerPath(provider), {
         method: "DELETE",
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      // Removing the connected provider is how a deployment disconnects.
+      void queryClient.invalidateQueries({ queryKey: [PLATFORM_CONNECT] })
+    },
+  })
+}
+
+// Connecting the deployment to otari.ai (`/platform/connect`): the gateway asks
+// otari.ai for a code, the operator approves it there, and the gateway stores
+// the key as the `otari-ai` hosted provider. Offered only where the bootstrap
+// says so (`platform_connect`), which is also what keeps the status read from
+// being sent to a gateway that mounts no such route.
+
+/** How often an open page asks whether a pending code was approved. */
+const PLATFORM_CONNECT_POLL_MS = 3_000
+
+/**
+ * Where the connection stands, polled only while a code is waiting to be
+ * approved: every other status is one that does not change on its own.
+ *
+ * The gateway asks otari.ai at most once per interval however often this is
+ * read. The read that first finds the attempt connected also refreshes the
+ * provider and model lists, which the gateway changed while answering it.
+ */
+export function usePlatformConnectStatus(enabled: boolean) {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateHosted()
+  return useQuery({
+    queryKey: [PLATFORM_CONNECT],
+    queryFn: async () => {
+      const before = queryClient.getQueryData<PlatformConnectStatus>([
+        PLATFORM_CONNECT,
+      ])
+      const status = await apiFetch<PlatformConnectStatus>("/platform/connect")
+      // Also on a first read: the gateway may have stored the provider while
+      // answering it, beside a provider list fetched at the same moment.
+      if (before?.status !== "connected" && status.status === "connected") {
+        if (before?.status === "pending") {
+          // The catalog's short model ids are re-indexed once a minute, and
+          // the setup guide hands one out right after this. Best effort: a
+          // failure only means the id resolves at the next tick.
+          await apiFetch("/catalog/selectors/refresh", {
+            method: "POST",
+          }).catch(() => undefined)
+        }
+        invalidate()
+      }
+      return status
+    },
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.status === "pending" ? PLATFORM_CONNECT_POLL_MS : false,
+    // A failed read is shown where the code is, and the next poll asks again.
+    ...NO_RETRY,
+  })
+}
+
+/** Ask otari.ai for a code. The answer seeds the status, so the page shows the code at once. */
+export function useStartPlatformConnect() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<PlatformConnectStart>("/platform/connect", { method: "POST" }),
+    onSuccess: (started) => {
+      queryClient.setQueryData<PlatformConnectStatus>([PLATFORM_CONNECT], {
+        status: "pending",
+        ...started,
+      })
+    },
+  })
+}
+
+export function useCancelPlatformConnect() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/platform/connect", { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.setQueryData<PlatformConnectStatus>([PLATFORM_CONNECT], {
+        status: "idle",
+        user_code: null,
+        verification_uri_complete: null,
+        expires_in: null,
+      })
+    },
   })
 }
 

@@ -13,8 +13,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy import column, event, inspect, literal, select, table
+from sqlalchemy.engine import URL, Connection, make_url
 from sqlalchemy.exc import DataError, DisconnectionError, IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -87,6 +87,49 @@ def to_sync_url(database_url: str) -> str:
     if sync_drivername is None:
         return database_url
     return url.set(drivername=sync_drivername).render_as_string(hide_password=False)
+
+
+def sqlite_database_file(database_url: str) -> Path | None:
+    """The file a SQLite ``database_url`` names, or ``None`` for any other database.
+
+    An in-memory database and a ``file:`` URI name no file a key could sit beside.
+    """
+    url: URL = make_url(database_url)
+    database = url.database
+    if (
+        not url.drivername.startswith("sqlite")
+        or not database
+        or database == ":memory:"
+        or database.startswith("file:")
+    ):
+        return None
+    return Path(database)
+
+
+async def holds_encrypted_secrets() -> bool:
+    """Whether any row holds a value sealed with the secret key, which is every ``encrypted_*`` column.
+
+    Read from the database's own schema rather than the models, so it answers for
+    the tables that exist, whichever revision they are at.
+    """
+    if _engine is None:
+        msg = "Database not initialized. Call init_db() first."
+        raise RuntimeError(msg)
+    async with _engine.connect() as connection:
+        return await connection.run_sync(_holds_encrypted_secrets)
+
+
+def _holds_encrypted_secrets(connection: Connection) -> bool:
+    inspector = inspect(connection)
+    for table_name in inspector.get_table_names():
+        for reflected in inspector.get_columns(table_name):
+            name = reflected["name"]
+            if not name.startswith("encrypted_"):
+                continue
+            sealed = select(literal(1)).select_from(table(table_name)).where(column(name).is_not(None)).limit(1)
+            if connection.execute(sealed).first() is not None:
+                return True
+    return False
 
 
 def _run_migrations(database_url: str) -> None:

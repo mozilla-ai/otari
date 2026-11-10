@@ -13,10 +13,14 @@ from gateway.db import APIKey, User
 from gateway.main import create_app
 from gateway.services.mail import Mailer
 
+# An operator-chosen master key: a deployment that generates its own starts from
+# the setup link and creates no bootstrap API key (tests/unit/test_master_key_service.py).
+MASTER_KEY = "operator-chosen-master-key"
+
 
 def test_create_app_bootstraps_first_api_key(tmp_path: Path) -> None:
     database_path = tmp_path / "bootstrap.db"
-    config = GatewayConfig(database_url=f"sqlite:///{database_path}")
+    config = GatewayConfig(database_url=f"sqlite:///{database_path}", master_key=MASTER_KEY)
     app = create_app(config)
 
     with TestClient(app):
@@ -47,7 +51,7 @@ def test_create_app_bootstraps_first_api_key(tmp_path: Path) -> None:
 
 def test_create_app_does_not_create_second_bootstrap_key(tmp_path: Path) -> None:
     database_path = tmp_path / "bootstrap-once.db"
-    config = GatewayConfig(database_url=f"sqlite:///{database_path}")
+    config = GatewayConfig(database_url=f"sqlite:///{database_path}", master_key=MASTER_KEY)
 
     app = create_app(config)
     with TestClient(app):
@@ -110,7 +114,7 @@ def test_first_boot_seeds_a_fresh_database_without_sending_mail(
 
     monkeypatch.setattr(Mailer, "send", _refuse)
     # No mail settings at all: the state every self-hoster who wants no email is in.
-    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'first-boot.db'}")
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'first-boot.db'}", bootstrap_api_key=True)
 
     with TestClient(create_app(config)) as client:
         assert client.get(f"{API_ROOT}/health").status_code == 200
@@ -155,7 +159,9 @@ def test_the_bootstrap_key_is_minted_in_the_bound_format(tmp_path: Path, monkeyp
     sys.modules.pop(module_name, None)
     try:
         database_path = tmp_path / "bootstrap-probe.db"
-        config = GatewayConfig(database_url=f"sqlite:///{database_path}", bootstrap=f"{module_name}:register")
+        config = GatewayConfig(
+            database_url=f"sqlite:///{database_path}", bootstrap=f"{module_name}:register", master_key=MASTER_KEY
+        )
         app = create_app(config)
 
         with TestClient(app):

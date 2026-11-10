@@ -4,10 +4,22 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -340,4 +352,50 @@ class WorkspaceProviderPolicy(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+PLATFORM_CONNECT_ROW_ID = 1
+
+PlatformConnectState = Literal["pending", "connected", "expired", "denied"]
+PLATFORM_CONNECT_PENDING: PlatformConnectState = "pending"
+PLATFORM_CONNECT_CONNECTED: PlatformConnectState = "connected"
+PLATFORM_CONNECT_EXPIRED: PlatformConnectState = "expired"
+PLATFORM_CONNECT_DENIED: PlatformConnectState = "denied"
+
+
+class PlatformConnectAttempt(Base):
+    """The deployment's one attempt to connect to otari.ai, pending or as it ended.
+
+    One row, so every replica reads the same attempt. ``attempt_id`` changes
+    with each start, and every write names it, so an answer for an attempt that
+    was canceled or replaced lands nowhere. ``next_poll_at`` is also the claim:
+    a status read asks otari.ai only where its conditional update moved it
+    forward. The device code is stored encrypted and cleared when the attempt
+    ends.
+    """
+
+    __tablename__ = "platform_connect_attempts"
+    __table_args__ = (
+        CheckConstraint(f"id = {PLATFORM_CONNECT_ROW_ID}", name="ck_platform_connect_attempts_one_row"),
+        CheckConstraint(
+            "status IN ('pending', 'connected', 'expired', 'denied')", name="ck_platform_connect_attempts_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=PLATFORM_CONNECT_ROW_ID)
+    attempt_id: Mapped[uuid.UUID] = mapped_column(Uuid, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(16))
+    encrypted_device_code: Mapped[str | None] = mapped_column(default=None)
+    user_code: Mapped[str] = mapped_column(String(64))
+    verification_uri_complete: Mapped[str] = mapped_column(String(2048))
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    interval_seconds: Mapped[int] = mapped_column(Integer)
+    next_poll_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    # The organization of the operator who started the attempt, which the provider is kept to.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
