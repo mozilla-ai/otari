@@ -98,8 +98,14 @@ class Mailer:
         """Where this deployment's dashboard serves its static files, or ``None`` if its address is unknown."""
         return self._config.effective_ui_base_url.partition("?")[0].rstrip("/") or None
 
-    async def send(self, *, to: str, message: MailMessage, reply_to: str | None = None) -> MailDelivery:
+    async def send(
+        self, *, to: str, message: MailMessage, reply_to: str | None = None, sender_name: str | None = None
+    ) -> MailDelivery:
         """Deliver one rendered message, with ``reply_to`` as its Reply-To when given. Never raises.
+
+        ``sender_name`` replaces the configured From name for this message only, as
+        for one relayed on someone's behalf. The From address stays this
+        deployment's own: a mail service sends only from addresses it verified.
 
         A mail failure must not fail the request that triggered it: creating an
         invitation still succeeds when only the notification did not go out. The
@@ -115,7 +121,7 @@ class Mailer:
         envelope = MailEnvelope(
             to=to,
             sender_email=self._config.mail_from_email or _FALLBACK_SENDER,
-            sender_name=self._config.mail_from_name,
+            sender_name=sender_name or self._config.mail_from_name,
             message=message,
             reply_to=reply_to,
         )

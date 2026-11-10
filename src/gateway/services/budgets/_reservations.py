@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core import error_codes
+from gateway.core.config import END_USER_BUDGET_HEADER
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import estimate_metered_cost, priced_per_request
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
@@ -340,19 +341,26 @@ def _blocked_axis(
 
 
 def _budget_exceeded(
-    detail: str, blocked: BlockedAxis, *, budget_scope: str, fields: dict[str, str] | None = None
+    detail: str,
+    blocked: BlockedAxis,
+    *,
+    budget_scope: str,
+    fields: dict[str, str] | None = None,
+    end_user_budget_id: str | None = None,
 ) -> HTTPException:
-    """The 403 for a budget with no room, with ``Retry-After`` when its window ending would let the request in."""
-    return error_codes.RefusalException(
-        status.HTTP_403_FORBIDDEN,
-        detail,
-        headers=error_codes.error_headers(
-            error_codes.BUDGET_EXCEEDED,
-            budget_scope=budget_scope,
-            retry_after=blocked.retry_after(datetime.now(UTC)),
-        ),
-        fields=fields,
+    """The 403 for a budget with no room, with ``Retry-After`` when its window ending would let the request in.
+
+    ``end_user_budget_id`` is the budget of the end user refused, sent in ``Otari-End-User-Budget`` as an admitted
+    request's is, so a caller can tell which budget it was put on.
+    """
+    headers = error_codes.error_headers(
+        error_codes.BUDGET_EXCEEDED,
+        budget_scope=budget_scope,
+        retry_after=blocked.retry_after(datetime.now(UTC)),
     )
+    if end_user_budget_id is not None:
+        headers[END_USER_BUDGET_HEADER] = end_user_budget_id
+    return error_codes.RefusalException(status.HTTP_403_FORBIDDEN, detail, headers=headers, fields=fields)
 
 
 def _normalize_strategy(strategy: str | None) -> str:
@@ -1141,6 +1149,7 @@ async def reserve_budget(
             blocked,
             budget_scope="user",
             fields=end_user_fields(user.external_id),
+            end_user_budget_id=budget.budget_id if user.external_id is not None else None,
         )
 
     return await _held_handle(

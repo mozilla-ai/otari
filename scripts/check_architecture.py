@@ -1431,6 +1431,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.OIDCConnection": {
+        "repository": "gateway/repositories/identity/oidc_connection_repository.py",
+        "baseline": (),
+    },
     "gateway.models.inference.BatchRecord": {
         "repository": None,
         "baseline": ("gateway/services/batch_service.py",),
@@ -1590,7 +1594,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.routing.RoutingPolicy": {
-        "repository": None,
+        "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (
             "gateway/api/routes/organization_routing.py",
             "gateway/api/routes/routing.py",
@@ -1606,8 +1610,8 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tenancy.OAuthPendingState": {
-        "repository": None,
-        "baseline": ("gateway/services/oauth_service.py",),
+        "repository": "gateway/repositories/identity/oauth_pending_state_repository.py",
+        "baseline": (),
     },
     "gateway.models.tenancy.Organization": {
         "repository": "gateway/repositories/tenancy/organization_repository.py",

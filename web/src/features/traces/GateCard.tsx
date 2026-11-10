@@ -62,7 +62,7 @@ function judgeTokens(judge: JudgeCalls): string {
 function JudgeFacts({ judge }: { judge: JudgeCalls }) {
   return (
     <section className="flex flex-col gap-1.5">
-      <h3 className="text-overline">Its model calls</h3>
+      <h3 className="text-overline">Its model requests</h3>
       <dl className="flex flex-col gap-2">
         <Fact term="Model">{judge.model}</Fact>
         <Fact term="Tokens">{judgeTokens(judge)}</Fact>

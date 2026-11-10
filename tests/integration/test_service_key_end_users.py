@@ -281,7 +281,7 @@ def test_an_unknown_end_user_budget_is_refused_on_update_and_leaves_the_key_alon
     assert fetched.json()["end_user_budget_id"] is None
 
 
-def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
+def test_an_end_user_refused_by_its_budget_gets_a_stable_code_and_its_budget(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     budget_id = _budget(client, master_key_header, request_limit=1)
@@ -293,6 +293,8 @@ def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
     assert refused.status_code == 403
     assert refused.headers["Otari-Error-Code"] == "budget_exceeded"
     assert refused.headers["Otari-Budget-Scope"] == "user"
+    # Placed by the key's default, which only this header shows on a refusal.
+    assert refused.headers["Otari-End-User-Budget"] == budget_id
     assert refused.json()["code"] == "budget_exceeded"
     assert refused.json()["end_user"] == "carol"
     assert refused.json()["detail"].startswith("End user 'carol' ")

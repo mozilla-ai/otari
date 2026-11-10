@@ -62,6 +62,7 @@
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
 * [Sign-in and accounts](sign-in.md)
+* [Single sign-on](sso.md)
 * [Run the dashboard](run-the-dashboard.md)
 
 ## Providers

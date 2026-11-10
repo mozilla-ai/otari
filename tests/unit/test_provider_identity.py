@@ -8,6 +8,7 @@ from gateway.models.identity import (
     MAX_SUBJECT_LENGTH,
     EmailAssertion,
     ProviderIdentity,
+    oidc_identity_provider,
 )
 
 
@@ -47,3 +48,30 @@ def test_an_address_the_table_cannot_store_is_refused() -> None:
             full_name=None,
             email_verified=EmailAssertion.VERIFIED,
         )
+
+
+def test_provider_identity_accepts_a_255_character_provider() -> None:
+    identity = ProviderIdentity(
+        provider="oidc:" + "https://login.example.com/" + "a" * 200,
+        subject="abc",
+        email=None,
+        full_name=None,
+        email_verified=EmailAssertion.UNASSERTED,
+    )
+    assert len(identity.provider) <= 255
+
+
+def test_provider_identity_refuses_a_provider_over_255_characters() -> None:
+    with pytest.raises(ValueError, match="1 to 255 characters"):
+        ProviderIdentity(
+            provider="oidc:" + "a" * 260,
+            subject="abc",
+            email=None,
+            full_name=None,
+            email_verified=EmailAssertion.UNASSERTED,
+        )
+
+
+def test_oidc_identity_provider_refuses_an_issuer_that_would_not_fit() -> None:
+    with pytest.raises(ValueError):
+        oidc_identity_provider("https://" + "a" * 260)

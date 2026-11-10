@@ -1,3 +1,13 @@
+# The uv this image installs with, shared by every stage that needs it.
+#
+# Declared before the first stage so the `uv` stage below can take it: `COPY --from`
+# does not expand a variable in an image reference, so the image is pinned through a
+# named stage instead of inline. `tests/unit/test_uv_version_pin.py` holds this to the
+# range `pyproject.toml` declares, which is where the version is decided.
+ARG UV_VERSION=0.13.7
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # The admin dashboard bundle is not committed (see .gitignore), so build it here.
 #
 # Pinned to BUILDPLATFORM: otari-docker.yml publishes linux/amd64 and linux/arm64,
@@ -32,7 +42,7 @@ FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir --upgrade pip uv
+COPY --from=uv /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src

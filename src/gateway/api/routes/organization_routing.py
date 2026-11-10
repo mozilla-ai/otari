@@ -58,7 +58,7 @@ traffic used, and the fallback a catalog ID gives each with no policy.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import Select, false, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +66,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     CurrentIdentity,
+    PersonGrowthSignalPortDep,
     RequestSessionModelProviderPortDep,
     RoutingServiceDep,
     VisibleWorkspacesDep,
@@ -95,6 +96,7 @@ from gateway.models.providers import ModelAlias
 from gateway.models.routing import PolicySpec, RoutingPolicy
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.routing import AutomaticFallbackPublic, AutomaticFallbacksResponse
 from gateway.services.alias_service import all_alias_names
@@ -139,7 +141,7 @@ fallbacks_router = APIRouter(
 _MAX_ROWS = 1000
 
 
-async def _writable_workspace_id(
+async def _writable_workspace(
     db: AsyncSession,
     config: GatewayConfig,
     *,
@@ -147,7 +149,7 @@ async def _writable_workspace_id(
     workspace_id: uuid.UUID | None,
     targets: list[str],
     model_provider: ModelProviderPort | None,
-) -> uuid.UUID:
+) -> Workspace:
     """Resolve the workspace a tenant write lands in, refusing what it may not do.
 
     Three refusals, in the order that keeps each one from leaking what the next
@@ -172,6 +174,22 @@ async def _writable_workspace_id(
         organizations=organizations,
     )
     await _require_reachable_targets(db, config, user=user, targets=targets, model_provider=model_provider)
+    return workspace
+
+
+async def _writable_workspace_id(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    user: TenancyUser,
+    workspace_id: uuid.UUID | None,
+    targets: list[str],
+    model_provider: ModelProviderPort | None,
+) -> uuid.UUID:
+    """The id of :func:`_writable_workspace`, for a write that needs nothing else of it."""
+    workspace = await _writable_workspace(
+        db, config, user=user, workspace_id=workspace_id, targets=targets, model_provider=model_provider
+    )
     return workspace.id
 
 
@@ -324,6 +342,9 @@ async def set_organization_routing_policy(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     model_provider: RequestSessionModelProviderPortDep,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
+    routing: RoutingServiceDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -332,7 +353,7 @@ async def set_organization_routing_policy(
     accepted here.
     """
     _reject_user_scope(request.user_id)
-    workspace_id = await _writable_workspace_id(
+    workspace = await _writable_workspace(
         db,
         config,
         user=current_identity,
@@ -340,7 +361,25 @@ async def set_organization_routing_policy(
         targets=validated_spec(request.name, request.spec).static_selectors(),
         model_provider=model_provider,
     )
-    return await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id)
+    policy, created = await upsert_policy_in_workspace(request, db, config, workspace_id=workspace.id)
+    if created and growth is not None:
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.ROUTING_POLICY_CREATED,
+            user_id=current_identity.id,
+            email=current_identity.email,
+            organization_id=workspace.organization_id,
+        )
+        if current_identity.email is not None and await routing.is_first_policy_in_organization(
+            workspace.organization_id
+        ):
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.FIRST_ROUTE_CONFIGURED,
+                user_id=current_identity.id,
+                email=current_identity.email,
+            )
+    return policy
 
 
 @policies_router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
