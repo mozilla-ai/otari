@@ -310,6 +310,7 @@ from gateway.services.pricing import (
     NO_FACTS,
     ModelSearchRate,
     PriceFacts,
+    billed_provider_searches,
     charged_as_reported,
     estimate_settles,
     model_search_rate,
@@ -5213,7 +5214,9 @@ async def record_usage(
     if provider_searches and provider:
         tool_tally = tool_tally if tool_tally is not None else ToolUsageTally()
         tool_tally.record_provider_searches(
-            provider_type or provider_key(provider), provider_searches, deployment_paid=deployment_paid
+            provider_type or provider_key(provider),
+            billed_provider_searches(model, provider_searches),
+            deployment_paid=deployment_paid,
         )
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they

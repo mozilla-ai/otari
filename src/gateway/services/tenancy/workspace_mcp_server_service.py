@@ -1818,9 +1818,13 @@ class WorkspaceMcpServerService:
         identity_ids: dict[str, uuid.UUID] = {}
         for row in rows:
             try:
-                identity_ids[row.user_id] = uuid.UUID(row.user_id)
+                parsed = uuid.UUID(row.user_id)
             except ValueError:
                 continue
+            # Only the canonical spelling names a dashboard account, as ``may_connect`` reads it: another
+            # spelling of the same digits is a request-plane user of its own, not that account.
+            if str(parsed) == row.user_id:
+                identity_ids[row.user_id] = parsed
         identities = {
             identity.id: identity for identity in await UserRepository(self.db).get_by_ids(identity_ids.values())
         }

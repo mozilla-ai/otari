@@ -127,6 +127,18 @@ describe("McpConnectionCallbackPage", () => {
     expect(calls).toHaveLength(0)
   })
 
+  it.each(["constructor", "__proto__", "toString"])(
+    "shows the generic refusal for an error named %s rather than crashing",
+    async (error) => {
+      mockComplete(() => Response.json({}))
+      renderCallback({ error, state: "s" })
+
+      expect(
+        await screen.findByText(/did not finish, so nothing was connected/),
+      ).toBeVisible()
+    },
+  )
+
   it("goes straight on for a sign-in the gateway already finished", async () => {
     const calls = mockComplete(() => Response.json({}))
     renderCallback({ connected: SERVER_ID })

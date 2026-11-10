@@ -1760,6 +1760,83 @@ async def test_the_public_callback_checks_iss_for_a_sign_in_with_no_dashboard_se
     assert (await _connection(async_db, world.server.id, "alice") is not None) is connects
 
 
+async def test_a_savepoint_released_before_the_commit_sends_nothing_yet(async_db: AsyncSession) -> None:
+    """SQLAlchemy fires after_commit for a savepoint too; only the outermost commit counts."""
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+        async with uow.savepoint():
+            pass
+        assert fired == [], "a released savepoint is not the removal committing"
+    assert fired == ["sent"]
+
+
+async def test_a_savepoint_beside_it_rolling_back_does_not_cancel_it(async_db: AsyncSession) -> None:
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+        with pytest.raises(RuntimeError):
+            async with uow.savepoint():
+                raise RuntimeError("an unrelated step failed and was undone")
+
+    assert fired == ["sent"]
+
+
+async def test_a_savepoint_it_was_registered_in_rolling_back_cancels_it(async_db: AsyncSession) -> None:
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        with pytest.raises(RuntimeError):
+            async with uow.savepoint():
+                McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+                raise RuntimeError("the removal inside the savepoint was undone")
+
+    assert fired == []
+
+
+async def test_disconnecting_does_not_wait_on_a_slow_authorization_server(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+
+    async def slow(*args: object, **kwargs: object) -> bool:
+        await asyncio.sleep(5)
+        return True
+
+    monkeypatch.setattr(_mcp_oauth, "revoke", slow)
+    monkeypatch.setattr(_mcp_connections, "_REVOCATION_DEADLINE_SECONDS", 0.05)
+
+    async with asyncio.timeout(2):
+        await _service(async_db, config).disconnect(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id
+        )
+
+
+async def test_a_user_spelled_like_an_account_is_not_shown_as_that_account(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """Uppercase digits of a dashboard account's id are a different request-plane user, and listed as one."""
+    world = await _world(async_db, config)
+    lookalike = str(world.member.id).upper()
+    async_db.add(BillingUser(user_id=lookalike))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    url = await connections.start(server_id=world.server.id, user_id=lookalike)
+    await connections.complete(state=_state(url), code="code")
+
+    listed = await _service(async_db, config).server_connections(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id
+    )
+
+    assert [(entry.user_id, entry.email, entry.full_name) for entry in listed.data] == [(lookalike, None, None)]
+
+
 # --------------------------------------------------------------------------- #
 # A model request: attached servers, and sign-ins it cannot do without
 # --------------------------------------------------------------------------- #

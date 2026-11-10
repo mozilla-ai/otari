@@ -94,7 +94,7 @@ export function McpServerConnection({
   // it, and a save that only clears the token no longer does.
   const willHaveToken =
     isPerUser || typedToken || (!clearToken && server.has_token)
-  const urlReason = urlProblem(url, willHaveToken)
+  const urlReason = urlProblem(url, willHaveToken, isPerUser)
   const tokenField = isPerUser
     ? undefined
     : typedToken

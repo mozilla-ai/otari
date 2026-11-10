@@ -135,6 +135,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.catalog import served_context_window
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
@@ -164,7 +165,6 @@ from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.pricing_service import (
     RequestPrices,
     ResolvedPricing,
-    model_context_window,
     pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
@@ -1011,7 +1011,7 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
 
 def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
     """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
-    return TraceService(uow, TracesRepositories.on(uow), content, owners, model_context_window)
+    return TraceService(uow, TracesRepositories.on(uow), content, owners, served_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -2194,6 +2194,10 @@ class DatabaseSessionOwners:
             return WorkspaceContent()
         return WorkspaceContent(keeps=True, tool_output=workspace.trace_content_tool_output)
 
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        workspace = await WorkspaceRepository(self._db).get(workspace_id)
+        return workspace.organization_id if workspace is not None else None
+
 
 class NoSessionOwners:
     """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
@@ -2208,6 +2212,9 @@ class NoSessionOwners:
 
     async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
         return WorkspaceContent()
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        return None
 
 
 async def workspace_keeps_trace_content(

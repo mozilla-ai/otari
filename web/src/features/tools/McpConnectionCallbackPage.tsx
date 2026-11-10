@@ -19,11 +19,14 @@ export interface McpConnectionCallbackSearch {
 }
 
 // What the gateway's callback names when it lands here without a code to spend.
-const REFUSALS: Record<string, string> = {
-  access_denied: "The sign-in was declined, so nothing was connected.",
-  unknown_state:
+// A Map: the code comes from the URL, and an object would answer `constructor` with a function.
+const REFUSALS = new Map<string, string>([
+  ["access_denied", "The sign-in was declined, so nothing was connected."],
+  [
+    "unknown_state",
     "This sign-in is unknown, already finished, or took longer than ten minutes.",
-}
+  ],
+])
 
 /** A dashboard path, and nothing that could leave the dashboard. */
 function insideDashboard(path: string | null | undefined): string | undefined {
@@ -77,7 +80,7 @@ export function McpConnectionCallbackPage({
   }, [connected, error, state, code, iss, returnTo, mutate, navigate])
 
   const refusal = error
-    ? (REFUSALS[error] ??
+    ? (REFUSALS.get(error) ??
       "The sign-in did not finish, so nothing was connected.")
     : !connected && (!state || !code)
       ? "This page finishes a sign-in to an MCP server, and it was opened without one."

@@ -878,7 +878,15 @@ class McpConnectionService:
         try:
             client = _client_for(server, client_id=client_id, auth_method=auth_method)
             if client is not None:
-                revoked = await _mcp_oauth.revoke(revocation_endpoint, client, token=decrypt_secret(encrypted_token))
+                # Bounded as the background revocations are: the tokens are already gone here, and the
+                # person disconnecting should not wait on a slow authorization server.
+                try:
+                    async with asyncio.timeout(_REVOCATION_DEADLINE_SECONDS):
+                        revoked = await _mcp_oauth.revoke(
+                            revocation_endpoint, client, token=decrypt_secret(encrypted_token)
+                        )
+                except TimeoutError:
+                    revoked = False
                 logger.info("MCP connection revocation server_id=%s confirmed=%s", server_id, revoked)
         except (ValueError, SecretBoxUnavailableError):
             # A token or secret that will not decrypt cannot be revoked remotely; it is already gone here.

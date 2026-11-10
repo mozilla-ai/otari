@@ -581,6 +581,7 @@ async def test_a_code_is_exchanged_with_its_verifier_and_resource(wire: _Wire) -
         ('"' + "9" * 5000 + '"', None),
         ('"' + "0" * 70 + '120"', None),
         ('"' + "0" * 60 + '120"', 120),
+        ("1" + "0" * 400, 2**32),
     ],
 )
 async def test_a_lifetime_no_clock_can_hold_does_not_crash(wire: _Wire, stated: str, kept: int | None) -> None:

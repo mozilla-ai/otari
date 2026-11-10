@@ -18,6 +18,7 @@ from gateway.types.models_dev import (
     ModelsDevTier,
     models_dev_provider_id,
     models_dev_provider_ids,
+    normalize_models_dev_base_url,
     parse_catalog,
     snapshot_document,
 )
@@ -367,3 +368,25 @@ def test_the_module_is_standard_library_only() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.snapshot_document(module.parse_catalog({"p": {"models": {}}})) == {"p": {"id": "p", "models": {}}}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://mirror.example/#",
+        "https://mirror.example/?",
+        "https://mirror.example/catalog?type=all",
+        "ftp://mirror.example",
+        "mirror.example",
+        "https://user:password@mirror.example",
+    ],
+)
+def test_a_base_url_a_document_path_cannot_follow_is_refused_without_being_repeated(value: str) -> None:
+    """An empty ``?`` or ``#`` still puts the path after it, and a credential must not reach a log or a snapshot."""
+    with pytest.raises(ValueError, match="must") as refused:
+        normalize_models_dev_base_url(value)
+    assert "mirror.example" not in str(refused.value)
+
+
+def test_a_base_url_keeps_its_path_and_loses_its_trailing_slash() -> None:
+    assert normalize_models_dev_base_url(" https://mirror.example/catalog/ ") == "https://mirror.example/catalog"
