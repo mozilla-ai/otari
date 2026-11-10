@@ -1367,8 +1367,13 @@ async def test_the_callback_passes_iss_on_to_the_dashboard(async_db: AsyncSessio
 
 @pytest.mark.parametrize(
     ("url", "kept"),
-    [(OTHER_PUBLIC_URL, False), ("https://93.184.216.34/other-path", True)],
-    ids=["other-origin", "same-origin"],
+    [
+        (OTHER_PUBLIC_URL, False),
+        ("https://93.184.216.34/other-path", True),
+        ("https://93.184.216.34:443/mcp", True),
+        ("https://93.184.216.34:8443/mcp", False),
+    ],
+    ids=["other-origin", "same-origin", "default-port-written-out", "other-port"],
 )
 async def test_a_managers_client_does_not_follow_the_server_to_another_host(
     async_db: AsyncSession, config: GatewayConfig, url: str, kept: bool
