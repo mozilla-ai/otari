@@ -7,10 +7,10 @@
 
 ## What you can do
 
-* [Organize](organize.md)
 * [Build](build.md)
-* [Control](control.md)
 * [Observe](observe.md)
+* [Control](control.md)
+* [Organize](organize.md)
 
 # Guides
 
