@@ -8,7 +8,8 @@ seen from two sides.
 
 A model offered without a rate is seeded with the community default, as a
 version carrying ``SEED_ORIGIN``, while the deployment consults that dataset at
-all. A refresh moves a seeded version with the dataset and leaves every other
+all. An ``otari`` provider's models are seeded whether it does or not, with the
+vendor's rate as an estimate. A refresh moves a seeded version with the dataset and leaves every other
 origin alone, because those are rates somebody chose. A model nothing prices
 is offered but not served, so a model the dataset has not caught up with
 cannot be billed at nothing; a refresh serves it once the dataset prices it.
@@ -29,6 +30,9 @@ from gateway.repositories.providers import HostedModelConflict, HostedProviderMo
 from gateway.schemas.providers import HostedModelCreateRequest, HostedModelRates, HostedModelUpdateRequest
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import default_pricing_enabled, normalize_effective_at
+
+# The any-llm implementation that reaches another Otari, such as otari.ai.
+OTARI_IMPLEMENTATION = "otari"
 
 PRICE_SOURCE_DEFAULT: PriceSource = "defaults"
 PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
@@ -72,9 +76,12 @@ class HostedOffers:
         ``provider`` is the hosted provider's name, which the rates are keyed
         under; ``implementation`` is what they are looked up as where the name
         differs. Empty while the deployment does not consult the dataset: a
-        rate seeded from it would be a rate the operator switched off.
+        rate seeded from it would be a rate the operator switched off. An
+        ``otari`` provider is the exception, and is seeded either way: nothing
+        else prices its ``vendor:model`` ids, so with the dataset off every
+        model of a provider just connected would arrive switched off.
         """
-        if not default_pricing_enabled():
+        if not default_pricing_enabled() and implementation != OTARI_IMPLEMENTATION:
             return {}
         return await self.pricing.defaults_for(provider, models, implementation=implementation)
 

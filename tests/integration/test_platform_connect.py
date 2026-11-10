@@ -10,9 +10,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.api.deps import get_platform_client
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -545,3 +547,72 @@ def test_an_empty_platform_url_removes_the_routes_and_the_bootstrap_flag(
         assert client.get(f"{API_ROOT}/bootstrap").json()["platform_connect"] is False
         for method in ("POST", "GET", "DELETE"):
             assert client.request(method, PATH, headers=master_key_header).status_code == 404
+
+
+def test_on_a_default_configuration_a_connected_model_serves_a_request_at_once(
+    postgres_url: str, clean_database: None, clock: Clock
+) -> None:
+    """Zero configuration: pricing is required, the models.dev defaults are off, and no setting is touched."""
+    config = GatewayConfig(database_url=postgres_url, master_key="test-master-key", auto_migrate=False)
+    assert (config.require_pricing, config.default_pricing) == (True, False)
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    fake = FakePlatform()
+    for client in build_test_client(config):
+        app: Any = client.app
+        app.dependency_overrides[get_platform_client] = lambda: PlatformClient(
+            PLATFORM, transport=httpx.MockTransport(fake.handler)
+        )
+        _start(client, headers)
+        _approve(fake)
+        clock.advance(5)
+        assert _status(client, headers)["status"] == "connected"
+
+        models = client.get(f"{HOSTED}/otari-ai/models", headers=headers).json()["data"]
+        by_name = {model["model"]: model for model in models}
+        assert by_name["openai:gpt-4o"]["enabled"] is True
+        assert by_name["openai:gpt-4o"]["price_source"] == "defaults"
+        assert by_name["openai:gpt-4o"]["input_price_per_million"] is not None
+        # No vendor entry prices it, so it waits for a rate as on any hosted provider.
+        assert (by_name["x:new"]["enabled"], by_name["x:new"]["disabled_reason"]) == (False, "unpriced")
+
+        assert client.post(f"{API_ROOT}/users", json={"user_id": "u1"}, headers=headers).status_code == 200
+        completion = ChatCompletion(
+            id="cmpl-1",
+            choices=[
+                Choice(finish_reason="stop", index=0, message=ChatCompletionMessage(role="assistant", content="hi"))
+            ],
+            created=0,
+            model="openai:gpt-4o",
+            object="chat.completion",
+            usage=CompletionUsage(prompt_tokens=1000, completion_tokens=1000, total_tokens=2000),
+        )
+        provider = AsyncMock(return_value=completion)
+        with patch("gateway.api.routes.chat.acompletion", new=provider):
+            response = client.post(
+                f"{API_ROOT}/chat/completions",
+                json={"model": "otari-ai:openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}], "user": "u1"},
+                headers=headers,
+            )
+
+        assert response.status_code == 200, response.text
+        assert float(response.json()["usage"]["cost_usd"]) > 0
+        assert provider.await_args is not None
+        assert provider.await_args.kwargs["api_key"] == ISSUED_KEY
+
+
+def test_the_toggle_still_decides_for_every_other_hosted_provider(
+    postgres_url: str, clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _listing(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-4o", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _listing)
+    config = GatewayConfig(database_url=postgres_url, master_key="test-master-key", auto_migrate=False)
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    for client in build_test_client(config):
+        created = client.post(HOSTED, json={"provider": "openai", "api_key": "sk-live-1234"}, headers=headers)
+        assert created.status_code == 201, created.text
+        [model] = client.get(f"{HOSTED}/openai/models", headers=headers).json()["data"]
+        assert (model["enabled"], model["disabled_reason"]) == (False, "unpriced")

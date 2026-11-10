@@ -126,10 +126,13 @@ What a connection stores:
   who connected. Lift or change the restriction through
   `/api/v1/hosted-providers`.
 - Its models, named `otari-ai:<vendor>:<model>` (`otari-ai:openai:gpt-4o`).
-- A rate for each model its vendor's models.dev entry prices, where
-  `default_pricing` is on. That rate is the vendor's own, an estimate of what
-  otari.ai charges, and the page marks it **Estimate**. Set your own to change
-  it. A model with no rate is offered switched off, as on any hosted provider.
+- A rate for each model its vendor's models.dev entry prices, so those models
+  arrive switched on and a request can be sent at once. This holds whether
+  `default_pricing` is on or off, for a provider of the `otari` implementation
+  only: nothing else prices its `vendor:model` names. That rate is the
+  vendor's own, an estimate of what otari.ai charges, and the page marks it
+  **Estimate**. Set your own to change it. A model no vendor entry prices is
+  offered switched off, as on any hosted provider.
 
 Connecting again replaces the key of the existing `otari-ai` provider. A code
 that expires or is declined leaves nothing behind; choose **Try again**.
@@ -177,7 +180,9 @@ Adding a provider offers every model its key lists:
 
 - A model the deployment price list already prices is switched on at that rate.
 - Otherwise, where `default_pricing` is on, the model is seeded with its
-  models.dev rate and switched on.
+  models.dev rate and switched on. A provider of the `otari` implementation is
+  seeded this way whatever `default_pricing` says; see
+  [Connecting otari.ai](#connecting-otariai).
 - Where `default_pricing` is off, or models.dev does not price the model, it is
   offered switched off until it is priced, by the operator or by a later
   refresh once models.dev prices it.

@@ -45,6 +45,7 @@ from gateway.schemas.providers import (
     PlatformConnectStartPublic,
     PlatformConnectStatusPublic,
 )
+from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION
 from gateway.services.providers._hosted_provider_service import HostedProviderService
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -57,7 +58,7 @@ from gateway.services.url_safety import UnsafeURLError, validate_credential_addr
 
 # The hosted provider a connection stores, and the any-llm implementation that serves it.
 PLATFORM_PROVIDER_NAME = "otari-ai"
-PLATFORM_PROVIDER_IMPLEMENTATION = "otari"
+PLATFORM_PROVIDER_IMPLEMENTATION = OTARI_IMPLEMENTATION
 
 MAX_GATEWAY_NAME_LENGTH = 100
 # RFC 8628 section 3.5: a ``slow_down`` adds this to the interval.
