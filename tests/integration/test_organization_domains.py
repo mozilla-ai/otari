@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
@@ -40,6 +41,7 @@ from gateway.models.tenancy import (
     OrganizationDomainUpdateRequest,
     OrganizationMember,
     User,
+    Workspace,
     WorkspaceMember,
 )
 from gateway.repositories.budgets import BudgetRepositories
@@ -49,6 +51,7 @@ from gateway.repositories.tenancy import (
     OrganizationRepository,
     UserRepository,
     WorkspaceMemberRepository,
+    WorkspaceRepository,
 )
 from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -426,6 +429,31 @@ async def test_a_refused_grant_leaves_the_membership_and_does_not_fail_the_admis
     assert membership.status == "active"
     members = WorkspaceMemberRepository(async_db)
     assert await members.get_by_workspace_and_user(workspace.id, newcomer.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_workspace_lookup_does_not_fail_the_admission(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lookup is the grant's first statement, so it is covered by the same savepoint."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    async def _refuse(self: WorkspaceRepository, organization_id: uuid.UUID, name: str) -> Workspace | None:
+        raise OperationalError("statement timed out", None, TimeoutError())
+
+    monkeypatch.setattr(WorkspaceRepository, "get_by_organization_and_name", _refuse)
+
+    membership = await _auto_join(async_db, newcomer)
+
+    assert membership is not None
+    assert membership.status == "active"
+    monkeypatch.undo()
+    assert await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, newcomer.id) is None
 
 
 @pytest.mark.asyncio

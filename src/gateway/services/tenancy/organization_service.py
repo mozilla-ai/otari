@@ -958,36 +958,41 @@ class OrganizationService:
         granted nothing. A membership of that workspace the user already holds is set to the
         role named here and made active.
 
-        Owns the failure of the grant rather than passing it up, because the admission this
-        completes matters more than the workspace it adds. The grant runs in a savepoint, so a
-        refused one is discarded and logged while the admission around it still lands, leaving
-        the member exactly where an organization with no such workspace leaves them. Without
-        that, contending for the workspace row with another membership write would refuse the
-        admission, and on the sign-in paths that admit somebody it would refuse the sign-in.
+        Owns every failure of its own, the workspace lookup included, rather than passing one
+        up, because the admission this completes matters more than the workspace it adds. Both
+        statements run in one savepoint, so a refusal is discarded and logged while the
+        admission around it still lands, leaving the member exactly where an organization with
+        no such workspace leaves them. Without that, contending for the workspace row with
+        another membership write would refuse the admission, and on the paths that admit
+        somebody as they sign in it would refuse the sign-in. The lookup is inside the savepoint
+        rather than merely inside the handler because a failed statement leaves the transaction
+        around it unusable, so catching one outside a savepoint would trade a refused admission
+        for a refused commit.
 
         NOTE: The caller must have just created an active organization membership, inside the
         open block the membership listener writes through.
         Nothing here proves either.
         """
-        workspace = await self.workspace_rows.get_by_organization_and_name(organization_id, DEFAULT_WORKSPACE_NAME)
-        if workspace is None:
-            logger.info(
-                "Organization %s has no workspace named %r, so identity %s holds none in it",
-                organization_id,
-                DEFAULT_WORKSPACE_NAME,
-                user_id,
-            )
-            return
         try:
             async with self._require_unit_of_work().savepoint():
+                workspace = await self.workspace_rows.get_by_organization_and_name(
+                    organization_id, DEFAULT_WORKSPACE_NAME
+                )
+                if workspace is None:
+                    logger.info(
+                        "Organization %s has no workspace named %r, so identity %s holds none in it",
+                        organization_id,
+                        DEFAULT_WORKSPACE_NAME,
+                        user_id,
+                    )
+                    return
                 await self._apply_workspace_assignments(
                     user_id=user_id,
                     assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role=role)],
                 )
         except _GRANT_REFUSALS as exc:
             logger.warning(
-                "Could not grant workspace %s to identity %s, who holds none in organization %s: %s",
-                workspace.id,
+                "Could not grant the default workspace to identity %s, who holds none in organization %s: %s",
                 user_id,
                 organization_id,
                 describe_database_error(exc),
