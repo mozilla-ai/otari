@@ -1,0 +1,75 @@
+"""Data access for ``memory_proposals``. Flushes, never commits."""
+
+import uuid
+from dataclasses import dataclass
+
+from sqlalchemy import delete, select
+
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.memory import MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
+from gateway.repositories.memory.fenced_repository import FencedRepository
+
+
+@dataclass(frozen=True)
+class NewProposal:
+    """What a proposal is stored with. Its text arrives sealed."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    scope: MemoryScope
+    owner_user_id: uuid.UUID | None
+    author_user_id: uuid.UUID | None
+    kind: MemoryKind
+    trust: MemoryTrust
+    key_id: uuid.UUID
+    content_sealed: str
+    source_api_key_id: str | None = None
+    source_session_id: str | None = None
+    source_model: str | None = None
+
+
+class ProposalRepository(FencedRepository[MemoryProposal]):
+    """Store proposals until they are decided, and delete them once they are."""
+
+    def __init__(self, uow: UnitOfWork) -> None:
+        super().__init__(uow, MemoryProposal)
+
+    async def add(self, proposal: NewProposal) -> MemoryProposal:
+        """Stage one pending proposal."""
+        await self._fence(proposal.workspace_id)
+        row = MemoryProposal(
+            id=proposal.id,
+            workspace_id=proposal.workspace_id,
+            scope=proposal.scope,
+            owner_user_id=proposal.owner_user_id,
+            author_user_id=proposal.author_user_id,
+            kind=proposal.kind,
+            trust=proposal.trust,
+            state="pending",
+            key_id=proposal.key_id,
+            content_sealed=proposal.content_sealed,
+            source_api_key_id=proposal.source_api_key_id,
+            source_session_id=proposal.source_session_id,
+            source_model=proposal.source_model,
+        )
+        self.db.add(row)
+        await self.db.flush()
+        return row
+
+    async def in_workspace(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> MemoryProposal | None:
+        """One proposal, only if it is in ``workspace_id``."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryProposal).where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.id == proposal_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def remove(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> bool:
+        """Delete one decided proposal; whether the workspace had it."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.id == proposal_id)
+            .returning(MemoryProposal.id)
+        )
+        return result.scalar_one_or_none() is not None

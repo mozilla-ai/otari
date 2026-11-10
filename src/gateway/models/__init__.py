@@ -17,6 +17,7 @@ from gateway.models import (  # noqa: F401
     health_checks,
     identity,
     inference,
+    memory,
     platform,
     playground,
     pricing,

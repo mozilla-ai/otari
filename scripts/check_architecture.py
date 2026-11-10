@@ -2129,6 +2129,30 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/inference/video_job_repository.py",
         "baseline": (),
     },
+    "gateway.models.memory.MemoryKey": {
+        "repository": "gateway/repositories/memory/key_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.memory.MemoryEntry": {
+        "repository": "gateway/repositories/memory/entry_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.memory.MemoryProposal": {
+        "repository": "gateway/repositories/memory/proposal_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.memory.MemorySignal": {
+        "repository": "gateway/repositories/memory/signal_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.memory.MemoryRead": {
+        "repository": "gateway/repositories/memory/read_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.memory.MemoryWorkspaceSettings": {
+        "repository": "gateway/repositories/memory/settings_repository.py",
+        "baseline": (),
+    },
     "gateway.models.platform.RuntimeSetting": {
         "repository": None,
         "baseline": (

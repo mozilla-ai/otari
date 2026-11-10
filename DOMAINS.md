@@ -252,6 +252,19 @@ tool definitions, messages, tool results, files) as integers, and a read adds
 the model's context window from the pricing domain's catalog lookup. Neither
 keeps text.
 
+### memory
+
+Agent memory: what agents of a workspace may recall across models and sessions.
+Agents propose, a consolidator decides what is kept, and each entry is a version
+with its provenance and a trust level. A member's own entries are theirs alone;
+the workspace's are shared by every member's agents. `MemoryService` is its one
+service.
+
+Every entry, proposal and embedding is sealed under a data key of its workspace,
+which `ContentKeyPort` makes and opens, so nothing an agent wrote is readable at
+rest. On PostgreSQL its tables are under forced row-level security keyed on the
+workspace, beside each repository's own filter. It depends on no other domain.
+
 ### inference
 
 The request path (the completion dialects, the pass-through endpoints, batches,

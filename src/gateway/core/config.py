@@ -26,6 +26,7 @@ from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.identity import IdentitySettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.memory import MemorySettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
@@ -620,6 +621,7 @@ class GatewayConfig(
     FeedbackSettings,
     HealthCheckFeatureSettings,
     IdentitySettings,
+    MemorySettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,

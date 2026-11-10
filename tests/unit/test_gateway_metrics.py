@@ -36,6 +36,8 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_db_pool_connections_idle", "gauge", ("pool",)),
     ("gateway_db_pool_overflow_connections", "gauge", ("pool",)),
     ("gateway_inline_cost_settlements", "counter", ("outcome",)),
+    ("gateway_memory_keys_unopened", "counter", ("reason",)),
+    ("gateway_memory_rows_unopened", "counter", ("table",)),
     ("gateway_rate_limit_hits", "counter", ()),
     ("gateway_rate_limit_model_full", "counter", ("rule", "model")),
     ("gateway_rate_limit_reported", "counter", ("rule",)),
