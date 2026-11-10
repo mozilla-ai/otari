@@ -1,4 +1,4 @@
-"""The web-access refusals carry a stable error code (Otari#2990)."""
+"""The web-access refusals carry a stable error code."""
 
 from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED, error_headers
 from gateway.exceptions.tools_exceptions import (
