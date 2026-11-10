@@ -1718,8 +1718,9 @@ privacy_url: "https://example.com/privacy"
 ```
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
-Privacy row stays disabled. The box that accepts the terms at signup links the
-privacy policy beside them when `privacy_url` is set too.
+Privacy row stays disabled. Wherever a page asks for the terms (signup, an
+invitation, a first password, a provider sign-in), the box links the privacy
+policy beside them when `privacy_url` is set too.
 `GET /api/v1/bootstrap` publishes both addresses unauthenticated, so a URL
 carrying a credential is refused at startup; the same check covers `docs_url`
 and `site_url`.
