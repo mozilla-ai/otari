@@ -50,6 +50,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
@@ -568,18 +569,27 @@ def _origin(url: str) -> str:
 class WorkspaceMcpConnectionEligibility:
     """Whether a user may still hold a connection to a workspace's servers, for ``McpConnectionService``.
 
-    Runs on the request's session, inside the connection service's Unit of Work over it. It takes
+    Runs inside the connection service's Unit of Work block, on the repositories it is given. It takes
     the workspace lock a member's removal takes before it reads the membership, and the user row
     lock a user's deletion takes, so a sign-in finishing and a removal running serialize: whichever
     commits second sees the other.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        workspaces: WorkspaceRepository,
+        members: WorkspaceMemberRepository,
+        organization_members: OrganizationMemberRepository,
+    ) -> None:
+        self._uow = uow
+        self._workspaces = workspaces
+        self._members = members
+        self._organization_members = organization_members
 
     async def hold(self, workspace_id: uuid.UUID) -> None:
         """Take the workspace lock a member's removal and the workspace's deletion take first."""
-        await WorkspaceRepository(self.db).lock(workspace_id)
+        await self._workspaces.lock(workspace_id)
 
     async def may_connect(self, workspace_id: uuid.UUID, user_id: str) -> bool:
         """A live user who, when they are a dashboard account, can still reach the workspace.
@@ -588,7 +598,7 @@ class WorkspaceMcpConnectionEligibility:
         organization. A request-plane user that is no dashboard account belongs to no workspace,
         so only its deletion ends its connections. Locks the user's row as their deletion does.
         """
-        if user_id not in await lock_live_users(self.db, [user_id]):
+        if user_id not in await lock_live_users(self._uow, [user_id]):
             return False
         try:
             identity = uuid.UUID(user_id)
@@ -598,12 +608,12 @@ class WorkspaceMcpConnectionEligibility:
             return True
         # Locked as read: an organization's removal of the person changes these rows without the
         # workspace lock, and must wait for this sign-in, or be seen by it.
-        if await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], [identity], lock=True):
+        if await self._members.get_active_pairs([workspace_id], [identity], lock=True):
             return True
-        workspace = await WorkspaceRepository(self.db).get(workspace_id)
+        workspace = await self._workspaces.get(workspace_id)
         if workspace is None:
             return False
-        managers = await OrganizationMemberRepository(self.db).active_with_roles(
+        managers = await self._organization_members.active_with_roles(
             workspace.organization_id, {identity}, MANAGEMENT_ROLES, lock=True
         )
         return identity in managers
