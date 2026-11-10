@@ -100,6 +100,7 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
   const submitAddress = async () => {
     const address = email.trim()
     if (!address) {
+      setError(new Error("Enter your work email."))
       return
     }
     setIsPending(true)
@@ -197,7 +198,10 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
         >
           <TextField
             value={email}
-            onChange={setEmail}
+            onChange={(next) => {
+              setEmail(next)
+              setError(null)
+            }}
             type="email"
             isRequired
             validationBehavior="aria"
@@ -210,11 +214,14 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
               className="h-10 text-base"
             />
           </TextField>
+          {/* Never disabled for an empty box, as Login's own submit is not:
+              a disabled primary button sits at 1.95:1 on the brand tint, so an
+              empty address is refused on submit instead. */}
           <Button
             type="submit"
             variant="primary"
             fullWidth
-            isDisabled={isDisabled || isPending || email.trim() === ""}
+            isDisabled={isDisabled || isPending}
             className="h-11"
           >
             {isPending ? "Looking up…" : "Continue"}

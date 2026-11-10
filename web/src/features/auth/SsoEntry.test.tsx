@@ -72,6 +72,24 @@ describe("SsoEntry", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
   })
 
+  it("offers Continue on an empty address and names the field on submit", async () => {
+    renderEntry()
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
+    )
+
+    const submit = screen.getByRole("button", { name: "Continue" })
+    expect(submit).toBeEnabled()
+
+    await user.click(submit)
+
+    expect(
+      await screen.findByText("Enter your work email."),
+    ).toBeInTheDocument()
+  })
+
   it("offers the other sign-in options back when no company matches", async () => {
     const notFound: SsoLookupResponse = { found: false }
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(notFound))
