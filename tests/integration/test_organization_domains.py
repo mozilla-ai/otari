@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.budget_exceptions import WorkspaceBudgetDefaultBudgetNotFoundError
 from gateway.exceptions.organizations_exceptions import (
     NotAuthorizedError,
     OrganizationDomainAlreadyClaimedError,
@@ -38,7 +40,9 @@ from gateway.models.tenancy import (
     OrganizationDomainUpdateRequest,
     OrganizationMember,
     User,
+    WorkspaceMember,
 )
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
@@ -46,6 +50,8 @@ from gateway.repositories.tenancy import (
     UserRepository,
     WorkspaceMemberRepository,
 )
+from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
@@ -118,10 +124,18 @@ async def _claim(
     return row
 
 
-async def _auto_join(db: AsyncSession, user: User) -> OrganizationMember | None:
-    """Run the sign-in auto-join over ``db``, inside the block the sign-in that triggers it holds."""
+async def _auto_join(
+    db: AsyncSession, user: User, *, membership_listener: MembershipListener | None = None
+) -> OrganizationMember | None:
+    """Run the sign-in auto-join over ``db``, inside the block the sign-in that triggers it holds.
+
+    ``membership_listener`` replaces the one the request path builds, for a test about what the
+    grant does when announcing the workspace membership fails.
+    """
     writes = membership_writes(db)
     uow = writes["uow"]
+    if membership_listener is not None:
+        writes["membership_listener"] = membership_listener
     listener = DomainAutoJoinListener(
         OrganizationDomainRepository(uow),
         OrganizationMemberRepository(uow),
@@ -129,6 +143,13 @@ async def _auto_join(db: AsyncSession, user: User) -> OrganizationMember | None:
     )
     async with uow:
         return await listener.join(user)
+
+
+class _RefusingMembershipListener(BudgetMembershipListener):
+    """A listener whose reaction to a new workspace membership fails, as a stale default would."""
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        raise WorkspaceBudgetDefaultBudgetNotFoundError(uuid.uuid4())
 
 
 # =============================================================================
@@ -385,6 +406,26 @@ async def test_a_newcomer_joins_the_organizations_default_workspace(async_db: As
     member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id)
     assert member is not None
     assert member.role == "member"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_grant_leaves_the_membership_and_does_not_fail_the_admission(
+    async_db: AsyncSession,
+) -> None:
+    """The grant is the convenience; the admission it completes is the thing the caller asked for."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+    refusing = _RefusingMembershipListener(BudgetRepositories.on(UnitOfWork(async_db)))
+
+    membership = await _auto_join(async_db, newcomer, membership_listener=refusing)
+
+    assert membership is not None
+    assert membership.status == "active"
+    members = WorkspaceMemberRepository(async_db)
+    assert await members.get_by_workspace_and_user(workspace.id, newcomer.id) is None
 
 
 @pytest.mark.asyncio

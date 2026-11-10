@@ -24,8 +24,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions import TenancyConflictError, TenancyValidationError
+from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
@@ -380,6 +381,12 @@ class SignInDestination:
 
     organization_id: uuid.UUID | None
     refused_everywhere: bool
+
+
+# What a default-workspace grant absorbs: a database refusal, contention on the workspace row
+# included, and a listener's own not-found, which is a workspace default naming a budget that is
+# gone. Neither is a reason to refuse the admission the grant completes.
+_GRANT_REFUSALS: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, TenancyNotFoundError)
 
 
 class OrganizationService:
@@ -951,6 +958,13 @@ class OrganizationService:
         granted nothing. A membership of that workspace the user already holds is set to the
         role named here and made active.
 
+        Owns the failure of the grant rather than passing it up, because the admission this
+        completes matters more than the workspace it adds. The grant runs in a savepoint, so a
+        refused one is discarded and logged while the admission around it still lands, leaving
+        the member exactly where an organization with no such workspace leaves them. Without
+        that, contending for the workspace row with another membership write would refuse the
+        admission, and on the sign-in paths that admit somebody it would refuse the sign-in.
+
         NOTE: The caller must have just created an active organization membership, inside the
         open block the membership listener writes through.
         Nothing here proves either.
@@ -964,10 +978,20 @@ class OrganizationService:
                 user_id,
             )
             return
-        await self._apply_workspace_assignments(
-            user_id=user_id,
-            assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role=role)],
-        )
+        try:
+            async with self._require_unit_of_work().savepoint():
+                await self._apply_workspace_assignments(
+                    user_id=user_id,
+                    assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role=role)],
+                )
+        except _GRANT_REFUSALS as exc:
+            logger.warning(
+                "Could not grant workspace %s to identity %s, who holds none in organization %s: %s",
+                workspace.id,
+                user_id,
+                organization_id,
+                describe_database_error(exc),
+            )
 
     async def provision_tenancy_for_claim(
         self,
