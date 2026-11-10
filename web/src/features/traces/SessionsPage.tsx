@@ -362,10 +362,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
   useEffect(() => {
-    if (!peekId) return
-    const source =
-      opening.current?.id === peekId ? opening.current.source : "link"
+    // Any change of the open session settles the press, whether it opened that
+    // session, another one or none: Back overtaking it can leave the panel
+    // closed, and a later link to the same session is then a link.
+    const pressed = opening.current
     opening.current = null
+    if (!peekId) return
+    const source = pressed?.id === peekId ? pressed.source : "link"
     recordEvent(TELEMETRY_EVENTS.SESSION_OPENED, { source })
   }, [peekId, recordEvent])
   // An owner of the organization may open a private session by break-glass. What
