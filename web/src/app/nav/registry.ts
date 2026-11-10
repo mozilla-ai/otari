@@ -343,6 +343,14 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organization_guardrails",
         icon: FiShield,
       },
+      // The MCP servers the organization recommends, which lead the Browse
+      // catalog list on the workspace rail's MCP servers page.
+      {
+        to: "/organization/mcp-catalog",
+        label: "MCP catalog",
+        surface: "mcp_catalog",
+        icon: FiGrid,
+      },
       {
         to: "/organization",
         label: "Org settings",

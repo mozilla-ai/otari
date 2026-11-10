@@ -11,7 +11,9 @@ import type {
 } from "@/client"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   workspaceMcpServerHealth as health,
   organizationContext,
   workspace,
@@ -112,16 +114,18 @@ function ServerPageProbe() {
   return <p>Server page {serverId}</p>
 }
 
-function renderCard(variant?: "card" | "page") {
+function renderCard(variant?: "card" | "page", surfaces?: string[]) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>
-        <WorkspaceMcpServersCard variant={variant} />
-      </SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>
+          <WorkspaceMcpServersCard variant={variant} />
+        </SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     {
       // A real router, because a row and a new server open the server's own
       // page; the probe stands in for that page.
@@ -742,6 +746,44 @@ describe("WorkspaceMcpServersCard", () => {
       screen.queryByRole("switch", {
         name: "Let requests name their own MCP servers",
       }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("offers Browse catalog beside Add to a manager, on a deployment that serves the catalog", async () => {
+    mockApi()
+    await renderLoaded()
+
+    expect(
+      screen.getByRole("button", { name: "Browse catalog" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add MCP server" }),
+    ).toBeInTheDocument()
+  })
+
+  it("leaves Browse catalog out where the deployment switched the catalog off", async () => {
+    mockApi()
+    renderCard("card", ["tools", "workspaces"])
+    await screen.findByText(/No MCP server registered/i)
+
+    expect(
+      screen.queryByRole("button", { name: "Browse catalog" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add MCP server" }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not offer Browse catalog to a member who cannot manage the workspace", async () => {
+    mockApi({
+      servers: [workspaceMcpServer()],
+      role: "member",
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
+    })
+    await renderLoaded([workspaceMcpServer()])
+
+    expect(
+      screen.queryByRole("button", { name: "Browse catalog" }),
     ).not.toBeInTheDocument()
   })
 })

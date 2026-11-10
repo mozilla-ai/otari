@@ -9,6 +9,20 @@ The catalog permits nothing. A workspace reaches an MCP server only once the
 server is added to that workspace, so a workspace's own servers stay its allow
 list. See [Add an MCP server](add-an-mcp-server.md).
 
+## In the dashboard
+
+Open **Organization → MCP catalog**.
+
+- **Featured servers** is the organization's shelf. Owners and admins of the
+  organization add to it with **Feature a server**, which searches the
+  catalog, and take an entry off with **Remove**. Every member can read it.
+- **Registry sync** is shown to operators. It says what the last sync did and
+  how many servers the catalog holds, and **Sync now** starts one within a
+  minute. The button is disabled while `mcp_catalog_sync` is `off`.
+
+People add servers from the catalog on **Tools → MCP servers**, with
+**Browse catalog**. See [Add an MCP server](add-an-mcp-server.md).
+
 ## Settings
 
 Set these in `config.yml`, or as `OTARI_<NAME>` environment variables.
@@ -85,7 +99,7 @@ that uses it.
 
 ## Running and reading a sync
 
-Both routes are for operators.
+Both routes are for operators. The dashboard's **Sync now** calls the first.
 
 ```bash
 # Start a sync within a minute.
@@ -152,7 +166,8 @@ how it compares with the catalog today, as `catalog_status`:
 | `removed` | The catalog no longer lists the server. The entry stays as it was. |
 
 To accept a changed URL, feature the server again, by the `catalog_server_id`
-the entry reports: the entry takes a fresh copy.
+the entry reports: the entry takes a fresh copy. In the dashboard that is
+**Update** on the entry's row.
 
 Removing an entry from the shelf does not touch servers already added to a
 workspace.

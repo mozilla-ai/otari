@@ -709,6 +709,7 @@ describe("AppShell surface gating", () => {
       "Email domains",
       "Spend & budgets",
       "Guardrails",
+      "MCP catalog",
       "Org settings",
     ])
     // Providers nests the organization's two kinds of provider key.
@@ -744,14 +745,20 @@ describe("AppShell surface gating", () => {
     expect(
       within(sidebar).getByRole("link", { name: "Web search" }),
     ).toHaveAttribute("href", "/organization/web-search-keys")
-    // Guardrails then Org settings after them, read off the rendered order
+    // Guardrails, MCP catalog then Org settings after them, read off the rendered order
     // rather than off the registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
         .map((link) => link.textContent)
-        .slice(-4),
-    ).toEqual(["Inference", "Web search", "Guardrails", "Org settings"])
+        .slice(-5),
+    ).toEqual([
+      "Inference",
+      "Web search",
+      "Guardrails",
+      "MCP catalog",
+      "Org settings",
+    ])
 
     await user.click(inference)
 

@@ -15,6 +15,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Popover } from "@/design-system/overlays/Popover"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
 import {
   McpServerDialog,
   type McpServerDraft,
@@ -37,6 +38,7 @@ import {
 import { useWorkspace } from "@/shared/api/workspaces"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 // The MCP servers this workspace has registered, which a request reaches by
 // naming their ids in `mcp_server_ids` (see docs/mcp.md).
@@ -156,6 +158,11 @@ export function WorkspaceMcpServersCard({
   // is still animating away.
   const [openCount, setOpenCount] = useState(0)
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
+  // The catalog is a feature a deployment can switch off, and its dialog is
+  // keyed like the form's so each open starts from nothing picked.
+  const hasCatalog = useSurfaces()("mcp_catalog")
+  const [isCatalogOpen, setCatalogOpen] = useState(false)
+  const [catalogOpenCount, setCatalogOpenCount] = useState(0)
 
   const isPage = variant === "page"
 
@@ -320,9 +327,21 @@ export function WorkspaceMcpServersCard({
   }
 
   const addButton = manages ? (
-    <Button variant="primary" onPress={openAdd}>
-      Add MCP server
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      {hasCatalog ? (
+        <Button
+          onPress={() => {
+            setCatalogOpenCount((count) => count + 1)
+            setCatalogOpen(true)
+          }}
+        >
+          Browse catalog
+        </Button>
+      ) : null}
+      <Button variant="primary" onPress={openAdd}>
+        Add MCP server
+      </Button>
+    </div>
   ) : null
 
   return (
@@ -381,6 +400,17 @@ export function WorkspaceMcpServersCard({
         error={create.error}
         onSubmit={submit}
       />
+
+      {hasCatalog ? (
+        <McpCatalogDialog
+          key={`catalog-${catalogOpenCount}`}
+          isOpen={isCatalogOpen}
+          onOpenChange={setCatalogOpen}
+          workspaceId={selected.workspace_id}
+          workspaceName={selected.name}
+          existing={rows}
+        />
+      ) : null}
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}

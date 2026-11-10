@@ -54,3 +54,23 @@ test("add an MCP server", async ({ page }) => {
     await cleanUp(page)
   }
 })
+
+test("browse the catalog", async ({ page }) => {
+  await login(page)
+  await openNestedPage(page, "Tools", "MCP servers")
+  await page.getByRole("button", { name: "Browse catalog" }).click()
+
+  const dialog = page.getByRole("dialog", { name: "Browse catalog" })
+  await expect(
+    dialog.getByRole("searchbox", { name: "Search the catalog" }),
+  ).toBeVisible()
+  // This gateway never synced, so the list says why it is empty and nothing
+  // can be reviewed.
+  await expect(dialog.getByText(/The catalog is empty/)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Review" })).toBeDisabled()
+  // The outcomes the page lists, in the words the dialog reports them with.
+  // "Connected", "Needs sign-in", "Check failed", "Not added" and "Allow" are
+  // covered by McpCatalogDialog.test.tsx and mcpCatalog.test.ts.
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toBeHidden()
+})

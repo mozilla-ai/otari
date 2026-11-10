@@ -58,6 +58,14 @@ export const HEALTH_CHECKS = "health-checks"
 // A run is started by a worker that polls every 15 seconds, so the page polls
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
+// The catalog of remote MCP servers, its sync status and the organization's
+// featured shelf, as three reads under one head. A sync changes the first two
+// and never the shelf, which holds the organization's own copies.
+export const MCP_CATALOG = "mcp-catalog"
+// A sync is started by a worker that polls once a minute and stores a page at
+// a time, so the status is worth re-reading this often only while one is
+// running or waiting to start.
+export const MCP_CATALOG_SYNC_POLL_MS = 5_000
 export const BUILD = "build"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key

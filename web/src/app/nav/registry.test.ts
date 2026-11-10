@@ -83,6 +83,7 @@ describe("nav registry", () => {
       "Spend & budgets",
       "Providers",
       "Guardrails",
+      "MCP catalog",
       "Org settings",
       "Settings",
       "Accounts",
@@ -355,6 +356,7 @@ describe("nav registry", () => {
       "admin",
       "budgets",
       "keys",
+      "mcp_catalog",
       "models",
       "organization_guardrails",
       "organization_providers",
@@ -438,11 +440,13 @@ describe("nav registry", () => {
     expect(general?.items.map((item) => item.to)).toEqual([
       "/organization/provider-keys",
       "/organization/guardrails",
+      "/organization/mcp-catalog",
       "/organization",
     ])
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
       "Guardrails",
+      "MCP catalog",
       "Org settings",
     ])
     // Providers groups the organization's two kinds of provider key.

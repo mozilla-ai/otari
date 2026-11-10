@@ -40,6 +40,7 @@ import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
 import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
+import { Route as OrganizationMcpCatalogRouteImport } from './routes/organization.mcp-catalog'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
@@ -211,6 +212,11 @@ const OrganizationGuardrailsRoute = OrganizationGuardrailsRouteImport.update({
   path: '/guardrails',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationMcpCatalogRoute = OrganizationMcpCatalogRouteImport.update({
+  id: '/mcp-catalog',
+  path: '/mcp-catalog',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 const OrganizationMembersRoute = OrganizationMembersRouteImport.update({
   id: '/members',
   path: '/members',
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
+  '/organization/mcp-catalog': typeof OrganizationMcpCatalogRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
@@ -365,6 +372,7 @@ export interface FileRoutesByTo {
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
+  '/organization/mcp-catalog': typeof OrganizationMcpCatalogRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
@@ -414,6 +422,7 @@ export interface FileRoutesById {
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
+  '/organization/mcp-catalog': typeof OrganizationMcpCatalogRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
@@ -465,6 +474,7 @@ export interface FileRouteTypes {
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
+    | '/organization/mcp-catalog'
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
@@ -507,6 +517,7 @@ export interface FileRouteTypes {
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
+    | '/organization/mcp-catalog'
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
@@ -555,6 +566,7 @@ export interface FileRouteTypes {
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
+    | '/organization/mcp-catalog'
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
@@ -821,6 +833,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationGuardrailsRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/mcp-catalog': {
+      id: '/organization/mcp-catalog'
+      path: '/mcp-catalog'
+      fullPath: '/organization/mcp-catalog'
+      preLoaderRoute: typeof OrganizationMcpCatalogRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/organization/members': {
       id: '/organization/members'
       path: '/members'
@@ -968,6 +987,7 @@ const ModelsRouteWithChildren =
 interface OrganizationRouteChildren {
   OrganizationDomainsRoute: typeof OrganizationDomainsRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
+  OrganizationMcpCatalogRoute: typeof OrganizationMcpCatalogRoute
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
   OrganizationProviderKeysRoute: typeof OrganizationProviderKeysRoute
@@ -979,6 +999,7 @@ interface OrganizationRouteChildren {
 const OrganizationRouteChildren: OrganizationRouteChildren = {
   OrganizationDomainsRoute: OrganizationDomainsRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
+  OrganizationMcpCatalogRoute: OrganizationMcpCatalogRoute,
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
   OrganizationProviderKeysRoute: OrganizationProviderKeysRoute,

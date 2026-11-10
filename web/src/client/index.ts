@@ -719,6 +719,14 @@ export type CreateWorkspaceMcpServerRequest =
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
 
+// The catalog of remote MCP servers a workspace can add, the organization's
+// featured shelf over it, and the sync that fills it from the MCP Registry.
+export type McpCatalogServer = Schemas["McpCatalogServerPublic"]
+export type McpCatalogServers = Schemas["McpCatalogServersPublic"]
+export type McpCatalogFeatured = Schemas["McpCatalogFeaturedPublic"]
+export type McpCatalogFeaturedList = Schemas["McpCatalogFeaturedListPublic"]
+export type McpCatalogSyncStatus = Schemas["McpCatalogSyncStatus"]
+
 // ---------------------------------------------------------------------------
 // Playground
 //

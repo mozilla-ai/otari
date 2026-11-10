@@ -15,6 +15,9 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  McpCatalogFeatured,
+  McpCatalogServer,
+  McpCatalogSyncStatus,
   Organization,
   OrganizationContext,
   OrganizationDomain,
@@ -157,6 +160,7 @@ export const SURFACES = [
   "health_checks",
   "hosted_providers",
   "keys",
+  "mcp_catalog",
   "models",
   "organization_guardrails",
   "organization_providers",
@@ -893,6 +897,67 @@ export function workspaceMcpServer(
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A server the MCP catalog lists. */
+export function mcpCatalogServer(
+  overrides: Partial<McpCatalogServer> = {},
+): McpCatalogServer {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    name: "io.example/sentry",
+    title: "Sentry",
+    description: "Read issues and events.",
+    url: "https://mcp.sentry.example/mcp",
+    requires_token: false,
+    website_url: null,
+    version: "1.0.0",
+    source: "registry",
+    ...overrides,
+  }
+}
+
+/** A server an organization features, still listed by the catalog at the same URL. */
+export function mcpCatalogFeatured(
+  overrides: Partial<McpCatalogFeatured> = {},
+): McpCatalogFeatured {
+  return {
+    id: "77777777-7777-7777-7777-777777777777",
+    name: "io.example/linear",
+    title: "Linear",
+    description: "Issues and projects.",
+    url: "https://mcp.linear.example/mcp",
+    requires_token: false,
+    website_url: null,
+    source: "registry",
+    catalog_status: "current",
+    catalog_server_id: "88888888-8888-8888-8888-888888888888",
+    created_at: "2026-11-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** The catalog's sync status on a deployment that has never synced. */
+export function mcpCatalogSyncStatus(
+  overrides: Partial<McpCatalogSyncStatus> = {},
+): McpCatalogSyncStatus {
+  return {
+    mode: "manual",
+    running: false,
+    requested: false,
+    outcome: null,
+    error: null,
+    started_at: null,
+    finished_at: null,
+    last_completed_at: null,
+    next_sync_at: null,
+    pages: 0,
+    fetched: 0,
+    kept: 0,
+    removed: 0,
+    server_count: 0,
     ...overrides,
   }
 }

@@ -301,6 +301,18 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "organization-guardrails")
   })
 
+  test("organization MCP catalog", async ({ page }) => {
+    // An empty shelf over a catalog that never synced, which is what a fresh
+    // deployment shows an operator.
+    await login(page)
+    await gotoRoute(page, "/organization/mcp-catalog")
+    await expect(
+      page.getByRole("heading", { name: "MCP catalog", level: 1 }),
+    ).toBeVisible()
+    await expect(page.getByText("No sync has run yet.")).toBeVisible()
+    await captureScreenshot(page, "organization-mcp-catalog")
+  })
+
   test("organization usage", async ({ page }) => {
     await login(page)
     await gotoRoute(page, "/organization/usage")
