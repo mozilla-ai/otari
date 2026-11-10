@@ -17,7 +17,7 @@ from gateway.services.traces import SpanContent, TraceService
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceSort, TraceWrite
 
 
-def _no_window(provider: str | None, model: str) -> int | None:
+def _no_window(provider: str | None, model: str, organization_id: uuid.UUID | None) -> int | None:
     return None
 
 

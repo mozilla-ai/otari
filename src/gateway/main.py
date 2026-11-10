@@ -86,7 +86,12 @@ from gateway.services.alias_service import load_aliases_at_startup, reset_alias_
 from gateway.services.api_keys import refuse_unusable_declared_secrets
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
-from gateway.services.catalog import reset_selector_index
+from gateway.services.catalog import (
+    load_served_models_at_startup,
+    reset_selector_index,
+    reset_served_models,
+    run_served_model_refresher,
+)
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
@@ -599,6 +604,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         lambda config, _container: run_discovery_refresher(config, hosted=build_hosted_discovery(config)),
         reset_discovery_cache,
     ),
+    _LifespanWorker("served model", lambda _config, _container: run_served_model_refresher(), reset_served_models),
     _LifespanWorker(
         "models.dev catalog", lambda config, _container: run_catalog_refresher(config), reset_catalog_refresh_state
     ),
@@ -1096,6 +1102,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_served_models_at_startup()
         await load_workspace_hosted_access_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:

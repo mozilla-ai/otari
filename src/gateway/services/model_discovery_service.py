@@ -37,6 +37,7 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.core.database import describe_database_error
 from gateway.log_config import logger
+from gateway.services.catalog import EngineSettings, read_engine_settings, record_served_models
 from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
     get_provider_kwargs,
@@ -68,6 +69,8 @@ class ProviderDiscovery:
     # provider still serves completions, so the dashboard warns that discovery is
     # unavailable instead of calling the provider unreachable (issue #447).
     discovery_unsupported: bool = False
+    # How an SGLang server says it was started; ``None`` from any other provider.
+    engine_settings: EngineSettings | None = None
 
 
 def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
@@ -82,6 +85,7 @@ def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
         models=list(discovery.models),
         error=discovery.error,
         discovery_unsupported=discovery.discovery_unsupported,
+        engine_settings=discovery.engine_settings,
     )
 
 
@@ -350,8 +354,8 @@ def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
 async def _discover_for_provider(
     provider_name: str,
     config: GatewayConfig,
-) -> tuple[str, list[Model]]:
-    """Discover models for a single instance. Returns (instance_name, models).
+) -> tuple[list[Model], EngineSettings | None]:
+    """Discover models for a single instance, with how an SGLang server says it was started.
 
     ``provider_name`` is the configured instance; the underlying implementation
     is resolved from its ``provider_type``. When the live ``list_models`` call
@@ -399,10 +403,10 @@ async def _discover_for_provider(
                 provider_name,
                 len(declared),
             )
-            return provider_name, declared
+            return declared, None
         raise
     _warn_about_undiscovered_declared_models(config, provider_name, models)
-    return provider_name, list(models)
+    return list(models), await read_engine_settings(models, api_base=api_base, api_key=api_key)
 
 
 def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: str, models: Sequence[Model]) -> None:
@@ -524,7 +528,7 @@ async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDi
         )
 
     try:
-        _, models = await _discover_for_provider(instance, config)
+        models, settings = await _discover_for_provider(instance, config)
     except Exception as exc:
         # Log the class only, never str(exc): some providers echo a partial key
         # or endpoint in the message. The capped text still reaches the
@@ -537,7 +541,15 @@ async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDi
             discovery_unsupported=_is_missing_models_endpoint(exc),
         )
 
-    return ProviderDiscovery(provider=instance, models=models)
+    return ProviderDiscovery(provider=instance, models=models, engine_settings=settings)
+
+
+async def _discover_and_record(name: str, discover: DiscoveryDial) -> ProviderDiscovery:
+    """Dial, then keep what a successful listing's engine says about each model under ``name``."""
+    discovery = await discover()
+    if discovery.error is None:
+        await record_served_models(name, discovery.models, discovery.engine_settings)
+    return discovery
 
 
 async def discover_provider_models(
@@ -569,7 +581,7 @@ async def discover_provider_models(
         instance,
         positive_ttl=0 if force else config.model_cache_ttl_seconds,
         negative_ttl=0 if force else config.model_discovery_negative_ttl_seconds,
-        discover=dial or (lambda: _discover_uncached(config, instance)),
+        discover=lambda: _discover_and_record(instance, dial or (lambda: _discover_uncached(config, instance))),
         serve_stale=serve_stale and not force,
     )
 
@@ -647,7 +659,11 @@ async def test_provider_credentials(
             error=_short_error(exc, provider=impl_name),
             discovery_unsupported=_is_missing_models_endpoint(exc),
         )
-    return ProviderDiscovery(provider=impl_name, models=list(models))
+    return ProviderDiscovery(
+        provider=impl_name,
+        models=list(models),
+        engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key),
+    )
 
 
 async def discover_models_with_status(

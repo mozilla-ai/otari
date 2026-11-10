@@ -11,6 +11,7 @@ in the list; one that declares none (`base`, `mcp`) stays out.
 from gateway.models import (  # noqa: F401
     api_keys,
     budgets,
+    catalog,
     files,
     guardrails,
     health_checks,
