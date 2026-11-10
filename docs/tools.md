@@ -295,19 +295,22 @@ instance that read them, `builtin_fetch` included:
 ### Searches a provider runs itself
 
 A model's own search tool, such as Anthropic's `web_search_<date>` forwarded to
-an Anthropic model on `/v1/messages` or `web_search` forwarded to an OpenAI
-model on `/v1/responses`, is run and billed by the provider, per search. Otari
+an Anthropic model on `/v1/messages`, `web_search` forwarded to an OpenAI
+model on `/v1/responses`, or `google_search` forwarded to a Gemini model on
+`/v1/chat/completions`, is run and billed by the provider, per search. Otari
 reads the count the provider reports (Anthropic's
 `usage.server_tool_use.web_search_requests`, OpenAI's
 `usage.tool_usage.web_search.num_requests`, or else one per `web_search_call`
-item the response lists) and adds those searches to the row as `web_search`
-calls labeled `<provider>:web_search`, so the row and the budget carry what the
-provider will charge. They are priced at, in order:
+item the response lists, and Gemini's grounding queries) and adds those searches
+to the row as `web_search` calls labeled `<provider>:web_search`, so the row and
+the budget carry what the provider will charge. Gemini 2.5 and earlier bill a
+grounded prompt once however many queries it ran, so a call there counts as one
+search; Gemini 3 bills each query. They are priced at, in order:
 
 1. the operator's `<provider>:web_search` row, such as `openai:web_search`;
 2. the `web_search` price the model's own rate carries, per 1,000 searches,
    which the catalog gives a model whose provider searches (Anthropic's and
-   OpenAI's are $10 per 1,000) and a `rates` block can set
+   OpenAI's are $10 per 1,000, Gemini 3's $14 and Gemini 2.5's $35) and a `rates` block can set
    ([Every price in its unit](configuration.md#every-price-in-its-unit-rates));
    the model's price applies its rules, a tier multiplier included
    ([Overrides and multipliers](configuration.md#overrides-and-multipliers));
