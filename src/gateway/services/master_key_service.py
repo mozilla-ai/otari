@@ -2,7 +2,8 @@
 
 When no master key is configured (no ``OTARI_MASTER_KEY`` / config value), the
 gateway generates one on first launch, stores only its SHA-256 hash, and prints
-the plaintext once so the operator can sign in to the dashboard. This makes
+it once, inside a setup link, so the operator can open the dashboard and set a
+password. This makes
 "launch with almost nothing" real without leaving the management API
 unauthenticated: the generated key gates every management route exactly like an
 operator-set one, and there is no unauthenticated setup route to race.
@@ -122,13 +123,25 @@ async def stage_generated_master_key_rotation(session: AsyncSession, current_has
     return token, hashed
 
 
-def _print_banner(config: GatewayConfig, token: str) -> None:
+def setup_link(config: GatewayConfig, token: str) -> str:
+    """The dashboard link that carries a generated master key to its setup page.
+
+    The key rides in the fragment, which a browser keeps to itself: it reaches
+    no server, access log or ``Referer`` header. The page takes it from there and
+    asks only for the password that claims the deployment.
+    """
+    path = f"/#/setup?key={token}"
+    if config.effective_ui_base_url:
+        return config.ui_link(path)
     host = "localhost" if config.host in ("0.0.0.0", "::", "") else config.host
-    url = f"http://{host}:{config.port}/"
+    return f"http://{host}:{config.port}{path}"
+
+
+def _print_banner(config: GatewayConfig, token: str) -> None:
     bar = "=" * 64
     logger.warning(bar)
     logger.warning("Otari first-run: no master key was set, so one was generated.")
-    logger.warning("Save it now (it is shown only once). Sign in to the dashboard at %s", url)
-    log_secret("Your master key:", token)
-    logger.warning("To choose your own instead, set OTARI_MASTER_KEY and restart.")
+    logger.warning("The link below is shown only once, and the key in it is your master key: save it now.")
+    log_secret("Open this link to set your password:", setup_link(config, token))
+    logger.warning("To choose your own master key instead, set OTARI_MASTER_KEY and restart.")
     logger.warning(bar)

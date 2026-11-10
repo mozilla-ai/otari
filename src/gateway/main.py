@@ -54,7 +54,15 @@ from gateway.core.config import (
     X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
+from gateway.core.database import (
+    create_session,
+    describe_database_error,
+    dispose_db,
+    holds_encrypted_secrets,
+    init_db,
+    release_session,
+    sqlite_database_file,
+)
 from gateway.core.error_codes import ERROR_CODE_HEADER, INVALID_REQUEST, body_fields_of, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
@@ -148,7 +156,14 @@ from gateway.services.routing import (
     run_agent_recommender_refresher,
 )
 from gateway.services.runtime_settings_service import apply_overrides_from_db
-from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
+from gateway.services.secret_box import (
+    forget_local_secret_key,
+    secret_box_configured,
+    secret_key_file_for,
+    shares_secret_key,
+    use_local_secret_key,
+    validate_secret_key,
+)
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
@@ -910,6 +925,20 @@ async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) 
         logger.exception("%s worker stopped with an unexpected error and will not run again", name)
 
 
+async def _use_local_secret_key(config: GatewayConfig) -> None:
+    """Give a SQLite deployment with no ``OTARI_SECRET_KEY`` the key kept beside its database file.
+
+    Generated on first run only: where the database already holds encrypted
+    credentials and the file is gone, startup stops instead of making a key that
+    cannot open them. PostgreSQL is left alone, since replicas share no local file.
+    """
+    database_file = sqlite_database_file(config.database_url)
+    if database_file is None or secret_box_configured():
+        return
+    key_file = secret_key_file_for(database_file)
+    use_local_secret_key(key_file, may_generate=key_file.exists() or not await holds_encrypted_secrets())
+
+
 def _create_lifespan() -> Callable[[FastAPI], Any]:
     """The app's lifespan: startup's checks, migrations and seeding, then shutdown's cleanup."""
 
@@ -937,6 +966,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
         init_db(config)
+        # Before anything below reads a stored credential.
+        await _use_local_secret_key(config)
         # On a session of its own, committed before the startup session below
         # opens, so SQLite's one writer is never held twice. Before the
         # bootstrap key, which a deployment that declares its keys does not need.
@@ -1129,6 +1160,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # After the log writer, whose final flush is the last thing to need
             # a session.
             await dispose_db()
+            forget_local_secret_key()
 
     return lifespan
 

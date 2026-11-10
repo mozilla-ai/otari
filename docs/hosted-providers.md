@@ -99,7 +99,8 @@ A deployment configures hosted providers in three places:
 A provider stored through the page or the API wins over a `config.yml` entry of
 the same name.
 
-Storing a hosted provider's key requires `OTARI_SECRET_KEY` (see
+Storing a hosted provider's key requires an encryption key: `OTARI_SECRET_KEY`,
+or on SQLite the key Otari generates beside the database (see
 [Runtime provider management](configuration.md#runtime-provider-management)).
 The API returns only the key's last four characters, and masks credentials in
 `client_args` and the base URL.
@@ -415,8 +416,9 @@ when created and charged when its results are accounted.
 
 ### From a `providers:` block in config.yml
 
-1. Set `OTARI_SECRET_KEY` first if it is not set (`otari gen-secret-key`): an
-   entry whose key cannot be encrypted is not copied. To keep serving every
+1. On PostgreSQL, set `OTARI_SECRET_KEY` first if it is not set
+   (`otari gen-secret-key`): an entry whose key cannot be encrypted is not
+   copied. A SQLite deployment generates its own key, so its entries are copied. To keep serving every
    entry from `config.yml` for now, set `import_configured_providers: false`
    instead.
 2. Start the upgraded gateway, and read its log: it names each entry it copied

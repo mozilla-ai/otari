@@ -52,6 +52,7 @@ import {
   readSignInAddress,
   rememberSignInAddress,
 } from "./signInAddress"
+import { forgetSignInNotice, readSignInNotice } from "./signInNotice"
 
 /** Whether the primary pointer is a mouse or a trackpad rather than a finger. */
 function hasFinePointer(): boolean {
@@ -301,8 +302,11 @@ export function Login() {
   const [isKeyVisible, setIsKeyVisible] = useState(false)
   // Handed over by the accept-invitation page after it set a first password.
   const [prefilledEmail] = useState(readSignInAddress)
+  // Why a link landed here instead of where it pointed (the setup page).
+  const [notice] = useState(readSignInNotice)
   useEffect(() => {
     forgetSignInAddress()
+    forgetSignInNotice()
   }, [])
   const [email, setEmail] = useState(prefilledEmail)
   const [password, setPassword] = useState("")
@@ -704,6 +708,12 @@ export function Login() {
               : "Sign in with your master key to browse models, set pricing, and manage settings."}
           </p>
         </div>
+
+        {notice ? (
+          <p role="status" className="text-center text-sm text-pretty">
+            {notice}
+          </p>
+        ) : null}
 
         <div className="flex flex-col">
           {oauthProviders.length > 0 ? (

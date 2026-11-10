@@ -74,7 +74,7 @@ the corresponding startup value after the database is available.
 
 | Setting | Purpose |
 | --- | --- |
-| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. |
+| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. Unset, it is `sqlite:///./otari.db`, and in the container image `sqlite:////data/otari.db`, on the image's `/data` volume. |
 | `master_key` | Deployment-wide management credential. |
 | `host`, `port` | Server bind address. |
 | `auto_migrate` | Apply Alembic migrations at startup. |
@@ -653,8 +653,25 @@ Operators add provider credentials at runtime as
 `/api/v1/hosted-providers`. Config-file entries remain read-only in the
 dashboard.
 
-Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
-`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+Stored credentials are encrypted with a Fernet key, and where that key comes
+from depends on the database:
+
+- **PostgreSQL**: set `OTARI_SECRET_KEY` to a key generated with
+  `otari gen-secret-key`. Nothing is stored until it is set.
+- **SQLite**: when `OTARI_SECRET_KEY` is unset, Otari generates a key on first
+  start and keeps it in a file beside the database file, named after it with
+  `.secret-key` added (`/data/otari.db.secret-key` in the container image),
+  readable only by its owner. Later starts load it from there. A set
+  `OTARI_SECRET_KEY` always wins, and the file is then neither read nor written.
+
+A key beside the database protects against a leaked database file or dump. It
+does not protect against a stolen disk or volume, which holds both; set
+`OTARI_SECRET_KEY` from a secret store where that matters. Back the key file up
+with the database. If the database holds encrypted credentials and neither
+`OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
+than generate a key that could not decrypt them.
+
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent

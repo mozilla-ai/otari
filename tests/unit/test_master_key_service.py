@@ -22,6 +22,7 @@ from gateway.services.master_key_service import (
     ensure_master_key,
     generate_master_key,
     hash_master_key,
+    setup_link,
     stage_generated_master_key_rotation,
 )
 from gateway.services.pricing_service import configure_default_pricing, no_pricing_error_detail
@@ -53,6 +54,38 @@ def test_generate_master_key_format() -> None:
 
 def test_hash_master_key_is_plain_sha256() -> None:
     assert hash_master_key("otari-mk-abc") == hashlib.sha256(b"otari-mk-abc").hexdigest()
+
+
+def test_setup_link_carries_the_key_in_the_fragment() -> None:
+    link = setup_link(GatewayConfig(host="0.0.0.0", port=8000), "otari-mk-abc")
+
+    assert link == "http://localhost:8000/#/setup?key=otari-mk-abc"
+    # Everything from the "#" on stays in the browser, so the key is in no request.
+    assert "otari-mk-abc" not in link.split("#", 1)[0]
+
+
+def test_setup_link_uses_the_interface_address_when_one_is_set() -> None:
+    config = GatewayConfig(public_base_url="https://otari.example.com/ui/")
+
+    assert setup_link(config, "otari-mk-abc") == "https://otari.example.com/ui/#/setup?key=otari-mk-abc"
+
+
+def test_first_run_banner_prints_the_setup_link_and_the_key_only_inside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    secrets_logged: list[str] = []
+    monkeypatch.setattr(master_key_service, "log_secret", lambda _message, secret: secrets_logged.append(secret))
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", require_pricing=False, port=8000)
+
+    with caplog.at_level("WARNING", logger="gateway"), TestClient(create_app(config)):
+        pass
+
+    assert len(secrets_logged) == 1
+    link = secrets_logged[0]
+    assert link.startswith("http://localhost:8000/#/setup?key=otari-mk-")
+    key = link.split("key=", 1)[1]
+    assert hash_master_key(key) == _stored_hashes(config.database_url)[0]
+    assert key not in caplog.text
 
 
 def test_first_run_generates_and_persists_a_hash(tmp_path: Path) -> None:
