@@ -45,9 +45,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["organization_id"], ["organization.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_platform_connect_attempts_organization_id", _TABLE, ["organization_id"], unique=False
-    )
+    op.create_index("ix_platform_connect_attempts_organization_id", _TABLE, ["organization_id"], unique=False)
 
 
 def downgrade() -> None:

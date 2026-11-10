@@ -26,6 +26,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.providers import PlatformClient
 from gateway.services.secret_box import generate_secret_key
+
 from .conftest import build_test_client
 
 PATH = f"{API_ROOT}/platform/connect"
@@ -44,13 +45,19 @@ class FakePlatform:
         self.token_answers: list[tuple[int, dict[str, Any]]] = []
         self.interval = 5
         self.expires_in = 600
-        self.verification = "https://otari.test/connect?code=WXYZ-1234"
+        # The shape otari.ai sends: a query and a fragment route, opened as given.
+        self.verification = "https://otari.test/dashboard/?region=us#/connect?code=WXYZ-1234"
+
+        self.token_headers: dict[str, str] = {}
+        self.device_status = 200
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         self.requests.append((request.url.path, body))
         assert "authorization" not in request.headers
         if request.url.path == f"{API_ROOT}/connect/device":
+            if self.device_status != 200:
+                return httpx.Response(self.device_status, json={"detail": "otari.ai's own words"})
             return httpx.Response(
                 200,
                 json={
@@ -66,7 +73,7 @@ class FakePlatform:
             status, answer = (
                 self.token_answers.pop(0) if self.token_answers else (400, {"error": "authorization_pending"})
             )
-            return httpx.Response(status, json=answer)
+            return httpx.Response(status, json=answer, headers=self.token_headers if status == 429 else {})
         return httpx.Response(404)
 
     def polls(self) -> int:
@@ -170,7 +177,7 @@ def test_start_returns_the_code_and_link_and_never_the_device_code(
 
     assert response.json() == {
         "user_code": "WXYZ-1234",
-        "verification_uri_complete": "https://otari.test/connect?code=WXYZ-1234",
+        "verification_uri_complete": "https://otari.test/dashboard/?region=us#/connect?code=WXYZ-1234",
         "expires_in": 600,
     }
     assert DEVICE_CODE not in response.text
@@ -241,6 +248,59 @@ def test_slow_down_adds_five_seconds_to_the_interval(
     clock.advance(1)
     _status(client, master_key_header)
     assert platform.polls() == 2
+
+
+def test_a_rate_limited_poll_waits_out_retry_after_and_stays_pending(
+    client: TestClient, master_key_header: dict[str, str], platform: FakePlatform, clock: Clock
+) -> None:
+    _start(client, master_key_header)
+    platform.token_answers.append((429, {"detail": "Too many requests"}))
+    platform.token_headers = {"Retry-After": "30"}
+    clock.advance(5)
+    assert _status(client, master_key_header)["status"] == "pending"
+    assert platform.polls() == 1
+
+    clock.advance(29)
+    assert _status(client, master_key_header)["status"] == "pending"
+    assert platform.polls() == 1
+
+    _approve(platform)
+    clock.advance(1)
+    assert _status(client, master_key_header)["status"] == "connected"
+
+
+@pytest.mark.parametrize("status", [422, 429, 503, 500])
+def test_a_platform_that_refuses_to_start_is_reported_as_unavailable_without_its_body(
+    client: TestClient, master_key_header: dict[str, str], platform: FakePlatform, status: int
+) -> None:
+    platform.device_status = status
+
+    response = client.post(PATH, headers=master_key_header)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "otari.ai could not be reached. Try again in a moment."}
+    assert _status(client, master_key_header)["status"] == "idle"
+
+
+def test_the_key_is_asked_for_once_and_a_long_gateway_name_is_cut_to_the_limit(
+    client: TestClient, master_key_header: dict[str, str], platform: FakePlatform, clock: Clock
+) -> None:
+    app: Any = client.app
+    app.state.config.public_base_url = f"https://{'g' * 150}.example.com"
+    try:
+        _start(client, master_key_header)
+    finally:
+        app.state.config.public_base_url = None
+    assert len(platform.requests[0][1]["gateway_name"]) == 100
+
+    _approve(platform)
+    clock.advance(5)
+    assert _status(client, master_key_header)["status"] == "connected"
+    polls = platform.polls()
+    for _ in range(3):
+        clock.advance(30)
+        _status(client, master_key_header)
+    assert platform.polls() == polls
 
 
 def test_approval_stores_the_provider_for_the_operators_organization_and_lists_its_models(

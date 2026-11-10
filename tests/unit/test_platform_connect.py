@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from gateway.core.config import API_ROOT, GatewayConfig, load_config
 from gateway.core.settings.providers import https_or_loopback_problem
-from gateway.services.providers._platform_connect import PlatformClient, PlatformProtocolError
+from gateway.services.providers._platform_connect import PlatformClient, PlatformProtocolError, PollDelay, _IssuedKey
 from gateway.services.url_safety import UnsafeURLError, validate_credential_address
 
 
@@ -140,17 +140,35 @@ async def test_request_code_refuses_an_answer_outside_the_contract(status: int, 
         await _client(status, body).request_code("gateway")
 
 
-@pytest.mark.parametrize("error", ["authorization_pending", "slow_down", "expired_token", "access_denied"])
+@pytest.mark.parametrize("error", ["authorization_pending", "expired_token", "access_denied"])
 @pytest.mark.asyncio
 async def test_exchange_reads_each_refusal(error: str) -> None:
     assert await _client(400, {"error": error}).exchange("dc") == error
 
 
 @pytest.mark.asyncio
+async def test_exchange_reads_slow_down_and_a_rate_limit_as_a_delay() -> None:
+    assert await _client(400, {"error": "slow_down"}).exchange("dc") == PollDelay()
+
+    def limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"detail": "Too many requests"}, headers={"Retry-After": "30"})
+
+    client = PlatformClient("https://platform.test", transport=httpx.MockTransport(limited))
+    assert await client.exchange("dc") == PollDelay(30)
+
+
+@pytest.mark.parametrize("status", [422, 429, 503])
+@pytest.mark.asyncio
+async def test_request_code_treats_a_refusal_to_start_as_unavailable(status: int) -> None:
+    with pytest.raises(PlatformProtocolError):
+        await _client(status, {"detail": "otari.ai's own words"}).request_code("gateway")
+
+
+@pytest.mark.asyncio
 async def test_exchange_reads_the_issued_key_and_keeps_it_out_of_its_repr() -> None:
     issued = await _client(200, {"api_key": "tk-secret", "api_base": "https://api.otari.ai/api/v1"}).exchange("dc")
 
-    assert not isinstance(issued, str)
+    assert isinstance(issued, _IssuedKey)
     assert (issued.api_key, issued.api_base) == ("tk-secret", "https://api.otari.ai/api/v1")
     assert "tk-secret" not in repr(issued)
 
