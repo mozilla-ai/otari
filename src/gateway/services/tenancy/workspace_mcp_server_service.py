@@ -545,10 +545,22 @@ def _edited_client(
     return edited.model_dump(), edited != stored, not same_client
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 def _origin(url: str) -> str:
-    """A URL's scheme and host, as a client registered with one authorization server is bound to them."""
+    """A URL's scheme, host and port, as a client registered with one authorization server is bound to them.
+
+    Compared as an origin rather than as text: the default port written out (``:443``), letter case
+    and credentials in the URL name the same host, so none of them counts as a move.
+    """
     parts = urlsplit(url)
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}"
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port or _DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        return f"{scheme}://{parts.netloc.lower()}"
+    return f"{scheme}://{(parts.hostname or '').lower()}:{port}"
 
 
 class WorkspaceMcpConnectionEligibility:
