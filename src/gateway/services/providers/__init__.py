@@ -56,6 +56,7 @@ from gateway.services.providers._platform_connect import (
 )
 from gateway.services.providers._provider_clients import (
     acompletion,
+    aembedding,
     amessages,
     aresponses,
     provider_for,
@@ -102,6 +103,7 @@ __all__ = [
     "WorkspaceHostedAccessDeniedError",
     "WorkspaceHostedAccessService",
     "acompletion",
+    "aembedding",
     "amessages",
     "aresponses",
     "cached_owned_endpoint",

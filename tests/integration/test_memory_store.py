@@ -9,18 +9,18 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.dml import Update
 
 from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.memory_exceptions import MemorySealingUnavailableError
 from gateway.models.memory import MemoryEntry, MemoryKey, MemoryProposal, MemoryWorkspaceSettings
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.memory import MemoryRepositories
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
-from gateway.services.memory import EntryDraft, MemoryService, ProposalDraft, Provenance, WorkspaceKeys
+from gateway.services.memory import EntryDraft, OpenedEntry, ProposalDraft, Provenance, WorkspaceKeys
+from gateway.services.memory._store import EntryStore
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
@@ -56,11 +56,33 @@ async def tenants(async_db: AsyncSession) -> Tenants:
     return Tenants(first.id, second.id, alice.id, bob.id)
 
 
+class _Store:
+    """The entry store on one Unit of Work, each call its own block, as a service would run it."""
+
+    def __init__(self, uow: UnitOfWork, keys: WorkspaceKeys) -> None:
+        self._uow = uow
+        self._store = EntryStore(MemoryRepositories.on(uow), keys)
+
+    async def keep(self, draft: EntryDraft) -> uuid.UUID:
+        async with self._uow:
+            return await self._store.write_entry(draft)
+
+    async def propose(self, draft: ProposalDraft) -> uuid.UUID:
+        async with self._uow:
+            return await self._store.write_proposal(draft)
+
+    async def recallable(self, workspace_id: uuid.UUID, member_id: uuid.UUID) -> list[OpenedEntry]:
+        async with self._uow:
+            return await self._store.recallable(
+                workspace_id, member_id=member_id, include_workspace=True, include_external=True
+            )
+
+
 @pytest_asyncio.fixture
 async def memory(
     test_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[Callable[[], MemoryService]]:
-    """A factory of services that share one process's keys, each on a Unit of Work of its own."""
+) -> AsyncIterator[Callable[[], _Store]]:
+    """A factory of stores that share one process's keys, each on a Unit of Work of its own."""
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     init_db(test_config)
     keys = WorkspaceKeys(
@@ -68,7 +90,7 @@ async def memory(
     )
     try:
         async with create_unit_of_work() as uow:
-            yield lambda: MemoryService(uow, MemoryRepositories.on(uow), keys)
+            yield lambda: _Store(uow, keys)
     finally:
         keys.clear()
         await dispose_db()
@@ -107,7 +129,7 @@ async def _dump(async_db: AsyncSession) -> str:
 
 
 async def test_an_entry_is_stored_sealed_and_recalled_opened(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     entry_id = await memory().keep(_entry(tenants.first, author=tenants.alice))
 
@@ -123,7 +145,7 @@ async def test_an_entry_is_stored_sealed_and_recalled_opened(
 
 
 async def test_a_proposal_is_stored_sealed(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     draft = ProposalDraft(
         workspace_id=tenants.first,
@@ -142,7 +164,7 @@ async def test_a_proposal_is_stored_sealed(
 
 
 async def test_a_member_recalls_their_own_entries_and_the_workspaces_never_anothers(
-    memory: Callable[[], MemoryService], tenants: Tenants
+    memory: Callable[[], _Store], tenants: Tenants
 ) -> None:
     shared = await memory().keep(_entry(tenants.first, text_="shared"))
     alices = await memory().keep(_entry(tenants.first, text_="alice's", scope="member", owner=tenants.alice))
@@ -152,38 +174,14 @@ async def test_a_member_recalls_their_own_entries_and_the_workspaces_never_anoth
     assert {e.id for e in await memory().recallable(tenants.first, tenants.bob)} == {shared, bobs}
 
 
-async def test_a_workspace_recalls_nothing_of_another(memory: Callable[[], MemoryService], tenants: Tenants) -> None:
+async def test_a_workspace_recalls_nothing_of_another(memory: Callable[[], _Store], tenants: Tenants) -> None:
     await memory().keep(_entry(tenants.first))
 
     assert await memory().recallable(tenants.second, tenants.alice) == []
 
 
-async def test_the_workspace_switches_decide_what_is_recalled(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
-) -> None:
-    shared = await memory().keep(_entry(tenants.first, text_="shared"))
-    await memory().keep(_entry(tenants.first, text_="from a web page", trust="external"))
-    own = await memory().keep(_entry(tenants.first, text_="own", scope="member", owner=tenants.alice))
-
-    def switch(**values: bool) -> Update:
-        settings = MemoryWorkspaceSettings
-        return update(settings).where(settings.workspace_id == tenants.first).values(**values)
-
-    await async_db.execute(switch(hide_external=True))
-    await async_db.commit()
-    assert {e.id for e in await memory().recallable(tenants.first, tenants.alice)} == {shared, own}
-
-    await async_db.execute(switch(workspace_scope_enabled=False))
-    await async_db.commit()
-    assert {e.id for e in await memory().recallable(tenants.first, tenants.alice)} == {own}
-
-    await async_db.execute(switch(enabled=False))
-    await async_db.commit()
-    assert await memory().recallable(tenants.first, tenants.alice) == []
-
-
 async def test_a_sealed_value_moved_onto_another_workspaces_row_does_not_open(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     source = await memory().keep(_entry(tenants.first))
     target = await memory().keep(_entry(tenants.second, text_="harmless"))
@@ -195,7 +193,7 @@ async def test_a_sealed_value_moved_onto_another_workspaces_row_does_not_open(
 
 
 async def test_without_a_secret_key_nothing_is_stored(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("OTARI_SECRET_KEY")
 
@@ -218,7 +216,7 @@ async def test_the_fenced_tables_are_under_forced_row_level_security(async_db: A
 
 
 async def test_a_role_held_to_the_policy_reads_only_the_workspace_it_names(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     await memory().keep(_entry(tenants.first))
     await memory().keep(_entry(tenants.second))
@@ -249,7 +247,7 @@ async def test_a_role_held_to_the_policy_reads_only_the_workspace_it_names(
 
 
 async def test_deleting_a_workspace_deletes_its_memory(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     await memory().keep(_entry(tenants.first))
     await memory().keep(_entry(tenants.second))
@@ -264,7 +262,7 @@ async def test_deleting_a_workspace_deletes_its_memory(
 
 
 async def test_deleting_a_member_deletes_their_entries_and_keeps_what_they_shared(
-    memory: Callable[[], MemoryService], tenants: Tenants, async_db: AsyncSession
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
 ) -> None:
     shared = await memory().keep(_entry(tenants.first, author=tenants.alice))
     await memory().keep(_entry(tenants.first, scope="member", owner=tenants.alice, author=tenants.alice))

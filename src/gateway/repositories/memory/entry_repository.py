@@ -1,10 +1,11 @@
 """Data access for ``memory_entries``. Flushes, never commits."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryEntry, MemoryKind, MemoryScope, MemoryStatus, MemoryTrust
@@ -112,3 +113,73 @@ class EntryRepository(FencedRepository[MemoryEntry]):
         row.status = status
         await self.db.flush()
         return True
+
+    async def comparable(
+        self, workspace_id: uuid.UUID, *, scope: MemoryScope, owner_user_id: uuid.UUID | None, embedding_model: str
+    ) -> Sequence[MemoryEntry]:
+        """The active entries a proposal of ``scope`` is compared with: same scope, same owner, same model."""
+        await self._fence(workspace_id)
+        query = select(MemoryEntry).where(
+            MemoryEntry.workspace_id == workspace_id,
+            MemoryEntry.status == "active",
+            MemoryEntry.scope == scope,
+            MemoryEntry.embedding_model == embedding_model,
+        )
+        if owner_user_id is not None:
+            query = query.where(MemoryEntry.owner_user_id == owner_user_id)
+        result = await self.db.execute(query.order_by(MemoryEntry.created_at, MemoryEntry.id))
+        return result.scalars().all()
+
+    async def least_used(self, workspace_id: uuid.UUID) -> MemoryEntry | None:
+        """The active entry nobody has used for longest, which the cap retires first."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryEntry)
+            .where(MemoryEntry.workspace_id == workspace_id, MemoryEntry.status == "active")
+            .order_by(MemoryEntry.last_used_at, MemoryEntry.created_at, MemoryEntry.id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def touch(self, workspace_id: uuid.UUID, entry_ids: Collection[uuid.UUID], at: datetime) -> None:
+        """Count one use of each entry, as of ``at``."""
+        if not entry_ids:
+            return
+        await self._fence(workspace_id)
+        await self.db.execute(
+            update(MemoryEntry)
+            .where(MemoryEntry.workspace_id == workspace_id, MemoryEntry.id.in_(list(entry_ids)))
+            .values(use_count=MemoryEntry.use_count + 1, last_used_at=at)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def set_signals(
+        self,
+        workspace_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        *,
+        confirmations: int,
+        flags: int,
+        confidence: float,
+        status: MemoryStatus,
+    ) -> None:
+        """Store what the members' signals add up to for one entry."""
+        await self._fence(workspace_id)
+        await self.db.execute(
+            update(MemoryEntry)
+            .where(MemoryEntry.workspace_id == workspace_id, MemoryEntry.id == entry_id)
+            .values(confirmations=confirmations, flags=flags, confidence=confidence, status=status)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def delete_versions(self, workspace_id: uuid.UUID, entry_ids: Collection[uuid.UUID]) -> int:
+        """Delete entry versions outright; how many the workspace had."""
+        if not entry_ids:
+            return 0
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryEntry)
+            .where(MemoryEntry.workspace_id == workspace_id, MemoryEntry.id.in_(list(entry_ids)))
+            .returning(MemoryEntry.id)
+        )
+        return len(result.scalars().all())

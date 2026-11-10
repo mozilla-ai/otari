@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.memory import MemoryEntry, MemoryKind, MemoryScope, MemoryTrust
+from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
 from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._sealing import (
@@ -74,6 +74,20 @@ class ProposalDraft:
 
 
 @dataclass(frozen=True)
+class OpenedProposal:
+    """One pending proposal, opened for the consolidator."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    scope: MemoryScope
+    owner_user_id: uuid.UUID | None
+    kind: MemoryKind
+    trust: MemoryTrust
+    text: str
+    provenance: Provenance
+
+
+@dataclass(frozen=True)
 class OpenedEntry:
     """One active entry version, opened for recall."""
 
@@ -90,6 +104,7 @@ class OpenedEntry:
     confidence: float
     confirmations: int
     flags: int
+    supersedes_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -191,6 +206,49 @@ class EntryStore:
         )
         return await self._open_entries(workspace_id, rows)
 
+    async def comparable(
+        self, workspace_id: uuid.UUID, *, scope: MemoryScope, owner_user_id: uuid.UUID | None, embedding_model: str
+    ) -> list[OpenedEntry]:
+        """The active entries a proposal is compared with, opened."""
+        rows = await self._repos.entries.comparable(
+            workspace_id, scope=scope, owner_user_id=owner_user_id, embedding_model=embedding_model
+        )
+        return await self._open_entries(workspace_id, rows)
+
+    async def entry(self, workspace_id: uuid.UUID, entry_id: uuid.UUID) -> OpenedEntry | None:
+        """One entry version of the workspace, opened; None when it has none by that id or it does not open."""
+        row = await self._repos.entries.in_workspace(workspace_id, entry_id)
+        if row is None:
+            return None
+        opened = await self._open_entries(workspace_id, [row])
+        return opened[0] if opened else None
+
+    async def history(self, workspace_id: uuid.UUID, entry: OpenedEntry, *, limit: int) -> list[OpenedEntry]:
+        """The versions ``entry`` replaced, newest first, up to ``limit``."""
+        versions: list[OpenedEntry] = []
+        previous = entry.supersedes_id
+        while previous is not None and len(versions) < limit:
+            version = await self.entry(workspace_id, previous)
+            if version is None:
+                break
+            versions.append(version)
+            previous = version.supersedes_id
+        return versions
+
+    async def pending_proposals(self, workspace_id: uuid.UUID, *, limit: int) -> list[OpenedProposal]:
+        """The workspace's oldest pending proposals, opened and locked until the block ends."""
+        rows = await self._repos.proposals.pending(workspace_id, limit=limit)
+        keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
+        opened: list[OpenedProposal] = []
+        for row in rows:
+            key = keys.get(row.key_id)
+            proposal = _open_proposal(row, key) if key is not None else None
+            if proposal is None:
+                UNOPENED_ROWS.labels(table="memory_proposals").inc()
+                continue
+            opened.append(proposal)
+        return opened
+
     async def _open_entries(self, workspace_id: uuid.UUID, rows: Sequence[MemoryEntry]) -> list[OpenedEntry]:
         keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
         opened: list[OpenedEntry] = []
@@ -238,5 +296,36 @@ def _open_entry(row: MemoryEntry, key: bytes) -> OpenedEntry | None:
         confidence=row.confidence,
         confirmations=row.confirmations,
         flags=row.flags,
+        supersedes_id=row.supersedes_id,
         created_at=row.created_at,
+    )
+
+
+def _open_proposal(row: MemoryProposal, key: bytes) -> OpenedProposal | None:
+    aad = associated_data(
+        workspace_id=row.workspace_id,
+        scope=row.scope,
+        owner_user_id=row.owner_user_id,
+        record="proposal",
+        record_id=row.id,
+        field="content",
+    )
+    try:
+        text = open_sealed(key, row.content_sealed, aad).decode()
+    except (SealedValueError, UnicodeDecodeError):
+        return None
+    return OpenedProposal(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        scope=row.scope,
+        owner_user_id=row.owner_user_id,
+        kind=row.kind,
+        trust=row.trust,
+        text=text,
+        provenance=Provenance(
+            author_user_id=row.author_user_id,
+            api_key_id=row.source_api_key_id,
+            session_id=row.source_session_id,
+            model=row.source_model,
+        ),
     )

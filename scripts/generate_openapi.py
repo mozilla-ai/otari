@@ -50,6 +50,8 @@ def generate_openapi_spec() -> dict[str, object]:
             federation_audiences=["https://openapi-generation-placeholder.invalid"],
             # Off by default, and on wherever Contact is offered, so it is part of the contract too.
             feedback_enabled=True,
+            # Off by default too, and agents reach it wherever a deployment turns it on.
+            memory_enabled=True,
         )
         # The token exchange needs a secret to start; a throwaway one, for this process only.
         previous = os.environ.get("OTARI_SECRET_KEY")

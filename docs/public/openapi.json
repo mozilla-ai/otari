@@ -40173,6 +40173,72 @@
         ]
       }
     },
+    "/api/v1/memory/mcp": {
+      "get": {
+        "description": "No server-to-client stream: every answer comes back on the POST that asked.",
+        "operationId": "memory-memory_mcp_stream",
+        "responses": {
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "No stream."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Memory Mcp Stream",
+        "tags": [
+          "memory"
+        ]
+      },
+      "post": {
+        "description": "Answer one MCP JSON-RPC message: initialize, ping, tools/list or tools/call.",
+        "operationId": "memory-memory_mcp",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "description": "A notification, which has no response."
+          },
+          "403": {
+            "description": "The key names no member of its workspace."
+          },
+          "413": {
+            "description": "The message exceeds 64 KiB."
+          },
+          "415": {
+            "description": "Only application/json is accepted."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Memory Mcp",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/v1/messages": {
       "post": {
         "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",

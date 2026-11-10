@@ -3,7 +3,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import partial
 from typing import Annotated, Any, cast
@@ -45,6 +45,7 @@ from gateway.ports.billing_port import (
     ToolUse,
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -70,6 +71,7 @@ from gateway.repositories.health_checks import (
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
+from gateway.repositories.memory import MemoryRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
@@ -160,6 +162,7 @@ from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.memory import MemoryCaller, MemoryModels, MemoryService, WorkspaceKeys
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -2279,6 +2282,79 @@ def get_update_check_service(
 
 
 UpdateCheckServiceDep = Annotated[UpdateCheckService, Depends(get_update_check_service)]
+
+
+def memory_keys_for(config: GatewayConfig, keys: ContentKeyPort | None) -> WorkspaceKeys:
+    """The workspaces' memory data keys over ``keys``, rotated as the deployment says."""
+    return WorkspaceKeys(keys, rotation=timedelta(days=config.memory_key_rotation_days))
+
+
+def build_memory_service(uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys) -> MemoryService:
+    """Build the memory service on a request's Unit of Work, or the consolidator's own."""
+    return MemoryService(uow, MemoryRepositories.on(uow), keys, MemoryModels(config), config)
+
+
+def get_memory_keys(request: Request) -> WorkspaceKeys:
+    """This app's memory data keys, built on first use and held for every request, so opened keys are shared."""
+    keys: WorkspaceKeys | None = getattr(request.app.state, "memory_keys", None)
+    if keys is None:
+        config: GatewayConfig = request.app.state.config
+        keys = memory_keys_for(config, get_container(request).resolve(ContentKeyPort, None))
+        request.app.state.memory_keys = keys
+    return keys
+
+
+def get_memory_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
+) -> MemoryService:
+    """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
+    return build_memory_service(uow, config, keys)
+
+
+async def get_memory_caller(
+    request: Request,
+    api_key: Annotated[APIKey, Depends(verify_api_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MemoryCaller:
+    """The member a key speaks for, in the key's own workspace: memory never takes either from the request body.
+
+    Raises:
+        HTTPException: 403 when the key names no active member of its workspace, as a service key or a
+            billing-only user does.
+    """
+    workspace = await WorkspaceRepository(db).get(api_key.workspace_id)
+    person = _person(api_key.user_id)
+    if (
+        workspace is None
+        or person is None
+        or not await is_workspace_member(db, api_key.workspace_id, api_key.user_id, workspace)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Memory is for workspace members, and this key names none of its workspace.",
+        )
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        workspace.organization_id, person
+    )
+    seat = await WorkspaceMemberRepository(db).get_by_workspace_and_user(api_key.workspace_id, person)
+    organization_manager = membership is not None and membership.role in MANAGEMENT_ROLES
+    workspace_role = seat.role if seat is not None and seat.status == "active" else None
+    session_id = request.headers.get("Otari-Session-Id") or request.headers.get("Mcp-Session-Id")
+    return MemoryCaller(
+        workspace_id=api_key.workspace_id,
+        member_id=person,
+        is_manager=organization_manager or workspace_role in MANAGEMENT_ROLES,
+        # A workspace viewer recalls what the workspace knows and writes nothing to it.
+        can_write=organization_manager or workspace_role != "viewer",
+        api_key_id=api_key.id,
+        session_id=session_id[:255] if session_id else None,
+    )
+
+
+MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
+MemoryCallerDep = Annotated[MemoryCaller, Depends(get_memory_caller)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 

@@ -1,9 +1,10 @@
 """Data access for ``memory_proposals``. Flushes, never commits."""
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
@@ -73,3 +74,47 @@ class ProposalRepository(FencedRepository[MemoryProposal]):
             .returning(MemoryProposal.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def pending(self, workspace_id: uuid.UUID, *, limit: int) -> Sequence[MemoryProposal]:
+        """The workspace's oldest pending proposals no other replica holds, locked until the block ends."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.state == "pending")
+            .order_by(MemoryProposal.created_at, MemoryProposal.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return result.scalars().all()
+
+    async def count_pending(self, workspace_id: uuid.UUID) -> int:
+        """How many proposals of the workspace wait for the consolidator."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.state == "pending")
+        )
+        return result.scalar_one()
+
+    async def hold_for_review(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID, reason: str) -> None:
+        """Leave one proposal for an admin, with the reason code it waits for."""
+        await self._fence(workspace_id)
+        await self.db.execute(
+            update(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.id == proposal_id)
+            .values(state="review", review_reason=reason)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def count_attempt(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> int:
+        """Count one failed pass over a proposal; how many it has had."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            update(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.id == proposal_id)
+            .values(attempts=MemoryProposal.attempts + 1)
+            .returning(MemoryProposal.attempts)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() or 0

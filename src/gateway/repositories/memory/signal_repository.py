@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemorySignal, MemorySignalKind
@@ -45,3 +45,14 @@ class SignalRepository(FencedRepository[MemorySignal]):
         row.reason = reason
         await self.db.flush()
         return row
+
+    async def counts(self, workspace_id: uuid.UUID, entry_id: uuid.UUID) -> tuple[int, int]:
+        """How many members confirm the entry, and how many flag it."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemorySignal.signal, func.count())
+            .where(MemorySignal.workspace_id == workspace_id, MemorySignal.entry_id == entry_id)
+            .group_by(MemorySignal.signal)
+        )
+        tally = {signal: count for signal, count in result.all()}
+        return tally.get("confirm", 0), tally.get("flag", 0)

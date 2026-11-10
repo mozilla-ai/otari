@@ -2809,6 +2809,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/memory/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Memory Mcp Stream
+         * @description No server-to-client stream: every answer comes back on the POST that asked.
+         */
+        get: operations["memory-memory_mcp_stream"];
+        put?: never;
+        /**
+         * Memory Mcp
+         * @description Answer one MCP JSON-RPC message: initialize, ping, tools/list or tools/call.
+         */
+        post: operations["memory-memory_mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages": {
         parameters: {
             query?: never;
@@ -27419,6 +27443,74 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["McpErrorBody"];
                 };
+            };
+        };
+    };
+    "memory-memory_mcp_stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No stream. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    "memory-memory_mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description A notification, which has no response. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key names no member of its workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The message exceeds 64 KiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only application/json is accepted. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

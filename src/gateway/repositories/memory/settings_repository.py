@@ -4,7 +4,10 @@ Not fenced: the table holds switches, never content, and the sweeps read it acro
 """
 
 import uuid
+from collections.abc import Sequence
 from typing import Never
+
+from sqlalchemy import select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryWorkspaceSettings, MemoryWritePolicy
@@ -43,3 +46,12 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         row.retention_days = retention_days
         await self.db.flush()
         return row
+
+    async def enabled_workspaces(self) -> Sequence[uuid.UUID]:
+        """Every workspace that has memory on, which the consolidator visits."""
+        result = await self.db.execute(
+            select(MemoryWorkspaceSettings.workspace_id)
+            .where(MemoryWorkspaceSettings.enabled.is_(True))
+            .order_by(MemoryWorkspaceSettings.workspace_id)
+        )
+        return result.scalars().all()
