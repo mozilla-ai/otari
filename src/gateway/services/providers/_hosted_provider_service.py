@@ -924,8 +924,20 @@ async def _undecryptable(provider: str) -> ProviderDiscovery:
 
 
 def _kinds(source: HostedSource, models: Sequence[str]) -> dict[str, ModelType | None]:
-    """What kind each model ``source`` offers is, by models.dev."""
-    return offered_model_types(cached_models_dev_catalog(), source.implementation, models)
+    """What kind each model ``source`` offers is, by models.dev.
+
+    Another Otari names a model ``vendor/model``, which models.dev knows under
+    the vendor, so that is where its kind is read. The kind its own listing
+    gives does not reach here: the client the listing is read with drops it.
+    """
+    catalog = cached_models_dev_catalog()
+    if source.implementation != OTARI_IMPLEMENTATION:
+        return offered_model_types(catalog, source.implementation, models)
+    kinds: dict[str, ModelType | None] = {}
+    for model in models:
+        vendor, separator, name = model.partition("/")
+        kinds[model] = offered_model_types(catalog, vendor, [name])[name] if separator else None
+    return kinds
 
 
 def _same_version(shown: datetime | None, stored: datetime | None) -> bool:

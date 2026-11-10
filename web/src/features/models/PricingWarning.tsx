@@ -2,6 +2,7 @@ import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { useModels } from "@/shared/api/models"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { useFailureCount } from "@/shared/api/usage"
@@ -10,7 +11,9 @@ import { HOUR_S } from "@/shared/helpers/timeRange"
 
 // A gateway-wide alarm, shown on every management page: when `require_pricing` is
 // on but `default_pricing` is off, every request for an unpriced model is being
-// rejected (402). It lives in the app shell rather than any one page so an
+// rejected (402). It stays down while every model the gateway offers has a
+// price, since nothing on offer would then be rejected for want of one, and
+// comes up with no model on offer or any one of them unpriced. It lives in the app shell rather than any one page so an
 // operator sees it regardless of where they are, or how the state arose (e.g.
 // flipping require_pricing on via config long after onboarding). Dismissible per
 // tab; it reappears on reload while the condition holds.
@@ -40,7 +43,21 @@ export function PricingWarning() {
     isOperator &&
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
-  const isShowing = needsPricing && !dismissed
+  // The catalog this caller is shown: what a request could name. A routing
+  // policy is priced per request, so it carries no rate of its own to miss.
+  const models = useModels(needsPricing)
+  const offered = models.data?.data
+  const isEveryModelPriced =
+    offered !== undefined &&
+    offered.length > 0 &&
+    offered.every(
+      (model) => model.pricing != null || model.pricing_source === "dynamic",
+    )
+  // Held back while the catalog is first read, rather than raised and
+  // withdrawn; a catalog that failed to answer leaves the alarm up.
+  const isCatalogPending = models.isPending && !models.data
+  const isShowing =
+    needsPricing && !dismissed && !isCatalogPending && !isEveryModelPriced
 
   // Every failure class the gateway served is counted (402 no pricing, 403 budget
   // or model access, 502 provider), not only the pricing rejections: the operator's

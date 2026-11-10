@@ -18,6 +18,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
+from gateway.types.models_dev import parse_catalog_v2
 
 from .conftest import build_test_client
 
@@ -79,11 +80,20 @@ def _chat(client: TestClient, model: str, provider: AsyncMock) -> Any:
         return client.post(f"{API_ROOT}/chat/completions", json=body, headers=HEADERS)
 
 
-def test_a_vendor_prefixed_model_is_priced_from_the_vendor_and_switched_on(client: TestClient) -> None:
+def test_a_vendor_prefixed_model_is_priced_from_the_vendor_and_switched_on(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_dev = parse_catalog_v2({"openai": {"models": {"gpt-4o": {"type": "chat"}}}})
+    monkeypatch.setattr(
+        "gateway.services.providers._hosted_provider_service.cached_models_dev_catalog", lambda: models_dev
+    )
     models = client.get(f"{API_ROOT}/hosted-providers/otari-ai/models", headers=HEADERS).json()["data"]
     by_name = {model["model"]: model for model in models}
 
     priced = by_name["openai/gpt-4o"]
+    # Its kind is read from the vendor's entry too, so the panel does not file it under Unknown.
+    assert priced["type"] == "chat"
+    assert by_name["x/y"]["type"] is None
     assert priced["enabled"] is True
     assert priced["price_source"] == "defaults"
     assert priced["input_price_per_million"] == 2.5
