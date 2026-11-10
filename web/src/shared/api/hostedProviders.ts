@@ -146,7 +146,7 @@ const PLATFORM_CONNECT_POLL_MS = 3_000
  * approved: every other status is one that does not change on its own.
  *
  * The gateway asks otari.ai at most once per interval however often this is
- * read. The read that finds a pending attempt connected also refreshes the
+ * read. The read that first finds the attempt connected also refreshes the
  * provider and model lists, which the gateway changed while answering it.
  */
 export function usePlatformConnectStatus(enabled: boolean) {
@@ -159,7 +159,9 @@ export function usePlatformConnectStatus(enabled: boolean) {
         PLATFORM_CONNECT,
       ])
       const status = await apiFetch<PlatformConnectStatus>("/platform/connect")
-      if (before?.status === "pending" && status.status === "connected") {
+      // Also on a first read: the gateway may have stored the provider while
+      // answering it, beside a provider list fetched at the same moment.
+      if (before?.status !== "connected" && status.status === "connected") {
         invalidate()
       }
       return status

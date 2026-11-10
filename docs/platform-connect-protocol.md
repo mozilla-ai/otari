@@ -97,7 +97,7 @@ gateway does not parse, and `api_base` is the region's host followed by
 | `error` | Meaning | The gateway |
 |---|---|---|
 | `authorization_pending` | Nobody has approved or declined yet. | Polls again after `interval`. |
-| `slow_down` | The gateway polled too soon (the platform answers this to polls less than 4 seconds apart). | Adds 5 seconds to `interval` for the rest of the attempt, then polls again. The platform does not grow the interval itself. |
+| `slow_down` | The gateway polled too soon (the platform answers this to polls less than 4 seconds apart). | Adds 5 seconds to `interval` for the rest of the attempt, up to 60 seconds, then polls again. The platform does not grow the interval itself. |
 | `expired_token` | The codes expired before the key was collected. An approval does not extend their lifetime. | Ends the attempt as expired. |
 | `access_denied` | The operator declined. | Ends the attempt as denied. |
 
