@@ -55,7 +55,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
-from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_code_of, error_headers
+from gateway.core.error_codes import ERROR_CODE_HEADER, INVALID_REQUEST, body_fields_of, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -1454,7 +1454,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
             ],
             # A speech response carries its cost on headers, which a browser on
             # another origin reads only when they are exposed.
-            expose_headers=[COST_USD_HEADER, PRICING_SOURCE_HEADER, USAGE_UNIT_HEADER, USAGE_UNITS_HEADER],
+            expose_headers=[
+                COST_USD_HEADER,
+                ERROR_CODE_HEADER,
+                PRICING_SOURCE_HEADER,
+                USAGE_UNIT_HEADER,
+                USAGE_UNITS_HEADER,
+            ],
         )
 
     # Tracks what the gateway is serving right now, so the activity log can show
