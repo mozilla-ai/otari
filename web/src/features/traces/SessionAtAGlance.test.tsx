@@ -256,7 +256,7 @@ describe("SessionAtAGlance", () => {
 
     expect(
       screen.getByText(
-        "Judge gates made 3 model calls, for $0.01 the split above leaves out, from the 1 call priced.",
+        "Judge gates made 3 model requests, for $0.01 the split above leaves out, from the 1 request priced.",
       ),
     ).toBeInTheDocument()
   })

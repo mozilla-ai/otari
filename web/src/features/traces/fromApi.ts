@@ -284,7 +284,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           isRollup: true,
           metadata: {
             State: turn.state,
-            "LLM calls": String(turn.llm_calls),
+            "Model requests": String(turn.llm_calls),
             "Tool calls": String(turn.tool_calls),
           },
         })
@@ -385,7 +385,13 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
             )
           : null
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
-      const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
+      // A span's timestamps are finer than a millisecond, so their difference
+      // can be one off the duration it states. Where it states one, that is
+      // its length, here and in what its explanation says it took.
+      const endMs =
+        span.start_time !== null && span.duration_ms !== null
+          ? startMs + span.duration_ms
+          : (offset(span.end_time) ?? startMs)
       const input = spanInput(span)
       const gate = gateCheck(span, gateSummaries, checkEvidence)
       const folded = foldedInto.get(span.span_id)

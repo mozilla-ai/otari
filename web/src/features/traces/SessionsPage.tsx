@@ -44,7 +44,7 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
-import { formatDuration, formatTraceTimestamp } from "./format"
+import { formatDuration, formatTraceTimestamp, plural } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent, ShareSessionAction } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
@@ -109,8 +109,6 @@ const HAS_ERROR: Record<string, "true" | "false"> = {
 }
 
 const EMPTY = <span className="text-subtle">—</span>
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 function columns(peekId: string): DataTableColumn<TraceSummary>[] {
   return [
@@ -419,8 +417,10 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
 
   const rows = traces.data?.items ?? []
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
-  // The row on screen, or the read's own summary for a link off this page.
-  const openSummary = rows[openIndex] ?? shown?.summary
+  // The read's own summary once it lands: the list is a snapshot, and a
+  // session still running has moved on since. Until then, the row on screen.
+  const openSummary =
+    shown?.summary.trace_id === peekId ? shown.summary : rows[openIndex]
   const open = useMemo(
     () => (openSummary ? toTrace(openSummary, shown) : null),
     [openSummary, shown],
@@ -497,8 +497,8 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
       <div className="flex flex-col" inert={open !== null && isMobile}>
         {embedded ? null : (
           <PageIntro title="Sessions">
-            Every agent session the gateway recorded: the turns, LLM calls and
-            tools behind each one. No model response is stored.
+            Every agent session the gateway recorded: the turns, model requests
+            and tools behind each one. No model response is stored.
           </PageIntro>
         )}
         {keepsContent ? (

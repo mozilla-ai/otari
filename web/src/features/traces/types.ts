@@ -125,7 +125,15 @@ export interface TraceTotals {
   totalTokens: number
   totalCost: number
   models: string[]
-  level: ObservationLevel
+}
+
+/**
+ * What the session cost: the total it recorded, which At a glance heads its
+ * Cost band with, rather than a sum of the spans on screen, which stands in
+ * only until the session's spans have loaded.
+ */
+export function sessionCost(trace: Trace, totals: TraceTotals): number {
+  return trace.gateway?.cost ?? totals.totalCost
 }
 
 export function summarizeTrace(trace: Trace): TraceTotals {
@@ -135,7 +143,6 @@ export function summarizeTrace(trace: Trace): TraceTotals {
   let cachedTokens = 0
   let cacheWriteTokens = 0
   let totalCost = 0
-  let level: ObservationLevel = "DEFAULT"
   const models = new Set<string>()
   for (const o of trace.observations) {
     latencyMs = Math.max(latencyMs, o.endMs)
@@ -148,8 +155,6 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     }
     if (!o.isRollup) totalCost += o.cost ?? 0
     if (o.model) models.add(o.model)
-    if (o.level === "ERROR") level = "ERROR"
-    else if (o.level === "WARNING" && level !== "ERROR") level = "WARNING"
   }
   return {
     latencyMs,
@@ -160,6 +165,5 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     totalTokens: promptTokens + completionTokens,
     totalCost,
     models: [...models],
-    level,
   }
 }

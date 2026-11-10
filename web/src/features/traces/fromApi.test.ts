@@ -44,7 +44,30 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
-  it("draws a request that made one LLM call and nothing else as that call", () => {
+  it("gives a span the length it states, not one off it from rounded timestamps", () => {
+    // 2.539 ms long: the timestamps cut to the millisecond are 2 ms apart.
+    const detail = traceDetail({
+      spans: [
+        traceSpan({
+          span_id: "call-read",
+          kind: "tool",
+          tool_name: "Read",
+          start_time: "2026-10-07T12:00:00.268400Z",
+          end_time: "2026-10-07T12:00:00.270939Z",
+          duration_ms: 3,
+        }),
+      ],
+    })
+
+    const read = toTrace(traceSummary(), detail).observations.find(
+      (o) => o.id === "call-read",
+    )
+
+    expect((read?.endMs ?? 0) - (read?.startMs ?? 0)).toBe(3)
+    expect(read?.explain?.facts).toContainEqual(["Took", "3 ms"])
+  })
+
+  it("draws a request that made one model request and nothing else as that one", () => {
     const detail = traceDetail()
     const spans = [
       ...detail.spans,
@@ -186,10 +209,7 @@ describe("toTrace", () => {
 
     expect(recovered?.level).toBe("WARNING")
     expect(recovered?.statusMessage).toBe("error, recovered by a fallback")
-    expect(summarizeTrace(trace)).toMatchObject({
-      level: "WARNING",
-      totalCost: 0.01,
-    })
+    expect(summarizeTrace(trace).totalCost).toBe(0.01)
   })
 
   it("draws guardrail checks and MCP connections as their own types", () => {
@@ -598,7 +618,7 @@ describe("toTrace", () => {
       sentence: "A request that continues a turn keeps nothing of its own.",
     })
     expect(byId.get("llm-1")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
     expect(byId.get("fetch-1")?.noInput).toEqual({
       sentence: "Otari keeps no content for this tool.",
@@ -636,7 +656,7 @@ describe("toTrace", () => {
       sentence: "A request that continues a turn keeps nothing of its own.",
     })
     expect(byId.get("llm-2")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
   })
 
@@ -662,7 +682,7 @@ describe("toTrace", () => {
     })
     expect(byId.has("req-2")).toBe(false)
     expect(byId.get("llm-2")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
   })
 
@@ -750,7 +770,7 @@ describe("toTrace", () => {
     )
   })
 
-  it("says what a permission decision, a run and a model call were", () => {
+  it("says what a permission decision, a run and a model request were", () => {
     const trace = toTrace(
       traceSummary(),
       traceDetail({
@@ -843,7 +863,7 @@ describe("toTrace", () => {
     )
   })
 
-  it("says a model call that errored failed rather than answered", () => {
+  it("says a model request that errored failed rather than answered", () => {
     const trace = toTrace(
       traceSummary(),
       traceDetail({

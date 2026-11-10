@@ -296,7 +296,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        "Otari never keeps what a model call sent or got back.",
+        "Otari never keeps what a model request sent or got back.",
       ),
     ).toBeInTheDocument()
     expect(
@@ -315,7 +315,7 @@ describe("SessionsPage", () => {
       "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
     )
 
-    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
     await user.click(
       within(peek).getByRole("button", { name: /Request \(req-1\)/ }),
     )
@@ -357,7 +357,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        "Otari never keeps what a model call sent or got back.",
+        "Otari never keeps what a model request sent or got back.",
       ),
     ).toBeInTheDocument()
 
@@ -407,7 +407,7 @@ describe("SessionsPage", () => {
       0,
     )
 
-    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
     await user.click(within(peek).getByRole("button", { name: /\(call-too\)/ }))
 
     expect(
@@ -545,7 +545,7 @@ describe("SessionsPage", () => {
     expect(await screen.findByText("Cached")).toBeInTheDocument()
     expect(screen.getByText("86.9%")).toBeInTheDocument()
     await userEvent.click(
-      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+      within(peek).getAllByRole("button", { name: /^Model request, gpt-5/ })[0],
     )
     await userEvent.click(
       await within(peek).findByRole("button", { name: "Attributes" }),
@@ -644,7 +644,7 @@ describe("SessionsPage", () => {
       ),
     ).toBeInTheDocument()
     await userEvent.click(
-      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+      within(peek).getAllByRole("button", { name: /^Model request, gpt-5/ })[0],
     )
     expect(
       await within(peek).findByRole("button", { name: "Attributes" }),
@@ -897,7 +897,7 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("says what a judge gate's model calls used and cost", async () => {
+  it("says what a judge gate's model requests used and cost", async () => {
     const detail = traceDetail()
     mockApi({
       traces: [traceSummary()],
@@ -935,7 +935,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /^Judge gates made 1 model call, for \$0\.01\d*\.$/,
+        /^Judge gates made 1 model request, for \$0\.01\d*\.$/,
       ),
     ).toBeInTheDocument()
     await userEvent.click(
@@ -944,7 +944,9 @@ describe("SessionsPage", () => {
     await userEvent.click(
       await within(peek).findByRole("button", { name: /^writing-style/ }),
     )
-    expect(await within(peek).findByText("Its model calls")).toBeInTheDocument()
+    expect(
+      await within(peek).findByText("Its model requests"),
+    ).toBeInTheDocument()
     expect(
       within(peek).getByText(
         "6,693 input (6,684 written to the cache), 111 output",
@@ -995,6 +997,38 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$0.02")
+  })
+
+  it("heads an open session with the total At a glance gives it", async () => {
+    // The spans on screen sum to $0.01; the session recorded $1.9711.
+    const summary = traceSummary({ cost: 1.9711 })
+    mockApi({ traces: [summary], traceDetail: traceDetail({ summary }) })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await costTotal(peek)).toBe("$1.97")
+    const heading = within(peek).getByRole("heading", { name: "claude-code" })
+    const header = heading.parentElement?.parentElement as HTMLElement
+    expect(within(header).getByText("$1.97")).toBeInTheDocument()
+    // The session's own row in the tree says the same, where a span's row
+    // keeps the four places of its own cost.
+    const tree = within(peek).getByRole("list", { name: "Spans" })
+    const [session] = within(tree).getAllByRole("button")
+    expect(within(session).getByText("$1.97")).toBeInTheDocument()
+    expect(within(tree).getByText("$0.01")).toBeInTheDocument()
+  })
+
+  it("reads an open session's totals from its own read, not the list's snapshot", async () => {
+    mockApi({
+      traces: [traceSummary({ cost: 0.5 })],
+      traceDetail: traceDetail({ summary: traceSummary({ cost: 2 }) }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await costTotal(peek)).toBe("$2.00")
   })
 
   it("says what a gate is and what its check read when it is opened", async () => {
@@ -1143,7 +1177,7 @@ describe("SessionsPage", () => {
       ),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByText("1 could not decide, held"),
+      within(peek).getByText("1 could not decide, blocked"),
     ).toBeInTheDocument()
   })
 
@@ -1235,7 +1269,7 @@ describe("SessionsPage", () => {
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession(user)
     await user.click(
-      await within(peek).findByRole("button", { name: "Log View" }),
+      await within(peek).findByRole("button", { name: "Log view" }),
     )
     await user.click(await within(peek).findByRole("button", { name: /Bash/ }))
 
@@ -1252,7 +1286,7 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
 
     expect(
-      await within(peek).findByRole("button", { name: "Log View" }),
+      await within(peek).findByRole("button", { name: "Log view" }),
     ).toBeInTheDocument()
     expect(
       within(peek).queryByRole("button", { name: /^Gates/ }),
@@ -1653,7 +1687,7 @@ describe("SessionsPage", () => {
 
       expect(search).toHaveValue("")
       expect(
-        within(peek).getByRole("list", { name: "Observations" }),
+        within(peek).getByRole("list", { name: "Spans" }),
       ).toBeInTheDocument()
       expect(
         screen.getByRole("complementary", { name: "Trace claude-code" }),
@@ -1669,7 +1703,7 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession(user)
-    const tree = await within(peek).findByRole("list", { name: "Observations" })
+    const tree = await within(peek).findByRole("list", { name: "Spans" })
     expect(
       within(tree).getByRole("button", { name: /^Tool, Bash/ }),
     ).toBeInTheDocument()
@@ -1693,7 +1727,7 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession(user)
-    const tree = await within(peek).findByRole("list", { name: "Observations" })
+    const tree = await within(peek).findByRole("list", { name: "Spans" })
     const [request] = within(tree).getAllByRole("button", {
       name: /^Span, Request/,
     })
@@ -1720,8 +1754,9 @@ describe("SessionsPage", () => {
     )
 
     const timeline = within(peek).getByRole("list", { name: "Timeline" })
+    // The duration the tree gives the same session, not seconds past a minute.
     expect(within(timeline).getAllByRole("button")[0]).toHaveAccessibleName(
-      /^Trace, claude-code,/,
+      "Trace, claude-code, 1m 10s",
     )
     const zoomOut = within(peek).getByRole("button", { name: "Zoom out" })
     expect(zoomOut).toBeDisabled()
@@ -1729,6 +1764,67 @@ describe("SessionsPage", () => {
     await user.click(within(peek).getByRole("button", { name: "Zoom in" }))
 
     expect(zoomOut).toBeEnabled()
+  })
+
+  it("offers Formatted and Raw only where stored content is on screen", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { command: "pytest -x" } }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    const format = () =>
+      within(peek).queryByRole("radiogroup", { name: "Format" })
+
+    // A model request keeps no content, so there is nothing to reformat.
+    const [call] = await within(peek).findAllByRole("button", {
+      name: /^Model request, gpt-5/,
+    })
+    await user.click(call)
+    expect(format()).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+    expect(format()).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Attributes" }))
+    expect(format()).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    expect(format()).toBeInTheDocument()
+  })
+
+  it("names a model request's model once, and a session's models by count", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "llm-2" ? { ...span, model: "claude-opus" } : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+
+    expect(
+      await within(peek).findByRole("button", { name: "2 models" }),
+    ).toBeInTheDocument()
+
+    await user.click(
+      within(peek).getByRole("button", { name: /^Model request, gpt-5/ }),
+    )
+    const heading = within(peek).getByRole("heading", { name: "gpt-5" })
+    const header = heading.parentElement?.parentElement as HTMLElement
+    expect(within(header).getAllByText("gpt-5")).toHaveLength(1)
   })
 
   it("says when no span matches the search", async () => {

@@ -9,7 +9,7 @@ import { FiChevronRight } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { formatCost, formatNumber, formatSpend } from "@/shared/helpers/format"
 
 import { formatDuration } from "./format"
 import { LevelChip } from "./LevelChip"
@@ -22,26 +22,34 @@ import {
   flattenTreeOrder,
   type TreeNode,
 } from "./tree"
-import { type Observation, summarizeTrace, type Trace } from "./types"
+import {
+  type Observation,
+  sessionCost,
+  summarizeTrace,
+  type Trace,
+} from "./types"
 
 function Metrics({
   durationMs,
   cost,
   tokens,
   estimate,
+  isSession = false,
 }: {
   durationMs: number
   cost: number
   tokens: number
   /** An estimated cost, marked as one. */
   estimate?: number
+  /** The session's own total, which reads in cents as its header says it. */
+  isSession?: boolean
 }) {
   if (durationMs <= 0 && !cost && !tokens && !estimate) return null
   return (
     <span className="flex items-center gap-x-3 truncate text-mono-caption whitespace-nowrap text-muted">
       {durationMs > 0 ? <span>{formatDuration(durationMs)}</span> : null}
       {cost ? (
-        <span>{formatCost(cost)}</span>
+        <span>{isSession ? formatSpend(cost) : formatCost(cost)}</span>
       ) : estimate ? (
         <span>≈ {formatCost(estimate)}</span>
       ) : tokens ? (
@@ -359,11 +367,7 @@ export function TraceTreeView({
     : null
 
   return (
-    <ul
-      aria-label="Observations"
-      data-trace-rows
-      className="flex flex-col py-1"
-    >
+    <ul aria-label="Spans" data-trace-rows className="flex flex-col py-1">
       <li
         className={`flex ${selectedId === null ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
       >
@@ -385,8 +389,9 @@ export function TraceTreeView({
             <span className="truncate text-body">{trace.name}</span>
             <Metrics
               durationMs={summary.latencyMs}
-              cost={summary.totalCost}
+              cost={sessionCost(trace, summary)}
               tokens={summary.totalTokens}
+              isSession
             />
           </span>
         </button>
