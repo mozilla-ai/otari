@@ -19,7 +19,7 @@ const MODE_COPY: Record<McpCatalogSyncStatus["mode"], string> = {
   scheduled: "Scheduled. A sync also runs on its own.",
 }
 
-function outcomeLine(status: McpCatalogSyncStatus): {
+function describeSync(status: McpCatalogSyncStatus): {
   dot: string
   text: string
 } {
@@ -58,7 +58,7 @@ export function McpCatalogSync() {
   const sync = useMcpCatalogSync(true)
   const request = useRequestMcpCatalogSync()
   const status = sync.data
-  const line = status ? outcomeLine(status) : undefined
+  const line = status ? describeSync(status) : undefined
   const isBusy = status ? status.running || status.requested : false
 
   return (

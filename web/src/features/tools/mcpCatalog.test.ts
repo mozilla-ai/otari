@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  addedOutcome,
-  endpointKey,
-  freeName,
-  pickOf,
-  refusedOutcome,
+  describeAdded,
+  describeRefusal,
+  findFreeName,
+  normalizeEndpoint,
+  toCatalogPick,
 } from "@/features/tools/mcpCatalog"
 import {
   mcpCatalogFeatured,
@@ -14,74 +14,79 @@ import {
   workspaceMcpServerHealth,
 } from "@/tests/fixtures"
 
-describe("endpointKey", () => {
+describe("normalizeEndpoint", () => {
   it("reads two spellings of one endpoint as the same", () => {
-    expect(endpointKey("https://MCP.Example.com/mcp/")).toBe(
-      endpointKey(" https://mcp.example.com/mcp"),
+    expect(normalizeEndpoint("https://MCP.Example.com/mcp/")).toBe(
+      normalizeEndpoint(" https://mcp.example.com/mcp"),
     )
   })
 
   it("keeps different paths and queries apart", () => {
-    expect(endpointKey("https://mcp.example.com/a")).not.toBe(
-      endpointKey("https://mcp.example.com/b"),
+    expect(normalizeEndpoint("https://mcp.example.com/a")).not.toBe(
+      normalizeEndpoint("https://mcp.example.com/b"),
     )
-    expect(endpointKey("https://mcp.example.com/a?team=1")).not.toBe(
-      endpointKey("https://mcp.example.com/a?team=2"),
+    expect(normalizeEndpoint("https://mcp.example.com/a?team=1")).not.toBe(
+      normalizeEndpoint("https://mcp.example.com/a?team=2"),
     )
   })
 
   it("falls back to the text of something that is not a URL", () => {
-    expect(endpointKey(" not a url ")).toBe("not a url")
+    expect(normalizeEndpoint(" not a url ")).toBe("not a url")
   })
 })
 
-describe("freeName", () => {
+describe("findFreeName", () => {
   it("uses the title when no server has it", () => {
-    expect(freeName(" Sentry ", new Set(["github"]))).toBe("Sentry")
+    expect(findFreeName(" Sentry ", new Set(["github"]))).toBe("Sentry")
   })
 
   it("numbers a title that is taken", () => {
-    expect(freeName("Sentry", new Set(["Sentry", "Sentry 2"]))).toBe("Sentry 3")
+    expect(findFreeName("Sentry", new Set(["Sentry", "Sentry 2"]))).toBe(
+      "Sentry 3",
+    )
   })
 
   it("stays within the gateway's 128 characters, suffix included", () => {
     const title = "x".repeat(200)
-    const first = freeName(title, new Set())
+    const first = findFreeName(title, new Set())
     expect(first).toHaveLength(128)
-    const second = freeName(title, new Set([first]))
+    const second = findFreeName(title, new Set([first]))
     expect(second).toHaveLength(128)
     expect(second.endsWith(" 2")).toBe(true)
   })
 
   it("names a server whose title is blank", () => {
-    expect(freeName("  ", new Set())).toBe("MCP server")
+    expect(findFreeName("  ", new Set())).toBe("MCP server")
   })
 })
 
-describe("pickOf", () => {
+describe("toCatalogPick", () => {
   it("carries a catalog server's own id", () => {
-    expect(pickOf(mcpCatalogServer({ id: "server-1" })).serverId).toBe(
+    expect(toCatalogPick(mcpCatalogServer({ id: "server-1" })).serverId).toBe(
       "server-1",
     )
   })
 
   it("carries the catalog id a featured entry was copied from, or none", () => {
     expect(
-      pickOf(mcpCatalogFeatured({ catalog_server_id: "server-2" })).serverId,
+      toCatalogPick(mcpCatalogFeatured({ catalog_server_id: "server-2" }))
+        .serverId,
     ).toBe("server-2")
     expect(
-      pickOf(mcpCatalogFeatured({ catalog_server_id: null })).serverId,
+      toCatalogPick(mcpCatalogFeatured({ catalog_server_id: null })).serverId,
     ).toBeUndefined()
   })
 
   it("reads a missing description as none", () => {
-    expect(pickOf(mcpCatalogServer({ description: null })).description).toBe("")
+    expect(
+      toCatalogPick(mcpCatalogServer({ description: null })).description,
+    ).toBe("")
   })
 })
 
-describe("addedOutcome", () => {
+describe("describeAdded", () => {
   it("reports a passing check with what the server offers", () => {
-    const outcome = addedOutcome(
+    const outcome = describeAdded(
       workspaceMcpServer({
         health: workspaceMcpServerHealth({ tools: ["a", "b"], tool_count: 2 }),
       }),
@@ -93,7 +98,7 @@ describe("addedOutcome", () => {
   it.each(["unauthorized", "forbidden"] as const)(
     "reads %s as a server that needs sign-in, not as a failure to add",
     (error) => {
-      const outcome = addedOutcome(
+      const outcome = describeAdded(
         workspaceMcpServer({
           health: workspaceMcpServerHealth({ status: "failing", error }),
         }),
@@ -104,7 +109,7 @@ describe("addedOutcome", () => {
   )
 
   it("says what failed when the check failed for another reason", () => {
-    const outcome = addedOutcome(
+    const outcome = describeAdded(
       workspaceMcpServer({
         health: workspaceMcpServerHealth({
           status: "failing",
@@ -117,15 +122,15 @@ describe("addedOutcome", () => {
   })
 
   it("reports a server stored without a check", () => {
-    expect(addedOutcome(workspaceMcpServer({ health: null })).label).toBe(
+    expect(describeAdded(workspaceMcpServer({ health: null })).label).toBe(
       "Added",
     )
   })
 })
 
-describe("refusedOutcome", () => {
+describe("describeRefusal", () => {
   it("carries the gateway's reason", () => {
-    expect(refusedOutcome("A server named 'x' already exists")).toEqual({
+    expect(describeRefusal("A server named 'x' already exists")).toEqual({
       tone: "danger",
       label: "Not added",
       detail: "A server named 'x' already exists",

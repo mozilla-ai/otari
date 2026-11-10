@@ -18,7 +18,7 @@ export interface CatalogPick {
   requiresToken: boolean
 }
 
-export function pickOf(
+export function toCatalogPick(
   entry: McpCatalogServer | McpCatalogFeatured,
 ): CatalogPick {
   return {
@@ -35,7 +35,7 @@ export function pickOf(
 }
 
 /** A URL as two spellings of one endpoint compare equal: host folded, no trailing slash. */
-export function endpointKey(url: string): string {
+export function normalizeEndpoint(url: string): string {
   try {
     const parsed = new URL(url.trim())
     const path = parsed.pathname.replace(/\/+$/, "")
@@ -53,7 +53,10 @@ const MAX_NAME_LENGTH = 128
  * `title`: "Sentry", then "Sentry 2". Names compare as the gateway stores
  * them, exactly, so only an identical one collides.
  */
-export function freeName(title: string, taken: ReadonlySet<string>): string {
+export function findFreeName(
+  title: string,
+  taken: ReadonlySet<string>,
+): string {
   const base = title.trim().slice(0, MAX_NAME_LENGTH) || "MCP server"
   if (!taken.has(base)) return base
   for (let suffix = 2; ; suffix += 1) {
@@ -74,7 +77,7 @@ export interface AddOutcome {
 }
 
 /** What adding one server came to, read from the connection check the create ran. */
-export function addedOutcome(server: WorkspaceMcpServer): AddOutcome {
+export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
   const health = server.health
   if (!health) {
     return {
@@ -102,6 +105,6 @@ export function addedOutcome(server: WorkspaceMcpServer): AddOutcome {
 }
 
 /** What a refused add came to. `message` is the gateway's own reason. */
-export function refusedOutcome(message: string): AddOutcome {
+export function describeRefusal(message: string): AddOutcome {
   return { tone: "danger", label: "Not added", detail: message }
 }

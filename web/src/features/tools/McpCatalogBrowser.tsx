@@ -6,7 +6,7 @@ import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Chip } from "@/design-system/indicators/Chip"
-import { type CatalogPick, pickOf } from "@/features/tools/mcpCatalog"
+import { type CatalogPick, toCatalogPick } from "@/features/tools/mcpCatalog"
 import { useMcpCatalogServers } from "@/shared/api/mcpCatalog"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
@@ -92,7 +92,7 @@ export function McpCatalogBrowser({
           <h3 className="text-title">Recommended by your organization</h3>
           <ul aria-label="Recommended by your organization">
             {featured.map((entry) => {
-              const pick = pickOf(entry)
+              const pick = toCatalogPick(entry)
               return (
                 <CatalogRow
                   key={entry.id}
@@ -125,7 +125,7 @@ export function McpCatalogBrowser({
             ) : (
               <ul aria-label={isSearching ? "Results" : "All servers"}>
                 {rows.map((server) => {
-                  const pick = pickOf(server)
+                  const pick = toCatalogPick(server)
                   return (
                     <CatalogRow
                       key={server.id}

@@ -14,11 +14,11 @@ import { McpCatalogBrowser } from "@/features/tools/McpCatalogBrowser"
 import {
   type AddOutcome,
   type AddTone,
-  addedOutcome,
   type CatalogPick,
-  endpointKey,
-  freeName,
-  refusedOutcome,
+  describeAdded,
+  describeRefusal,
+  findFreeName,
+  normalizeEndpoint,
 } from "@/features/tools/mcpCatalog"
 import { useFeaturedMcpServers } from "@/shared/api/mcpCatalog"
 import { useCreateWorkspaceMcpServer } from "@/shared/api/tools"
@@ -74,7 +74,7 @@ export function McpCatalogDialog({
   const [results, setResults] = useState<Result[]>([])
   const [isAdding, setIsAdding] = useState(false)
 
-  const added = new Set(existing.map((server) => endpointKey(server.url)))
+  const added = new Set(existing.map((server) => normalizeEndpoint(server.url)))
   // A featured entry and its catalog row are one server, so picking either
   // replaces the other. They can list different URLs once the catalog moved
   // on, and only the row that was ticked shows as picked: its URL is the one
@@ -93,7 +93,7 @@ export function McpCatalogDialog({
     const taken = new Set(existing.map((server) => server.name))
     setDrafts(
       picks.map((pick) => {
-        const name = freeName(pick.title, taken)
+        const name = findFreeName(pick.title, taken)
         taken.add(name)
         return { pick, name, token: "" }
       }),
@@ -109,7 +109,7 @@ export function McpCatalogDialog({
     )
 
   const names = drafts.map((draft) => draft.name.trim())
-  const nameProblem = (draft: Draft): string | undefined => {
+  const findNameProblem = (draft: Draft): string | undefined => {
     const name = draft.name.trim()
     if (!name) return "Give the server a name."
     if (names.filter((other) => other === name).length > 1) {
@@ -117,7 +117,8 @@ export function McpCatalogDialog({
     }
     return undefined
   }
-  const canAdd = drafts.length > 0 && drafts.every((d) => !nameProblem(d))
+  const canAdd =
+    drafts.length > 0 && drafts.every((draft) => !findNameProblem(draft))
 
   // One at a time, in order: the gateway locks the workspace per create, and a
   // refusal of one server (a name in use, the workspace's cap) must not stop
@@ -133,13 +134,14 @@ export function McpCatalogDialog({
           body: {
             name,
             url: draft.pick.url,
-            authorization_token: draft.token || undefined,
+            // A pasted token often ends in a newline, which would be stored and then refused.
+            authorization_token: draft.token.trim() || undefined,
             enabled: true,
           },
         })
-        outcomes.push({ name, outcome: addedOutcome(server) })
+        outcomes.push({ name, outcome: describeAdded(server) })
       } catch (error) {
-        outcomes.push({ name, outcome: refusedOutcome(errorMessage(error)) })
+        outcomes.push({ name, outcome: describeRefusal(errorMessage(error)) })
       }
       setResults([...outcomes])
     }
@@ -222,7 +224,7 @@ export function McpCatalogDialog({
         }
       >
         {drafts.map((draft) => {
-          const problem = nameProblem(draft)
+          const problem = findNameProblem(draft)
           return (
             <DialogSection key={draft.pick.name}>
               <Field
@@ -289,14 +291,14 @@ export function McpCatalogDialog({
               ariaLabel={`Select ${pick.title}`}
               hasTouchTarget
               isSelected={isPicked(pick)}
-              isDisabled={added.has(endpointKey(pick.url))}
+              isDisabled={added.has(normalizeEndpoint(pick.url))}
               onChange={(isSelected) => toggle(pick, isSelected)}
             >
               {null}
             </Checkbox>
           )}
           renderNote={(pick) =>
-            added.has(endpointKey(pick.url)) ? (
+            added.has(normalizeEndpoint(pick.url)) ? (
               <Chip tone="neutral">Already added</Chip>
             ) : null
           }

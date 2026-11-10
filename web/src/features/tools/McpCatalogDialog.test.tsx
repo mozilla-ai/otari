@@ -214,7 +214,7 @@ describe("McpCatalogDialog", () => {
     ])
     await user.type(
       screen.getByLabelText("Authorization token for Stripe"),
-      "secret-token",
+      " secret-token ",
     )
     await user.click(screen.getByRole("button", { name: "Add 3 servers" }))
 
