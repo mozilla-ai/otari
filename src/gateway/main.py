@@ -105,6 +105,7 @@ from gateway.services.log_writer import (
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key, load_master_key_hash, startup_notice
+from gateway.services.model_catalog_service import configure_models_dev_base_url
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -970,6 +971,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         config: GatewayConfig = app.state.config
         app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
+        configure_models_dev_base_url(config.models_dev_base_url)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
         # implementation it actually dispatches to. Deliberately not

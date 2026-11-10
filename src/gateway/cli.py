@@ -8,10 +8,11 @@ import warnings
 
 import click
 import uvicorn
+from pydantic import ValidationError
 from sqlalchemy.exc import SAWarning
 from uvicorn.config import logger
 
-from gateway.core.config import API_ROOT, load_config
+from gateway.core.config import API_ROOT, GatewayConfig, load_config
 from gateway.log_config import setup_logger, uvicorn_log_config
 from gateway.services.url_safety import redact_url_secrets
 
@@ -41,6 +42,24 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
 
 # What a container health check, a load balancer or an orchestrator polls.
 HEALTH_PROBE_PATHS = tuple(f"{API_ROOT}/health{suffix}" for suffix in ("", "/liveness", "/readiness"))
+
+
+def _load_config_or_fail(config_path: str | None) -> GatewayConfig:
+    """``load_config``, with a refused value reported by its field and message and never by its value.
+
+    Pydantic's own rendering repeats the input of every failed field, and a
+    config value can be a credential, such as a URL with a password in it.
+    """
+    try:
+        return load_config(config_path)
+    except ValidationError as exc:
+        lines = [
+            f"{'.'.join(str(part) for part in error['loc']) or 'config'}: {error['msg']}"
+            for error in exc.errors(include_url=False, include_input=False)
+        ]
+        raise click.ClickException("Invalid configuration:\n  " + "\n  ".join(lines)) from exc
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @click.group()
@@ -103,10 +122,7 @@ def serve(
             "To scale out, run several otari processes behind a load balancer or process manager. "
             "Re-run with --workers 1 (the default)."
         )
-    try:
-        gateway_config = load_config(config)
-    except ValueError as e:
-        raise click.ClickException(str(e)) from e
+    gateway_config = _load_config_or_fail(config)
     setup_logger(level=log_level)
     if log_level > logging.DEBUG:
         # SQLAlchemy's advice to developers, printed raw to stderr among the startup lines.
@@ -157,7 +173,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
     """Initialize the database schema."""
     from gateway.db import init_db as db_init
 
-    gateway_config = load_config(config)
+    gateway_config = _load_config_or_fail(config)
 
     if database_url:
         gateway_config.database_url = database_url
@@ -175,7 +191,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
 @click.option("--revision", default="head", help="Target revision (default: head)")
 def migrate(config: str | None, database_url: str | None, revision: str) -> None:
     """Run database migrations using Alembic."""
-    gateway_config = load_config(config)
+    gateway_config = _load_config_or_fail(config)
 
     if database_url:
         gateway_config.database_url = database_url
@@ -300,7 +316,7 @@ def routing_explain(
         explain_router_ordering,
     )
 
-    cfg = load_config(config)
+    cfg = _load_config_or_fail(config)
     if not cfg.routing.policies:
         click.echo(
             "No routing policies are configured in config.yml. Add a `routing.policies` block there, or, if "

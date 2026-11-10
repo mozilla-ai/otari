@@ -213,6 +213,9 @@ The models.dev catalog is refreshed as follows:
   default) and stores it in the database; every worker serves the stored copy
   within 30 seconds. A model listing never waits on the download, and after a
   restart the stored copy is served at once.
+- The stored catalog records the `models_dev_base_url` it came from. After a
+  restart with another one, it is served until a download from the new source
+  replaces it, which is tried within a minute rather than after the interval.
 - A failed download is tried again a minute later. The gateway reads
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
