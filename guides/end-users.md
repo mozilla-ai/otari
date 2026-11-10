@@ -12,7 +12,7 @@ keys on a deployment you run, see
 ## 1. Create the end-user budgets
 
 Create one budget per feature in **Spend & budgets**, as in
-[Create a budget](https://docs.otari.ai/how-to-guides/set-a-budget-and-ceiling#create-a-budget). For example:
+[Create a budget](set-a-budget-and-ceiling.md#create-a-budget). For example:
 
 - `end-user-budget-ai`, $0.10 a day
 - `end-user-budget-memories`, with its own limit
@@ -46,11 +46,11 @@ The key belongs to the organization, not to you:
 
 Whether a key is a service key is fixed when you create it. To cap the total
 spend of all its end users together, give the key its own spend ceiling (see
-[Apply a spend ceiling](https://docs.otari.ai/how-to-guides/set-a-budget-and-ceiling#apply-a-spend-ceiling)).
+[Apply a spend ceiling](set-a-budget-and-ceiling.md#apply-a-spend-ceiling)).
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.42.0/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.43.0/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 

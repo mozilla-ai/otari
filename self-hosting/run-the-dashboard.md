@@ -2,8 +2,7 @@
 
 A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
-the deployment view, and deployment-wide settings. What any signed-in person
-sees is in [Admin dashboard](https://docs.otari.ai/guides/dashboard/dashboard).
+the deployment view, and deployment-wide settings.
 
 ## Sign-in and secrets
 
@@ -173,7 +172,7 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 Set `activation_guide: false` to turn off the Overview's
-[setup guide](https://docs.otari.ai/guides/dashboard/dashboard#the-setup-guide) for the deployment.
+setup guide for the deployment.
 
 ## Signup and terms
 
@@ -186,7 +185,8 @@ sign-in method is in [Sign-in and accounts](sign-in.md).
 
 With `terms_url` set, the signup page asks the person to accept the terms
 first, and so does the invitation page before "Accept and sign in with a
-provider instead". A provider sign-in that would create an account without
+provider instead". With `privacy_url` set too, the box links the privacy policy
+beside the terms. A provider sign-in that would create an account without
 them stops on the return page, asks for the terms, and starts the sign-in again.
 
 Mail is optional: when an invitation email does not go out, the inviter gets
@@ -214,4 +214,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/v0.42.0/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/v0.43.0/web/README.md).

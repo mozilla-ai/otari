@@ -465,6 +465,18 @@
             ],
             "title": "Attribution User Id"
           },
+          "avatar_face": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preset avatar face this member picked, or null when they have picked none.",
+            "title": "Avatar Face"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3324,6 +3336,18 @@
       "CallerIdentityPublic": {
         "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\n``email`` and ``full_name`` are nullable for opposite reasons. A local\noperator identity has no address, because first boot provisions it with a\nname and nothing to sign in with but the master key; a member added by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
         "properties": {
+          "avatar_face": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preset avatar face this identity picked, or null when it has picked none.",
+            "title": "Avatar Face"
+          },
           "claims_deployment": {
             "description": "Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.",
             "title": "Claims Deployment",
@@ -24087,6 +24111,33 @@
         "title": "UnitRate",
         "type": "object"
       },
+      "UpdateAvatarRequest": {
+        "description": "The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them.",
+        "example": {
+          "face": 1234
+        },
+        "properties": {
+          "face": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 203896.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The index of a preset face from the dashboard's avatar set, or null to go back to the face this identity's id gives it.",
+            "title": "Face"
+          }
+        },
+        "required": [
+          "face"
+        ],
+        "title": "UpdateAvatarRequest",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -29755,7 +29806,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.42.0"
+    "version": "0.43.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -31454,6 +31505,56 @@
           }
         ],
         "summary": "Update Own Profile",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/profile/avatar": {
+      "put": {
+        "description": "Change the avatar the caller is drawn with, everywhere their organization lists them.\n\nAlways the caller's own identity, and the same answer as ``PATCH``, for the\nsame reason.",
+        "operationId": "auth-update_own_avatar",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAvatarRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerIdentityPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Own Avatar",
         "tags": [
           "auth"
         ]

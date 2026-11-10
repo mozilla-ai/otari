@@ -1,19 +1,21 @@
+---
+icon: people
+---
+
 # Members and invitations
 
-Organization owners and admins invite people to an organization and choose which
-workspaces each person can use. What each role can do is in
-[Roles](https://docs.otari.ai/learn/workspaces#roles).
+Organization **Admins and Owners** can invite other members to collaborate and control which workspaces they can access. This makes it easy to give each person access only to the areas relevant to their work.
 
 ## Invite a member
 
-1. Open **Organization** and select **Members & roles**.
+1. Go to **Organization** → **Members & roles**.
 2. Click **Invite member**.
-3. Enter one or more **Email addresses**, separated by commas or new lines.
-4. Select the **Role**: Owner, Admin, Member or Viewer.
-5. Choose the **Workspaces** the person should have access to.
-6. Click **Invite member**. The person gets an accept link by email, or the
-   dialog gives you the link to share when no email goes out. The membership
-   becomes active once they accept.
+3. Enter one or more **Email addresses** separated by commas or new lines.
+4. Select the **Role** you want to assign: Owner, Admin, Member, or Viewer.
+5. Choose the workspaces the new member should have access to.
+6. Click **Invite member**. The user will receive an invitation by email, and their membership will become active once they accept it. When no email goes out, the dialog shows an accept link to share with them instead.
+
+![The Invite member dialog, with two addresses, the Admin role and one workspace chosen.](assets/screenshots/invite-member.png)
 
 You can paste up to 100 addresses at once. Everyone gets the same role and
 workspaces. Each address succeeds or fails on its own, and the result shows, for
@@ -21,7 +23,7 @@ each one, whether its email went out or the link to share.
 
 ## Manage existing members
 
-On **Members & roles**:
+Admins and Owners can also manage existing members. On **Members & roles**:
 
 - the **Role** column changes a member's organization role;
 - **Edit** changes which workspaces they can use and their role in each;
@@ -34,6 +36,8 @@ An invited row shows when its invitation has expired, and offers:
   of inviting the same address again, which is refused while an invitation is
   pending.
 - **Revoke**, which withdraws the invitation.
+
+Roles have predefined permissions. Owners and Admins can manage the organization, including its workspaces, provider keys, guardrails, pricing, and members, and have full access to usage data. Members and Viewers can access the workspaces they’ve been assigned to. See [Roles](workspaces.md#roles) for the full table.
 
 ## Let colleagues join by email domain
 
@@ -51,8 +55,9 @@ address there join without an invitation. See
 
 3. Click **Verify domain**. Once Otari finds the record, the domain starts
    admitting people.
-4. Before the proof expires, click **Re-verify domain** to keep it admitting
-   people.
+
+Before the proof expires, verify the domain again from the same row to keep it
+admitting people.
 
 ## How it works
 
@@ -71,6 +76,15 @@ limits under [Mail](https://docs.otari.ai/self-hosting/configuration#invitations
 
 **Accepting.**
 
+- Invitations waiting for you are listed under **Invitations**, reached from the
+  organization switcher. Someone signed in who belongs to no organization is
+  taken there when an invitation is waiting; otherwise Overview says how to get
+  in. Creating an organization is offered only where signup is open.
+- Opening an invitation link while signed in as a different address says who the
+  invitation is for and offers to sign out, because accepting always adds the
+  invited address.
+- After you set a password from an invitation link, the sign-in screen opens
+  with your address filled in.
 - If the invited address has never signed in, the accept page asks for a first
   password, and they can sign in right away. No verification email is needed.
   Where the deployment publishes terms, they accept them here too.

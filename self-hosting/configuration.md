@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.42.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.43.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -80,6 +80,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -106,9 +107,9 @@ the corresponding startup value after the database is available.
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](https://docs.otari.ai/reference#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
-| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](https://docs.otari.ai/guides/observability/traces#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](https://docs.otari.ai/guides/observe/sessions#keep-what-a-session-was-about). |
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
-| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](https://docs.otari.ai/guides/observability/traces#who-reads-content). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](https://docs.otari.ai/reference/gateway/sessions-reference#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -322,9 +323,9 @@ the next start. It takes:
 | `secret` | Required. The secret requests present, interpolated from the environment. |
 | `key_name` | Display name. Defaults to the key's name in config. |
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
-| `is_service_key` | Lets requests name end users. See [Track spend per end user](https://docs.otari.ai/guides/organizations-and-access/end-users). |
+| `is_service_key` | Lets requests name end users. See [Track spend per end user](https://docs.otari.ai/guides/control/end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
-| `max_end_users` | Most live end users the key may have on the budgets it assigns, or on any budget when it assigns none. See [Capping a key's end users](https://docs.otari.ai/guides/organizations-and-access/end-users#capping-a-keys-end-users). |
+| `max_end_users` | Most live end users the key may have on the budgets it assigns, or on any budget when it assigns none. See [Capping a key's end users](https://docs.otari.ai/guides/control/end-users#capping-a-keys-end-users). |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
@@ -406,7 +407,7 @@ deployment mint and print one anyway.
 `reject_user_mismatch` (default `true`) is the deployment-wide answer to a request
 whose `user` field names someone other than an ordinary key's user (service
 keys and the master key name users by design); a key's own value
-overrides it, as [Mismatched `user` fields](https://docs.otari.ai/guides/organizations-and-access/api-keys#mismatched-user-fields)
+overrides it, as [Mismatched `user` fields](https://docs.otari.ai/guides/control/api-keys#mismatched-user-fields)
 describes. It is a runtime setting, changed on the Settings page or with
 `PATCH /api/v1/settings`.
 
@@ -415,14 +416,14 @@ describes. It is a runtime setting, changed on the Settings page or with
 When neither a key nor its user has an `allowed_tools` list, the key still
 reaches search tools through its `allowed_models`; when either has one, even an
 empty one, that list decides. The model-list route is a deprecated form, described in
-[Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access). Startup
+[Model and search tool access](https://docs.otari.ai/guides/control/api-keys#model-and-search-tool-access). Startup
 counts the keys and users that still rely on it, and names the tools some reached
 only through a wildcard, which no longer grants them. Give those keys and users an
 `allowed_tools` list before a later release removes the form.
 
 ## Budget enforcement
 
-These settings govern how [budgets](https://docs.otari.ai/learn/budgets) are enforced:
+These settings govern how [budgets](https://docs.otari.ai/guides/control/budgets) are enforced:
 
 | Setting | Purpose |
 | --- | --- |
@@ -806,7 +807,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.42.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.43.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -981,6 +982,12 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
+
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then
@@ -1004,8 +1011,15 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
-It refuses models.dev data the gateway cannot read: a document that lists
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+which publishes the same documents at the same paths, built from models.dev's
+catalog plus the models it does not list yet; each of those is also offered to
+models.dev, and leaves the fork once it lands there. `https://models.dev` reads
+models.dev itself, and a private mirror works when it serves the same paths.
+An update refuses models.dev data the gateway cannot read: a document that lists
 no models, or one with more than a quarter of its models damaged. When neither
 catalog can be read, the prices in force stay, and the update reports an error.
 
@@ -1017,7 +1031,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 The bundled snapshot is the whole models.dev catalog, so it also carries the
 model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+saved v2 `api.json`, adding `--input-version v1` for a v1 one; `--base-url`
+fetches from somewhere other than the default) and commit
 `src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
@@ -1638,7 +1653,7 @@ where logs are shared. Test delivery from Settings or
 
 An invitation link expires after `invitation_expiry_hours` (default `168`, seven
 days). What an inviter and an invitee see is in
-[Invitations](https://docs.otari.ai/guides/organizations-and-access/members#invitations).
+[Invitations](https://docs.otari.ai/guides/organize/members#invitations).
 
 Invitation email is limited over any 24 hours, because it carries text an
 organization chose (its name, the inviter's name) from the deployment's own
@@ -1691,7 +1706,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (below)
 
 See [Built-in tools](https://docs.otari.ai/reference/gateway/tools), [MCP](https://docs.otari.ai/reference/gateway/mcp), and
-[Guardrails](https://docs.otari.ai/guides/guardrails/guardrails) for behavior and security boundaries.
+[Guardrails](https://docs.otari.ai/reference/gateway/guardrails-reference) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1729,9 +1744,12 @@ privacy_url: "https://example.com/privacy"
 ```
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
-Privacy row stays disabled. `GET /api/v1/bootstrap` publishes both addresses
-unauthenticated, so a URL carrying a credential is refused at startup; the same
-check covers `docs_url` and `site_url`.
+Privacy row stays disabled. Wherever a page asks for the terms (signup, an
+invitation, a first password, a provider sign-in), the box links the privacy
+policy beside them when `privacy_url` is set too.
+`GET /api/v1/bootstrap` publishes both addresses unauthenticated, so a URL
+carrying a credential is refused at startup; the same check covers `docs_url`
+and `site_url`.
 
 ## The public site
 
@@ -1782,7 +1800,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.42.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.43.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

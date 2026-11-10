@@ -1,9 +1,10 @@
-# Inference Guardrails reference
+# Guardrails reference
 
-The fields, headers, states and endpoints of inference guardrails. The
-[Inference Guardrails guide](https://docs.otari.ai/guides/guardrails/guardrails) covers adding a guardrail to a
-request and mandating one across an organization, and explains how the layers
-compose.
+The fields, headers, states and endpoints of guardrails. A guardrail checks
+what a model is asked before the provider is called, on
+`/api/v1/chat/completions`, `/api/v1/messages` and `/api/v1/responses`.
+[Configure guardrails](https://docs.otari.ai/guides/control/configure-guardrails) covers setting one up in the
+dashboard, in a request and over the API.
 
 Contents:
 
@@ -11,8 +12,10 @@ Contents:
 - [Modes](#modes)
 - [Reading the `Otari-Guardrails` header](#reading-the-otari-guardrails-header)
 - [When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable)
+- [How the layers compose](#how-the-layers-compose)
 - [Mandate fields](#mandate-fields)
 - [Definition fields](#definition-fields)
+- [How Otari builds a definition](#how-otari-builds-a-definition)
 - [Telling whether a definition is running](#telling-whether-a-definition-is-running)
 - [Which profiles exist, and what they take](#which-profiles-exist-and-what-they-take)
 - [The guardrail catalog](#the-guardrail-catalog)
@@ -91,6 +94,25 @@ was wrong with it.
 | --- | --- |
 | `block` (default) | Refuses the request with `502`. |
 | `monitor` | Serves the request and records the check as `unavailable`, or `inconclusive` when the service gave no verdict, trading enforcement for availability. |
+
+A mandate that names a [definition](#definition-fields) is checked inside the
+gateway, by the client Otari built from it. When the definition is not
+available (paused, deleted, failed to build, or not yet picked up by this
+worker), the check cannot be evaluated and takes the same two paths. The caller
+is told the profile only; details stay in the gateway's log.
+
+## How the layers compose
+
+Three layers can name a guardrail: the caller's request, the caller's
+organization, and an operator's [routing policy](routing.md). They are merged by
+profile. Each layer can add or tighten a check but never weaken one: `block` beats
+`monitor`, for both `mode` and `on_unavailable`. A caller who sends `monitor` for
+a profile their organization mandates in `block` mode still gets `block`. An
+organization mandate adds to what callers send; it never replaces it.
+
+Where two layers name the same profile, the outer layer decides which check runs
+and with what arguments, so a caller cannot redirect a mandated check. The
+routing policy is outermost.
 
 ## Mandate fields
 
@@ -187,6 +209,25 @@ Two guardrails the catalog lists cannot be defined this way:
 - `any_llm` is refused outright: it takes no credential of its own, so it would
   call an LLM on the deployment's environment key, unmetered.
 
+## How Otari builds a definition
+
+Otari builds every enabled definition when it starts and keeps it ready in
+memory, so a request never waits for its client to be built. A hosted-API
+guardrail still waits for the vendor's verdict on every check.
+
+- **A write rebuilds the definition** on the worker that served it, and the
+  response reports the outcome. Other workers pick up changes within about
+  thirty seconds.
+- **A failed build is not retried** until the definition changes, since retrying
+  a wrong credential cannot help. A build that only timed out is retried.
+- **Errors never expose credentials.** The log names the guardrail, the
+  definition's id and the error type only.
+- **A missing vendor SDK fails the build.** A definition can save and then fail
+  to build when an install left out an SDK the
+  [catalog](#the-guardrail-catalog) needs, such as a plain `pip install` that
+  skipped `any-guardrail`'s extras. The log shows the full `ImportError`, naming
+  the extra to install.
+
 ## Telling whether a definition is running
 
 A read of a definition carries `build_state`:
@@ -257,8 +298,11 @@ unavailable state. Any signed-in user and any API key can read it. What it
 answers is a property of the installed library, identical on every deployment
 of the same build, and a parameter's environment variable is named without
 saying whether it is set.
-[Which guardrails Otari can run itself](https://docs.otari.ai/guides/guardrails/guardrails#which-guardrails-otari-can-run-itself)
-explains what it leaves out.
+
+It lists only the [any-guardrail](https://github.com/mozilla-ai/any-guardrail)
+guardrails that call a hosted API. A guardrail that runs model weights is left
+out, even if it also offers a hosted API, because a saved definition has no way
+to choose that API.
 
 ## What a guardrails service answers
 

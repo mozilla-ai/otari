@@ -1,5 +1,4 @@
 ---
-description: Go from sign-up to your first request in a few minutes.
 icon: bolt
 ---
 
@@ -7,7 +6,7 @@ icon: bolt
 
 This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears on the workspace's Overview.
 
-**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](manage-provider-keys.md).
+**Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](https://docs.otari.ai/guides/organize/billing) or your own [provider key](https://docs.otari.ai/guides/organize/model-providers).
 
 To run Otari on your own machine instead, follow the [Self-hosted quickstart](https://docs.otari.ai/self-hosting).
 
@@ -85,9 +84,9 @@ print(response.choices[0].message.content)
 
 You've sent your first LLM request! Now you can:
 
-- [Manage workspaces](manage-workspaces.md)
-- [Manage provider keys](manage-provider-keys.md)
-- [Set a budget and ceiling](set-a-budget-and-ceiling.md)
-- [Create a multi-provider routing](create-a-multi-provider-routing.md)
-- [Manage guardrails](manage-guardrails.md)
-- [Use with Claude Code](https://docs.otari.ai/guides/agents-and-frameworks/use-with-claude-code)
+- [Manage workspaces](https://docs.otari.ai/guides/organize/manage-workspaces)
+- [Model providers](https://docs.otari.ai/guides/organize/model-providers)
+- [Set a budget and ceiling](https://docs.otari.ai/guides/control/set-a-budget-and-ceiling)
+- [Create a multi-provider routing](https://docs.otari.ai/guides/control/create-a-multi-provider-routing)
+- [Configure guardrails](https://docs.otari.ai/guides/control/configure-guardrails)
+- [Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code)

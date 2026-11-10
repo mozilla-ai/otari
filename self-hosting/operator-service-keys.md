@@ -1,11 +1,11 @@
 # Service keys on a deployment you run
 
 With the master key or an operator session, the operator can make
-[service keys](https://docs.otari.ai/guides/organizations-and-access/end-users) whose end users go on the deployment's own budgets
+[service keys](https://docs.otari.ai/guides/control/end-users) whose end users go on the deployment's own budgets
 (which can carry per-minute limits), and can declare them in `config.yml`.
 Organization owners and admins make their own service keys instead; naming,
 managing and billing end users works the same way and is on
-[Track spend per end user](https://docs.otari.ai/guides/organizations-and-access/end-users).
+[Track spend per end user](https://docs.otari.ai/guides/control/end-users).
 
 The example is a service, `mlpa`, with two features, each with its own per-user
 limit.
@@ -27,7 +27,7 @@ Create `end-user-budget-memories` the same way.
 - `GET /api/v1/budgets` reports the users on each budget in `user_count`.
 - An operator's key may assign only deployment budgets, not an organization's
   (an organization's own service key lists that organization's budgets; see
-  [Track spend per end user](https://docs.otari.ai/guides/organizations-and-access/end-users#2-create-the-service-key)).
+  [Track spend per end user](https://docs.otari.ai/guides/control/end-users#2-create-the-service-key)).
 
 ## Create the service key
 
@@ -93,7 +93,7 @@ service keys. An operator's service key has no cap unless you set **Max end
 users** on the key in **API keys**, `max_end_users` in `POST` or
 `PATCH /api/v1/keys`, or `max_end_users` in `config.yml`; empty (`null`) means
 no cap. **End users** in the key's menu lists them. How the cap counts is in
-[Capping a key's end users](https://docs.otari.ai/guides/organizations-and-access/end-users#capping-a-keys-end-users).
+[Capping a key's end users](https://docs.otari.ai/guides/control/end-users#capping-a-keys-end-users).
 
 ## Operator routes
 

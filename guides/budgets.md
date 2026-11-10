@@ -6,7 +6,7 @@ icon: square-dollar
 
 A budget caps how much can be spent in a period and blocks requests when the limit is reached. You can set budgets at the organization or workspace level, and narrow them to specific members or providers when you need finer control.
 
-A budget is applied with a **spend ceiling**, which names what it caps, or by putting a service key's [end users](https://docs.otari.ai/guides/organizations-and-access/end-users) on it. A budget nothing uses blocks nothing.
+A budget is applied with a **spend ceiling**, which names what it caps, or by putting a service key's [end users](end-users.md) on it. A budget nothing uses blocks nothing.
 
 ## Scope: where the budget applies
 
@@ -32,7 +32,7 @@ Every ceiling has two scope dimensions.
 
 Each budget is enforced independently. If a workspace has a $500/month overall cap and one member has a $100/month cap inside that workspace, both limits are checked on that member's requests. The first budget to run out blocks the request. Other members' requests are checked against the workspace cap only. On otari.ai a request must also fit the organization's [balance](billing.md#budgets-are-a-different-control).
 
-To cap a single API key, set a budget on the key itself; see [Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend).
+To cap a single API key, set a budget on the key itself; see [Cap a key's spend](api-keys.md#cap-a-keys-spend).
 
 ## Period: how often it resets
 
@@ -66,7 +66,7 @@ A request is also blocked when its estimated cost no longer fits in what is left
 
 Spend limits are defined in USD. Budgets can also cap tokens and request count.
 
-Usage you import never counts toward a budget, and batch jobs are settled after the fact rather than blocked in real time; see [Importing external usage](https://docs.otari.ai/guides/observability/external-usage) and [Budget enforcement](https://docs.otari.ai/reference/gateway/budget-enforcement#imported-usage-batches-and-video).
+Usage you import never counts toward a budget, and batch jobs are settled after the fact rather than blocked in real time; see [Import usage from outside Otari](external-usage.md) and [Budget enforcement](https://docs.otari.ai/reference/gateway/budget-enforcement#imported-usage-batches-and-video).
 
 ## Refusals and `Retry-After`
 

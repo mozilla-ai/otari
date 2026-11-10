@@ -162,7 +162,7 @@ skipped because a check once passed.
 
 Each stored server has an access list (ACL) that decides which keys reach it and
 which of its tools they may run. The dashboard steps are in
-[Control access to an MCP server](https://docs.otari.ai/tools/control-access-to-an-mcp-server).
+[Control who can use it](https://docs.otari.ai/guides/build/configure-an-mcp-server#control-who-can-use-it).
 
 An ACL has two parts:
 
@@ -478,7 +478,7 @@ remote tool name, and final arguments to its authorization or approval record.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
-Each execution is recorded in the workspace's [agent traces](https://docs.otari.ai/guides/observability/traces) as a
+Each execution is recorded in the workspace's [sessions](https://docs.otari.ai/guides/observe/sessions) as a
 step with one tool span: the tool, its server, whether it ran, and which rule
 decided the call (the key's rule, its user's rule, the server's default policy,
 or the server's own tool list). A call the rules refuse is recorded too, as a
