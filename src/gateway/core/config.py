@@ -560,6 +560,16 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
         raise ValueError(msg) from exc
 
 
+def _default_database_url() -> str:
+    """The database a deployment that names none gets.
+
+    ``OTARI_DEFAULT_DATABASE_URL`` is how the container image points this at its
+    data volume. It ranks below the config file, unlike ``OTARI_DATABASE_URL``,
+    so an image that sets it does not override a mounted ``database_url``.
+    """
+    return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -604,7 +614,7 @@ class GatewayConfig(
     )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
-        default="sqlite:///./otari.db",
+        default_factory=_default_database_url,
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(

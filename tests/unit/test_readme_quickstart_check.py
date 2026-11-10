@@ -29,7 +29,7 @@ def test_it_finds_the_readme_quickstart() -> None:
     command = check.quickstart_command(check.README.read_text(encoding="utf-8"))
 
     assert command.startswith("docker run ")
-    assert command.rstrip().endswith("otari serve")
+    assert command.rstrip().endswith(check.PUBLISHED_IMAGE)
 
 
 def test_only_the_image_changes() -> None:
