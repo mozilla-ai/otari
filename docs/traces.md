@@ -182,21 +182,18 @@ same trace in another backend.
 
 ### Claude Code without routing
 
-Claude Code can export its own spans, so a session is traced, guardrail checks
-included, without routing its model traffic through Otari. Set it up with
+Claude Code can export its own spans, so a session is traced without routing
+its model traffic through Otari. Set it up with
 [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
 
 - Each prompt becomes a turn, with its model calls and tool calls.
-- A tool call a hook refused, such as an [agent guardrail](agent-guardrails.md),
-  shows as `blocked`. Blocked calls and tool errors (a command exiting non-zero,
-  a `grep` finding nothing) do not count as session errors.
+- A tool call a Claude Code hook refused shows as `blocked`. Blocked calls and
+  tool errors (a command exiting non-zero, a `grep` finding nothing) do not
+  count as session errors.
 - Cost comes from Claude Code's exported logs, priced at the deployment's API
   rates. Without exported logs a session has tokens but no cost. On a Claude
   subscription, this is what the requests are worth at API prices, not what was
   charged.
-- A judge gate that [reports its model calls](agent-guardrails-reference.md#what-otari-hook-reports)
-  is priced too, counted in the session's cost but not in any turn's, and
-  **At a glance** shows what judge gates cost in all.
 
 ## Keeping what a span was about
 
@@ -237,7 +234,6 @@ too:
   value is refused with a 400. The client answers for its users' consent.
 - **Claude Code exporting spans** sends prompts with `OTEL_LOG_USER_PROMPTS=1`,
   and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`.
-- **`otari hook`** sends what a gate checked with `OTARI_HOOK_REPORT_CONTENT=1`.
 
 What a tool returned is kept only from routed requests: the results the client
 hands back, and the output of tools Otari ran itself. Otari never keeps tool

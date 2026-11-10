@@ -130,9 +130,8 @@ model.
 ## Send Claude Code sessions to Otari
 
 Otari can record each Claude Code session without routing its model traffic:
-every prompt as a turn, with its model requests, tool calls, cost, and any
-[agent guardrail](agent-guardrails.md) checks. Claude Code exports this over
-OpenTelemetry.
+every prompt as a turn, with its model requests, tool calls and cost. Claude
+Code exports this over OpenTelemetry.
 
 This works on a gateway you run, not on otari.ai today. It needs a
 budget-exempt API key, which only the deployment's operator can create (with
@@ -142,9 +141,7 @@ instead.
 
 1. Have the operator create a budget-exempt key. Traces must be on
    (`OTARI_TRACE_CAPTURE_ENABLED`, the default).
-2. For guardrail checks, register the hook with `otari hook setup`; see
-   [Agent guardrails](agent-guardrails.md).
-3. Add the variables to the `env` block of `~/.claude/settings.json`, with your
+2. Add the variables to the `env` block of `~/.claude/settings.json`, with your
    gateway's URL:
 
    ```json
@@ -156,14 +153,12 @@ instead.
        "OTEL_LOGS_EXPORTER": "otlp",
        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:8000/otlp",
-       "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tk-your-import-key",
-       "OTARI_URL": "http://localhost:8000",
-       "OTARI_API_KEY": "tk-your-import-key"
+       "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tk-your-import-key"
      }
    }
    ```
 
-4. Run Claude Code, ask for something that uses a tool or two, and open
+3. Run Claude Code, ask for something that uses a tool or two, and open
    **Sessions** in the dashboard. A short `claude -p` run can exit before its
    last spans are sent.
 
@@ -172,27 +167,20 @@ instead.
 | `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`, `OTEL_TRACES_EXPORTER` | Turns, model requests and tool calls (a Claude Code beta) |
 | `OTEL_LOGS_EXPORTER` | Each request's usage, which prices the session; without it there is no cost |
 | `OTEL_EXPORTER_OTLP_*` | Where both go: your Otari URL plus `/otlp`, over HTTP (not gRPC), with the key |
-| `OTARI_URL`, `OTARI_API_KEY` | The hook's guardrail checks, since Claude Code passes no `OTEL_*` variable to hooks |
 
 To keep the key out of the settings file, Claude Code's `otelHeadersHelper`
 (see its [monitoring docs](https://code.claude.com/docs/en/monitoring-usage))
-can replace `OTEL_EXPORTER_OTLP_HEADERS`, and you can export `OTARI_API_KEY` in
-the shell that starts Claude Code instead. On macOS, for example:
-
-```sh
-export OTARI_API_KEY="$(security find-generic-password -s otari-import-key -w)"
-```
+can replace `OTEL_EXPORTER_OTLP_HEADERS`.
 
 By default no span records what it was about (no prompt, command or file path).
 To keep that, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
-`OTARI_SECRET_KEY`, and Claude Code and the hook must send it:
+`OTARI_SECRET_KEY`, and Claude Code must send it:
 
 ```json
 {
   "env": {
     "OTEL_LOG_USER_PROMPTS": "1",
-    "OTEL_LOG_TOOL_DETAILS": "1",
-    "OTARI_HOOK_REPORT_CONTENT": "1"
+    "OTEL_LOG_TOOL_DETAILS": "1"
   }
 }
 ```
@@ -200,8 +188,7 @@ To keep that, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
 
 Do not both route and export the same session: each turn and its cost would
-appear twice. The hook is the exception, since its checks carry no cost, so a
-routed session can still report them.
+appear twice.
 
 ## Import Claude Code usage without routing
 

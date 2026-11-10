@@ -97,7 +97,7 @@ OpenAI 客户端只需将 `base_url` 设置为
 brew install mozilla-ai/tap/otari
 ```
 
-参见 [Agent Guardrails](docs/agent-guardrails.md) 和
+参见 [Agent Guardrails](cli/docs/agent-guardrails.md) 和
 [在 Claude Code 中使用](docs/use-with-claude-code.md)。
 
 ## 运行完整服务栈
@@ -169,7 +169,7 @@ make typecheck
 - [路由](docs/routing.md)
 - [访问控制](docs/access-control.md)
 - [内置工具](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
+- [Agent Guardrails](cli/docs/agent-guardrails.md)
 - [SDK 与智能体集成](docs/index.md#integrations)
 - [架构](ARCHITECTURE.md)
 

@@ -9,7 +9,7 @@ The rules live in `.otari/`, committed with the code. The `otari hook` command
 runs them from the agent's own hook system. It needs no gateway, no account and no
 credential, unless you choose to [report its checks to Otari](#reporting-to-otari).
 
-These are not [Inference Guardrails](guardrails.md), which check what a model is
+These are not [the gateway's guardrails](../../docs/configure-guardrails.md), which check what a model is
 asked before the provider is called. This page walks through setting Agent Guardrails up;
 every field, gate type, option and limit is in the
 [Agent Guardrails reference](agent-guardrails-reference.md).
@@ -266,8 +266,8 @@ To run it on every pull request:
    and its verifier scripts, since that job runs the pull request's code.
 
 Otari's own repository does this in
-[`.github/workflows/otari-guardrails-check.yml`](../.github/workflows/otari-guardrails-check.yml)
-and [`.github/workflows/otari-guardrails-judges.yml`](../.github/workflows/otari-guardrails-judges.yml).
+[`.github/workflows/otari-guardrails-check.yml`](../../.github/workflows/otari-guardrails-check.yml)
+and [`.github/workflows/otari-guardrails-judges.yml`](../../.github/workflows/otari-guardrails-judges.yml).
 
 ## Reporting to Otari
 
@@ -281,12 +281,12 @@ export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
 ```
 
 - **The key must be budget-exempt.** Only a deployment's operator can create one
-  (see [Importing external usage](external-usage.md#enforcement-boundary)), so
+  (see [Importing external usage](../../docs/external-usage.md#enforcement-boundary)), so
   reporting works on a gateway you run, not on otari.ai today.
 - **Claude Code** does not pass these variables to its hooks; set them in the
-  `env` block of `~/.claude/settings.json`, as
-  [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
-  shows. Keep the key out of project settings files you commit.
+  `env` block of `~/.claude/settings.json`, beside the exporter variables of
+  [Send Claude Code sessions to Otari](../../docs/use-with-claude-code.md#send-claude-code-sessions-to-otari).
+  Keep the key out of project settings files you commit.
 - **The server sees your gates**, including their messages and your own gates in
   `~/.otari/`. Point `OTARI_URL` only at a server you trust with them. It keeps
   up to 1,000 versions of the guardrail per workspace; past that, gates show by
@@ -299,7 +299,7 @@ or turn it checked.
 
 - `OTARI_HOOK_REPORT_CONTENT=1` also sends the command or paths a gate checked,
   kept only where the workspace keeps content (see
-  [Keeping what a span was about](traces.md#keeping-what-a-span-was-about)).
+  [Keeping what a span was about](../../docs/traces.md#keeping-what-a-span-was-about)).
 - `OTARI_HOOK_REPORT=off` turns reporting off.
 
 What a report carries, and the server's limits, are under

@@ -205,7 +205,7 @@ service cannot run or gives no verdict; `monitor` lets the request continue and
 records the skipped check. Only input checks can be mandated by a policy.
 
 Organization-mandated and request-provided guardrails compose with policy
-guardrails. See [Guardrails](guardrails.md).
+guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
 
 ## Explain a policy
 

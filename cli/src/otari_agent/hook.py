@@ -3,7 +3,7 @@
 Reads one hook payload from a supported coding agent, collects the evidence it
 names, composes the repository's own guardrail files, evaluates them in
 process and answers in the harness's own exit-code protocol. No server and no
-credential are involved. See docs/agent-guardrails.md.
+credential are involved. See cli/docs/agent-guardrails.md.
 """
 
 import json
@@ -77,7 +77,7 @@ _HOOK_READ_TOOL_PATH_FIELDS = {"Read": "file_path"}
 
 # Claude Code's shell tool and the tool_input field naming the command it is
 # about to run. A PreToolUse call for this tool is the only evidence a
-# command gate gets before the command runs; see docs/agent-guardrails.md.
+# command gate gets before the command runs; see cli/docs/agent-guardrails.md.
 _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 
 # Codex hook-dispatches its own shell tool under the same canonical name
@@ -1988,7 +1988,7 @@ def _hook_run_check_verifier(
 
     No sandboxing beyond that check, and no guard requiring the script to
     predate the diff under check, deliberately: see VerifierGate's own
-    docstring and docs/agent-guardrails.md for why. `cwd` is the repo root, so a
+    docstring and cli/docs/agent-guardrails.md for why. `cwd` is the repo root, so a
     verifier that wants to inspect the working tree (`git diff`, `git
     status`, a plain file scan) can do so exactly the way a Makefile target
     or a pre-commit hook already checked into the repo would.
@@ -2389,7 +2389,7 @@ def hook(
     status), and checks it in process against this repository's guardrail.
     The user's own guardrail in `~/.otari/` composes with it, unless
     `--repo-only` leaves it out.
-    No server and no credential are involved. See docs/agent-guardrails.md.
+    No server and no credential are involved. See cli/docs/agent-guardrails.md.
 
     `--repo-only` is for a person whose own rules do not suit one repository.
     It means what it does on `otari guardrails validate`, so a dry run there
@@ -2601,7 +2601,7 @@ def hook(
         # None rather than `[]`: `[]` means "collected, and there is none",
         # which would let a required command/command_if_changed gate
         # read a failed collection as a clean pass instead of the unresolved
-        # `unknown` it actually is (see docs/agent-guardrails.md).
+        # `unknown` it actually is (see cli/docs/agent-guardrails.md).
         transcript_path = payload.get("transcript_path")
         collect_transcript_commands = (
             _hook_collect_codex_transcript_commands if harness == "codex" else _hook_collect_transcript_commands
@@ -3100,7 +3100,7 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     when this repo has no guardrail yet, and picks the PreToolUse matcher
     (whether it needs to cover the shell tool, the read tool, or both) from
     whatever gates the guardrail turns out to have; Stop needs no matcher;
-    see docs/agent-guardrails.md for why both are registered unconditionally.
+    see cli/docs/agent-guardrails.md for why both are registered unconditionally.
 
     `--repo-only` writes that flag into the registered command, so the hook
     enforces this repo's guardrail alone here. The matcher is then picked from
@@ -3129,12 +3129,12 @@ def hook_setup(harness: str, repo_only: bool) -> None:
             click.echo(
                 f"Skipping. otari hook will still be registered below and will check your own gates in "
                 f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
-                f"{GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
+                f"{GUARDRAIL_DIR}/ exists; see cli/docs/agent-guardrails.md."
             )
         else:
             click.echo(
                 f"Skipping. otari hook will still be registered below, but every gate check "
-                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
+                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see cli/docs/agent-guardrails.md."
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
@@ -3171,7 +3171,7 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     # benefits: path already falls back to `git status` on Stop
     # (catching a Bash-written change PreToolUse never saw coming), and
     # command_if_changed/command now read real command evidence there
-    # too (from the session's own transcript; see docs/agent-guardrails.md). A
+    # too (from the session's own transcript; see cli/docs/agent-guardrails.md). A
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
@@ -3680,7 +3680,7 @@ def guardrails_generate(
     gate (edited or not) is validated the same way a submitted policy is
     (`otari_agent.domain.policy.parse_policy`) before it is appended, so a
     hallucinated field or type is caught here, not the first time the hook
-    actually runs. See docs/agent-guardrails.md for the gate schema this asks the
+    actually runs. See cli/docs/agent-guardrails.md for the gate schema this asks the
     model to stay inside.
     """
     root = _hook_find_repo_root(Path.cwd())
@@ -4082,7 +4082,7 @@ def guardrails_validate(
     gate firing there is the answer, not a failure, so it does not change the
     exit status.
 
-    See docs/agent-guardrails.md.
+    See cli/docs/agent-guardrails.md.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -4472,7 +4472,7 @@ def guardrails_check(
     It reads the repo's own guardrail only.
     The files in `~/.otari/` belong to one person, and a check reads the same on every machine.
 
-    See docs/agent-guardrails.md.
+    See cli/docs/agent-guardrails.md.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:

@@ -43,9 +43,7 @@
 * [API keys](api-keys.md)
 * [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 * [Create a multi-provider routing](create-a-multi-provider-routing.md)
-* [Manage guardrails](manage-guardrails.md)
-* [Inference Guardrails](guardrails.md)
-* [Agent Guardrails](agent-guardrails.md)
+* [Configure guardrails](configure-guardrails.md)
 
 ## Organize
 
@@ -94,11 +92,7 @@
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-* [Inference Guardrails reference](guardrails-reference.md)
-
-## Agent Guardrails
-
-* [Agent Guardrails reference](agent-guardrails-reference.md)
+* [Guardrails reference](guardrails-reference.md)
 
 ## Protocols
 

@@ -1658,7 +1658,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](guardrails.md) for behavior and security boundaries.
+[Guardrails](guardrails-reference.md) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 

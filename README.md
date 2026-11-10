@@ -98,7 +98,7 @@ The command a developer runs next to a coding agent (`otari hook`,
 brew install mozilla-ai/tap/otari
 ```
 
-See [Agent Guardrails](docs/agent-guardrails.md) and
+See [Agent Guardrails](cli/docs/agent-guardrails.md) and
 [Use with Claude Code](docs/use-with-claude-code.md).
 
 ## Run the full stack
@@ -176,7 +176,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Routing](docs/routing.md)
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
+- [Agent Guardrails](cli/docs/agent-guardrails.md)
 - [SDK and agent integrations](docs/index.md#integrations)
 - [Architecture](ARCHITECTURE.md)
 

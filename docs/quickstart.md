@@ -88,5 +88,5 @@ You've sent your first LLM request! Now you can:
 - [Manage provider keys](manage-provider-keys.md)
 - [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 - [Create a multi-provider routing](create-a-multi-provider-routing.md)
-- [Manage guardrails](manage-guardrails.md)
+- [Configure guardrails](configure-guardrails.md)
 - [Use with Claude Code](use-with-claude-code.md)
