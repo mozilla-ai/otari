@@ -14354,6 +14354,21 @@
         "title": "OIDCConnectionDomain",
         "type": "object"
       },
+      "OIDCConnectionEnabledRequest": {
+        "description": "What an organization administrator submits to pause or resume sign-in through its connection.",
+        "properties": {
+          "enabled": {
+            "description": "Whether this connection admits sign-in.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OIDCConnectionEnabledRequest",
+        "type": "object"
+      },
       "OIDCConnectionPublic": {
         "description": "An organization's own sign-in connection, as its admins see it.\n\nCarries ``client_secret_last4`` and never the secret itself.",
         "properties": {
@@ -14423,7 +14438,7 @@
         "type": "object"
       },
       "OIDCConnectionRequest": {
-        "description": "What an organization administrator submits to configure its own sign-in connection.",
+        "description": "What an organization administrator submits to configure its own sign-in connection.\n\nWhether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only\nway to change it, so storing a connection can neither pause nor resume one.",
         "properties": {
           "client_id": {
             "description": "The OAuth client ID this deployment authenticates with.",
@@ -14461,12 +14476,6 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
-          },
-          "enabled": {
-            "default": true,
-            "description": "Whether this connection currently admits sign-in.",
-            "title": "Enabled",
-            "type": "boolean"
           },
           "issuer": {
             "description": "The identity provider's issuer URL, as the organization's own claim.",
@@ -44175,6 +44184,54 @@
           }
         ],
         "summary": "Get Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "patch": {
+        "description": "Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.\n\nWrites the one field, so the issuer is neither re-read nor re-submitted and the stored client\nsecret stands. Refused with 404 when the organization has not saved a connection yet, and with\n409 when pausing a connection the organization still requires sign-in through: stop requiring\nit first.",
+        "operationId": "organization-sso-patch_organization_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OIDCConnectionEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Patch Organization Sso",
         "tags": [
           "organization-sso"
         ]

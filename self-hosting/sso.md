@@ -24,6 +24,22 @@ Two organizations may configure a connection to the same issuer. A person is
 admitted to an organization only on a domain that organization itself has
 proven, never on the issuer alone.
 
+## Pausing a connection
+
+A connection can be paused from the Single sign-on settings page, beside its
+status. Pausing refuses every new sign-in through the provider and changes
+nothing else: sessions already signed in stay signed in, every membership the
+connection granted remains, and the stored client secret is kept, so resuming
+needs no credential.
+
+Pausing writes that one field. It neither re-reads the provider's
+configuration nor needs the issuer resubmitted, so a connection can be paused
+while its provider is unreachable.
+
+A connection the organization requires sign-in through cannot be paused,
+because that would leave the organization admitting nobody. Stop requiring
+sign-in first.
+
 ## Accounts
 
 A person's identity at a connection is keyed on the connection's issuer and
