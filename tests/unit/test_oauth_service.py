@@ -14,15 +14,20 @@ check, behind an opt-in flag.
 """
 
 import logging
+import string
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from apron_auth.errors import IdentityFetchError, TokenExchangeError
+from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
+from fastapi import Response
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,17 +69,12 @@ def fake_db() -> AsyncSession:
     return cast("AsyncSession", FakeSession())
 
 
-FLOW_SECRET = "a-flow-secret"
+BROWSER_TOKEN = "a-browser-token"
 
 
-async def authorize(config: GatewayConfig, provider: str) -> tuple[str, str]:
+async def authorize(config: GatewayConfig, provider: str) -> oauth_service.BrowserAuthorization:
     """``authorization_url`` over a throwaway session, for the URL assertions."""
-    return await oauth_service.authorization_url(
-        config,
-        provider,
-        db=fake_db(),
-        flow_secret=FLOW_SECRET,
-    )
+    return await oauth_service.authorization_url(config, provider, db=fake_db())
 
 
 def configured(**overrides: Any) -> GatewayConfig:
@@ -152,6 +152,34 @@ class TestHalfConfiguredOAuthIsAnnounced:
             yield
         finally:
             gateway_logger.removeHandler(caplog.handler)
+
+    def test_an_address_too_malformed_to_parse_still_refuses_rather_than_raising(self) -> None:
+        """The refusal is the answer for it either way, and a raise here would answer 500 instead."""
+        config = GatewayConfig(
+            public_base_url="https://[bad",
+            oauth_google_client_id="google-id",
+            oauth_google_client_secret="google-secret",  # noqa: S106
+        )
+
+        with pytest.raises(OAuthNotConfiguredError):
+            oauth_service.require_configured(config, "google")
+
+    def test_an_address_carrying_credentials_is_refused_for_what_is_wrong_with_it(self) -> None:
+        """An https address the library still refuses must not be reported as needing https."""
+        config = GatewayConfig(
+            public_base_url="https://operator:secret@otari.example.com",
+            oauth_google_client_id="google-id",
+            oauth_google_client_secret="google-secret",  # noqa: S106
+        )
+
+        with pytest.raises(OAuthNotConfiguredError) as refusal:
+            oauth_service.require_configured(config, "google")
+
+        reason = str(refusal.value)
+        assert "user or password" in reason
+        assert "https address" not in reason
+        assert "secret" not in reason
+        assert "operator" not in reason
 
     def test_a_missing_public_base_url_is_named(self, caplog: pytest.LogCaptureFixture) -> None:
         config = GatewayConfig(
@@ -367,24 +395,24 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
 class TestAuthorizationUrl:
     @pytest.mark.asyncio
     async def test_google_asks_for_the_scopes_its_identity_handler_reads_back(self) -> None:
-        url, state = await authorize(configured(), "google")
-        query = parse_qs(urlsplit(url).query)
+        started = await authorize(configured(), "google")
+        query = parse_qs(urlsplit(started.url).query)
 
-        assert urlsplit(url).netloc == "accounts.google.com"
+        assert urlsplit(started.url).netloc == "accounts.google.com"
         assert query["scope"] == ["openid email profile"]
         assert query["response_type"] == ["code"]
         assert query["client_id"] == ["google-id"]
         assert query["redirect_uri"] == ["https://otari.example.com/auth/google/callback"]
-        assert query["state"] == [state]
+        assert query["state"] == [started.state]
 
     @pytest.mark.asyncio
     async def test_github_asks_for_the_scopes_its_identity_handler_reads_back(self) -> None:
         # /user plus /user/emails, which is what makes a verified address
         # available at callback time.
-        url, _ = await authorize(configured(), "github")
-        query = parse_qs(urlsplit(url).query)
+        started = await authorize(configured(), "github")
+        query = parse_qs(urlsplit(started.url).query)
 
-        assert urlsplit(url).netloc == "github.com"
+        assert urlsplit(started.url).netloc == "github.com"
         assert query["scope"] == ["read:user user:email"]
         assert query["client_id"] == ["github-id"]
 
@@ -396,8 +424,8 @@ class TestAuthorizationUrl:
         # already asked for. It grants nothing new and names a scope this
         # gateway did not choose on the consent screen, so `_as_configured_here`
         # pins the set. Nothing read this field while the URL was hand-built.
-        url, _ = await authorize(configured(), provider)
-        query = parse_qs(urlsplit(url).query)
+        started = await authorize(configured(), provider)
+        query = parse_qs(urlsplit(started.url).query)
 
         assert query["scope"] == [" ".join(oauth_service._PROVIDERS[provider].scopes)]
 
@@ -409,8 +437,8 @@ class TestAuthorizationUrl:
         # this deployment discards and nobody revokes. A deliberate departure
         # from both the platform's URL and apron-auth's own preset, which set
         # access_type=offline (and the preset prompt=consent too).
-        url, _ = await authorize(configured(), provider)
-        query = parse_qs(urlsplit(url).query)
+        started = await authorize(configured(), provider)
+        query = parse_qs(urlsplit(started.url).query)
 
         assert "access_type" not in query
         assert "prompt" not in query
@@ -420,7 +448,7 @@ class TestAuthorizationUrl:
         # The half that keeps the assertion above from passing vacuously: the
         # parameter really is one apron-auth's preset sets, so not sending it is
         # a choice this module makes rather than a default it inherits.
-        provider_config, _ = apron_google.preset(
+        provider_config = apron_google.preset(
             client_id="id",
             client_secret="secret",  # noqa: S106
             scopes=["openid"],
@@ -435,8 +463,8 @@ class TestAuthorizationUrl:
         # has somewhere to live until the exchange, so the authorization request
         # can be bound to it. Without this an authorization code is spendable by
         # whoever holds it, which is what shipped in otari#765.
-        url, _ = await authorize(configured(), provider)
-        query = parse_qs(urlsplit(url).query)
+        started = await authorize(configured(), provider)
+        query = parse_qs(urlsplit(started.url).query)
 
         assert query["code_challenge_method"] == ["S256"]
         assert query["code_challenge"]
@@ -447,23 +475,15 @@ class TestAuthorizationUrl:
         # A row that stored the challenge would prove nothing at exchange time:
         # the challenge is the public half and travels in the URL above.
         session = FakeSession()
-        url, state = await oauth_service.authorization_url(
-            configured(),
-            provider,
-            db=cast("AsyncSession", session),
-            flow_secret=FLOW_SECRET,
-        )
-        query = parse_qs(urlsplit(url).query)
+        started = await oauth_service.authorization_url(configured(), provider, db=cast("AsyncSession", session))
+        query = parse_qs(urlsplit(started.url).query)
         (row,) = session.added
 
         assert row.code_verifier is not None
-        assert row.code_verifier not in url
+        assert row.code_verifier not in started.url
         assert row.provider == provider
         # Keyed by the digest, so a reader of the table cannot present the value.
-        assert row.state_hash != state
-        # The browser's flow secret is kept the same way.
-        assert row.flow_hash != FLOW_SECRET
-        assert FLOW_SECRET not in url
+        assert row.state_hash != started.state
         assert query["code_challenge"] != [row.code_verifier]
 
     @pytest.mark.asyncio
@@ -482,28 +502,21 @@ class TestAuthorizationUrl:
             await authorize(configured(), "not-a-provider")
 
 
-class TestFlowSecret:
-    def test_a_missing_or_foreign_cookie_is_replaced(self) -> None:
-        minted = oauth_service.flow_secret_for(None)
+class TestBrowserToken:
+    @pytest.mark.asyncio
+    async def test_is_fresh_per_authorization_and_never_travels_in_the_url(self) -> None:
+        first = await authorize(configured(), "google")
+        second = await authorize(configured(), "google")
 
-        assert len(minted) == 43
-        assert oauth_service.flow_secret_for("") != ""
-        assert oauth_service.flow_secret_for("not ours") != "not ours"
-        assert oauth_service.flow_secret_for("x" * 43 + "!") != "x" * 43 + "!"
-
-        non_ascii = "é" * 43
-        assert oauth_service.flow_secret_for(non_ascii) != non_ascii
-
-    def test_one_of_ours_is_reused_so_a_second_tab_does_not_break_the_first(self) -> None:
-        existing = oauth_service.flow_secret_for(None)
-
-        assert oauth_service.flow_secret_for(existing) == existing
+        assert first.browser_token != second.browser_token
+        assert first.browser_token not in first.url
+        assert first.state != first.browser_token
 
     @pytest.mark.asyncio
-    async def test_a_callback_without_the_cookie_is_refused_before_the_database(self) -> None:
+    async def test_a_callback_without_the_cookie_redeems_nothing(self) -> None:
         class _NoSession:
             async def execute(self, *_a: Any, **_k: Any) -> Any:
-                raise AssertionError("the database must not be touched")
+                raise AssertionError("no state may be claimed and no code redeemed")
 
         with pytest.raises(OAuthStateError):
             await oauth_service.exchange_code(
@@ -511,18 +524,241 @@ class TestFlowSecret:
                 "google",
                 code="c",
                 state="s",
-                flow_secret=None,
+                browser_token=None,
                 db=cast("AsyncSession", _NoSession()),
             )
+
+    @pytest.mark.asyncio
+    async def test_a_callback_carrying_another_flows_token_redeems_nothing(self) -> None:
+        """The state another authorization minted, returned with this browser's token."""
+
+        class _NoSession:
+            async def execute(self, *_a: Any, **_k: Any) -> Any:
+                raise AssertionError("no state may be claimed and no code redeemed")
+
+        other = await authorize(configured(), "google")
+
+        with pytest.raises(OAuthStateError):
+            await oauth_service.exchange_code(
+                configured(),
+                "google",
+                code="c",
+                state=other.state,
+                browser_token=BROWSER_TOKEN,
+                db=cast("AsyncSession", _NoSession()),
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_says_whether_a_token_for_that_state_was_presented(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A cookie that never arrives is the likeliest of these and reads nothing like an expiry."""
+
+        class _NoSession:
+            async def execute(self, *_a: Any, **_k: Any) -> Any:
+                raise AssertionError("no state may be claimed and no code redeemed")
+
+        other = await authorize(configured(), "google")
+        lines = []
+        gateway_logger.addHandler(caplog.handler)
+        try:
+            for presented in (None, BROWSER_TOKEN):
+                caplog.clear()
+                with caplog.at_level(logging.WARNING, logger="gateway"), pytest.raises(OAuthStateError):
+                    await oauth_service.exchange_code(
+                        configured(),
+                        "google",
+                        code="c",
+                        state=other.state,
+                        browser_token=presented,
+                        db=cast("AsyncSession", _NoSession()),
+                    )
+                lines.append(caplog.text)
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert "cookie" in lines[0]
+        assert lines[0] != lines[1]
+
+
+def flow_cookie(response: Response) -> str | None:
+    """The flow cookie's value as the browser would hold it, or ``None`` where the response deletes it."""
+    jar: SimpleCookie = SimpleCookie()
+    for header in response.raw_headers:
+        if header[0] == b"set-cookie":
+            jar.load(header[1].decode())
+    cookie = jar[oauth_service.FLOW_COOKIE_NAME]
+    return None if cookie["max-age"] == "0" else cookie.value
+
+
+def authorization(state: str) -> oauth_service.BrowserAuthorization:
+    """One authorization, named so a test can tell its flow from the others."""
+    return oauth_service.BrowserAuthorization(
+        url="https://provider.example.com/consent", state=state, browser_token=f"token-for-{state}"
+    )
+
+
+def with_flows(*states: str) -> str | None:
+    """The cookie a browser holds after starting an authorization per name, in order."""
+    value: str | None = None
+    for state in states:
+        response = Response()
+        oauth_service.apply_flow_cookie(response, value, authorization(state), secure=True)
+        value = flow_cookie(response)
+    return value
+
+
+class TestFlowCookie:
+    def test_every_live_flow_keeps_its_own_token(self) -> None:
+        value = with_flows("first", "second")
+
+        assert oauth_service.browser_token_for(value, "first") == "token-for-first"
+        assert oauth_service.browser_token_for(value, "second") == "token-for-second"
+
+    def test_a_state_the_cookie_does_not_name_has_no_token(self) -> None:
+        assert oauth_service.browser_token_for(with_flows("first"), "second") is None
+
+    def test_the_oldest_flow_goes_once_a_browser_starts_one_too_many(self) -> None:
+        names = [f"flow-{index}" for index in range(oauth_service.MAX_LIVE_FLOWS + 1)]
+        value = with_flows(*names)
+
+        assert oauth_service.browser_token_for(value, names[0]) is None
+        assert all(oauth_service.browser_token_for(value, name) is not None for name in names[1:])
+
+    def test_a_finished_flow_leaves_the_others_behind(self) -> None:
+        response = Response()
+        oauth_service.drop_finished_flow(response, with_flows("first", "second"), "first", secure=True)
+        value = flow_cookie(response)
+
+        assert oauth_service.browser_token_for(value, "first") is None
+        assert oauth_service.browser_token_for(value, "second") == "token-for-second"
+
+    def test_the_last_flow_finishing_deletes_the_cookie(self) -> None:
+        response = Response()
+        oauth_service.drop_finished_flow(response, with_flows("only"), "only", secure=True)
+
+        assert flow_cookie(response) is None
+
+    @pytest.mark.parametrize("value", ["not-base-64-at-all-$$$", "YWJj", "WyJhIiwiYiJd", "x"])
+    def test_a_cookie_that_cannot_be_read_carries_no_flows(self, value: str) -> None:
+        # A mangled or stale cookie costs a sign-in to start again, never a failed request.
+        assert oauth_service.browser_token_for(value, "first") is None
+
+    def test_a_cookie_longer_than_this_deployment_writes_carries_no_flows(self) -> None:
+        # The bound belongs here rather than on the request, because a cookie a
+        # route refuses is one no route rewrites, and this one is HttpOnly.
+        state = "s" * oauth_service.MAX_FLOW_COOKIE_CHARS
+        value = with_flows(state)
+
+        assert value is not None
+        assert len(value) > oauth_service.MAX_FLOW_COOKIE_CHARS
+        assert oauth_service.browser_token_for(value, state) is None
+
+    def test_the_value_is_one_a_browser_hands_back_unchanged(self) -> None:
+        # Quoting or re-encoding a cookie value is how a round trip loses it.
+        value = with_flows("first", "second")
+
+        assert value is not None
+        assert set(value) <= set(string.ascii_letters + string.digits + "-_")
 
 
 class TestState:
     @pytest.mark.asyncio
     async def test_is_unguessable_and_fresh_each_time(self) -> None:
-        values = {(await authorize(configured(), "google"))[1] for _ in range(50)}
+        values = {(await authorize(configured(), "google")).state for _ in range(50)}
 
         assert len(values) == 50
         assert all(len(value) >= 32 for value in values)
+
+
+class TestDatabaseStateStore:
+    @staticmethod
+    def _store_over_row(provider: str, *, nonce: str | None, openid_requested: bool) -> Any:
+        """A store whose one pending row holds ``nonce`` and ``openid_requested``, as a reload reads it."""
+        now = datetime.now(UTC)
+        row = (
+            provider,
+            "a-code-verifier",
+            nonce,
+            openid_requested,
+            "https://otari.example.com/callback",
+            now,
+            now + timedelta(minutes=5),
+        )
+
+        class _Session:
+            async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+                return SimpleNamespace(first=lambda: row)
+
+            async def flush(self) -> None:
+                return None
+
+        return oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), provider)
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_asked_for_openid_without_a_nonce_is_refused(self) -> None:
+        """A guard over a row this code cannot write, because the two fields agree by construction.
+
+        The library refuses a pending state whose nonce and flag disagree, in either direction, so
+        rebuilding one from such a row would raise where a refusal belongs. The row is written here
+        directly to reach the guard at all.
+        """
+        store = self._store_over_row("google", nonce=None, openid_requested=True)
+
+        assert await store.consume("a-state") is None
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_asked_for_no_openid_loads_without_a_nonce(self) -> None:
+        """The nonce is withheld for those on purpose, so the refusal above must not reach them."""
+        loaded = self._store_over_row("github", nonce=None, openid_requested=False)
+
+        state = await loaded.consume("a-state")
+
+        assert state is not None
+        assert state.openid_requested is False
+
+    @pytest.mark.asyncio
+    async def test_save_records_the_flag_the_request_carried(self) -> None:
+        """The contract asks for every saved field back, so the write has to keep this one."""
+        staged: list[Any] = []
+
+        class _Session:
+            async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+                return None
+
+            def add(self, row: Any) -> None:
+                staged.append(row)
+
+            async def flush(self) -> None:
+                return None
+
+        store = oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), "google")
+        await store.save(
+            PendingState(
+                state="a-state",
+                redirect_uri="https://otari.example.com/callback",
+                nonce="a-nonce",
+                openid_requested=True,
+                created_at=0.0,
+            )
+        )
+
+        assert staged[0].openid_requested is True
+
+    @pytest.mark.asyncio
+    async def test_database_state_store_refuses_carried_state(self) -> None:
+        """A pending state carrying apron-auth context is refused, because no column holds it."""
+        store = oauth_service._DatabaseStateStore(fake_db(), "google")
+        state = PendingState(
+            state="s",
+            redirect_uri="https://otari.example.com/auth/google/callback",
+            created_at=0.0,
+            openid_requested=False,
+            context={"caller": "data"},
+        )
+
+        with pytest.raises(ValueError, match="cannot carry state"):
+            await store.save(state)
 
 
 class TestPkce:
@@ -532,7 +768,7 @@ class TestPkce:
         # Asserted against the preset rather than the URL so a later release
         # flipping the default cannot pass unnoticed behind a green suite.
         preset = apron_google.preset if provider == "google" else apron_github.preset
-        provider_config, _ = preset(
+        provider_config = preset(
             client_id="id",
             client_secret="secret",  # noqa: S106
             scopes=["openid"],
@@ -548,7 +784,7 @@ class TestExchange:
     @staticmethod
     def _stub_client(monkeypatch: pytest.MonkeyPatch, profile: Any) -> None:
         class _Client:
-            async def exchange_code(self, **_: Any) -> object:
+            async def exchange_code(self, _callback: Any, **_: Any) -> object:
                 return object()
 
             async def fetch_identity(self, _tokens: object) -> Any:
@@ -571,7 +807,7 @@ class TestExchange:
         self._stub_client(monkeypatch, self._profile())
 
         identity = await oauth_service.exchange_code(
-            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+            configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
         )
 
         assert identity.provider == "google"
@@ -585,7 +821,7 @@ class TestExchange:
         self._stub_client(monkeypatch, self._profile(email_verified=None))
 
         identity = await oauth_service.exchange_code(
-            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+            configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
         )
 
         assert identity.email_verified is EmailAssertion.UNASSERTED
@@ -599,7 +835,7 @@ class TestExchange:
 
         with pytest.raises(OAuthExchangeError):
             await oauth_service.exchange_code(
-                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+                configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
             )
 
     @pytest.mark.asyncio
@@ -607,7 +843,7 @@ class TestExchange:
         self._stub_client(monkeypatch, self._profile(email_verified=False))
 
         identity = await oauth_service.exchange_code(
-            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+            configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
         )
 
         assert identity.email_verified is EmailAssertion.UNVERIFIED
@@ -622,7 +858,7 @@ class TestExchange:
         secret = "invalid_grant: code was already redeemed by client 1234"  # noqa: S105
 
         class _Client:
-            async def exchange_code(self, **_: Any) -> object:
+            async def exchange_code(self, _callback: Any, **_: Any) -> object:
                 raise RuntimeError(secret)
 
             async def fetch_identity(self, _tokens: object) -> Any:  # pragma: no cover - never reached
@@ -632,7 +868,7 @@ class TestExchange:
 
         with pytest.raises(OAuthExchangeError) as caught:
             await oauth_service.exchange_code(
-                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+                configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
             )
 
         assert secret not in caught.value.message
@@ -643,7 +879,9 @@ class TestExchange:
     @pytest.mark.asyncio
     async def test_a_failed_identity_fetch_is_the_same_refusal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _Client:
-            async def exchange_code(self, **_: Any) -> object:
+            # The callback is passed positionally, so a keyword-only mock raises TypeError before
+            # the fetch below is reached and the refusal under test is never the one asserted.
+            async def exchange_code(self, _callback: object, **_: Any) -> object:
                 return object()
 
             async def fetch_identity(self, _tokens: object) -> Any:
@@ -651,15 +889,17 @@ class TestExchange:
 
         monkeypatch.setattr(oauth_service, "_client", lambda *_a, **_k: _Client())
 
-        with pytest.raises(OAuthExchangeError):
+        with pytest.raises(OAuthExchangeError) as refusal:
             await oauth_service.exchange_code(
                 configured(),
                 "github",
                 code="c",
                 state="s",
-                flow_secret=FLOW_SECRET,
+                browser_token=BROWSER_TOKEN,
                 db=fake_db(),
             )
+
+        assert str(refusal.value.__cause__) == "userinfo 500"
 
     @pytest.mark.asyncio
     async def test_an_unconfigured_provider_refuses_before_any_outbound_call(self) -> None:
@@ -669,7 +909,7 @@ class TestExchange:
                 "google",
                 code="c",
                 state="s",
-                flow_secret=FLOW_SECRET,
+                browser_token=BROWSER_TOKEN,
                 db=fake_db(),
             )
 
@@ -679,7 +919,7 @@ class _FailingClient:
         self._error = error
         self._on = on
 
-    async def exchange_code(self, *, code: str, state: str) -> object:
+    async def exchange_code(self, _callback: Any, *, browser_token: str | None) -> object:
         if self._on == "exchange":
             raise self._error
         return object()
@@ -712,7 +952,7 @@ class TestProviderFailures:
 
         with pytest.raises(OAuthProviderUnavailableError) as raised:
             await oauth_service.exchange_code(
-                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+                configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
             )
 
         assert raised.value.status_code == 502
@@ -725,7 +965,7 @@ class TestProviderFailures:
 
         with pytest.raises(OAuthExchangeError) as raised:
             await oauth_service.exchange_code(
-                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+                configured(), "google", code="c", state="s", browser_token=BROWSER_TOKEN, db=fake_db()
             )
 
         assert not isinstance(raised.value, OAuthProviderUnavailableError)

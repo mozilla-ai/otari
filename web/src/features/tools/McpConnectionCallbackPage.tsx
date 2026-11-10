@@ -29,7 +29,9 @@ const REFUSALS = new Map<string, string>([
 ])
 
 /** A dashboard path, and nothing that could leave the dashboard. */
-function insideDashboard(path: string | null | undefined): string | undefined {
+function pickDashboardPath(
+  path: string | null | undefined,
+): string | undefined {
   return path?.startsWith("/") && !path.startsWith("//") ? path : undefined
 }
 
@@ -52,7 +54,7 @@ export function McpConnectionCallbackPage({
   const { mutate } = complete
   const sent = useRef(false)
   const { state, code, iss, error, connected } = search
-  const returnTo = insideDashboard(search.return_to)
+  const returnTo = pickDashboardPath(search.return_to)
 
   useEffect(() => {
     if (connected) {
@@ -71,7 +73,7 @@ export function McpConnectionCallbackPage({
         onSuccess: (done) =>
           void navigate({
             to:
-              insideDashboard(done.return_to) ??
+              pickDashboardPath(done.return_to) ??
               `/tools/mcp-servers/${done.server_id}`,
             replace: true,
           }),
