@@ -214,6 +214,14 @@ loadtest = [
 ]
 
 [tool.uv]
+# The lock's format revision follows whichever uv writes it, and uv keeps the
+# existing revision only while it has nothing to change. Touching one dependency
+# on another minor therefore rewrites the whole lock: hundreds of changed lines
+# with no difference to what installs, in a diff that explains none of it.
+# `astral-sh/setup-uv` reads this field, so pinning it here pins CI too and the
+# version lives in one place.
+required-version = ">=0.13.0,<0.14.0"
+
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
 # never packaged for Windows, so the lock resolves for those two platforms only.
 #
