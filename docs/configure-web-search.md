@@ -21,10 +21,6 @@ The domain lists apply to the search and fetch Otari runs, not to direct searche
 
 ![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/configure-web-search.png)
 
-Workspace settings can make the deployment-level web search policy more restrictive, but they **cannot override it to allow access that has been blocked at the deployment level**.
-
-For the full policy, including the prompt hint, which is set through the API, see [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
-
 ## The organization's search and fetch keys
 
 **Organization** → **Providers** → **Web search** lists the organization's
