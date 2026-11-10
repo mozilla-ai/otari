@@ -268,6 +268,10 @@ class McpOAuthFlow(Base):
     resource: Mapped[str | None] = mapped_column(Text, default=None)
     redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str | None] = mapped_column(Text, default=None)
+    # The authorization server the sign-in went to, and whether it said it sends ``iss`` back
+    # (RFC 9207): what tells this sign-in's answer from another server's on the one redirect URI.
+    issuer: Mapped[str | None] = mapped_column(Text, default=None)
+    requires_iss: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False)
     return_to: Mapped[str | None] = mapped_column(Text, default=None)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

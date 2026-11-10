@@ -33,6 +33,7 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import PaginatedRequestParams
 
 from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
+from gateway.exceptions.tools_exceptions import McpConnectionUnavailableError, McpSignInRequiredError
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
@@ -505,15 +506,63 @@ async def open_session(server: ResolvedMcpServer, *, screen_answers: bool = Fals
     Connection and initialization share one deadline, so a server
     that accepts a socket and then never answers ``initialize`` cannot hold a
     slot for the length of the call deadline instead.
+
+    A per-user server that refuses its token with a 401 gets one more try with a renewed one,
+    from ``server.renew_token``; a user whose sign-in ended is answered ``mcp_sign_in_required``.
     """
+    retried = False
+    while True:
+        stack = AsyncExitStack()
+        try:
+            session = await _enter_session(stack, server, screen_answers=screen_answers)
+        except BaseException as exc:
+            failure = await closed_with(stack, exc)
+            if retried or server.renew_token is None or not refused_token(failure):
+                raise failure from None
+            server = server.model_copy(update={"authorization_token": await _renewed(server)})
+            retried = True
+            continue
+        async with stack:
+            yield session
+        return
+
+
+async def _enter_session(stack: AsyncExitStack, server: ResolvedMcpServer, *, screen_answers: bool) -> ClientSession:
+    """Connect and initialize one session into ``stack``; a test stands in for the network here."""
     headers = {"Authorization": f"Bearer {server.authorization_token}"} if server.authorization_token else None
-    async with AsyncExitStack() as stack:
-        async with asyncio.timeout(CONNECT_TIMEOUT_S):
-            client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
-            read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-        yield session
+    async with asyncio.timeout(CONNECT_TIMEOUT_S):
+        client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
+        read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+    return session
+
+
+async def closed_with(stack: AsyncExitStack, failure: BaseException) -> BaseException:
+    """Close a half-opened session's stack, and return what failed: the group closing raises carries the cause."""
+    try:
+        await stack.aclose()
+    except BaseException as closed:
+        return closed
+    return failure
+
+
+def refused_token(failure: BaseException) -> bool:
+    """Whether a failed session was the server answering 401, the one failure a new token can mend."""
+    return any(
+        isinstance(leaf, httpx2.HTTPStatusError) and leaf.response.status_code == 401 for leaf in _leaves(failure)
+    )
+
+
+async def _renewed(server: ResolvedMcpServer) -> str:
+    """A new token for the one ``server`` was refused with, as an execution error the routes already answer."""
+    assert server.renew_token is not None
+    try:
+        return await server.renew_token(server.authorization_token or "")
+    except McpSignInRequiredError:
+        raise McpExecutionError(CODE_SIGN_IN_REQUIRED, ExecutionState.NOT_STARTED, 403) from None
+    except McpConnectionUnavailableError:
+        raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
 
 
 # --------------------------------------------------------------------------- #
@@ -690,6 +739,9 @@ class CheckFailure(StrEnum):
     NOT_MCP = "not_mcp"
     LIMITS_EXCEEDED = "limits_exceeded"
     CONNECTION_FAILED = "connection_failed"
+    # A per-user server's sign-in setup, found before anyone signs in (``sign_in_problem``).
+    SIGN_IN_UNSUPPORTED = "sign_in_unsupported"
+    SIGN_IN_UNAVAILABLE = "sign_in_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -906,6 +958,9 @@ async def _execute_once(
     try:
         try:
             session = await stack.enter_async_context(open_session(server))
+        except McpExecutionError:
+            # A sign-in that ended while renewing a refused token: already the answer to give.
+            raise
         except BaseException as exc:
             # ``BaseException``, not ``Exception``, because that is what a dead
             # server actually raises: the SDK yields inside an anyio task group,

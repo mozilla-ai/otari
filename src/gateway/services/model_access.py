@@ -25,7 +25,7 @@ import uuid
 from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from any_llm import LLMProvider
 from sqlalchemy import select
@@ -54,6 +54,9 @@ from gateway.services.tenancy.org_provider_key_service import (
     cached_org_provider_kwargs,
     cached_org_slug_provider,
 )
+
+if TYPE_CHECKING:
+    from gateway.services.tools import McpRevocation
 
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
@@ -407,14 +410,27 @@ async def resolve_request_mcp_access(
     )
 
 
-async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> None:
+async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "list[McpRevocation]":
     """Stage the removal of a deleted user's MCP grants, connections and pending sign-ins.
 
-    A soft delete leaves all three behind otherwise.
+    A soft delete leaves all three behind otherwise. Returns what to ask the authorization servers
+    to end once the caller has committed, read while the servers still hold the clients.
     """
+    # Imported here: the tools package reaches back into this module while it loads.
+    from gateway.services.tools import revocations_for
+
+    connections = McpUserConnectionRepository(db)
+    revocable = await connections.revocable_for_user(user_id)
+    servers = await WorkspaceMcpServerRepository(db).find_many({row.server_id for row in revocable})
+    revocations = [
+        revocation
+        for server in servers
+        for revocation in revocations_for(server, [row for row in revocable if row.server_id == server.id])
+    ]
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
-    await McpUserConnectionRepository(db).remove_for_user(user_id)
+    await connections.remove_for_user(user_id)
     await McpOAuthFlowRepository(db).remove_for_user(user_id)
+    return revocations
 
 
 def tool_not_allowed_detail(

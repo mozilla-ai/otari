@@ -63,6 +63,8 @@ def upgrade() -> None:
         sa.Column("resource", sa.Text(), nullable=True),
         sa.Column("redirect_uri", sa.Text(), nullable=False),
         sa.Column("scope", sa.Text(), nullable=True),
+        sa.Column("issuer", sa.Text(), nullable=True),
+        sa.Column("requires_iss", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("return_to", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

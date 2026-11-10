@@ -2603,6 +2603,8 @@ export interface paths {
          *     The dashboard calls this from the page the callback lands on. The state
          *     is consumed whatever happens next, so it finishes one sign-in at most, and
          *     it must be one the caller started: another person's is refused with a 400.
+         *     Send the redirect's `iss` too when it had one: an answer naming another
+         *     authorization server is refused (RFC 9207).
          */
         post: operations["mcp-connections-complete_mcp_connection"];
         delete?: never;
@@ -10444,7 +10446,7 @@ export interface components {
          *     server said. The first two are decided before any connection is opened.
          * @enum {string}
          */
-        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed" | "sign_in_unsupported" | "sign_in_unavailable";
         /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
@@ -14146,6 +14148,11 @@ export interface components {
              * @description The authorization code from the redirect
              */
             code: string;
+            /**
+             * Iss
+             * @description The redirect's iss, the authorization server's own name, if it sent one
+             */
+            iss?: string | null;
             /**
              * State
              * @description The state from the redirect

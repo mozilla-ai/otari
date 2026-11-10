@@ -4907,7 +4907,9 @@
           "http_error",
           "not_mcp",
           "limits_exceeded",
-          "connection_failed"
+          "connection_failed",
+          "sign_in_unsupported",
+          "sign_in_unavailable"
         ],
         "title": "CheckFailure",
         "type": "string"
@@ -12736,6 +12738,19 @@
             "minLength": 1,
             "title": "Code",
             "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The redirect's iss, the authorization server's own name, if it sent one",
+            "title": "Iss"
           },
           "state": {
             "description": "The state from the redirect",
@@ -38329,7 +38344,7 @@
     },
     "/api/v1/mcp-connections/complete": {
       "post": {
-        "description": "Finish a sign-in to a per-user MCP server, from the code its authorization server returned.\n\nThe dashboard calls this from the page the callback lands on. The state\nis consumed whatever happens next, so it finishes one sign-in at most, and\nit must be one the caller started: another person's is refused with a 400.",
+        "description": "Finish a sign-in to a per-user MCP server, from the code its authorization server returned.\n\nThe dashboard calls this from the page the callback lands on. The state\nis consumed whatever happens next, so it finishes one sign-in at most, and\nit must be one the caller started: another person's is refused with a 400.\nSend the redirect's `iss` too when it had one: an answer naming another\nauthorization server is refused (RFC 9207).",
         "operationId": "mcp-connections-complete_mcp_connection",
         "requestBody": {
           "content": {

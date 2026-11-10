@@ -209,7 +209,11 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
+from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpConnectionEligibility,
+    WorkspaceMcpServers,
+    WorkspaceMcpServerService,
+)
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tool_settings_service import load_overrides, stage_override
@@ -1652,7 +1656,9 @@ WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(ge
 
 
 def get_mcp_connection_service(
-    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> McpConnectionService:
     """Build the service that runs a user's sign-in to a per-user MCP server, on the request's Unit of Work."""
     return McpConnectionService(
@@ -1661,6 +1667,7 @@ def get_mcp_connection_service(
         McpUserConnectionRepository(uow),
         McpOAuthFlowRepository(uow),
         config,
+        eligibility=WorkspaceMcpConnectionEligibility(db),
     )
 
 

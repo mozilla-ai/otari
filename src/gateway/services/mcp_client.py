@@ -26,10 +26,11 @@ import anyio.lowlevel
 import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ListToolsResult
 
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
-from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, failure_class
+from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, closed_with, failure_class, refused_token
 from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
@@ -248,16 +249,44 @@ class MCPClientPool:
             await self._release.wait()
 
     async def _connect(self, cfg: McpServerConfig) -> _ConnectedServer:
+        """Open one server's session; a per-user server that refuses its token with a 401 is tried once more.
+
+        The session is opened on a stack of its own, joined to the pool's once it is up, so an
+        attempt the server refused leaves nothing behind to close.
+
+        Raises:
+            McpSignInRequiredError: the refused token's sign-in ended and the connection was removed.
+            McpConnectionUnavailableError: the refused token could not be renewed right now.
+        """
+        retried = False
+        while True:
+            stack = AsyncExitStack()
+            try:
+                session, listed = await self._open(stack, cfg)
+            except BaseException as exc:
+                failure = await closed_with(stack, exc)
+                if retried or cfg.renew_token is None or not refused_token(failure):
+                    raise failure from None
+                cfg = cfg.model_copy(
+                    update={"authorization_token": await cfg.renew_token(cfg.authorization_token or "")}
+                )
+                retried = True
+                continue
+            await self._stack.enter_async_context(stack)
+            return self._connected(cfg, session, listed)
+
+    async def _open(self, stack: AsyncExitStack, cfg: McpServerConfig) -> tuple[ClientSession, ListToolsResult]:
+        """Connect, initialize and list one server's tools into ``stack``; a test stands in for the network here."""
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
-
-        client = await self._stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
-        read, write = await self._stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
-        session = await self._stack.enter_async_context(ClientSession(read, write))
+        client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
+        read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
+        return session, await session.list_tools()
 
-        listed = await session.list_tools()
+    def _connected(self, cfg: McpServerConfig, session: ClientSession, listed: ListToolsResult) -> _ConnectedServer:
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         not_granted: list[str] = []
