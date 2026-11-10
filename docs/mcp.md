@@ -162,7 +162,7 @@ skipped because a check once passed.
 
 Each stored server has an access list (ACL) that decides which keys reach it and
 which of its tools they may run. The dashboard steps are in
-[Control access to an MCP server](control-access-to-an-mcp-server.md).
+[Control who can use it](add-an-mcp-server.md#control-who-can-use-it).
 
 An ACL has two parts:
 
