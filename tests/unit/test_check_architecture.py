@@ -735,7 +735,15 @@ def test_a_module_on_the_transaction_baseline_may_commit(tmp_path: Path, monkeyp
     assert check.check_transaction_control(tmp_path) == []
 
 
-@pytest.mark.parametrize("source", ["async def save(db: object) -> None:\n    await db.flush()\n", None])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "async def save(db: object) -> None:\n    await db.flush()\n",
+        # A savepoint alone does not keep a module on the baseline, or its later commits would pass unchecked.
+        "async def save(db: object) -> None:\n    async with db.begin_nested():\n        pass\n",
+        None,
+    ],
+)
 def test_a_transaction_baseline_entry_that_ends_no_transaction_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
 ) -> None:
@@ -745,8 +753,8 @@ def test_a_transaction_baseline_entry_that_ends_no_transaction_must_leave_the_ba
     if source is not None:
         _write(tmp_path, "gateway/services/thing_service.py", source)
     assert check.check_transaction_control(tmp_path) == [
-        "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit, "
-        "rollback nor begin_nested; remove it from the baseline"
+        "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit nor "
+        "rollback; remove it from the baseline"
     ]
 
 

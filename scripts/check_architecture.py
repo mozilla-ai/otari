@@ -664,20 +664,21 @@ def check_transaction_control(src_root: Path) -> list[str]:
     saving: set[str] = set()
     for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
         for line, call in _transaction_calls(tree):
-            if call == SAVEPOINT_CALL and relative_path in SAVEPOINT_BASELINE:
-                saving.add(relative_path)
+            if call == SAVEPOINT_CALL:
+                if relative_path in SAVEPOINT_BASELINE:
+                    saving.add(relative_path)
+                elif relative_path not in TRANSACTION_CONTROL_BASELINE:
+                    violations.append(
+                        f"{relative_path}:{line} calls {call}; "
+                        "a repository opens a savepoint only to diagnose a refusal of its own write"
+                    )
                 continue
             ending.add(relative_path)
             if relative_path not in TRANSACTION_CONTROL_BASELINE:
-                remedy = (
-                    "a repository opens a savepoint only to diagnose a refusal of its own write"
-                    if call == SAVEPOINT_CALL
-                    else "only a Unit of Work block ends a transaction"
-                )
-                violations.append(f"{relative_path}:{line} calls {call}; {remedy}")
+                violations.append(f"{relative_path}:{line} calls {call}; only a Unit of Work block ends a transaction")
     violations.extend(
-        f"{relative_path} is on the transaction control baseline but calls neither commit, rollback nor "
-        "begin_nested; remove it from the baseline"
+        f"{relative_path} is on the transaction control baseline but calls neither commit nor rollback; "
+        "remove it from the baseline"
         for relative_path in sorted(set(TRANSACTION_CONTROL_BASELINE) - ending)
     )
     violations.extend(
