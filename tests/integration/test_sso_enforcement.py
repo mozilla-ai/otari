@@ -951,7 +951,7 @@ async def test_a_blocked_member_signs_in_and_sees_only_their_other_organization(
     )
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(member)
+    signed_in = await _identity_service(async_db).sign_in(member, asserted_email=None)
 
     assert signed_in.active_organization_id == other.id
 
@@ -1053,7 +1053,7 @@ async def test_a_password_sign_in_is_refused_where_every_organization_requires_t
     await async_db.commit()
 
     with pytest.raises(SsoSignInRequiredError) as refusal:
-        await _identity_service(async_db).sign_in(member)
+        await _identity_service(async_db).sign_in(member, asserted_email=None)
 
     reason = str(refusal.value)
     assert "its own provider" in reason
@@ -1074,7 +1074,7 @@ async def test_a_refused_sign_in_leaves_no_session_behind(async_db: AsyncSession
     member_id = member.id
 
     with pytest.raises(SsoSignInRequiredError):
-        await _identity_service(async_db).sign_in(member)
+        await _identity_service(async_db).sign_in(member, asserted_email=None)
 
     seated = (
         await async_db.execute(
@@ -1103,7 +1103,7 @@ async def test_turning_enforcement_on_ends_the_session_of_a_member_it_now_refuse
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(member)
+    signed_in = await _identity_service(async_db).sign_in(member, asserted_email=None)
     await async_db.commit()
     client.cookies.set(SESSION_COOKIE_NAME, signed_in.session_token)
     assert client.get(f"{API_ROOT}/organizations/me/members").status_code == 200
@@ -1130,7 +1130,7 @@ async def test_a_passkey_sign_in_is_refused_where_every_organization_requires_th
     await async_db.commit()
 
     with pytest.raises(SsoSignInRequiredError):
-        await _identity_service(async_db).sign_in(member)
+        await _identity_service(async_db).sign_in(member, asserted_email=None)
 
 
 async def test_a_member_linked_through_the_connection_reaches_the_enforcing_organization(
@@ -1147,7 +1147,7 @@ async def test_a_member_linked_through_the_connection_reaches_the_enforcing_orga
     await _link_member(async_db, linked_member, connection)
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(linked_member)
+    signed_in = await _identity_service(async_db).sign_in(linked_member, asserted_email=None)
 
     assert signed_in.active_organization_id == organization.id
 
@@ -1169,7 +1169,7 @@ async def test_the_deployment_operator_reaches_an_enforcing_organization(async_d
     async_db.add(operator)
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(operator)
+    signed_in = await _identity_service(async_db).sign_in(operator, asserted_email=None)
 
     assert signed_in.active_organization_id == organization.id
 
@@ -1356,7 +1356,7 @@ async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(asyn
     async_db.add(bystander)
     await async_db.commit()
 
-    signed_in = await _identity_service(async_db).sign_in(bystander)
+    signed_in = await _identity_service(async_db).sign_in(bystander, asserted_email=None)
     assert signed_in.active_organization_id == elsewhere.id
 
     link = await _identity_service(async_db).issue_password_link(bystander.id)
@@ -1624,7 +1624,7 @@ async def test_switching_enforcement_on_revokes_the_affected_live_sessions(async
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
-    signed_in = await _identity_service(async_db).sign_in(member)
+    signed_in = await _identity_service(async_db).sign_in(member, asserted_email=None)
     assert signed_in.session_token
 
     await _connection_service(async_db).set_sso_enforcement_for_user(
@@ -1645,7 +1645,7 @@ async def test_switching_enforcement_on_leaves_an_unaffected_session_alone(async
         async_db, elsewhere, role="member", email="by@other.example", full_name="By Stander"
     )
     await async_db.commit()
-    signed_in = await _identity_service(async_db).sign_in(bystander)
+    signed_in = await _identity_service(async_db).sign_in(bystander, asserted_email=None)
     assert signed_in.session_token
 
     await _connection_service(async_db).set_sso_enforcement_for_user(
@@ -1666,7 +1666,7 @@ async def test_switching_enforcement_on_leaves_a_linked_members_session_alive(as
     connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await _link_member(async_db, linked_member, connection)
     await async_db.commit()
-    signed_in = await _identity_service(async_db).sign_in(linked_member)
+    signed_in = await _identity_service(async_db).sign_in(linked_member, asserted_email=None)
     assert signed_in.session_token
 
     await _connection_service(async_db).set_sso_enforcement_for_user(
@@ -1688,7 +1688,7 @@ async def test_saving_enforcement_again_revokes_a_member_whose_link_is_now_gone(
     connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await _link_member(async_db, member, connection)
     await async_db.commit()
-    signed_in = await _identity_service(async_db).sign_in(member)
+    signed_in = await _identity_service(async_db).sign_in(member, asserted_email=None)
     assert signed_in.session_token
 
     await _connection_service(async_db).set_sso_enforcement_for_user(

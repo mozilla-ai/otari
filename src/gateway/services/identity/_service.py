@@ -186,30 +186,37 @@ class IdentityService:
             resolution = await self._account_for(external, label)
             if resolution.new_account:
                 self._record_terms(resolution.identity, terms_accepted=terms_accepted)
-            signed_in = await self.sign_in(resolution.identity)
+            signed_in = await self.sign_in(resolution.identity, asserted_email=external.email)
         return replace(signed_in, new_account=resolution.new_account, password_removed=resolution.password_removed)
 
-    async def sign_in(self, account: User) -> SignIn:
+    async def sign_in(self, account: User, *, asserted_email: str | None) -> SignIn:
         """Sign in an account that has proven who it is, and start its dashboard session.
+
+        ``asserted_email`` is the address a provider asserted for this sign-in, carried to the session
+        for the blocklist, and ``None`` where no provider asserted one.
 
         What the sign-in listener stages and the session commit together.
 
         Raises:
-            SignInBlockedError: If the deployment's email blocklist matches the account's address. Nothing the
+            SignInBlockedError: If the deployment's email blocklist matches either address. Nothing the
                 caller staged in the same block is kept, an account a first provider sign-in created included.
 
         """
         async with self._uow:
             await self._sign_in_listener.account_signed_in(account)
-            return await self.start_session(account)
+            return await self.start_session(account, asserted_email=asserted_email)
 
-    async def start_session(self, account: User) -> SignIn:
+    async def start_session(self, account: User, *, asserted_email: str | None) -> SignIn:
         """Start a dashboard session for ``account`` without running the sign-in listener.
 
         The session counts as the account's latest sign-in, and acts in the organization the account can act in.
 
+        ``asserted_email`` is the address a provider asserted for this sign-in, and ``None`` where no
+        provider asserted one. It is the only address an account reached through an organization's own
+        connection has, so the blocklist is checked against it as well as the account's own.
+
         Raises:
-            SignInBlockedError: If the deployment's email blocklist matches the account's address. The check holds
+            SignInBlockedError: If the deployment's email blocklist matches either address. The check holds
                 the blocklist lock until the session commits, so a block cannot commit between the two.
 
         """
@@ -249,7 +256,8 @@ class IdentityService:
             # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
             # write lock when it reads the blocklist.
             await self._sessions.prune_expired(now)
-            if account.email is not None and await self.blocked_among([account.email]):
+            presented = {email for email in (account.email, asserted_email) if email is not None}
+            if presented and await self.blocked_among(presented):
                 logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
                 raise SignInBlockedError
             await self._users.record_sign_in(account.id, at=now)

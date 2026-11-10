@@ -11,16 +11,19 @@ from sqlmodel import SQLModel
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import GatewayConfig
+from gateway.core.email_domains import blocklist_entry
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityLinkConflictError,
     OAuthIdentityUnknownError,
+    SignInBlockedError,
     SsoIdentityNotAdmittedError,
     TermsNotAcceptedError,
 )
 from gateway.models.base import Base
 from gateway.models.identity import (
+    BlockedEmail,
     EmailAssertion,
     OAuthIdentityLink,
     OIDCConnection,
@@ -161,6 +164,13 @@ async def _add_claim(db: AsyncSession, organization_id: uuid.UUID, *, domain: st
     return row
 
 
+async def _block_address(db: AsyncSession, value: str) -> None:
+    pattern = blocklist_entry(value)
+    assert pattern is not None
+    db.add(BlockedEmail(pattern=pattern, reason=None, created_by_user_id=None))
+    await db.commit()
+
+
 async def test_a_first_sso_sign_in_creates_an_account_with_no_email(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     await _add_connection(async_db, organization.id)
@@ -172,6 +182,34 @@ async def test_a_first_sso_sign_in_creates_an_account_with_no_email(async_db: As
     assert signed_in.account.email is None
     assert signed_in.account.full_name == "Ada Lovelace"
     assert signed_in.active_organization_id == organization.id
+
+
+async def test_a_first_sso_sign_in_is_refused_when_the_address_is_blocked(async_db: AsyncSession) -> None:
+    """The account the sign-in would mint holds no address, so only the asserted one can be checked."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    await _block_address(async_db, "ada@acme.example")
+
+    with pytest.raises(SignInBlockedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    accounts = await async_db.scalar(select(func.count()).select_from(OAuthIdentityLink))
+    assert accounts == 0
+
+
+async def test_a_linked_sso_sign_in_is_refused_when_the_address_is_blocked(async_db: AsyncSession) -> None:
+    """A block added after the link still refuses the sign-in it reaches."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert first.new_account is True
+
+    await _block_address(async_db, "ada@acme.example")
+
+    with pytest.raises(SignInBlockedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
 
 
 async def test_a_first_sso_sign_in_mints_the_account_that_can_own_a_key(async_db: AsyncSession) -> None:
@@ -403,7 +441,7 @@ async def test_starting_a_session_records_the_sign_in_on_the_account(async_db: A
     await async_db.commit()
     assert account.last_sign_in_at is None
 
-    await _service(async_db, open_signup=False).start_session(account)
+    await _service(async_db, open_signup=False).start_session(account, asserted_email=None)
 
     await async_db.refresh(account)
     assert account.last_sign_in_at is not None
