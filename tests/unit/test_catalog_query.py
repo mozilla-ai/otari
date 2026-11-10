@@ -79,6 +79,8 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"search": "glm-5"}, [GLM]),
         ({"search": "accounts/fireworks"}, [GLM]),
         ({"search": "nebius"}, []),
+        ({"search": "fireworks"}, []),
+        ({"search": "glm-5p3"}, [GLM]),
         ({"search": "nebius:zai-org/glm"}, [GLM]),
         ({"search": "Z.ai: GLM-5.3"}, [GLM]),
         ({"search": "k2.6 moonshot"}, [KIMI]),
