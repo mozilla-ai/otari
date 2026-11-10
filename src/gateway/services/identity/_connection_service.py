@@ -469,16 +469,18 @@ class OIDCConnectionService:
         """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
 
         Setting it to ``True`` additionally revokes the live session of every active member it
-        currently refuses. Turning it off has no precondition, so an organization can always
-        undo it, even with no connection configured.
+        currently refuses. Turning it off asks only that a named account exists, so an organization
+        can always undo it, even with no connection configured and even once the named owner has
+        been removed.
 
         Raises:
             OIDCConnectionNotFoundError: ``required`` is set, and the organization has not
                 configured a connection yet.
             OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
                 the connection.
-            SsoBreakGlassRequiredError: An account is named that is not one of the organization's
-                own active owners, or ``required`` is set naming none and waiving none.
+            SsoBreakGlassRequiredError: An account is named that this deployment does not hold,
+                ``required`` is set naming one that is not one of the organization's own active
+                owners, or ``required`` is set naming none and waiving none.
             SsoBreakGlassRouteRequiredError: ``required`` is set naming an account that could not
                 sign in while the connection is unavailable.
         """
@@ -487,10 +489,7 @@ class OIDCConnectionService:
         async with self._uow:
             connection: OIDCConnection | None = None
             if break_glass_user_id is not None:
-                await self._require_break_glass_member(organization, break_glass_user_id)
-                # Ownership only while enforcement is on, because that is the only time the
-                # exception grants anything: an owner demoted since they were named would otherwise
-                # stand in the way of turning enforcement off.
+                await self._require_break_glass_account(break_glass_user_id)
                 if required:
                     await self._require_break_glass_owner(organization, break_glass_user_id)
             if required:
@@ -550,16 +549,18 @@ class OIDCConnectionService:
         ):
             raise SsoBreakGlassRouteRequiredError
 
-    async def _require_break_glass_member(self, organization: Organization, user_id: uuid.UUID) -> None:
-        """Refuse a break-glass account that is not an active member of this organization.
+    async def _require_break_glass_account(self, user_id: uuid.UUID) -> None:
+        """Refuse a break-glass account this deployment does not hold.
 
         Held whether or not enforcement is on, because the column is a foreign key and an id naming
-        nobody would otherwise reach the database as an integrity error instead of a refusal.
+        nobody would otherwise reach the database as an integrity error instead of a refusal. What
+        the named account must be to act on the exception is the owner rule, which is held only
+        while enforcement is on.
 
         Raises:
-            SsoBreakGlassRequiredError: The account is not an active member here.
+            SsoBreakGlassRequiredError: This deployment holds no such account.
         """
-        if await self._organizations.members.get_active_by_organization_and_user(organization.id, user_id) is None:
+        if await self._users.get(user_id) is None:
             raise SsoBreakGlassRequiredError
 
     async def _require_break_glass_owner(self, organization: Organization, user_id: uuid.UUID) -> None:

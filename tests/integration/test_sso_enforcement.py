@@ -444,6 +444,50 @@ async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_
     assert (await _reloaded(async_db, organization)).sso_required is False
 
 
+async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_a_member(
+    async_db: AsyncSession,
+) -> None:
+    """The dashboard resends the stored account, so a removed one must not block the way out."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    removed = await _member_with_email(
+        async_db, organization, role="owner", email="gone@acme.example", full_name="Gone Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = removed.id
+    async_db.add(organization)
+    membership = await _membership_of(async_db, organization, removed)
+    membership.status = "removed"
+    async_db.add(membership)
+    await async_db.commit()
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=False, break_glass_user_id=removed.id, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_turning_enforcement_off_still_refuses_an_account_this_deployment_does_not_hold(
+    async_db: AsyncSession,
+) -> None:
+    """The column is a foreign key, so an id naming nobody is refused rather than left to the database."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    with pytest.raises(SsoBreakGlassRequiredError):
+        await _connection_service(async_db).set_sso_enforcement_for_user(
+            user=owner, required=False, break_glass_user_id=uuid.uuid4(), break_glass_waived=False
+        )
+
+
 async def test_enforcement_is_permitted_once_the_connection_has_signed_somebody_in(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
