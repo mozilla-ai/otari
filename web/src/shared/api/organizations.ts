@@ -28,6 +28,8 @@ import type {
   OrganizationMember,
   OrganizationMembers,
   OrganizationSso,
+  OrganizationSsoEnforcementRequest,
+  OrganizationSsoPreflight,
   OrgProviderAvailableModels,
   OrgProviderKey,
   OrgProviderModel,
@@ -55,6 +57,7 @@ import {
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
   ORGANIZATION_SSO,
+  ORGANIZATION_SSO_PREFLIGHT,
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
@@ -897,10 +900,9 @@ export function useDeleteOrganizationDomain() {
 // sign-in methods. `redirect_uri` is served alongside the connection, so the
 // one read also tells an admin what to register before saving anything.
 //
-// Saving replaces the whole connection. The client secret is the one field that
-// may be left out, and only where the issuer and the client ID are both
-// unchanged: the stored secret is then kept, and any other edit is refused
-// without one, because a secret belongs to the client it was issued for.
+// There is no partial update: saving replaces the whole connection. The client
+// secret may be left out to keep the stored one, which is refused unless the
+// issuer and the client ID are both unchanged.
 
 export function useOrganizationSso(enabled = true) {
   return useQuery({
@@ -911,10 +913,23 @@ export function useOrganizationSso(enabled = true) {
   })
 }
 
+// Returned rather than discarded, so a mutation settles only once the refetch has landed: a
+// caller that remounts on success would otherwise re-read the value it just replaced.
 function invalidateOrganizationSso(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
-  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+  return queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+}
+
+// Storing, removing or enforcing a connection each move who enforcement would affect. Testing one
+// moves nothing.
+function invalidateOrganizationSsoAndPreflight(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  return Promise.all([
+    invalidateOrganizationSso(queryClient),
+    queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO_PREFLIGHT] }),
+  ])
 }
 
 export function useSaveOrganizationSso() {
@@ -925,7 +940,7 @@ export function useSaveOrganizationSso() {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateOrganizationSso(queryClient),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
   })
 }
 
@@ -945,7 +960,40 @@ export function useDeleteOrganizationSso() {
   return useMutation({
     mutationFn: () =>
       apiFetch<void>("/organizations/me/sso", { method: "DELETE" }),
-    onSuccess: () => invalidateOrganizationSso(queryClient),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
+  })
+}
+
+// Who requiring sign-in through the connection would affect today: every
+// active member holding no sign-in link to it. Read before the enforcement
+// toggle is offered, and short-lived, since a member linking moves the count.
+// Keyed on the organization, unlike the reads around it. This report names the members who would
+// lose access, and a key shared across organizations serves the previous one's report while the
+// new one is still being fetched, so the page would show one organization's people to another and
+// offer an owner from it. The settings beside it carry no names and recover on the same refetch.
+export function useOrganizationSsoPreflight(enabled = true) {
+  const context = useOrganizationContext(enabled)
+  const organizationId = context.data?.organization.id ?? null
+  return useQuery({
+    queryKey: [ORGANIZATION_SSO_PREFLIGHT, organizationId],
+    queryFn: () =>
+      apiFetch<OrganizationSsoPreflight>("/organizations/me/sso/preflight"),
+    staleTime: 15_000,
+    // Withheld until the organization is settled, so the report cannot be read under one key and
+    // then attributed to another.
+    enabled: enabled && organizationId !== null,
+  })
+}
+
+export function useSetOrganizationSsoEnforcement() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OrganizationSsoEnforcementRequest) =>
+      apiFetch<void>("/organizations/me/sso/enforcement", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
   })
 }
 

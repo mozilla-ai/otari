@@ -322,8 +322,8 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         user.default_organization_id = organization_id
         return await self.set_active_organization(user, organization_id)
 
-    async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
-        """Stage a change of the identity's active organization."""
+    async def set_active_organization(self, user: User, organization_id: uuid.UUID | None) -> User:
+        """Stage a change of the identity's active organization, or ``None`` for no organization."""
         user.active_organization_id = organization_id
         self.db.add(user)
         await self.db.flush()
@@ -344,7 +344,9 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return set(result.scalars().all())
 
-    async def move_active_organization(self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID) -> None:
+    async def move_active_organization(
+        self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID | None
+    ) -> None:
         """Stage ``organization_id`` as the active organization of each of these identities."""
         if not user_ids:
             return

@@ -19,7 +19,12 @@ from gateway.services.tenancy.organization_domain_service import (
     OrganizationDomainService,
     VerifiedDomainLookup,
 )
-from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
+from gateway.services.tenancy.organization_service import (
+    InvitationClaimSettings,
+    OrganizationService,
+    sso_blocks_membership,
+    sso_would_block_membership,
+)
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.tokens import generate_shared_token, generate_token, hash_token
@@ -53,6 +58,8 @@ __all__ = [
     "render_password_reset_email",
     "report_new_account",
     "report_sign_in",
+    "sso_blocks_membership",
+    "sso_would_block_membership",
     "unverified_identity_is_claimable",
     "update_full_name",
 ]

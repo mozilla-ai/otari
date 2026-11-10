@@ -180,6 +180,33 @@ class OIDCConnectionPublic(BaseModel):
     )
 
 
+class OrganizationSsoEnforcementRequest(BaseModel):
+    """What an organization administrator submits to require, or stop requiring, sign-in through its own connection."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        description="One of the organization's own owners who keeps a non-SSO sign-in route when required is true.",
+    )
+    break_glass_waived: bool = Field(
+        default=False,
+        description="Whether the organization explicitly waives a break-glass owner when enforcement is required.",
+    )
+
+
+class OrganizationSsoEnforcementPublic(BaseModel):
+    """The caller's organization's current sign-in enforcement, as its admins see it."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        description="One of the organization's own owners who keeps a non-SSO sign-in route, where the "
+        "organization named one."
+    )
+    break_glass_waived: bool = Field(
+        description="Whether the organization has explicitly waived naming a break-glass owner."
+    )
+
+
 class OrganizationSsoPublic(BaseModel):
     """An organization's own OIDC connection, and what to register at the provider."""
 
@@ -192,6 +219,46 @@ class OrganizationSsoPublic(BaseModel):
     )
     connection: OIDCConnectionPublic | None = Field(
         description="The organization's own connection, or null until one is saved."
+    )
+    enforcement: OrganizationSsoEnforcementPublic = Field(
+        description="The organization's current sign-in enforcement. Independent of whether a connection exists."
+    )
+
+
+class OrganizationSsoPreflightMemberPublic(BaseModel):
+    """One active member who holds no sign-in link to the caller's organization's own connection."""
+
+    user_id: uuid.UUID
+    email: str | None = Field(description="The member's sign-in address, or null for an identity with none.")
+    full_name: str | None = Field(description="The member's display name, or null when none is set.")
+
+
+class OrganizationSsoPreflightPublic(BaseModel):
+    """What requiring sign-in through the caller's organization's own connection would cost today.
+
+    ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+    would get a new account the first time they use it. ``affected_members`` samples those people,
+    bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+
+    ``break_glass_candidates`` is who may be named as the exception, so naming one of them is never
+    refused. It leaves out the deployment's own operator, who is never subject to enforcement and so
+    needs no exception.
+    """
+
+    total_members: int = Field(description="The organization's active membership count.")
+    break_glass_candidates: list[OrganizationSsoPreflightMemberPublic] = Field(
+        description=(
+            "The owners who may be named to keep a route in that does not depend on this connection. "
+            "An owner this connection provisioned is not among them, because exempting an account that "
+            "cannot sign in without the connection keeps no route open."
+        )
+    )
+    affected_count: int = Field(description="How many active members hold no sign-in link to this connection.")
+    affected_members: list[OrganizationSsoPreflightMemberPublic] = Field(
+        description="A sample of the affected members, for recognizing who they are."
+    )
+    affected_members_truncated: bool = Field(
+        description="Whether affected_members leaves out some of the members affected_count counts."
     )
 
 
@@ -292,6 +359,10 @@ __all__ = [
     "OIDCConnectionDomain",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
+    "OrganizationSsoEnforcementPublic",
+    "OrganizationSsoEnforcementRequest",
+    "OrganizationSsoPreflightMemberPublic",
+    "OrganizationSsoPreflightPublic",
     "OrganizationSsoPublic",
     "PasswordLinkPublic",
     "SsoAuthorizeResponse",

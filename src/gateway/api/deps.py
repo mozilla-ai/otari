@@ -18,6 +18,7 @@ from gateway.container import Container
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    OAUTH_PROVIDERS,
     TRACE_CONTENT_HEADER,
     TRACE_CONTENT_KEEP,
     X_API_KEY_HEADER,
@@ -63,7 +64,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -1711,17 +1712,27 @@ IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
 
 
 def get_oidc_connection_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     organizations: OrganizationServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OIDCConnectionService:
-    """Build the organization OIDC connection service on the request's Unit of Work."""
+    """Build the organization OIDC connection service on the request's Unit of Work.
+
+    ``sign_in_states`` is the one repository built on the session instead, for the reason the
+    service's own attribute gives: the sign-in client is used after the block that built it.
+    """
     return OIDCConnectionService(
         uow,
         IdentityRepositories.on(uow),
         organizations=organizations,
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
         allow_private_hosts=config.oidc_allow_private_hosts,
+        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
+        offered_providers=frozenset(
+            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
+        ),
     )
 
 
