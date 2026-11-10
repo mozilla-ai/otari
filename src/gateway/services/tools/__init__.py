@@ -317,7 +317,6 @@ __all__ = [
     "McpRevocation",
     "McpServerRef",
     "McpUserTokens",
-    "McpServerRef",
     "McpSignInBackend",
     "McpSignInNeeded",
     "McpSignInReason",
