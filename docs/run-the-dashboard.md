@@ -186,7 +186,8 @@ sign-in method is in [Sign-in and accounts](sign-in.md).
 
 With `terms_url` set, the signup page asks the person to accept the terms
 first, and so does the invitation page before "Accept and sign in with a
-provider instead". A provider sign-in that would create an account without
+provider instead". With `privacy_url` set too, the box links the privacy policy
+beside the terms. A provider sign-in that would create an account without
 them stops on the return page, asks for the terms, and starts the sign-in again.
 
 Mail is optional: when an invitation email does not go out, the inviter gets
