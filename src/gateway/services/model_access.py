@@ -135,6 +135,21 @@ def is_allowlist_subset(child: list[str] | None, parent: list[str] | None, *, to
     return all(entry in parent if entry in tool_keys else _covers(parent, entry) for entry in child)
 
 
+def intersect_allowlists(first: list[str] | None, second: list[str] | None) -> list[str] | None:
+    """One allow-list permitting exactly the keys both permit.
+
+    Two entries that match a common key are nested, one covering the other, so
+    keeping each entry the other list covers loses nothing either allows.
+    """
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return [entry for entry in first if _covers(second, entry)] + [
+        entry for entry in second if _covers(first, entry) and entry not in first
+    ]
+
+
 def _entry_matches(entry: str, canonical_key: str) -> bool:
     """Whether one allow-list entry matches a canonical ``instance:model`` key."""
     entry_instance, _, entry_model = entry.partition(":")

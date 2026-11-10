@@ -90,6 +90,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": False,
+        "platform_connect": True,
         "federation_member_rules": False,
         "mail_ready": False,
         "public_catalog": False,

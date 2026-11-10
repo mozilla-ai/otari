@@ -74,14 +74,16 @@ the corresponding startup value after the database is available.
 
 | Setting | Purpose |
 | --- | --- |
-| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. |
+| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. Unset, it is `sqlite:///./otari.db`, and in the container image `sqlite:////data/otari.db`, on the image's `/data` volume. |
 | `master_key` | Deployment-wide management credential. |
 | `host`, `port` | Server bind address. |
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
+| `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -108,9 +110,9 @@ the corresponding startup value after the database is available.
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
-| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](sessions.md#keep-what-a-session-was-about). |
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
-| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -403,7 +405,11 @@ declaration that cannot be applied, such as a key naming a budget that does not
 exist, stops the start and nothing is written.
 
 Declarations are applied before the first-run bootstrap key, so a fresh
-deployment that declares a key does not mint and print one.
+deployment that declares a key does not mint and print one. Neither does a
+deployment that generated its own master key: it starts from the setup link,
+and its operator creates the first key in the dashboard. Set
+`bootstrap_api_key: true` (`OTARI_BOOTSTRAP_API_KEY=true`) to have that
+deployment mint and print one anyway.
 
 ### Mismatched `user` fields
 
@@ -662,8 +668,25 @@ Operators add provider credentials at runtime as
 `/api/v1/hosted-providers`. Config-file entries remain read-only in the
 dashboard.
 
-Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
-`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+Stored credentials are encrypted with a Fernet key, and where that key comes
+from depends on the database:
+
+- **PostgreSQL**: set `OTARI_SECRET_KEY` to a key generated with
+  `otari gen-secret-key`. Nothing is stored until it is set.
+- **SQLite**: when `OTARI_SECRET_KEY` is unset, Otari generates a key on first
+  start and keeps it in a file beside the database file, named after it with
+  `.secret-key` added (`/data/otari.db.secret-key` in the container image),
+  readable only by its owner. Later starts load it from there. A set
+  `OTARI_SECRET_KEY` always wins, and the file is then neither read nor written.
+
+A key beside the database protects against a leaked database file or dump. It
+does not protect against a stolen disk or volume, which holds both; set
+`OTARI_SECRET_KEY` from a secret store where that matters. Back the key file up
+with the database. If the database holds encrypted credentials and neither
+`OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
+than generate a key that could not decrypt them.
+
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
@@ -968,6 +991,12 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
+
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then
@@ -991,8 +1020,15 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
-It refuses models.dev data the gateway cannot read: a document that lists
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+which publishes the same documents at the same paths, built from models.dev's
+catalog plus the models it does not list yet; each of those is also offered to
+models.dev, and leaves the fork once it lands there. `https://models.dev` reads
+models.dev itself, and a private mirror works when it serves the same paths.
+An update refuses models.dev data the gateway cannot read: a document that lists
 no models, or one with more than a quarter of its models damaged. When neither
 catalog can be read, the prices in force stay, and the update reports an error.
 
@@ -1004,7 +1040,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 The bundled snapshot is the whole models.dev catalog, so it also carries the
 model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+saved v2 `api.json`, adding `--input-version v1` for a v1 one; `--base-url`
+fetches from somewhere other than the default) and commit
 `src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
@@ -1027,6 +1064,17 @@ the dashboard, `seed` for one a catalog update copied from models.dev for a
 model a hosted provider serves, and `migration` for one an upgrade wrote. It is
 null on a rate stored before origins were recorded. A catalog update moves only
 a `seed` rate.
+
+A `seed` rate and a models.dev default are one headline price per model, so a
+completion whose provider states what it charged is settled at that charge
+instead, and its usage row and inline `pricing_source` read `reported`. Only
+OpenRouter states one: its `usage.cost`, plus `cost_details.upstream_inference_cost`
+on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
+depends on the upstream it routes a request to, which no single rate matches.
+A rate set in this file, through the pricing API or on the dashboard still
+prices the completion. The hold placed before the request is still estimated
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
 
 ### A public catalog
 
@@ -1667,7 +1715,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](guardrails.md) for behavior and security boundaries.
+[Guardrails](guardrails-reference.md) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1705,9 +1753,12 @@ privacy_url: "https://example.com/privacy"
 ```
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
-Privacy row stays disabled. `GET /api/v1/bootstrap` publishes both addresses
-unauthenticated, so a URL carrying a credential is refused at startup; the same
-check covers `docs_url` and `site_url`.
+Privacy row stays disabled. Wherever a page asks for the terms (signup, an
+invitation, a first password, a provider sign-in), the box links the privacy
+policy beside them when `privacy_url` is set too.
+`GET /api/v1/bootstrap` publishes both addresses unauthenticated, so a URL
+carrying a credential is refused at startup; the same check covers `docs_url`
+and `site_url`.
 
 ## The public site
 

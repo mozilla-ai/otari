@@ -1,5 +1,6 @@
 """Pure selection over authorized summaries assembled from the catalog's sources."""
 
+import re
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -44,6 +45,30 @@ def _pricing_matches(model: CatalogModelSummary, pricing: str) -> bool:
             return True
 
 
+def _search_matches(model: CatalogModelSummary, term: str) -> bool:
+    """Every word of ``term`` is in the model's name, vendor, id, or the last segment of a selector.
+
+    The title a card prints, ``<vendor>: <name>``, is one more text to match, and a
+    term with a colon or a slash may be a pasted selector. A provider's name alone
+    matches nothing, not even inside a path like Fireworks' ``accounts/fireworks/models/...``:
+    a provider serves other vendors' models, and the provider filter covers it.
+    """
+    if (":" in term or "/" in term) and any(term in selector.casefold() for selector in model.selectors):
+        return True
+    vendor = model.vendor or ""
+    texts = [
+        text.casefold()
+        for text in (
+            model.name,
+            model.id,
+            vendor,
+            f"{vendor}: {model.name}",
+            *(selector.rpartition("/")[2].rpartition(":")[2] for selector in model.selectors),
+        )
+    ]
+    return all(any(word in text for text in texts) for word in re.split(r"[\s:]+", term) if word)
+
+
 def _source_matches(model: CatalogModelSummary, source: str) -> bool:
     return source == "all" or model.discovered == (source == "discovered")
 
@@ -63,10 +88,7 @@ def _matching_models(
     types = set(query.type)
 
     def matches(model: CatalogModelSummary) -> bool:
-        if term and not any(
-            term in value.casefold()
-            for value in (model.name, model.id, model.vendor or "", *model.selectors, *model.providers)
-        ):
+        if term and not _search_matches(model, term):
             return False
         if providers and not providers.intersection(model.providers):
             return False

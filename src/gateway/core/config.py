@@ -35,6 +35,7 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.tools import CodeExecutor, SandboxProvider
+from gateway.types.models_dev import MODELS_DEV_BASE_URL, normalize_models_dev_base_url
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the
@@ -71,7 +72,7 @@ ROUTER_HEADER = "Otari-Router"
 CONVERSATION_HEADER = "Otari-Conversation-Id"
 # Request header a client sends as ``keep`` to have the content of a request it
 # routes kept on its session's trace, where the deployment and the workspace keep
-# content. The client answers for its users' consent. See docs/traces.md.
+# content. The client answers for its users' consent. See docs/sessions.md.
 TRACE_CONTENT_HEADER = "Otari-Trace-Content"
 TRACE_CONTENT_KEEP = "keep"
 # Response header naming one inference request, minted by the gateway. Clients use
@@ -560,6 +561,16 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
         raise ValueError(msg) from exc
 
 
+def _default_database_url() -> str:
+    """The database a deployment that names none gets.
+
+    ``OTARI_DEFAULT_DATABASE_URL`` is how the container image points this at its
+    data volume. It ranks below the config file, unlike ``OTARI_DATABASE_URL``,
+    so an image that sets it does not override a mounted ``database_url``.
+    """
+    return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -604,7 +615,7 @@ class GatewayConfig(
     )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
-        default="sqlite:///./otari.db",
+        default_factory=_default_database_url,
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(
@@ -1010,7 +1021,10 @@ class GatewayConfig(
     )
     bootstrap_api_key: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
-        description="Create a first-use API key on startup when no API keys exist",
+        description=(
+            "Create a first-use API key on startup when no API keys exist. Left unset, a deployment that "
+            "generated its own master key creates none, since its operator starts from the setup link."
+        ),
     )
     bootstrap: Annotated[str | None, OMITTED] = Field(
         default=None,
@@ -1087,6 +1101,14 @@ class GatewayConfig(
             "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
             "cutoff). Set false to disable the outbound call; the gateway then shows the "
             "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
+        ),
+    )
+    models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
+        default=MODELS_DEV_BASE_URL,
+        description=(
+            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "publishes models.dev's catalog plus the models it does not list yet. Set "
+            "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
@@ -1305,8 +1327,7 @@ class GatewayConfig(
     guardrails_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Default URL of the input-guardrails service used when a request does not pass its "
-            "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
+            "Default URL of the input-guardrails service used when a request does not pass its own guardrail `url`."
         ),
     )
     guardrail_thread_pool_size: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -2201,6 +2222,16 @@ class GatewayConfig(
             raise ValueError(msg)
         return normalized
 
+    @field_validator("models_dev_base_url")
+    @classmethod
+    def _validate_models_dev_base_url(cls, value: str) -> str:
+        """An absolute http(s) origin, with or without a path, that the document paths append to."""
+        try:
+            return normalize_models_dev_base_url(value)
+        except ValueError as exc:
+            msg = f"models_dev_base_url {exc}"
+            raise ValueError(msg) from None
+
     @field_validator("ui_base_url")
     @classmethod
     def _validate_ui_base_url(cls, value: str | None) -> str | None:
@@ -2601,6 +2632,10 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
         os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
+# Fields an empty ``OTARI_<FIELD>`` switches off, where every other field reads an empty variable as unset.
+_EMPTY_ENV_SWITCHES_OFF = frozenset({"platform_url"})
+
+
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
 
@@ -2610,6 +2645,9 @@ def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """
     for field_name in GatewayConfig.model_fields:
         value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")
+        if value == "" and field_name in _EMPTY_ENV_SWITCHES_OFF:
+            config[field_name] = ""
+            continue
         if value is None or value == "":
             continue
         try:

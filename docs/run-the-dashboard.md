@@ -2,8 +2,7 @@
 
 A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
-the deployment view, and deployment-wide settings. What any signed-in person
-sees is in [Admin dashboard](dashboard.md).
+the deployment view, and deployment-wide settings.
 
 ## Sign-in and secrets
 
@@ -13,22 +12,51 @@ sees is in [Admin dashboard](dashboard.md).
 | `OTARI_SECRET_KEY` | Encrypts provider and search-tool credentials stored in the database |
 
 If `OTARI_MASTER_KEY` is unset on a new database, Otari generates a master key
-and prints it once. The dashboard exchanges it for an HttpOnly session cookie
-and never stores it in the browser.
+and prints it once, inside a setup link:
 
-Set `OTARI_SECRET_KEY` before saving provider or search-tool credentials in the
-dashboard:
+```text
+Otari 1.0.0 is running at http://localhost:8000
+
+Open this link to choose your password and finish setup:
+
+http://localhost:8000/#/setup?key=otari-mk-...
+
+It is shown only once and carries your master key, so treat it like one.
+```
+
+That start prints nothing else unless something needs attention, and holds
+its reminders about optional settings left unset until the next start. Later
+starts print where Otari runs and where to sign in. `otari serve --log-level
+debug` shows every startup line, and the access lines of successful health
+probes, which are otherwise left out of the log. A deployment that generated its master key
+creates no bootstrap API key (see
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config)); create the
+first key in the dashboard.
+
+The key is the part after `key=`. It sits in the link's fragment, which the
+browser does not send to the server, and the setup page removes it from the
+address bar as soon as it opens. The dashboard exchanges the key for an
+HttpOnly session cookie and never stores it in the browser. Save the key if you
+will call the management API with it, and treat the link as you would the key.
+
+On SQLite, Otari generates the key that encrypts stored credentials and keeps
+it in a file beside the database. On PostgreSQL, set `OTARI_SECRET_KEY` before
+saving provider or search-tool credentials in the dashboard:
 
 ```bash
 otari gen-secret-key
 ```
 
-Keep it apart from the database: losing it makes stored credentials
-undecryptable. Providers configured in `config.yml` do not need it.
+Losing the key makes stored credentials undecryptable. See
+[Runtime provider management](configuration.md#runtime-provider-management)
+for where the key lives and what it protects against. Providers configured in
+`config.yml` do not need it.
 
-To claim a new deployment, set an email address and password in **Account
-settings**. The sign-in page then asks for the password instead of the master
-key. The master key still works for the management API and can reset the
+Opening the setup link and choosing an email address and password claims a new
+deployment. A deployment whose operator signed in with the master key instead
+is claimed from **Account settings**. Once claimed, the sign-in page asks for
+the password instead of the master key, and the setup link leads to the sign-in
+page. The master key still works for the management API and can reset the
 operator's password, but only the operator's. For a member who forgot theirs,
 send a password link from **Accounts** (see
 [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration)).
@@ -38,15 +66,22 @@ Which sign-in forms the page offers is described in
 
 ## First-run walkthrough
 
-1. Start Otari.
-2. Open the gateway root, usually `http://localhost:8000/`.
-3. Sign in with the configured or generated master key.
-4. Add a provider. To store its credential in the dashboard, set
-   `OTARI_SECRET_KEY` first.
-5. Test the provider connection, or declare model IDs for a backend with no
+1. Start Otari. With Docker, keep its data in a named volume, since an
+   anonymous volume does not reattach to a new container:
+
+   ```bash
+   docker run -v otari:/data -p 127.0.0.1:8000:8000 mzdotai/otari
+   ```
+
+2. Open the setup link from the log and choose an email address and password.
+   If you set `OTARI_MASTER_KEY` yourself, no link is printed: open the gateway
+   root, usually `http://localhost:8000/`, and sign in with that key.
+3. Add a provider. On PostgreSQL, storing its credential in the dashboard needs
+   `OTARI_SECRET_KEY` set first.
+4. Test the provider connection, or declare model IDs for a backend with no
    model-listing endpoint.
-6. Create an API key from the setup guide or the **Keys** page.
-7. Send a request and check that it appears on the **Overview**, in
+5. Create an API key from the setup guide or the **Keys** page.
+6. Send a request and check that it appears on the **Overview**, in
    **Requests**.
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
@@ -137,7 +172,7 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 Set `activation_guide: false` to turn off the Overview's
-[setup guide](dashboard.md#the-setup-guide) for the deployment.
+setup guide for the deployment.
 
 ## Signup and terms
 
@@ -150,7 +185,8 @@ sign-in method is in [Sign-in and accounts](sign-in.md).
 
 With `terms_url` set, the signup page asks the person to accept the terms
 first, and so does the invitation page before "Accept and sign in with a
-provider instead". A provider sign-in that would create an account without
+provider instead". With `privacy_url` set too, the box links the privacy policy
+beside the terms. A provider sign-in that would create an account without
 them stops on the return page, asks for the terms, and starts the sign-in again.
 
 Mail is optional: when an invitation email does not go out, the inviter gets

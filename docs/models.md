@@ -144,6 +144,10 @@ rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
+Where that rate is a models.dev one nobody set, a completion whose provider
+states what it charged is billed at that charge instead, which OpenRouter's
+does; see [Keeping the defaults current](configuration.md#keeping-the-defaults-current).
+
 An unknown price is reported differently per surface:
 
 | Surface | Unknown rate (including an unset cache rate in `pricing`) | Source field |
@@ -158,6 +162,15 @@ sends it.
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 from models.dev's entry for the model under the provider serving it:
 
+- A model a vLLM or SGLang server lists, through a configured instance, a
+  hosted provider or an organization's own key, reports the context length
+  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  above it. Each listing of the server is stored, so the value survives a
+  restart and reaches every worker within a minute. An organization's key is
+  read only for that organization's callers, and is listed when the key is
+  added or its models are refreshed. Where the provider has no models.dev entry for the model,
+  the entry comes from models.dev's Hugging Face listing, under the model's own
+  name or the model the server loaded.
 - Until the gateway has fetched models.dev, and always with
   `models_dev_metadata: false`, the entry comes from the models.dev catalog
   bundled with the gateway.
@@ -182,8 +195,13 @@ uses:
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
 
-All three are unset for a model models.dev does not describe, which means
-unknown rather than unsupported. An alias reports its target's capabilities but
+An SGLang server also says how it was started, and that overrides models.dev:
+without a tool-call parser it offers no `tools`, a reasoning parser adds
+`reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
+not say, so its models keep models.dev's flags.
+
+All three are unset for a model neither models.dev nor its server describes,
+which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
@@ -209,10 +227,21 @@ The models.dev catalog is refreshed as follows:
   default) and stores it in the database; every worker serves the stored copy
   within 30 seconds. A model listing never waits on the download, and after a
   restart the stored copy is served at once.
+- The stored catalog records the `models_dev_base_url` it came from. After a
+  restart with another one, it is served until a download from the new source
+  replaces it, which is tried within a minute rather than after the interval.
+- A catalog update, **Update catalog** on the Hosted providers page or
+  `POST /api/v1/hosted-providers/catalog-update/preview`, stores the catalog
+  it downloads for the prices at once when `models_dev_metadata` is on, so a
+  new model's kind and details arrive with its price. A database error there
+  is logged and does not fail the update.
 - A failed download is tried again a minute later. The gateway reads
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
   back. Both give the same limits, capabilities and prices.
+- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+  models.dev, which serves models.dev's catalog plus the models it does not
+  list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
 - When neither can be read, the last good copy stays in use and the gateway
   logs why.
 - A document is refused when it lists no models or when more than a quarter of
@@ -455,9 +484,27 @@ gives the wrong protocol shows the wrong route until models.dev is corrected.
 
 The dashboard's "Use this model" drawer reads this list. It shows the request
 for the route of the offering that answers, and offers a choice where the list
-has more than one ([Models and Routing](dashboard.md#models-and-routing)).
+has more than one ([Browsing the grouped catalog](#browsing-the-grouped-catalog)).
 
 ### Browsing the grouped catalog
+
+**Models** shows one card per model, with filters beside the list. A model's page
+compares every offering in a table, with each offering's limits and the price
+your organization pays.
+
+- Prices are shown in the unit they bill, such as "$0.50 / 1M" for tokens or
+  "$0.04 per image". A card shows the cheapest price when all offerings bill in
+  one unit, and "priced in several units" otherwise.
+- **Price rules** under the table lists each offering's overrides and multipliers
+  in words, such as "×0.5 on every price when service tier is flex". They are
+  read-only here; see [Overrides and multipliers](configuration.md#overrides-and-multipliers).
+- Each row shows the provider's own model ID, which tells apart offerings on one
+  provider, such as Bedrock's regional inference profiles.
+- **Use this model** opens a drawer with a request to copy, for the route the
+  offering is served on.
+
+The page is read-only. An organization sets its own rate on **Providers >
+Inference**, which an offering on one of its keys links to.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -645,7 +692,7 @@ Configure endpoint regions, relative capacity and the trusted location header in
 to restore baseline selection.
 
 The dashboard's Models page and the Routing page's Automatic fallback section
-show this catalog and this order; see [Models and Routing](dashboard.md#models-and-routing).
+show this catalog and this order; see [Automatic fallback](create-a-multi-provider-routing.md#automatic-fallback).
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the

@@ -55,6 +55,7 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
 )
+from gateway.services.pricing_service import is_estimated_rate, resolve_model_pricing
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
@@ -437,6 +438,11 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     [stored] = await _organization_rates(async_db)
     assert stored.input_price_per_million == Decimal("3.0")
     assert stored.origin == SEED_ORIGIN
+    # So settlement takes a charge the provider states over it (mozilla-ai/otari#3029).
+    resolved = await resolve_model_pricing(
+        async_db, "openai", "gpt-4o", as_of=stored.effective_from, organization_id=organization.id
+    )
+    assert resolved is not None and is_estimated_rate(resolved)
 
     # An admin chooses a rate, and the dataset stops reaching it.
     stored.input_price_per_million = Decimal("1.0")
@@ -448,6 +454,10 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     assert result.repriced == []
     [stored] = await _organization_rates(async_db)
     assert stored.input_price_per_million == Decimal("1.0")
+    resolved = await resolve_model_pricing(
+        async_db, "openai", "gpt-4o", as_of=stored.effective_from, organization_id=organization.id
+    )
+    assert resolved is not None and not is_estimated_rate(resolved)
 
 
 async def test_an_offered_model_says_what_its_rate_is_per(

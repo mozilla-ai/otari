@@ -6,16 +6,13 @@ own is answered by a guardrail this worker already built and holds, handed in as
 ``in_process`` and declared here as :class:`InProcessGuardrail`; nothing about it
 leaves the process, and nothing in this module knows how one is built.
 
-The guardrails service (``otari-anyguardrails-container``) wraps
-`any-guardrail <https://github.com/mozilla-ai/any-guardrail>`_ behind a small
-HTTP API. The only endpoint we call is::
+The guardrails service is any HTTP service the operator points
+``guardrails_url`` at. The only endpoint we call is::
 
     POST /validate  {profile, input_text, validate_kwargs}
         → {profile, result: {valid, explanation, score}}
 
-``result.valid is False`` means the guardrail flagged the input (e.g. the
-``prompt-injection`` profile — Deepset in-process, or DuoGuard via an
-encoderfile — detected a prompt injection).
+``result.valid is False`` means the guardrail flagged the input.
 
 Unlike the sandbox / web-search backends, this does **not** duck-type the MCP
 tool-loop ``pool`` protocol: guardrails never enter the tool loop. It is a flat

@@ -11,6 +11,7 @@ request does: an override the organization wrote itself would let it name the
 deployment's cost, down to zero.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -32,9 +33,25 @@ from gateway.types.tool_charges import (
 # Default pricing prices a provider-run search at its list price when the operator
 # set no rate, as models.dev prices a model. Anthropic: $10 per 1,000 searches
 # (https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool), read 2026-10-17.
+# OpenAI: $10 per 1,000 calls (https://platform.openai.com/docs/pricing), as every
+# OpenAI model in the bundled models.dev catalog prices it, read 2026-11-10.
 PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
     "anthropic:web_search": Decimal("0.01"),
+    "openai:web_search": Decimal("0.01"),
 }
+
+# Gemini 2.5 and earlier bill Google Search grounding per grounded prompt, however
+# many queries it ran; Gemini 3 bills each query (https://ai.google.dev/gemini-api/docs/pricing).
+# Keyed on the model alone: only Google's grounding reports searches on these
+# models, and a hosted provider or organization key serving them has a name of its own.
+_PER_PROMPT_SEARCH_MODEL = re.compile(r"(?:^|/)gemini-[12][.-]")
+
+
+def billed_provider_searches(model: str, searches: int) -> int:
+    """How many of the ``searches`` a model's provider ran it bills: one per prompt on Gemini 2.5 and earlier."""
+    if _PER_PROMPT_SEARCH_MODEL.search(model):
+        return min(searches, 1)
+    return searches
 
 
 class ToolRate(NamedTuple):

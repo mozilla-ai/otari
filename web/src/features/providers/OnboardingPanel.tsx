@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
+import { PlatformConnect } from "@/features/providers/PlatformConnect"
 import { welcomeGuideLink } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -36,14 +37,32 @@ export function OnboardingPanel({
   onEnablePricing,
   isEnabling,
   secretKeyConfigured,
+  onConnected,
 }: {
   onAddProvider: () => void
   needsPricing: boolean
   onEnablePricing: () => void
   isEnabling: boolean
   secretKeyConfigured: boolean
+  /** Called when otari.ai approves a connection started here. */
+  onConnected?: () => void
 }) {
-  const { href } = welcomeGuideLink(useDeployment())
+  const deployment = useDeployment()
+  const { href } = welcomeGuideLink(deployment)
+  const addProvider = (
+    // Disabled at 0.4 rather than hidden. Blocked is not the same as
+    // empty: an operator whose server has no secret key has to see the
+    // action they are being denied, or the page reads as though adding a
+    // provider is not a thing this product does.
+    <Button
+      variant="primary"
+      className="min-h-11 md:min-h-9"
+      isDisabled={!secretKeyConfigured}
+      onPress={onAddProvider}
+    >
+      Add your first provider
+    </Button>
+  )
   return (
     <Section
       className="border-y border-border py-5"
@@ -54,8 +73,9 @@ export function OnboardingPanel({
         <div>
           <h2 className="text-display-sub">Welcome to Otari</h2>
           <p className="mt-1 text-sm text-muted">
-            You are signed in. Add a provider to start serving models: three
-            quick steps.
+            {deployment.platform_connect
+              ? "You are signed in. Connect otari.ai or add a provider of your own to start serving models."
+              : "You are signed in. Add a provider to start serving models: three quick steps."}
           </p>
         </div>
       </div>
@@ -105,19 +125,34 @@ export function OnboardingPanel({
           to meter new models with public rates.
         </p>
       ) : null}
-      <div>
-        {/* Disabled at 0.4 rather than hidden. Blocked is not the same as
-              empty: an operator whose server has no secret key has to see the
-              action they are being denied, or the page reads as though adding a
-              provider is not a thing this product does. */}
-        <Button
-          variant="primary"
-          isDisabled={!secretKeyConfigured}
-          onPress={onAddProvider}
-        >
-          Add your first provider
-        </Button>
-      </div>
+      {deployment.platform_connect ? (
+        // Two ways to the first model, side by side and neither ahead of the
+        // other: the same button, and nothing chosen for the operator.
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="border border-border p-4">
+            {secretKeyConfigured ? (
+              <PlatformConnect onConnected={onConnected} />
+            ) : (
+              <p className="text-sm text-muted">
+                Connecting otari.ai stores a key, which needs{" "}
+                <code>OTARI_SECRET_KEY</code> set on the server.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-3 border border-border p-4">
+            <div>
+              <h3 className="text-title">Bring your own provider</h3>
+              <p className="mt-1 text-sm text-muted">
+                Use a key you already hold with a provider. Requests go straight
+                from this gateway to that provider.
+              </p>
+            </div>
+            <div>{addProvider}</div>
+          </div>
+        </div>
+      ) : (
+        <div>{addProvider}</div>
+      )}
     </Section>
   )
 }

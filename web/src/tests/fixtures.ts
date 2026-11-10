@@ -205,6 +205,8 @@ export function bootstrap(
     oauth_providers: [],
     mail_ready: false,
     feedback_enabled: true,
+    // Off, so a page test sends no connect read: the connect tests turn it on.
+    platform_connect: false,
     // Off, the setting default: the workload identity tests turn it on.
     federation_member_rules: false,
     // Off by default, matching the config default; the public-catalog tests

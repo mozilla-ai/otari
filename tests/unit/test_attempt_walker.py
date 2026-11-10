@@ -317,6 +317,25 @@ async def test_exhaustion_where_every_candidate_refused_the_request_as_too_large
 
 
 @pytest.mark.asyncio
+async def test_a_413_advances_to_the_next_candidate() -> None:
+    """A size limit is the provider's own, so another candidate may still take the request."""
+    chosen, result = await _walk(
+        [_attempt(1, "a"), _attempt(2, "b")], [_Rejection(413, "request too large for a"), "ok"]
+    )
+    assert chosen.position == 2
+    assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_single_attempt_413_keeps_the_providers_sentence_and_code() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a")], [_Rejection(413, "Request too large: Limit 8000, Requested 10974")])
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == "Request too large: Limit 8000, Requested 10974"
+    assert error_code_of(exc_info.value.headers) == REQUEST_TOO_LARGE
+
+
+@pytest.mark.asyncio
 async def test_exhaustion_where_every_prompt_was_too_long_keeps_that_code() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await _walk(
@@ -360,6 +379,7 @@ async def test_exhaustion_where_no_candidate_knew_the_model_is_a_502() -> None:
     [
         [_Rejection(400, "bad request"), _Rejection(404, "no such model")],
         [_Rejection(400, "bad request"), _http_error(503)],
+        [_Rejection(413, "request too large"), _Rejection(400, "bad request")],
         [_Rejection(429, "slow down"), _Rejection(429, "slow down")],
     ],
 )

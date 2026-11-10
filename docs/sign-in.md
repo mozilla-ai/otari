@@ -38,16 +38,27 @@ Otari keeps identities for dashboard sign-in and user records for request
 attribution and per-user budgets. Deleting or deactivating a user blocks future
 access but keeps historical usage.
 
+**Account settings** holds the name you are known by in the account menu, the
+organization roster and the Overview's user column. Someone added by address has
+no name until they set one; with no name, you are shown by your sign-in address.
+
+Signing in can also add you to an organization that has proven your email
+domain; see [Email-domain auto-join](members.md#email-domain-auto-join).
+
 ### Dashboard sessions and identity
 
 The first operator signs in with the master key, which Otari exchanges for an
-opaque, HttpOnly session cookie. Once the operator sets an email and password,
-the dashboard signs in with those; the master key stays an API credential and
+opaque, HttpOnly session cookie. The setup link a first run prints carries a
+generated master key and asks only for the email and password. Once the
+operator sets an email and password, the dashboard signs in with those; the master key stays an API credential and
 recovery path.
 
 The email and password form appears whenever any active identity has a
 password, even before the operator claims the deployment. Until then, the
 master-key box is shown beside it.
+
+A link to a dashboard page opened while signed out shows the sign-in screen
+first, then that page.
 
 Sessions expire after `dashboard_session_ttl_hours` and can be revoked.
 Password changes, master-key rotation, sign-out and identity deactivation

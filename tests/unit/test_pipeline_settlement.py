@@ -1417,6 +1417,130 @@ async def test_cost_override_settlement_names_no_rate(monkeypatch: pytest.Monkey
     assert row.calculated_at == row.timestamp
 
 
+# OpenRouter's usage on the first row of mozilla-ai/otari#3029: 78 in (48 cached), 25 out.
+_OPENROUTER_USAGE = {
+    "prompt_tokens": 78,
+    "completion_tokens": 25,
+    "total_tokens": 103,
+    "prompt_tokens_details": {"cached_tokens": 48},
+    "cost": 0.00001015,
+    "is_byok": False,
+    "cost_details": {"upstream_inference_cost": 0.00001015},
+}
+
+
+def _openrouter_rate(*, origin: str | None, source: PriceSource = "organization") -> ResolvedPricing:
+    pricing = ModelPricing(
+        model_key="openrouter:openai/gpt-oss-120b",
+        input_price_per_million=Decimal("0.15"),
+        output_price_per_million=Decimal("0.60"),
+        cache_read_price_per_million=Decimal("0.075"),
+        origin=origin,
+    )
+    return ResolvedPricing(pricing, source, "row-id", datetime(2026, 9, 1, tzinfo=UTC))
+
+
+async def _settle_openrouter(usage: dict[str, Any], *, provider: str = "openrouter") -> tuple[Any, LoggedUsage]:
+    writer = _FakeLogWriter()
+    logged = await pipeline.record_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="openai/gpt-oss-120b",
+        provider=provider,
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage.model_validate(usage),
+    )
+    return writer.put_rows[0], logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resolved",
+    [
+        pytest.param(_openrouter_rate(origin="seed"), id="seeded"),
+        pytest.param(_openrouter_rate(origin=None, source="defaults"), id="defaults"),
+        pytest.param(None, id="unpriced"),
+    ],
+)
+async def test_a_charge_openrouter_states_settles_in_place_of_a_rate_nobody_chose(
+    monkeypatch: pytest.MonkeyPatch, resolved: ResolvedPricing | None
+) -> None:
+    """A seeded rate is one headline price, and OpenRouter's moves with its upstream (mozilla-ai/otari#3029)."""
+    _stub_pricing(monkeypatch, resolved)
+
+    row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
+
+    assert row.cost == Decimal("0.000010")
+    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None)
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == ("reported", None, None)
+    assert (row.billing_meters, row.pricing_breakdown) == (None, None)
+    assert row.calculated_at == row.timestamp
+    assert pipeline.inline_settlement(logged) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_rate_somebody_set_prices_an_openrouter_call_over_its_stated_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="api"))
+
+    row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
+
+    # 30 x 0.15 + 48 x 0.075 + 25 x 0.60 micro-dollars.
+    assert row.cost == Decimal("0.000023")
+    assert logged.pricing_source == "organization"
+
+
+@pytest.mark.asyncio
+async def test_a_byok_openrouter_call_settles_at_its_fee_and_the_upstream_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="seed"))
+    usage = _OPENROUTER_USAGE | {
+        "cost": 0.000001,
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": 0.00002},
+    }
+
+    row, _ = await _settle_openrouter(usage)
+
+    assert row.cost == Decimal("0.000021")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usage", "provider"),
+    [
+        pytest.param(_OPENROUTER_USAGE, "together", id="another-provider"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": "0.00001015"}, "openrouter", id="not-a-number"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": True}, "openrouter", id="a-bool"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": -1.0}, "openrouter", id="negative"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": float("nan")}, "openrouter", id="nan"),
+        pytest.param(_OPENROUTER_USAGE | {"is_byok": True, "cost_details": None}, "openrouter", id="byok-no-upstream"),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": -0.01, "is_byok": True, "cost_details": {"upstream_inference_cost": 0.02}},
+            "openrouter",
+            id="byok-negative-part",
+        ),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": 1e308, "is_byok": True, "cost_details": {"upstream_inference_cost": 1e308}},
+            "openrouter",
+            id="byok-overflow",
+        ),
+    ],
+)
+async def test_a_charge_nobody_can_read_leaves_the_seeded_rate_to_price_the_call(
+    monkeypatch: pytest.MonkeyPatch, usage: dict[str, Any], provider: str
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="seed"))
+
+    row, logged = await _settle_openrouter(usage, provider=provider)
+
+    assert row.cost == Decimal("0.000023")
+    assert logged.pricing_source == "organization"
+
+
 @pytest.mark.asyncio
 async def test_oversized_pricing_reference_is_recorded_as_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """A model key past the column's length must not fail the row's insert."""

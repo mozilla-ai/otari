@@ -247,3 +247,59 @@ def test_a_library_logger_without_a_handler_is_masked(
     logging.lastResort.handle(record)
 
     assert GITHUB_TOKEN not in capsys.readouterr().err
+
+
+def test_uvicorn_lifecycle_lines_print_only_when_debugging() -> None:
+    quiet = log_config.uvicorn_log_config(logging.INFO)["loggers"]
+    assert quiet["uvicorn.error"]["level"] == "WARNING"
+    # Requests are still logged, and so is anything uvicorn warns about.
+    assert quiet["uvicorn.access"]["level"] == "INFO"
+
+    assert log_config.uvicorn_log_config(logging.DEBUG)["loggers"]["uvicorn.error"]["level"] == "INFO"
+
+
+def test_log_plain_prints_lines_without_columns_or_wrapping(captured_logger: io.StringIO) -> None:
+    link = "http://localhost:8000/#/setup?key=" + LONG_SECRET
+
+    log_config.log_plain("Open this link:", link, level=logging.WARNING)
+
+    assert captured_logger.getvalue() == f"Open this link:\n{link}\n"
+
+
+def test_log_plain_is_silent_below_the_logger_level(captured_logger: io.StringIO) -> None:
+    log_config.log_plain("Otari is running", level=logging.INFO)
+
+    assert captured_logger.getvalue() == ""
+
+
+def _access_record(path: str, status: int) -> logging.LogRecord:
+    return logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:1", "GET", path, "1.1", status),
+        None,
+    )
+
+
+def test_successful_health_probes_leave_the_access_log_and_nothing_else_does() -> None:
+    probes = ("/api/v1/health", "/api/v1/health/readiness")
+    config = log_config.uvicorn_log_config(logging.INFO, probe_paths=probes)
+    assert "probes" in config["handlers"]["access"]["filters"]
+    assert "probes" not in config["handlers"]["default"]["filters"]
+    probe_filter = log_config.ProbeAccessFilter(probes)
+
+    assert probe_filter.filter(_access_record("/api/v1/health", 200)) is False
+    assert probe_filter.filter(_access_record("/api/v1/health/readiness?verbose=1", 200)) is False
+    # A failing probe, and every other request, is still logged.
+    assert probe_filter.filter(_access_record("/api/v1/health/readiness", 503)) is True
+    assert probe_filter.filter(_access_record("/api/v1/models", 200)) is True
+    assert probe_filter.filter(_access_record("/api/v1/healthy", 200)) is True
+
+
+def test_debug_level_logs_health_probes_too() -> None:
+    config = log_config.uvicorn_log_config(logging.DEBUG, probe_paths=("/api/v1/health",))
+
+    assert "probes" not in config["handlers"]["access"]["filters"]

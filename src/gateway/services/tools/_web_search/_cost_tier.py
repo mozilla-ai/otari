@@ -19,12 +19,8 @@ def refused_cost_tier(instance: ToolInstance) -> str | None:
 
 def _cost_tier(instance: ToolInstance) -> str | None:
     """The provider's cost tier option, one at most; none for a provider the instance's library does not serve."""
-    if instance.kind == "search":
-        if instance.provider not in any_search.AnySearch.get_supported_providers():
-            return None
-        search_options = any_search.AnySearch.get_provider_metadata(instance.provider).options
-        return next((option.name for option in search_options if option.cost_tier), None)
-    if instance.provider not in any_fetch.AnyFetch.get_supported_providers():
+    library = any_search.AnySearch if instance.kind == "search" else any_fetch.AnyFetch
+    if instance.provider not in library.get_supported_providers():
         return None
-    fetch_options = any_fetch.AnyFetch.get_provider_metadata(instance.provider).options
-    return next((option.name for option in fetch_options if option.cost_tier), None)
+    options = library.get_provider_metadata(instance.provider).options
+    return next((option.name for option in options if option.cost_tier), None)

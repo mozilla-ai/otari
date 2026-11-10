@@ -1350,6 +1350,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
         "baseline": (),
     },
+    "gateway.models.catalog.ServedModel": {
+        "repository": "gateway/repositories/catalog/served_model_repository.py",
+        "baseline": (),
+    },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
         "baseline": (
@@ -1531,6 +1535,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.providers.HostedProviderModel": {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.providers.PlatformConnectAttempt": {
+        "repository": "gateway/repositories/providers/platform_connect_repository.py",
         "baseline": (),
     },
     "gateway.models.providers.ModelAlias": {

@@ -58,6 +58,8 @@ from gateway.services.tools import (
     is_capped_call,
     native_rendering,
     owning_backend,
+    provider_web_searches,
+    with_provider_web_searches,
 )
 from gateway.streaming import RESPONSES_TERMINAL_EVENTS
 
@@ -210,11 +212,13 @@ def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
     )
 
 
-def _with_earlier_rounds_usage(event: Any, acc: dict[str, Any]) -> Any:
+def _with_earlier_rounds_usage(event: Any, acc: dict[str, Any], final_searches: int) -> Any:
     """Return a terminal event whose usage adds the rounds the loop hid to the final round's.
 
     Pass-through when no round was hidden. ``streaming_generator`` reads the usage
     row off ``event.response.usage``, so it is the only report that counts.
+    ``final_searches`` is the final round's own provider searches, counted before
+    its output was rewritten.
     """
     if not any(acc[name] for name in _USAGE_COUNTS):
         return event
@@ -224,6 +228,8 @@ def _with_earlier_rounds_usage(event: Any, acc: dict[str, Any]) -> Any:
         return event
     final = _round_usage(usage)
     new_usage = _with_usage(usage, {name: final[name] + acc[name] for name in _USAGE_COUNTS})
+    if acc["provider_web_searches"]:
+        new_usage = with_provider_web_searches(new_usage, final_searches + acc["provider_web_searches"])
     new_response = response_obj.model_copy(update={"usage": new_usage})
     return event.model_copy(update={"response": new_response})
 
@@ -419,15 +425,24 @@ class _ResponsesToolLoopStrategy:
         # final response can announce them natively; ``compactions`` keeps replay
         # state produced by hidden iterations available to the caller. See
         # ``fold_usage``.
-        return {**dict.fromkeys(_USAGE_COUNTS, 0), "native_items": [], "compactions": []}
+        return {
+            **dict.fromkeys(_USAGE_COUNTS, 0),
+            "provider_web_searches": 0,
+            "native_items": [],
+            "compactions": [],
+        }
 
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
             _add_round_usage(acc, result.usage)
+        acc["provider_web_searches"] += provider_web_searches(result)
 
     def fold_usage(self, result: Response, acc: dict[str, Any]) -> None:
         if result.usage is not None:
             result.usage = _with_usage(result.usage, acc)
+            # Each round reports its own searches, so the final one alone undercounts.
+            if acc["provider_web_searches"]:
+                result.usage = with_provider_web_searches(result.usage, acc["provider_web_searches"])
         # Prepend a native item per gateway-run search or execution. The loop
         # consumed the raw ``function_call`` items, so without this the caller has
         # no way to know the call happened; they come first because they did.
@@ -529,6 +544,8 @@ class _ResponsesToolLoopStrategy:
         # the SDK's stream helper treats as a protocol error.
         return {
             **dict.fromkeys(_USAGE_COUNTS, 0),
+            # Searches the provider ran on hidden rounds, added to the final round's.
+            "provider_web_searches": 0,
             "started": 0,
             "next_sequence": 0,
             "next_output_index": 0,
@@ -680,6 +697,7 @@ class _ResponsesToolLoopStrategy:
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_terminal is None:
             return []
+        final_searches = provider_web_searches(getattr(state.deferred_terminal, "response", None))
         # The terminal event carries the whole response, whose ``output`` still lists
         # the gateway's own function_call items even though their item events were
         # hidden. Left in, ``get_final_response()`` would contradict the stream the
@@ -690,7 +708,7 @@ class _ResponsesToolLoopStrategy:
             folded = _with_output_as_shown(state.deferred_terminal, state, acc["shown_items"])
         else:
             folded = state.deferred_terminal
-        folded = _with_earlier_rounds_usage(folded, acc)
+        folded = _with_earlier_rounds_usage(folded, acc, final_searches)
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
@@ -703,6 +721,7 @@ class _ResponsesToolLoopStrategy:
             iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
             if iter_usage is not None:
                 _add_round_usage(acc, iter_usage)
+            acc["provider_web_searches"] += provider_web_searches(iter_response)
 
     def synthetic_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.

@@ -1,7 +1,6 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Checkbox } from "@/design-system/forms/Checkbox"
 import { useMailedLinkStatus, useResetPassword } from "@/shared/api/auth"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
@@ -13,6 +12,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import { TermsAcceptanceField } from "./TermsAcceptanceField"
 import { CheckingLinkPanel, UnusableLinkPanel } from "./UnusableLinkPanel"
 
 /**
@@ -164,32 +164,15 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
         />
-        {/* Beside the checkbox rather than inside its label, for the reason
-            `SignupPage` gives: nested, the link only ticked the box. */}
         {terms_url !== null ? (
-          <div className="flex flex-wrap items-center gap-x-1 text-caption">
-            <Checkbox
-              isSelected={isTermsAccepted}
-              onChange={(next) => {
-                setIsTermsAccepted(next)
-                clearError()
-              }}
-              ariaLabel="I accept the terms of service"
-            >
-              <span className="text-caption">I accept the</span>
-            </Checkbox>
-            <span>
-              <a
-                href={terms_url}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-link hover:text-link-hover"
-              >
-                terms of service
-              </a>
-              .
-            </span>
-          </div>
+          <TermsAcceptanceField
+            termsUrl={terms_url}
+            isAccepted={isTermsAccepted}
+            onChange={(next) => {
+              setIsTermsAccepted(next)
+              clearError()
+            }}
+          />
         ) : null}
         <ErrorBanner error={reset.error} />
         <Button

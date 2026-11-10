@@ -115,6 +115,7 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             reasoning_tokens=reasoning_tokens,
+            provider_web_searches=provider_web_searches_of(usage),
             service_tier=service_tier if service_tier is not None else service_tier_of(usage),
             inference_geo=usage.inference_geo,
         )
@@ -178,8 +179,16 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
 
 
 def provider_web_searches_of(usage: CompletionUsage) -> int:
-    """Return the searches the provider ran itself, which only a :class:`GatewayUsage` carries."""
-    return usage.provider_web_searches if isinstance(usage, GatewayUsage) else 0
+    """Return the searches the provider ran itself.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to ``server_tool_use.web_search_requests``,
+    which any-llm fills for Gemini's Google Search grounding).
+    """
+    if isinstance(usage, GatewayUsage):
+        return usage.provider_web_searches
+    server_tool_use = usage.server_tool_use
+    return (server_tool_use.web_search_requests or 0) if server_tool_use is not None else 0
 
 
 def service_tier_of(usage: CompletionUsage) -> str | None:
@@ -198,6 +207,35 @@ def reasoning_tokens_of(usage: CompletionUsage) -> int:
     if usage.completion_tokens_details is not None:
         return usage.completion_tokens_details.reasoning_tokens or 0
     return 0
+
+
+def provider_reported_cost_of(usage: CompletionUsage, provider: str | None) -> float | None:
+    """What ``provider`` says the call cost, in USD, or ``None`` where it says nothing usable.
+
+    Only OpenRouter states one, as ``usage.cost``. On a key in its BYOK mode
+    that is OpenRouter's fee alone, and the upstream's charge to the key is
+    ``cost_details.upstream_inference_cost``, so the two are summed. Any other
+    provider's ``cost`` extra is ignored: nothing says what unit it is in.
+    """
+    if provider != "openrouter":
+        return None
+    extras = usage.model_extra or {}
+    parts = [extras.get("cost")]
+    if extras.get("is_byok") is True:
+        details = extras.get("cost_details")
+        parts.append(details.get("upstream_inference_cost") if isinstance(details, dict) else None)
+    amounts = [
+        part
+        for part in parts
+        if isinstance(part, int | float) and not isinstance(part, bool) and math.isfinite(part) and part >= 0
+    ]
+    if len(amounts) != len(parts):
+        return None
+    try:
+        total = math.fsum(amounts)
+    except OverflowError:
+        return None
+    return total if math.isfinite(total) else None
 
 
 # Provider-specific field(s) any-llm leaves in ``usage.model_extra`` that sum to
