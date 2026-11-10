@@ -663,6 +663,64 @@ async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobo
     assert not (stored.sso_required and not enabled)
 
 
+async def test_enforcing_and_deleting_at_once_cannot_require_a_connection_that_is_gone(
+    async_db: AsyncSession,
+) -> None:
+    """The third path over the same pair: deleting the connection reads the switch, enabling reads it.
+
+    Deleting a child row takes no lock on the organization, so only the settings lock keeps what
+    each one read true when it writes. Without it both commit and the organization requires a
+    connection nobody can reach.
+    """
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    owner_id, organization_id = owner.id, organization.id
+    engine = create_async_engine(async_db.get_bind().engine.url)
+
+    async def enforce(session: AsyncSession) -> object:
+        actor = await UserRepository(session).get(owner_id)
+        assert actor is not None
+        await _connection_service(session).set_sso_enforcement_for_user(
+            user=actor, required=True, break_glass_user_id=None, break_glass_waived=True
+        )
+        return None
+
+    async def remove(session: AsyncSession) -> object:
+        actor = await UserRepository(session).get(owner_id)
+        assert actor is not None
+        await _connection_service(session).delete_for_user(user=actor)
+        return None
+
+    async def run(attempt: Callable[[AsyncSession], Awaitable[object]]) -> object:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            try:
+                return await attempt(session)
+            except Exception as error:  # noqa: BLE001 - the outcome is the assertion
+                return error
+
+    try:
+        outcomes = list(await asyncio.gather(run(enforce), run(remove)))
+    finally:
+        await engine.dispose()
+
+    refused = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert len(refused) == 1
+
+    stored = await _reloaded(async_db, organization)
+    remaining = (
+        await async_db.execute(
+            select(func.count())
+            .select_from(OIDCConnection)
+            .where(col(OIDCConnection.organization_id) == organization_id)
+        )
+    ).scalar_one()
+    assert not (stored.sso_required and remaining == 0)
+
+
 async def test_enforcement_is_permitted_once_the_connection_has_signed_somebody_in(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(

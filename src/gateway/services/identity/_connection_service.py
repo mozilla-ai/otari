@@ -243,6 +243,11 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
 
         async with self._uow:
+            # The third path deciding on the enforcement switch and the connection together, so it
+            # serializes on the same row as the other two. Without it, a delete that read the switch
+            # off and an enable that still saw the connection both commit, and the organization then
+            # requires a connection that does not exist.
+            await self._organizations.organizations.lock_settings(organization.id)
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
                 raise OIDCConnectionNotFoundError
