@@ -75,8 +75,12 @@ export function McpCatalogDialog({
   const [isAdding, setIsAdding] = useState(false)
 
   const added = new Set(existing.map((server) => endpointKey(server.url)))
+  // A featured entry and its catalog row are one server, so picking either
+  // replaces the other. They can list different URLs once the catalog moved
+  // on, and only the row that was ticked shows as picked: its URL is the one
+  // that gets added.
   const isPicked = (pick: CatalogPick) =>
-    picks.some((other) => other.name === pick.name)
+    picks.some((other) => other.name === pick.name && other.url === pick.url)
 
   const toggle = (pick: CatalogPick, isSelected: boolean) =>
     setPicks((current) =>

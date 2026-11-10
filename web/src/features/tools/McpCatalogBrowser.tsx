@@ -1,17 +1,13 @@
 import { type ReactNode, useState } from "react"
 
 import type { McpCatalogFeatured } from "@/client"
-import { Button } from "@/design-system/actions/Button"
+import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Chip } from "@/design-system/indicators/Chip"
 import { type CatalogPick, pickOf } from "@/features/tools/mcpCatalog"
-import {
-  MCP_CATALOG_PAGE_SIZE,
-  useMcpCatalogServers,
-} from "@/shared/api/mcpCatalog"
-import { formatNumber } from "@/shared/helpers/format"
+import { useMcpCatalogServers } from "@/shared/api/mcpCatalog"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // The gateway's own bound on `q`.
@@ -69,15 +65,12 @@ export function McpCatalogBrowser({
 }) {
   const [typed, setTyped] = useState("")
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(25)
   const query = useDebounced(typed.trim())
-  const servers = useMcpCatalogServers({ query, page })
+  const servers = useMcpCatalogServers({ query, page, pageSize })
 
   const rows = servers.data?.data ?? []
-  const total = servers.data?.count ?? 0
   const isSearching = query !== ""
-  const first = page * MCP_CATALOG_PAGE_SIZE + 1
-  const last = page * MCP_CATALOG_PAGE_SIZE + rows.length
-  const hasNext = last < total
 
   return (
     <div className="flex flex-col gap-4">
@@ -119,46 +112,48 @@ export function McpCatalogBrowser({
         </h3>
         {servers.isPending && !servers.data ? (
           <EmptyMessage>Reading the catalog.</EmptyMessage>
-        ) : rows.length === 0 ? (
-          <EmptyMessage>
-            {isSearching ? `No server matches "${query}".` : emptyCatalog}
-          </EmptyMessage>
         ) : (
           <>
-            <ul aria-label={isSearching ? "Results" : "All servers"}>
-              {rows.map((server) => {
-                const pick = pickOf(server)
-                return (
-                  <CatalogRow
-                    key={server.id}
-                    pick={pick}
-                    control={renderControl(pick)}
-                    note={renderNote?.(pick)}
-                  />
-                )
-              })}
-            </ul>
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-              <span className="text-caption">
-                {`${formatNumber(first)}–${formatNumber(last)} of ${formatNumber(total)}`}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  className="min-h-11 md:min-h-9"
-                  isDisabled={page === 0 || servers.isFetching}
-                  onPress={() => setPage((current) => current - 1)}
-                >
-                  Previous
-                </Button>
-                <Button
-                  className="min-h-11 md:min-h-9"
-                  isDisabled={!hasNext || servers.isFetching}
-                  onPress={() => setPage((current) => current + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            {rows.length === 0 ? (
+              <EmptyMessage>
+                {isSearching
+                  ? `No server matches "${query}".`
+                  : page === 0
+                    ? emptyCatalog
+                    : "Nothing on this page. The catalog changed since it was opened."}
+              </EmptyMessage>
+            ) : (
+              <ul aria-label={isSearching ? "Results" : "All servers"}>
+                {rows.map((server) => {
+                  const pick = pickOf(server)
+                  return (
+                    <CatalogRow
+                      key={server.id}
+                      pick={pick}
+                      control={renderControl(pick)}
+                      note={renderNote?.(pick)}
+                    />
+                  )
+                })}
+              </ul>
+            )}
+            {/* Kept on an empty page past the first, so there is a way back
+                when a sync shortened the catalog under the reader. */}
+            {rows.length > 0 || page > 0 ? (
+              <TablePagination
+                label="catalog servers"
+                page={page}
+                pageSize={pageSize}
+                total={servers.data?.count ?? null}
+                rowsOnPage={rows.length}
+                isFetching={servers.isFetching}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size)
+                  setPage(0)
+                }}
+              />
+            ) : null}
           </>
         )}
       </section>

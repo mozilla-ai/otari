@@ -278,4 +278,74 @@ describe("McpCatalogDialog", () => {
     ).toBeChecked()
     expect(creates(calls)).toEqual([])
   })
+
+  it("ticks only the row that was picked when the shelf and the catalog list different URLs", async () => {
+    const calls = mockApi({
+      servers: [SENTRY],
+      featured: [
+        mcpCatalogFeatured({
+          name: SENTRY.name,
+          title: "Sentry",
+          url: "https://old.sentry.example/mcp",
+          catalog_status: "changed",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderDialog()
+    await screen.findByRole("list", { name: "All servers" })
+
+    const [featured, listed] = screen.getAllByRole("checkbox", {
+      name: "Select Sentry",
+    })
+    await user.click(featured)
+    expect(featured).toBeChecked()
+    expect(listed).not.toBeChecked()
+    // Picking the catalog's row instead replaces it: one server, one URL.
+    await user.click(listed)
+    expect(featured).not.toBeChecked()
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Review" }))
+    await user.click(screen.getByRole("button", { name: "Add 1 server" }))
+    await screen.findByRole("list", { name: "What was added" })
+    expect(creates(calls).map((call) => call.body?.url)).toEqual([SENTRY.url])
+  })
+
+  it("pages through the catalog on the gateway", async () => {
+    const many = Array.from({ length: 25 }, (_, index) =>
+      mcpCatalogServer({
+        id: `id-${index}`,
+        name: `io.example/s${index}`,
+        title: `Server ${index}`,
+        url: `https://s${index}.example/mcp`,
+      }),
+    )
+    const calls: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.includes("/mcp-catalog/featured")) {
+        return Response.json({ data: [], count: 0 })
+      }
+      // The second page is empty, as it is when a sync shortened the catalog.
+      const skip = new URL(url, "http://localhost").searchParams.get("skip")
+      return Response.json({ data: skip === "0" ? many : [], count: 60 })
+    })
+    const user = userEvent.setup()
+    renderDialog()
+    await screen.findByText("Server 0")
+
+    await user.click(
+      screen.getByRole("button", { name: "Next page, catalog servers" }),
+    )
+
+    expect(await screen.findByText(/Nothing on this page/)).toBeInTheDocument()
+    expect(calls.some((url) => url.includes("skip=25&limit=25"))).toBe(true)
+    // The way back is still there.
+    await user.click(
+      screen.getByRole("button", { name: "Previous page, catalog servers" }),
+    )
+    expect(await screen.findByText("Server 0")).toBeInTheDocument()
+  })
 })

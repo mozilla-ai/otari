@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
-import type { McpCatalogFeatured, McpCatalogSyncStatus } from "@/client"
+import type { McpCatalogFeatured } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -9,16 +9,14 @@ import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Chip } from "@/design-system/indicators/Chip"
-import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { McpCatalogSync } from "@/features/organization/mcpCatalog/McpCatalogSync"
 import { canManage } from "@/features/organization/roles"
 import { McpCatalogBrowser } from "@/features/tools/McpCatalogBrowser"
 import {
   useFeaturedMcpServers,
   useFeatureMcpServer,
-  useMcpCatalogSync,
-  useRequestMcpCatalogSync,
   useUnfeatureMcpServer,
 } from "@/shared/api/mcpCatalog"
 import {
@@ -26,97 +24,11 @@ import {
   useOrganizationContext,
 } from "@/shared/api/organizations"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { formatDateTimeMinutes, formatNumber } from "@/shared/helpers/format"
+import { formatDateTimeMinutes } from "@/shared/helpers/format"
 
 // The organization's featured shelf, and for an operator the sync that fills
 // the catalog under it. Two audiences on one page because they are one
 // subject: what the Browse catalog list offers a workspace, and in what order.
-
-const MODE_COPY: Record<McpCatalogSyncStatus["mode"], string> = {
-  off: "Off. This deployment never contacts the MCP Registry (mcp_catalog_sync is off).",
-  manual: "Manual. A sync runs only when an operator starts one here.",
-  scheduled: "Scheduled. A sync also runs on its own.",
-}
-
-function outcomeLine(status: McpCatalogSyncStatus): {
-  dot: string
-  text: string
-} {
-  if (status.running) {
-    return {
-      dot: "bg-info",
-      text: `Syncing. ${formatNumber(status.pages)} pages read, ${formatNumber(status.kept)} servers kept so far.`,
-    }
-  }
-  if (status.requested) {
-    return { dot: "bg-info", text: "A sync starts within a minute." }
-  }
-  if (status.outcome === "complete") {
-    return {
-      dot: "bg-success",
-      text: `Complete on ${formatDateTimeMinutes(status.finished_at)}: ${formatNumber(status.kept)} servers kept of ${formatNumber(status.fetched)} read, ${formatNumber(status.removed)} removed.`,
-    }
-  }
-  if (status.outcome === "partial") {
-    return {
-      dot: "bg-warning",
-      text: `Partial on ${formatDateTimeMinutes(status.finished_at)}: ${status.error ?? "it stopped early"}. The ${formatNumber(status.pages)} pages it read were kept, nothing was removed, and the next sync resumes there.`,
-    }
-  }
-  if (status.outcome === "failed") {
-    return {
-      dot: "bg-danger",
-      text: `Failed on ${formatDateTimeMinutes(status.finished_at)}: ${status.error ?? "no page could be read"}. The catalog was left as it was.`,
-    }
-  }
-  return { dot: "bg-text-subtle", text: "No sync has run yet." }
-}
-
-function SyncGroup() {
-  const sync = useMcpCatalogSync(true)
-  const request = useRequestMcpCatalogSync()
-  const status = sync.data
-  const line = status ? outcomeLine(status) : undefined
-  const isBusy = status ? status.running || status.requested : false
-
-  return (
-    <SettingsGroup
-      title="Registry sync"
-      description="The catalog is a copy of the official MCP Registry, kept only for remote servers Otari can connect to. Operators only."
-      docsHref={docsSourceHref("mcp-catalog.md")}
-      isBounded
-      action={
-        <Button
-          variant="primary"
-          className="min-h-11 md:min-h-9"
-          isDisabled={!status || status.mode === "off" || isBusy}
-          isPending={request.isPending}
-          onPress={() => request.mutate()}
-        >
-          Sync now
-        </Button>
-      }
-    >
-      <div className="flex flex-col gap-2 py-3">
-        <ErrorBanner error={sync.error ?? request.error} />
-        {status && line ? (
-          <>
-            <p className="flex items-start gap-2 text-sm">
-              <Dot className={`mt-1.5 ${line.dot}`} />
-              <span>{line.text}</span>
-            </p>
-            <p className="text-caption">
-              {`${formatNumber(status.server_count)} servers in the catalog. ${MODE_COPY[status.mode]}`}
-              {status.next_sync_at
-                ? ` Next sync ${formatDateTimeMinutes(status.next_sync_at)}.`
-                : ""}
-            </p>
-          </>
-        ) : null}
-      </div>
-    </SettingsGroup>
-  )
-}
 
 const STATUS_CHIP: Record<
   McpCatalogFeatured["catalog_status"],
@@ -162,13 +74,10 @@ export function McpCatalogPage() {
               {row.requires_token ? (
                 <Chip tone="info">Needs a token</Chip>
               ) : null}
-              {chip ? (
-                <span title={chip.detail}>
-                  <Chip tone={chip.tone}>{chip.label}</Chip>
-                </span>
-              ) : null}
+              {chip ? <Chip tone={chip.tone}>{chip.label}</Chip> : null}
             </span>
             <span className="font-mono text-caption">{row.name}</span>
+            {chip ? <span className="text-caption">{chip.detail}</span> : null}
           </span>
         )
       },
@@ -192,26 +101,31 @@ export function McpCatalogPage() {
     columns.push({
       id: "actions",
       header: "",
-      cell: (row) => (
-        <RowActionRow>
-          {row.catalog_status === "changed" && row.catalog_server_id ? (
+      cell: (row) => {
+        // Only an entry whose catalog URL moved has a newer copy to take.
+        const newer =
+          row.catalog_status === "changed" ? row.catalog_server_id : null
+        return (
+          <RowActionRow>
+            {newer ? (
+              <RowAction
+                icon={FiRefreshCw}
+                label="Update"
+                ariaLabel={`Update ${row.title} to the catalog's URL`}
+                isDisabled={feature.isPending}
+                onPress={() => feature.mutate(newer)}
+              />
+            ) : null}
             <RowAction
-              icon={FiRefreshCw}
-              label="Update"
-              ariaLabel={`Update ${row.title} to the catalog's URL`}
-              isDisabled={feature.isPending}
-              onPress={() => feature.mutate(row.catalog_server_id as string)}
+              icon={FiTrash2}
+              label="Remove"
+              ariaLabel={`Remove ${row.title}`}
+              isDisabled={unfeature.isPending && unfeature.variables === row.id}
+              onPress={() => unfeature.mutate(row.id)}
             />
-          ) : null}
-          <RowAction
-            icon={FiTrash2}
-            label="Remove"
-            ariaLabel={`Remove ${row.title}`}
-            isDisabled={unfeature.isPending && unfeature.variables === row.id}
-            onPress={() => unfeature.mutate(row.id)}
-          />
-        </RowActionRow>
-      ),
+          </RowActionRow>
+        )
+      },
     })
   }
 
@@ -267,7 +181,7 @@ export function McpCatalogPage() {
         ) : null}
       </SettingsGroup>
 
-      {isOperator ? <SyncGroup /> : null}
+      {isOperator ? <McpCatalogSync /> : null}
 
       <Dialog
         isOpen={isAdding}

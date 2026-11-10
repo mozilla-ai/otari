@@ -13,7 +13,9 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { MCP_CATALOG, MCP_CATALOG_SYNC_POLL_MS } from "@/shared/api/queryKeys"
 
-export const MCP_CATALOG_PAGE_SIZE = 25
+// A sync changes the catalog at most a few times a day, so a page read a
+// minute ago is still the page.
+const CATALOG_STALE_MS = 60_000
 
 /**
  * One page of the catalog, filtered by the gateway. The previous page stays on
@@ -22,21 +24,22 @@ export const MCP_CATALOG_PAGE_SIZE = 25
 export function useMcpCatalogServers({
   query,
   page,
-  enabled = true,
+  pageSize,
 }: {
   query: string
   /** 0-based. */
   page: number
-  enabled?: boolean
+  /** At most 100, the gateway's bound. */
+  pageSize: number
 }) {
   return useQuery({
-    queryKey: [MCP_CATALOG, "servers", query, page],
-    enabled,
+    queryKey: [MCP_CATALOG, "servers", query, page, pageSize],
     placeholderData: keepPreviousData,
+    staleTime: CATALOG_STALE_MS,
     queryFn: () => {
       const params = new URLSearchParams({
-        skip: String(page * MCP_CATALOG_PAGE_SIZE),
-        limit: String(MCP_CATALOG_PAGE_SIZE),
+        skip: String(page * pageSize),
+        limit: String(pageSize),
       })
       if (query) params.set("q", query)
       return apiFetch<McpCatalogServers>(`/mcp-catalog/servers?${params}`)
@@ -49,6 +52,8 @@ export function useFeaturedMcpServers(enabled = true) {
   return useQuery({
     queryKey: [MCP_CATALOG, "featured"],
     enabled,
+    // Changed only by this organization's admins, and every write here invalidates it.
+    staleTime: CATALOG_STALE_MS,
     queryFn: () =>
       apiFetch<McpCatalogFeaturedList>(
         "/organizations/me/mcp-catalog/featured",
@@ -92,6 +97,8 @@ export function useMcpCatalogSync(enabled: boolean) {
     queryKey: [MCP_CATALOG, "sync"],
     enabled,
     queryFn: () => apiFetch<McpCatalogSyncStatus>("/mcp-catalog/sync"),
+    // A worker moves it, not this tab, so what is cached is never trusted.
+    staleTime: 0,
     refetchInterval: (query) =>
       query.state.data?.running || query.state.data?.requested
         ? MCP_CATALOG_SYNC_POLL_MS
