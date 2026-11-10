@@ -319,8 +319,8 @@ async def get_request_settlement(
     no way to tell those apart. A stream that failed, including one the provider
     cut, always writes an error row. A stream the client abandoned before the
     provider reported usage, with no gateway tool work, writes a row only under
-    the ``estimate`` policy, billed on an estimate; otherwise it writes none, so
-    its id stays 404.
+    the ``estimate`` policy, billed on an estimate, and settles as
+    ``incomplete``; otherwise it writes none, so its id stays 404.
     """
     api_key, is_master_key = auth_result
     api_key_id: str | None = None

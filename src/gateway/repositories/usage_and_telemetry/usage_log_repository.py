@@ -191,6 +191,7 @@ class RequestRows:
     total_tokens: int
     served: int
     errors: int
+    incomplete: int
 
 
 # The columns a breakdown can group by, named by the summary's dimension vocabulary.
@@ -503,6 +504,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             # call runs and is the only one with no latency, so it settles nothing.
             func.count(case(((UsageLog.status == "success") & UsageLog.latency_ms.is_not(None), 1))),
             func.count(case((UsageLog.status == "error", 1))),
+            func.count(case((UsageLog.status == "incomplete", 1))),
         ).where(*conditions)
         row = (await self.db.execute(stmt)).one()
         return RequestRows(
@@ -514,6 +516,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             total_tokens=int(row[5] or 0),
             served=int(row[6]),
             errors=int(row[7]),
+            incomplete=int(row[8]),
         )
 
     async def cost_and_requests(self, filters: UsageFilters, scope: UsageScope) -> tuple[float, int]:
