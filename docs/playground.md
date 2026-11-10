@@ -14,7 +14,7 @@ The Playground lets you test different AI models directly in Otari, experiment w
 2. Make sure **Single** is selected.
 3. Choose a model from the dropdown menu below the prompt box.
 4. Enter your prompt or select one of the suggested **Starting points**.
-5. Optionally, click **Tools** to add tools to your request, such as web search, code execution, or MCP servers, and attach files with the paperclip. Only the MCP servers your [access rules](add-an-mcp-server.md#control-who-can-use-it) let you reach are listed.
+5. Optionally, click **Tools** to add tools to your request, such as web search, code execution, or MCP servers, and attach files with the paperclip. Only the MCP servers your [access rules](configure-an-mcp-server.md#control-who-can-use-it) let you reach are listed.
 6. Press Enter or click the Send button to submit your prompt.
 7. Review the model's response and available usage and performance information.
 
@@ -49,7 +49,7 @@ Overview.
 **Billing.** A Playground request uses no API key. It is billed to you, in the
 workspace selected in the switcher, against your own budget and rate limit, and
 its usage row has no key. A viewer cannot send one. Playground requests do not
-complete the [setup guide](quickstart.md#the-setup-guide).
+complete the setup guide.
 
 **Files.** Attach files with the paperclip or by dropping them on the page. The
 model reads them like an API request's [uploaded files](files.md); in Compare,

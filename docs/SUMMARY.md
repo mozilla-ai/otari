@@ -19,7 +19,7 @@
 * [Playground](playground.md)
 * [Configure web search](configure-web-search.md)
 * [Configure code execution](configure-code-execution.md)
-* [Configure an MCP server](add-an-mcp-server.md)
+* [Configure an MCP server](configure-an-mcp-server.md)
 * [Framework integrations](framework-integrations.md)
 * [Use with Claude Code](use-with-claude-code.md)
 * [Use with Codex](use-with-codex.md)

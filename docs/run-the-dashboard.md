@@ -136,7 +136,7 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 Set `activation_guide: false` to turn off the Overview's
-[setup guide](quickstart.md#the-setup-guide) for the deployment.
+setup guide for the deployment.
 
 ## Signup and terms
 
