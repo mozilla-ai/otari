@@ -36,6 +36,7 @@ from gateway.models.tenancy import (
     OrganizationDomain,
     OrganizationDomainCreateRequest,
     OrganizationDomainUpdateRequest,
+    OrganizationMember,
     User,
 )
 from gateway.repositories.tenancy import (
@@ -44,7 +45,7 @@ from gateway.repositories.tenancy import (
     OrganizationRepository,
     UserRepository,
 )
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
 
 _SERVICE_MODULE = "gateway.services.tenancy.organization_domain_service"
 
@@ -110,6 +111,11 @@ async def _claim(
         db.add(row)
         await db.flush()
     return row
+
+
+async def _auto_join(db: AsyncSession, user: User) -> OrganizationMember | None:
+    """Run the sign-in auto-join over ``db``, built as the request path builds it."""
+    return await DomainAutoJoinListener(OrganizationDomainRepository(db), OrganizationMemberRepository(db)).join(user)
 
 
 # =============================================================================
@@ -344,7 +350,7 @@ async def test_a_verified_address_joins_the_organization_that_proved_its_domain(
     await _claim(async_db, organization, domain="acme.example", default_role="viewer")
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(newcomer)
+    membership = await _auto_join(async_db, newcomer)
 
     assert membership is not None
     assert membership.organization_id == organization.id
@@ -359,7 +365,7 @@ async def test_an_unverified_address_does_not_join(async_db: AsyncSession) -> No
     await _claim(async_db, organization, domain="acme.example")
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example", email_verified=False)
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -369,7 +375,7 @@ async def test_an_unproven_claim_sweeps_in_nobody(async_db: AsyncSession) -> Non
     await _claim(async_db, organization, domain="acme.example", verified=False)
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -378,7 +384,7 @@ async def test_a_disabled_claim_sweeps_in_nobody(async_db: AsyncSession) -> None
     await _claim(async_db, organization, domain="acme.example", enabled=False)
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -386,7 +392,7 @@ async def test_an_unclaimed_domain_is_the_ordinary_no_match(async_db: AsyncSessi
     organization = await _organization(async_db, slug="acme")
     newcomer = await _identity(async_db, organization, role=None, email="new@elsewhere.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -396,7 +402,7 @@ async def test_an_identity_with_no_address_is_skipped(async_db: AsyncSession) ->
     await _claim(async_db, organization, domain="acme.example")
     operator = await _identity(async_db, organization, role=None, email=None)
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(operator) is None
+    assert await _auto_join(async_db, operator) is None
 
 
 @pytest.mark.asyncio
@@ -413,7 +419,7 @@ async def test_a_suspended_member_is_not_re_added_by_signing_in(async_db: AsyncS
         status="suspended",
     )
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(removed)
+    membership = await _auto_join(async_db, removed)
 
     assert membership is not None
     assert membership.status == "suspended"
@@ -427,7 +433,7 @@ async def test_an_established_role_is_never_overwritten_by_the_claims_default(
     await _claim(async_db, organization, domain="acme.example", default_role="viewer")
     owner = await _identity(async_db, organization, role="owner", email="owner@acme.example")
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(owner)
+    membership = await _auto_join(async_db, owner)
 
     assert membership is not None
     assert membership.role == "owner"
@@ -442,7 +448,7 @@ async def test_auto_join_never_moves_where_the_caller_is_pointed(async_db: Async
     person = await _identity(async_db, home, role="member", email="person@acme.example")
     pointed_at = person.active_organization_id
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(person)
+    membership = await _auto_join(async_db, person)
 
     assert membership is not None
     assert membership.organization_id == claiming.id
@@ -462,7 +468,7 @@ async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_exis
     claim = await _claim(async_db, organization, domain="acme.example", verified=False)
     service = OrganizationDomainService(async_db)
 
-    assert await service.auto_join_for_user(existing) is None
+    assert await _auto_join(async_db, existing) is None
 
     monkeypatch.setattr(
         f"{_SERVICE_MODULE}.resolve_txt_records",
@@ -470,7 +476,7 @@ async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_exis
     )
     await service.verify_domain_for_user(user=admin, organization_domain_id=claim.id)
 
-    assert await service.auto_join_for_user(existing) is not None
+    assert await _auto_join(async_db, existing) is not None
 
 
 @pytest.mark.asyncio
@@ -480,7 +486,7 @@ async def test_dropping_a_claim_leaves_the_members_it_already_admitted(async_db:
     admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
     joined = await _identity(async_db, organization, role=None, email="joined@acme.example")
     service = OrganizationDomainService(async_db)
-    assert await service.auto_join_for_user(joined) is not None
+    assert await _auto_join(async_db, joined) is not None
 
     await service.delete_domain_for_user(user=admin, organization_domain_id=claim.id)
 
@@ -492,7 +498,7 @@ async def test_dropping_a_claim_leaves_the_members_it_already_admitted(async_db:
     assert still_there.status == "active"
     # And the claim no longer admits anyone new.
     latecomer = await _identity(async_db, organization, role=None, email="late@acme.example")
-    assert await service.auto_join_for_user(latecomer) is None
+    assert await _auto_join(async_db, latecomer) is None
 
 
 # =============================================================================
@@ -796,7 +802,7 @@ async def test_a_proof_that_has_aged_out_admits_nobody(async_db: AsyncSession) -
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -809,7 +815,7 @@ async def test_a_proof_inside_its_window_still_admits(async_db: AsyncSession) ->
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None
 
 
 @pytest.mark.asyncio
@@ -838,7 +844,7 @@ async def test_re_verifying_an_aged_out_proof_runs_the_lookup_again(
     assert renewed.verified_at is not None
     assert renewed.verified_at > stale
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None
 
 
 @pytest.mark.asyncio
@@ -858,4 +864,4 @@ async def test_a_record_pulled_after_verification_stops_mattering_only_at_the_tt
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None

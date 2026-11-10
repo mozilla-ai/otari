@@ -1,6 +1,6 @@
 """Auto-join over the sign-in routes themselves, not the service beneath them.
 
-`test_organization_domains.py` calls ``auto_join_for_user`` directly, which
+`test_organization_domains.py` calls ``DomainAutoJoinListener.join`` directly, which
 proves the rule and nothing about the wiring: delete any one of the three call
 sites and that suite stays green while the feature dies on that route. These
 tests sign in over HTTP instead, once per credential, so a missing call is a

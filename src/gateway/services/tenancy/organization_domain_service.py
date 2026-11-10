@@ -177,7 +177,6 @@ class OrganizationDomainService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.domains = OrganizationDomainRepository(db)
-        self.members = OrganizationMemberRepository(db)
         self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
@@ -368,14 +367,6 @@ class OrganizationDomainService:
         row = await self._require_domain(organization_domain_id, organization.id)
         await self.domains.delete_domain(row)
         await self.db.commit()
-
-    # ------------------------------------------------------------------
-    # Sign-in
-    # ------------------------------------------------------------------
-
-    async def auto_join_for_user(self, user: User) -> OrganizationMember | None:
-        """Add ``user`` to the organization that has proven their email domain, as ``DomainAutoJoinListener`` does."""
-        return await DomainAutoJoinListener(self.domains, self.members).join(user)
 
     # ------------------------------------------------------------------
     # Helpers
