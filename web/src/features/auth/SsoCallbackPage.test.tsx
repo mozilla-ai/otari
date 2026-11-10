@@ -106,6 +106,22 @@ describe("SsoCallbackPage", () => {
     )
   })
 
+  it("names the organization, not its slug, while the sign-in is in flight", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    window.sessionStorage.setItem(SLUG_KEY, "acme-corp-7f3a")
+    window.sessionStorage.setItem(NAME_KEY, "Acme Corp")
+    vi.spyOn(globalThis, "fetch").mockReturnValue(
+      new Promise<Response>(() => {}),
+    )
+
+    renderCallback("#/auth/sso/callback?state=the-state&code=the-code")
+
+    expect(
+      await screen.findByText("Finishing your sign-in with Acme Corp"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/acme-corp-7f3a/)).not.toBeInTheDocument()
+  })
+
   it("remembers nothing when the round trip carried no name", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     window.sessionStorage.setItem(SLUG_KEY, "acme")

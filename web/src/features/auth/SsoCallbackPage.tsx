@@ -191,8 +191,8 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     return (
       <PublicAuthLayout
         title={
-          slug
-            ? `Finishing your sign-in with ${slug}`
+          organizationName
+            ? `Finishing your sign-in with ${organizationName}`
             : "Finishing your company sign-in"
         }
         description="One moment."
