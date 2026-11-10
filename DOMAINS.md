@@ -296,8 +296,9 @@ each organization's featured shelf. A featured entry is the organization's own
 copy, so a sync never changes or removes it.
 
 The catalog permits nothing and the model never calls it, so it is not part of
-tools. A workspace's stored servers stay its allow list, and a catalog server
-becomes one through the tools domain's own create. Every replica polls, and the
+tools. Being in the catalog gives a workspace no access: a catalog server is
+one the workspace stores only through the tools domain's own create. Whether a
+request may name a server inline instead is that domain's separate policy. Every replica polls, and the
 conditional update on the sync state row decides which one syncs.
 
 Built in the target shape from the start.
