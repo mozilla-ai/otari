@@ -36,4 +36,4 @@ To find one request, open `/requests?request=<id>` with the `Otari-Request-ID`
 its response carried. Routed requests share a request group, so the log shows
 each model tried and the one that served the response. Imported usage is labeled
 by its source and does not use a budget (see
-[Importing external usage](external-usage.md)).
+[Import usage from outside Otari](external-usage.md)).

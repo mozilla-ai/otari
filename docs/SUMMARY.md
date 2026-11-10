@@ -33,7 +33,7 @@
 
 * [Review usage and requests](review-usage-and-requests.md)
 * [Sessions](sessions.md)
-* [Importing external usage](external-usage.md)
+* [Import usage from outside Otari](external-usage.md)
 
 ## Control
 
@@ -86,6 +86,7 @@
 * [Models](models.md)
 * [Routing policies](routing.md)
 * [Sessions reference](sessions-reference.md)
+* [External usage reference](external-usage-reference.md)
 * [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)

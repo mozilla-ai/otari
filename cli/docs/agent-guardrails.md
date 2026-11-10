@@ -281,7 +281,7 @@ export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
 ```
 
 - **The key must be budget-exempt.** Only a deployment's operator can create one
-  (see [Importing external usage](../../docs/external-usage.md#enforcement-boundary)), so
+  (see [Enforcement boundary](../../docs/external-usage-reference.md#enforcement-boundary)), so
   reporting works on a gateway you run, not on otari.ai today.
 - **Claude Code** does not pass these variables to its hooks; set them in the
   `env` block of `~/.claude/settings.json`, beside the exporter variables of

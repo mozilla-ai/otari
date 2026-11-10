@@ -48,7 +48,7 @@ off or change how long sessions are kept.
 
   The first product token of `User-Agent` names the agent in the list.
 - **An agent instrumented with OpenTelemetry** exports its spans to Otari; see
-  [Importing external usage](external-usage.md#opentelemetry).
+  [Import usage from outside Otari](external-usage.md#opentelemetry).
 
 Every signal that groups requests into a session is in
 [What makes a session](sessions-reference.md#what-makes-a-session).

@@ -135,7 +135,8 @@ Code exports this over OpenTelemetry.
 
 This works on a gateway you run, not on otari.ai today. It needs a
 budget-exempt API key, which only the deployment's operator can create (with
-**Exempt from budget** in the deployment view's key form). To see Claude Code
+**Exempt from budget** under **Advanced** in the key form; see
+[Create an import key](external-usage.md#create-an-import-key)). To see Claude Code
 sessions on otari.ai, [route them through Otari](#route-claude-code-through-otari)
 instead.
 
@@ -209,7 +210,7 @@ claude
 The metrics exporter is optional and adds content-free outcome counters.
 Imported usage is priced for analytics and never counts toward budgets. Do not
 export a session you also route. See
-[Importing external usage](external-usage.md).
+[Import usage from outside Otari](external-usage.md).
 
 ## Backfill history from local transcripts
 

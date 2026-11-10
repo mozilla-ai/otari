@@ -139,7 +139,7 @@ message count).
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to Otari (see
-[Importing external usage](external-usage.md#opentelemetry)) has its spans kept on
+[Import usage from outside Otari](external-usage.md#opentelemetry)) has its spans kept on
 the trace of the exporting key's user, with the span tree it sent, within the
 limits under [Settings](trace-storage.md#settings). Its sessions are grouped by
 the OTLP attributes in [What makes a session](#what-makes-a-session). Span names
