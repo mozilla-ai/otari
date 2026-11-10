@@ -30461,6 +30461,11 @@
             "title": "Hide External",
             "type": "boolean"
           },
+          "offer_to_every_request": {
+            "description": "Offer memory's tools to every request a member sends through the gateway, not only to one that asks for them.",
+            "title": "Offer To Every Request",
+            "type": "boolean"
+          },
           "organization_enabled": {
             "description": "Whether the workspace's organization has memory on.",
             "title": "Organization Enabled",
@@ -30510,6 +30515,7 @@
           "enabled",
           "workspace_scope_enabled",
           "write_policy",
+          "offer_to_every_request",
           "hide_external",
           "retention_days",
           "deployment_retention_days",
@@ -30529,6 +30535,11 @@
           "hide_external": {
             "default": false,
             "title": "Hide External",
+            "type": "boolean"
+          },
+          "offer_to_every_request": {
+            "default": false,
+            "title": "Offer To Every Request",
             "type": "boolean"
           },
           "retention_days": {

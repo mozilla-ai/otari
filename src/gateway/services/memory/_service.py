@@ -124,6 +124,14 @@ class Swept:
 
 
 @dataclass(frozen=True)
+class MemoryOffer:
+    """What a request through the gateway may get: memory's tools when it asks, or whether it asks or not."""
+
+    on: bool
+    every_request: bool
+
+
+@dataclass(frozen=True)
 class OrganizationMemory:
     organization_id: uuid.UUID
     enabled: bool
@@ -138,6 +146,7 @@ class WorkspaceMemory:
     enabled: bool
     workspace_scope_enabled: bool
     write_policy: MemoryWritePolicy
+    offer_to_every_request: bool
     hide_external: bool
     retention_days: int | None
     entries: dict[str, int]
@@ -149,6 +158,7 @@ class SwitchChange:
     enabled: bool
     workspace_scope_enabled: bool
     write_policy: MemoryWritePolicy
+    offer_to_every_request: bool
     hide_external: bool
     retention_days: int | None
 
@@ -317,6 +327,14 @@ class MemoryService:
                 caller.workspace_id, [entry.id, *(version.id for version in versions)]
             )
 
+    async def offer(self, caller: MemoryCaller) -> MemoryOffer:
+        """Whether memory is on for the caller's workspace, and whether it is offered to every request."""
+        async with self._uow:
+            settings = await self._repos.settings.of_workspace(caller.workspace_id)
+            if await self._switches_if_on(caller.workspace_id) is None or settings is None:
+                return MemoryOffer(on=False, every_request=False)
+            return MemoryOffer(on=True, every_request=settings.offer_to_every_request)
+
     # -- What workspace managers call ----------------------------------------
 
     async def organization_memory(self, user: User) -> OrganizationMemory:
@@ -355,6 +373,7 @@ class MemoryService:
                 enabled=change.enabled,
                 workspace_scope_enabled=change.workspace_scope_enabled,
                 write_policy=change.write_policy,
+                offer_to_every_request=change.offer_to_every_request,
                 hide_external=change.hide_external,
                 retention_days=change.retention_days,
             )
@@ -389,6 +408,7 @@ class MemoryService:
             enabled=settings is not None and settings.enabled,
             workspace_scope_enabled=settings is not None and settings.workspace_scope_enabled,
             write_policy=settings.write_policy if settings is not None else "review",
+            offer_to_every_request=settings is not None and settings.offer_to_every_request,
             hide_external=settings is not None and settings.hide_external,
             retention_days=settings.retention_days if settings is not None else None,
             entries=await self._repos.entries.count_by_status(workspace_id),

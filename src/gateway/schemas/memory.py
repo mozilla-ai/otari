@@ -99,6 +99,10 @@ class WorkspaceMemoryPublic(BaseModel):
     write_policy: MemoryWritePolicy = Field(
         description="auto keeps what the consolidator decides; review holds every shared proposal for an admin."
     )
+    offer_to_every_request: bool = Field(
+        description="Offer memory's tools to every request a member sends through the gateway, not only to one "
+        "that asks for them."
+    )
     hide_external: bool = Field(description="Keep entries resting on outside content out of recall.")
     retention_days: int | None = Field(description="Days an unused entry is kept; null keeps the deployment's.")
     deployment_retention_days: int
@@ -112,6 +116,7 @@ class WorkspaceMemoryUpdate(BaseModel):
     enabled: bool
     workspace_scope_enabled: bool = False
     write_policy: MemoryWritePolicy = "review"
+    offer_to_every_request: bool = False
     hide_external: bool = False
     retention_days: int | None = Field(default=None, ge=1, le=3650)
 

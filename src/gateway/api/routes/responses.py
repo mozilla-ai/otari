@@ -73,6 +73,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.memory import MEMORY_HEADER
 from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.providers import aresponses
@@ -553,6 +554,7 @@ async def create_response(
             code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
             web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+            memory_header=raw_request.headers.get(MEMORY_HEADER),
         ),
         backends=ToolBackends(
             ports=tool_ports,

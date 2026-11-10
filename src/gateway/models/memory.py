@@ -285,6 +285,8 @@ class MemoryWorkspaceSettings(Base):
     # Member entries come with ``enabled``; the shared workspace memory is a second switch.
     workspace_scope_enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
     write_policy: Mapped[MemoryWritePolicy] = mapped_column(String(16), default="review", server_default="review")
+    # Offer memory's tools to every request a member sends through the gateway, not only to one that asks.
+    offer_to_every_request: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Leave entries whose evidence came from outside (a web page, a fetched file, a third-party tool) out of recall.
     hide_external: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Null keeps the deployment's ``memory_retention_days``.

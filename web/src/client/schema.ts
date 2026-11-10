@@ -22559,6 +22559,11 @@ export interface components {
              */
             hide_external: boolean;
             /**
+             * Offer To Every Request
+             * @description Offer memory's tools to every request a member sends through the gateway, not only to one that asks for them.
+             */
+            offer_to_every_request: boolean;
+            /**
              * Organization Enabled
              * @description Whether the workspace's organization has memory on.
              */
@@ -22599,6 +22604,11 @@ export interface components {
              * @default false
              */
             hide_external: boolean;
+            /**
+             * Offer To Every Request
+             * @default false
+             */
+            offer_to_every_request: boolean;
             /** Retention Days */
             retention_days?: number | null;
             /**

@@ -106,6 +106,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.memory import MEMORY_HEADER
 from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ProviderAccounts, apply_endpoint_defaults
 from gateway.services.providers import amessages
@@ -1073,6 +1074,7 @@ async def create_message(
             code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
             web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+            memory_header=raw_request.headers.get(MEMORY_HEADER),
             # Anthropic's own field, which is where an Anthropic SDK puts the id it
             # read off the last response. Resolved at admission against this caller's
             # leases; the provider never sees it when the sandbox runs the code.

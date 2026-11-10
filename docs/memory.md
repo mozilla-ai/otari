@@ -48,6 +48,7 @@ under a data key of its workspace.
    | `enabled` | Memory on: each member's agents keep and recall entries of their own. |
    | `workspace_scope_enabled` | The memory every member's agents share. |
    | `write_policy` | `auto` keeps what the consolidator decides; `review`, the default, holds every shared proposal for an admin. |
+   | `offer_to_every_request` | Offer memory's tools to every request a member sends through Otari, not only to one that asks. Off by default. See [Through Otari's tool loop](#through-otaris-tool-loop). |
    | `hide_external` | Leave entries resting on a web page, a fetched file or a third-party tool out of recall. |
    | `retention_days` | Days an unused entry is kept. Unset keeps the deployment's `memory_retention_days`. |
 
@@ -57,7 +58,36 @@ under a data key of its workspace.
 
 ## Connect an agent
 
-Memory is an MCP server at `/api/v1/memory/mcp`, reached with the API key of a
+An agent reaches memory in one of two ways, and both reach the same tools with
+the same checks.
+
+### Through Otari's tool loop
+
+A request routed through Otari, on any model, gets memory's tools beside its
+other tools, and Otari runs each call, as it runs web search. A request asks for
+them in either of two ways:
+
+- declare the built-in tool in `tools`:
+
+  ```json
+  {"model": "openai:gpt-4.1", "messages": [...], "tools": [{"type": "otari_memory"}]}
+  ```
+
+- or send the header `Otari-Memory: on`.
+
+Where the workspace has `offer_to_every_request` on, every request a member sends
+gets them without asking, and one that sends `Otari-Memory: off` does not. A
+request that neither asks nor is offered them reaches the provider unchanged.
+
+The request's API key must name a member of its workspace. Asking for memory
+where it cannot be had (memory off for the workspace or its organization, or a
+key with no member behind it) is refused before the provider is called; not
+asking never is. No provider is sent the `otari_memory` declaration, and an MCP
+server cannot expose a tool under one of memory's names.
+
+### As an MCP server
+
+Memory is also an MCP server at `/api/v1/memory/mcp`, reached with the API key of a
 member of the workspace. The key decides the workspace and the member; no tool
 argument can name either. A key that names no member of its workspace, such as
 a service key, is refused.

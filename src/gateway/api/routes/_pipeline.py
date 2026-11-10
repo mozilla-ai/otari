@@ -82,6 +82,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    MemoryToolAdmission,
     ToolPorts,
     asks_to_keep_trace_content,
     get_automatic_router,
@@ -185,6 +186,7 @@ from gateway.exceptions.budget_exceptions import (
     SpendCeilingExceededError,
 )
 from gateway.exceptions.inference_exceptions import StoredStateOnManagedCredentialError
+from gateway.exceptions.memory_exceptions import MemoryToolsRefusedError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
@@ -309,6 +311,7 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.mcp_stateless import failure_class
+from gateway.services.memory import MEMORY_TOOL_NAMES, MemoryToolBackend
 from gateway.services.model_access import (
     McpAccess,
     key_model_refusal,
@@ -3740,11 +3743,17 @@ class ToolContext:
         shared: SharedToolUse | None = None,
         web_provider_client: httpx.AsyncClient | None = None,
         guardrails: RequestGuardrails | None = None,
+        memory: MemoryToolBackend | None = None,
+        memory_declared: bool = False,
     ) -> None:
         self.config = config
         # The request's guardrails, which the gateway's tools and the answer pass
         # through; None where the request runs none.
         self.guardrails = guardrails
+        # Whether the caller's tools held the memory declaration, which their remaining tools no longer do.
+        self.memory_declared = memory_declared
+        # Memory's tools for the request's caller, where it asked for them or its workspace offers them unasked.
+        self.memory = memory
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
@@ -3809,7 +3818,9 @@ class ToolContext:
         # Each candidate's tools by its provider and model, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[tuple[str | None, str | None], CandidateVariant] = {}
         # The built-in tool names no MCP server may expose: those any attempt of the request runs here.
-        self.reserved_tool_names: frozenset[str] = frozenset(self.declared_gateway_tools)
+        self.reserved_tool_names: frozenset[str] = frozenset(self.declared_gateway_tools) | (
+            MEMORY_TOOL_NAMES if memory is not None else frozenset()
+        )
 
     def for_candidate(self, provider: str | None, model: str | None) -> ToolContext:
         """The tools the candidate on ``provider`` and ``model`` is dispatched with: these, or its variant's.
@@ -3893,6 +3904,7 @@ class ToolContext:
             self.sandbox_tool_entry is not None
             or self.web_search_tool_entry is not None
             or self.web_fetch_tool_entry is not None
+            or self.memory_declared
         )
 
     @property
@@ -3951,7 +3963,13 @@ class ToolContext:
 
     @property
     def use_tool_loop(self) -> bool:
-        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
+        return (
+            bool(self.mcp_server_configs)
+            or self.use_sandbox
+            or self.use_web_search
+            or self.use_web_fetch
+            or self.memory is not None
+        )
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
         """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
@@ -4227,6 +4245,7 @@ class DeclaredTools:
     tools_header: str | None
     web_fetch_header: str | None = None
     web_search_header: str | None = None
+    memory_header: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -4267,6 +4286,7 @@ async def prepare_gateway_tools(
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
+        memory = await _admit_memory(adapter, ctx, declared, backends.ports.memory)
         code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(adapter, ctx, code, candidates, web_policy=web_policy)
@@ -4328,7 +4348,7 @@ async def prepare_gateway_tools(
             sandbox_container_lease=code.container_lease,
             sandbox_containers=code.containers,
             web=web_access,
-            remaining_user_tools=web.remaining_user_tools,
+            remaining_user_tools=_without_memory_declarations(web.remaining_user_tools),
             max_tool_iterations=min(
                 declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
                 MAX_TOOL_ITERATIONS_CAP,
@@ -4341,6 +4361,8 @@ async def prepare_gateway_tools(
             shared=shared,
             web_provider_client=backends.ports.web_provider_client,
             guardrails=guardrails,
+            memory=memory,
+            memory_declared=any(_declares_memory(tool) for tool in web.remaining_user_tools or []),
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
@@ -4358,6 +4380,52 @@ async def prepare_gateway_tools(
             key: variants[candidate.claimed] for key, candidate in zip(_candidates(ctx), candidates, strict=True)
         }
     return tool_ctx
+
+
+MEMORY_TOOL_TYPE = "otari_memory"
+MEMORY_HEADER_INVALID_DETAIL = "Otari-Memory must be 'on' or 'off'."
+MEMORY_DECLARED_AND_DECLINED_DETAIL = "The request declares otari_memory and sends Otari-Memory: off."
+MEMORY_NOT_OFFERED_DETAIL = "This deployment does not offer agent memory."
+
+
+def _declares_memory(entry: object) -> bool:
+    return isinstance(entry, dict) and entry.get("type") == MEMORY_TOOL_TYPE
+
+
+def _without_memory_declarations(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """The caller's tools without the memory declaration, which no provider is sent."""
+    if tools is None:
+        return None
+    return [tool for tool in tools if not _declares_memory(tool)]
+
+
+async def _admit_memory(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    declared: DeclaredTools,
+    admission: MemoryToolAdmission | None,
+) -> MemoryToolBackend | None:
+    """Memory's tools for the request's caller, where it asked for them or its workspace offers them unasked.
+
+    A request asks by declaring ``{"type": "otari_memory"}`` or sending ``Otari-Memory: on``, and opts out
+    of a workspace's offer with ``Otari-Memory: off``. Asking where memory cannot be had is refused.
+    """
+    header = (declared.memory_header or "").strip().lower()
+    if header not in ("", "on", "off"):
+        raise adapter.error(400, MEMORY_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST)
+    in_tools = any(_declares_memory(tool) for tool in declared.tools or [])
+    if in_tools and header == "off":
+        raise adapter.error(400, MEMORY_DECLARED_AND_DECLINED_DETAIL, ErrorKind.INVALID_REQUEST)
+    asked = in_tools or header == "on"
+    if admission is None:
+        if asked:
+            raise adapter.error(400, MEMORY_NOT_OFFERED_DETAIL, ErrorKind.INVALID_REQUEST)
+        return None
+    model = ctx.resolved_provider.model if ctx.resolved_provider is not None else None
+    try:
+        return await admission.admit(ctx.db, ctx.api_key, asked=asked, declined=header == "off", model=model)
+    except MemoryToolsRefusedError as exc:
+        raise domain_error(adapter, exc) from exc
 
 
 @dataclass(frozen=True)
@@ -5929,6 +5997,8 @@ async def _open_tool_backends(
     if tool_ctx.use_sandbox:
         sandbox = await stack.enter_async_context(tool_ctx.build_sandbox_backend())
         backends.append(sandbox)
+    if tool_ctx.memory is not None:
+        backends.append(await stack.enter_async_context(tool_ctx.memory))
     if mcp is not None:
         backends.append(mcp)
     if (guardrails := tool_ctx.guardrails) is not None and guardrails.guards_tools:
@@ -6015,6 +6085,7 @@ class _ToolBackendKind(StrEnum):
     MCP = "MCP"
     SANDBOX = "sandbox"
     WEB_RETRIEVAL = "web retrieval"
+    MEMORY = "memory"
     COMBINED = "combined"
 
     @classmethod
@@ -6025,6 +6096,7 @@ class _ToolBackendKind(StrEnum):
                 (cls.MCP, bool(tool_ctx.mcp_server_configs)),
                 (cls.SANDBOX, tool_ctx.use_sandbox),
                 (cls.WEB_RETRIEVAL, tool_ctx.use_web_search or tool_ctx.use_web_fetch),
+                (cls.MEMORY, tool_ctx.memory is not None),
             )
             if used
         ]

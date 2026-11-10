@@ -32,6 +32,7 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         enabled: bool,
         workspace_scope_enabled: bool,
         write_policy: MemoryWritePolicy,
+        offer_to_every_request: bool,
         hide_external: bool,
         retention_days: int | None,
     ) -> MemoryWorkspaceSettings:
@@ -44,6 +45,7 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         row.enabled = enabled
         row.workspace_scope_enabled = workspace_scope_enabled
         row.write_policy = write_policy
+        row.offer_to_every_request = offer_to_every_request
         row.hide_external = hide_external
         row.retention_days = retention_days
         await self.db.flush()

@@ -94,3 +94,7 @@ class MemoryRefusedError(TenancyValidationError):
     def __init__(self, finding: str) -> None:
         super().__init__(REFUSED.format(what=_WHAT.get(finding, "that")))
         self.finding = finding
+
+
+class MemoryToolsRefusedError(TenancyForbiddenError):
+    """A request asked for memory's tools, and its caller cannot have them. The message says why."""

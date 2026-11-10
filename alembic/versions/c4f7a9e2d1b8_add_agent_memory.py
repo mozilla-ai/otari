@@ -209,6 +209,7 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("workspace_scope_enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("write_policy", sa.String(length=16), server_default="review", nullable=False),
+        sa.Column("offer_to_every_request", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("hide_external", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("retention_days", sa.Integer(), nullable=True),
         _timestamp("updated_at"),

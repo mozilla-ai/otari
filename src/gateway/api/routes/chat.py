@@ -80,6 +80,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
+from gateway.services.memory import MEMORY_HEADER
 from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
@@ -666,6 +667,7 @@ async def run_chat_completion(
             code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
             web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+            memory_header=raw_request.headers.get(MEMORY_HEADER),
         ),
         backends=ToolBackends(
             ports=tool_ports,

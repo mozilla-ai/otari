@@ -29,6 +29,7 @@ from gateway.core.feature import CoreFeature
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
+from gateway.exceptions.memory_exceptions import MEMORY_OFF, MemoryToolsRefusedError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
 from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
 from gateway.inflight import track_request
@@ -162,7 +163,16 @@ from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
-from gateway.services.memory import MemoryCaller, MemoryModels, MemoryService, ModelUse, WorkspaceKeys
+from gateway.services.memory import (
+    MemoryCaller,
+    MemoryModels,
+    MemoryService,
+    MemoryToolBackend,
+    ModelUse,
+    ToolOutcome,
+    WorkspaceKeys,
+    call_memory_tool,
+)
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -2369,16 +2379,16 @@ def get_memory_service(
     return build_memory_service(uow, config, keys, db)
 
 
-async def get_memory_caller(
-    request: Request,
-    api_key: Annotated[APIKey, Depends(verify_api_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> MemoryCaller:
-    """The member a key speaks for, in the key's own workspace: memory never takes either from the request body.
+NOT_A_MEMBER = "Memory is for workspace members, and this key names none of its workspace."
 
-    Raises:
-        HTTPException: 403 when the key names no active member of its workspace, as a service key or a
-            billing-only user does.
+
+async def memory_caller_for(
+    db: AsyncSession, api_key: APIKey, *, session_id: str | None = None, model: str | None = None
+) -> MemoryCaller | None:
+    """The member a key speaks for, in the key's own workspace; None for a key that names no active member.
+
+    A service key, or a billing user no person stands behind, names none. Memory never takes the workspace
+    or the member from a request body.
     """
     workspace = await WorkspaceRepository(db).get(api_key.workspace_id)
     person = _person(api_key.user_id)
@@ -2387,17 +2397,13 @@ async def get_memory_caller(
         or person is None
         or not await is_workspace_member(db, api_key.workspace_id, api_key.user_id, workspace)
     ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Memory is for workspace members, and this key names none of its workspace.",
-        )
+        return None
     membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
         workspace.organization_id, person
     )
     seat = await WorkspaceMemberRepository(db).get_by_workspace_and_user(api_key.workspace_id, person)
     organization_manager = membership is not None and membership.role in MANAGEMENT_ROLES
     workspace_role = seat.role if seat is not None and seat.status == "active" else None
-    session_id = request.headers.get("Otari-Session-Id") or request.headers.get("Mcp-Session-Id")
     return MemoryCaller(
         workspace_id=api_key.workspace_id,
         member_id=person,
@@ -2406,7 +2412,83 @@ async def get_memory_caller(
         can_write=organization_manager or workspace_role != "viewer",
         api_key_id=api_key.id,
         session_id=session_id[:255] if session_id else None,
+        model=model[:255] if model else None,
     )
+
+
+async def get_memory_caller(
+    request: Request,
+    api_key: Annotated[APIKey, Depends(verify_api_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MemoryCaller:
+    """The member a key speaks for on the MCP endpoint.
+
+    Raises:
+        HTTPException: 403 when the key names no active member of its workspace.
+    """
+    session_id = request.headers.get("Otari-Session-Id") or request.headers.get("Mcp-Session-Id")
+    caller = await memory_caller_for(db, api_key, session_id=session_id)
+    if caller is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_A_MEMBER)
+    return caller
+
+
+class MemoryToolAdmission:
+    """Decides whether a request through the gateway gets memory's tools, and builds them for its caller.
+
+    A request asks for them by declaring ``{"type": "otari_memory"}`` or sending ``Otari-Memory: on``, and
+    gets them unasked where its workspace offers memory to every request, unless it sends ``Otari-Memory: off``.
+    Asking where memory cannot be had is refused; not asking never is.
+    """
+
+    def __init__(self, config: GatewayConfig, keys: WorkspaceKeys) -> None:
+        self._config = config
+        self._keys = keys
+
+    async def admit(
+        self,
+        db: AsyncSession,
+        api_key: APIKey | None,
+        *,
+        asked: bool,
+        declined: bool,
+        session_id: str | None = None,
+        model: str | None = None,
+    ) -> MemoryToolBackend | None:
+        """Memory's tools for this request, or None when it gets none.
+
+        Raises:
+            MemoryToolsRefusedError: the request asked for them and its caller cannot have them.
+        """
+        if declined:
+            return None
+        caller = await memory_caller_for(db, api_key, session_id=session_id, model=model) if api_key else None
+        if caller is None:
+            if asked:
+                raise MemoryToolsRefusedError(NOT_A_MEMBER)
+            return None
+        async with create_unit_of_work() as uow:
+            offer = await build_memory_service(uow, self._config, self._keys).offer(caller)
+        if not offer.on:
+            if asked:
+                raise MemoryToolsRefusedError(MEMORY_OFF)
+            return None
+        if not (asked or offer.every_request):
+            return None
+        return MemoryToolBackend(caller, self._run)
+
+    async def _run(self, caller: MemoryCaller, name: str, arguments: dict[str, Any]) -> ToolOutcome | None:
+        # A Unit of Work per call: the request's own session is released before the provider is called.
+        async with create_unit_of_work() as uow:
+            return await call_memory_tool(build_memory_service(uow, self._config, self._keys), caller, name, arguments)
+
+
+def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:
+    """What admits memory's tools to a request, or None where the deployment does not offer memory."""
+    config: GatewayConfig = request.app.state.config
+    if not config.memory_enabled:
+        return None
+    return MemoryToolAdmission(config, get_memory_keys(request))
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
@@ -2820,6 +2902,8 @@ class ToolPorts:
     mcp_server: WorkspaceMcpServers
     web_search_policy: WorkspaceWebSearchPolicies
     web_provider_client: httpx.AsyncClient | None = None
+    # ``None`` where the deployment does not offer memory, or a test builds this by hand.
+    memory: MemoryToolAdmission | None = None
 
 
 async def get_tool_ports(
@@ -2828,6 +2912,7 @@ async def get_tool_ports(
     mcp_server: WorkspaceMcpServersDep,
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: OptionalWebProviderClientDep,
+    memory: Annotated[MemoryToolAdmission | None, Depends(get_memory_tool_admission)],
 ) -> ToolPorts:
     """Resolve the ports and policies a request's tools reach."""
     return ToolPorts(
@@ -2836,6 +2921,7 @@ async def get_tool_ports(
         mcp_server=mcp_server,
         web_search_policy=web_search_policy,
         web_provider_client=web_provider_client,
+        memory=memory,
     )
 
 
