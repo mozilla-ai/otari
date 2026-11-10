@@ -30,13 +30,7 @@ from apron_auth.workload import WorkloadTokenVerifier
 
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.models.api_keys import APIKeyFederationRule
-from gateway.services.url_safety import UnsafeURLError, validate_federation_url
-from gateway.services.web_retrieval_network import (
-    PINNED_TARGET_EXTENSION,
-    PinnedAsyncHTTPTransport,
-    RetrievalTargetError,
-    validate_retrieval_target,
-)
+from gateway.services.web_retrieval_network import CheckedFederationTransport
 
 MAX_TOKEN_BYTES = 16 * 1024
 # A token with longer than this left before its ``exp`` is refused: platform identity tokens last an hour, so a
@@ -106,45 +100,6 @@ def unverified_issuer(token: str) -> str | None:
     return issuer if isinstance(issuer, str) else None
 
 
-class _CheckedTransport(httpx.AsyncBaseTransport):
-    """Send a discovery or key set request only to a URL that passes the outbound checks.
-
-    With private hosts refused, the connection goes to the address the check admitted rather than to a second
-    resolution of the hostname, so a name that answers with a public address and then a private one cannot pass.
-    """
-
-    def __init__(self, *, allow_private_hosts: bool) -> None:
-        self._allow_private_hosts = allow_private_hosts
-        self._transport: httpx.AsyncBaseTransport = (
-            httpx.AsyncHTTPTransport(trust_env=False) if allow_private_hosts else PinnedAsyncHTTPTransport()
-        )
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        try:
-            if self._allow_private_hosts:
-                await validate_federation_url(str(request.url), allow_private_hosts=True)
-                return await self._transport.handle_async_request(request)
-            if request.url.scheme != "https":
-                raise UnsafeURLError("federation URL must use https")
-            target = await validate_retrieval_target(str(request.url))
-        except (UnsafeURLError, RetrievalTargetError) as exc:
-            # A request error is what apron-auth reports as a failed fetch.
-            raise httpx.ConnectError("refused by the outbound URL checks", request=request) from exc
-        headers = request.headers.copy()
-        headers["host"] = target.origin.authority
-        pinned = httpx.Request(
-            request.method,
-            target.url,
-            headers=headers,
-            stream=request.stream,
-            extensions={**request.extensions, PINNED_TARGET_EXTENSION: target},
-        )
-        return await self._transport.handle_async_request(pinned)
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
-
-
 TransportFactory = Callable[[str], httpx.AsyncBaseTransport]
 
 
@@ -170,8 +125,10 @@ class FederatedTokenVerifier:
         self.allow_private_hosts = allow_private_hosts
         self.member_issuers = member_issuers
         self._clock = clock
-        self._member_factory = transport_factory or (lambda _url: _CheckedTransport(allow_private_hosts=False))
-        factory = transport_factory or (lambda _url: _CheckedTransport(allow_private_hosts=allow_private_hosts))
+        self._member_factory = transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=False))
+        factory = transport_factory or (
+            lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
+        )
         self._by_issuer: dict[str, WorkloadTokenVerifier | None] = {}
         for entry in self.issuers:
             try:

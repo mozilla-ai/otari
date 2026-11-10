@@ -29,9 +29,12 @@ from gateway.services.api_keys import (
     match_federation_rules,
     unverified_issuer,
 )
-from gateway.services.api_keys._federation import _CheckedTransport
 from gateway.services.url_safety import UnsafeURLError, validate_federation_url
-from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, SystemAddressResolver
+from gateway.services.web_retrieval_network import (
+    CheckedFederationTransport,
+    PinnedAsyncHTTPTransport,
+    SystemAddressResolver,
+)
 
 ISSUER = "https://issuer.example.com"
 JWKS_URI = "https://issuer.example.com/keys"
@@ -403,7 +406,7 @@ async def test_a_public_fetch_connects_to_the_address_it_checked(monkeypatch: py
         sent.append(request)
         return httpx.Response(200, json={})
 
-    transport = _CheckedTransport(allow_private_hosts=False)
+    transport = CheckedFederationTransport(allow_private_hosts=False)
     transport._transport = PinnedAsyncHTTPTransport(transport_factory=lambda: httpx.MockTransport(respond))
     async with httpx.AsyncClient(transport=transport) as client:
         await client.get(JWKS_URI)
@@ -420,7 +423,7 @@ async def test_a_public_fetch_refuses_a_host_that_resolves_privately(monkeypatch
 
     monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
 
-    async with httpx.AsyncClient(transport=_CheckedTransport(allow_private_hosts=False)) as client:
+    async with httpx.AsyncClient(transport=CheckedFederationTransport(allow_private_hosts=False)) as client:
         with pytest.raises(httpx.ConnectError):
             await client.get(JWKS_URI)
 
