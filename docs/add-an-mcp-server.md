@@ -2,11 +2,11 @@
 icon: computer-classic
 ---
 
-# Add an MCP server
+# Connect an MCP server
 
 MCP servers allow requests from a workspace to connect to external tools and services. Each server is configured at the **workspace level**, so you can control which MCP tools are available to requests within that workspace.
 
-To add an MCP server:
+To connect an MCP server:
 
 1. Select the workspace in the top-left corner.
 2. Go to **Tools** → **MCP servers**.
