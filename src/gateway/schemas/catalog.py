@@ -110,7 +110,10 @@ class CatalogQuery(BaseModel):
     search: str | None = Field(
         default=None,
         max_length=200,
-        description="Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+        description=(
+            "Case-insensitive words, each in a model's name, vendor, id, or a selector's model part; "
+            "a whole selector matches too. Provider instances are the `provider` filter's."
+        ),
     )
     workspace_id: uuid.UUID | None = Field(
         default=None,
