@@ -1518,6 +1518,16 @@ async def test_a_byok_openrouter_call_settles_at_its_fee_and_the_upstream_charge
         pytest.param(_OPENROUTER_USAGE | {"cost": -1.0}, "openrouter", id="negative"),
         pytest.param(_OPENROUTER_USAGE | {"cost": float("nan")}, "openrouter", id="nan"),
         pytest.param(_OPENROUTER_USAGE | {"is_byok": True, "cost_details": None}, "openrouter", id="byok-no-upstream"),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": -0.01, "is_byok": True, "cost_details": {"upstream_inference_cost": 0.02}},
+            "openrouter",
+            id="byok-negative-part",
+        ),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": 1e308, "is_byok": True, "cost_details": {"upstream_inference_cost": 1e308}},
+            "openrouter",
+            id="byok-overflow",
+        ),
     ],
 )
 async def test_a_charge_nobody_can_read_leaves_the_seeded_rate_to_price_the_call(

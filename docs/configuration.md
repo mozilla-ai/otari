@@ -1049,7 +1049,8 @@ on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
 depends on the upstream it routes a request to, which no single rate matches.
 A rate set in this file, through the pricing API or on the dashboard still
 prices the completion. The hold placed before the request is still estimated
-at the rate.
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
 
 ### A public catalog
 
