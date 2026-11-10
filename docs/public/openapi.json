@@ -38399,6 +38399,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "The sync is switched off on this deployment; nothing was started."
           }
         },
         "security": [
@@ -41471,6 +41474,12 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "The catalog holds no server with this id."
+          },
+          "409": {
+            "description": "The organization already features 50 servers; remove one first."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -41515,6 +41524,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "The organization features no entry with this id."
           },
           "422": {
             "content": {
