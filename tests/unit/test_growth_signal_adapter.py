@@ -1,16 +1,12 @@
 """The core ``GrowthSignalPort`` adapter: a build with no vendor schedules nothing."""
 
 import uuid
-from typing import cast
 
 import pytest
 from fastapi import BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.ports.growth_signal_port import GrowthAction
-
-NO_SESSION = cast(AsyncSession, None)
 
 
 @pytest.mark.asyncio
@@ -18,7 +14,7 @@ NO_SESSION = cast(AsyncSession, None)
 async def test_an_action_schedules_nothing(action: GrowthAction) -> None:
     background_tasks = BackgroundTasks()
 
-    await NullGrowthSignalAdapter(NO_SESSION).record_action(
+    await NullGrowthSignalAdapter(None).record_action(
         background_tasks=background_tasks,
         action=action,
         user_id=uuid.uuid4(),
