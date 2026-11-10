@@ -1674,7 +1674,6 @@ WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(ge
 
 def get_mcp_connection_service(
     uow: UnitOfWorkDep,
-    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> McpConnectionService:
     """Build the service that runs a user's sign-in to a per-user MCP server, on the request's Unit of Work."""
@@ -1684,7 +1683,9 @@ def get_mcp_connection_service(
         McpUserConnectionRepository(uow),
         McpOAuthFlowRepository(uow),
         config,
-        eligibility=WorkspaceMcpConnectionEligibility(db),
+        eligibility=WorkspaceMcpConnectionEligibility(
+            uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+        ),
     )
 
 

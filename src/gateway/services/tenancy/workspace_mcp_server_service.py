@@ -51,6 +51,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
@@ -573,27 +574,48 @@ def _edited_client(
     return edited.model_dump(), edited != stored, not same_client
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 def _origin(url: str) -> str:
-    """A URL's scheme and host, as a client registered with one authorization server is bound to them."""
+    """A URL's scheme, host and port, as a client registered with one authorization server is bound to them.
+
+    Compared as an origin rather than as text: the default port written out (``:443``), letter case
+    and credentials in the URL name the same host, so none of them counts as a move.
+    """
     parts = urlsplit(url)
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}"
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port or _DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        return f"{scheme}://{parts.netloc.lower()}"
+    return f"{scheme}://{(parts.hostname or '').lower()}:{port}"
 
 
 class WorkspaceMcpConnectionEligibility:
     """Whether a user may still hold a connection to a workspace's servers, for ``McpConnectionService``.
 
-    Runs on the request's session, inside the connection service's Unit of Work over it. It takes
+    Runs inside the connection service's Unit of Work block, on the repositories it is given. It takes
     the workspace lock a member's removal takes before it reads the membership, and the user row
     lock a user's deletion takes, so a sign-in finishing and a removal running serialize: whichever
     commits second sees the other.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        workspaces: WorkspaceRepository,
+        members: WorkspaceMemberRepository,
+        organization_members: OrganizationMemberRepository,
+    ) -> None:
+        self._uow = uow
+        self._workspaces = workspaces
+        self._members = members
+        self._organization_members = organization_members
 
     async def hold(self, workspace_id: uuid.UUID) -> None:
         """Take the workspace lock a member's removal and the workspace's deletion take first."""
-        await WorkspaceRepository(self.db).lock(workspace_id)
+        await self._workspaces.lock(workspace_id)
 
     async def may_connect(self, workspace_id: uuid.UUID, user_id: str) -> bool:
         """A live user who, when they are a dashboard account, can still reach the workspace.
@@ -602,7 +624,7 @@ class WorkspaceMcpConnectionEligibility:
         organization. A request-plane user that is no dashboard account belongs to no workspace,
         so only its deletion ends its connections. Locks the user's row as their deletion does.
         """
-        if user_id not in await lock_live_users(self.db, [user_id]):
+        if user_id not in await lock_live_users(self._uow, [user_id]):
             return False
         try:
             identity = uuid.UUID(user_id)
@@ -612,12 +634,12 @@ class WorkspaceMcpConnectionEligibility:
             return True
         # Locked as read: an organization's removal of the person changes these rows without the
         # workspace lock, and must wait for this sign-in, or be seen by it.
-        if await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], [identity], lock=True):
+        if await self._members.get_active_pairs([workspace_id], [identity], lock=True):
             return True
-        workspace = await WorkspaceRepository(self.db).get(workspace_id)
+        workspace = await self._workspaces.get(workspace_id)
         if workspace is None:
             return False
-        managers = await OrganizationMemberRepository(self.db).active_with_roles(
+        managers = await self._organization_members.active_with_roles(
             workspace.organization_id, {identity}, MANAGEMENT_ROLES, lock=True
         )
         return identity in managers
@@ -888,6 +910,20 @@ def _renewer(
     return partial(tokens.renew_rejected, McpServerRef.of(row), access.user_id)
 
 
+async def _caller_token(ref: McpServerRef, access: McpAccess | None, tokens: McpUserTokens) -> str:
+    """A per-user server's token for the caller's own user, read from a copy of the row.
+
+    Raises:
+        WorkspaceMcpServerNotFoundError: the caller has no user, who could hold a connection.
+        McpSignInRequiredError: the caller's user has not signed in to it.
+        McpConnectionUnavailableError: that user's token has expired and cannot be renewed right now.
+        SecretDecryptionError: a stored token will not decrypt.
+    """
+    if access is None or access.user_id is None:
+        raise WorkspaceMcpServerNotFoundError(ref.id)
+    return await tokens.token_for(ref, access.user_id)
+
+
 async def resolve_workspace_mcp_server(
     db: AsyncSession,
     *,
@@ -943,14 +979,14 @@ async def resolve_workspace_mcp_server(
     if _needs_a_user(row, access):
         return None
     per_user = row.credential_mode == McpCredentialMode.PER_USER
-    reader = tokens or McpUserTokens(McpUserConnectionRepository(db))
-    # Built before the token is read: reading one may release the session, and a release whose commit
-    # fails rolls back, which expires the row.
+    tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
+    # Read in full before the token is: reading a per-user one may release the session and expire the row.
     resolved = ResolvedMcpServer(
         id=row.id,
         name=row.name,
         url=row.url,
-        renew_token=_renewer(row, access, reader),
+        authorization_token=None if per_user else _stored_token(row),
+        renew_token=_renewer(row, access, tokens),
         # A user's token changes at every renewal, which is not a change to the server's configuration.
         credential_revision=McpCredentialMode.PER_USER if per_user else None,
         enabled=row.enabled,
@@ -959,10 +995,9 @@ async def resolve_workspace_mcp_server(
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
-    # A per-user server reached here has a caller with a user: `_needs_a_user` answered for the rest.
-    user_id = access.user_id if access is not None else None
-    token = await reader.token_for(McpServerRef.of(row), user_id) if per_user and user_id else _stored_token(row)
-    return resolved.model_copy(update={"authorization_token": token})
+    if per_user:
+        resolved.authorization_token = await _caller_token(McpServerRef.of(row), access, tokens)
+    return resolved
 
 
 async def list_reachable_mcp_servers(
