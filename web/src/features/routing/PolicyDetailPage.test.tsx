@@ -737,8 +737,20 @@ describe("PolicyDetailPage test section", () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(explains()).toHaveLength(before)
 
+    // A budget that is not a number hides the plan rather than leaving the
+    // last one under the field as if it answered it.
+    await user.clear(budget)
+    await user.type(budget, "abc")
+    await waitFor(() =>
+      expect(test.queryByRole("list", { name: "Tried in order" })).toBeNull(),
+    )
+
     await user.clear(budget)
     await user.type(budget, "85")
+    // Until the new value compiles, the last plan is marked as not current.
+    expect(
+      test.getByRole("list", { name: "Tried in order" }).parentElement,
+    ).toHaveAttribute("aria-busy", "true")
     await waitFor(() =>
       expect(explains().at(-1)?.body).toMatchObject({
         name: "auto",
