@@ -73,9 +73,15 @@ dashboard:
 3. Open the tunnel, go to **Routes**, and select **Add route**, then **Published
    application**.
 4. Pick a subdomain and domain, for example `mcp.example.com`. For **Service
-   URL**, enter the private address of the server, for example
-   `http://192.168.1.20:8123`.
+   URL**, enter where the server listens, for example `http://localhost:8123`.
 5. Save, and check the tunnel shows as healthy.
+
+Run the tunnel program on the same machine as the MCP server, so the hop from
+the tunnel to the server never leaves that machine. The bearer token travels
+over that hop, and a plain `http://` Service URL pointing at another machine
+sends it across your LAN unencrypted, where anyone on it could copy it and use it
+against the public address. If the server has to be on another machine, give it
+an `https://` Service URL with a certificate the tunnel program can verify.
 
 Cloudflare's guide is
 [Create a remotely-managed tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
@@ -94,7 +100,13 @@ documentation, is:
 tailscale funnel 8123
 ```
 
-where `8123` is the local port of the MCP server. Tailscale's page is
+where `8123` is the local port of the MCP server. That form runs in the
+foreground: closing the terminal stops the Funnel, and after a reboot or a
+Tailscale restart you start it again. To keep it running, add `--bg`
+(`tailscale funnel --bg 8123`). To stop a background Funnel, repeat the original
+command with `off` at the end, as Tailscale's page describes.
+
+Tailscale's page is
 [Tailscale Funnel](https://tailscale.com/kb/1223/funnel); read it for the
 prerequisites and the flags.
 
@@ -124,19 +136,47 @@ configuration (see [Configuration](configuration.md)).
 | `OTARI_MCP_ALLOW_LOOPBACK` | `true` | Allows `127.0.0.1` and `localhost`. Set `false`, `0` or `no` to refuse them. |
 | `OTARI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | Set `true`, `1` or `yes` to turn the address check off. |
 
-- If the server is on the same machine as the gateway, you need no change:
-  `http://127.0.0.1:<port>/mcp` is accepted.
+- If the server runs in the same network namespace as the gateway (both
+  directly on one machine), you need no change: `http://127.0.0.1:<port>/mcp` is
+  accepted. A gateway in a container does not share the host's loopback, so
+  `127.0.0.1` there means the container itself. Use an address of the host or of
+  the server that the container can reach. That is usually a private address, so
+  it needs the next step.
 - If it is on another machine, set `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` and
-  restart the gateway.
+  restart the gateway. With it on, the loopback setting no longer matters:
+  `OTARI_MCP_ALLOW_LOOPBACK=false` does not refuse loopback while the private-host
+  setting is `true`, because the address check is skipped altogether.
+
+With the Docker Compose file from the
+[Self-hosted quickstart](self-hosted-quickstart.md), adding the variable to `.env`
+is not enough: `docker-compose.yml` only passes into the container the variables
+it lists, and this one is not among them. Pass it through an override file next
+to `docker-compose.yml`, named `docker-compose.override.yml`, which Compose reads
+automatically:
+
+```yaml
+services:
+  otari:
+    environment:
+      - OTARI_MCP_ALLOW_PRIVATE_HOSTS=true
+```
+
+Then run `docker compose up -d` again so the container is recreated with the new
+environment. If you use a mounted config file instead, the same setting is
+`mcp_allow_private_hosts: true` in it.
 
 Know what that setting does before you turn it on. It is a single switch for the
 whole gateway. There is no way to allow one host and still refuse the rest, so
 it lifts the address check for every stored MCP server in every workspace, and
 for the guardrail endpoints that share the same check. That includes addresses
 like the cloud metadata address. It also lets a hostname that fails to resolve
-through. Only turn it on for a gateway whose workspace admins you trust, and keep
-the gateway's own network rules (a firewall or an egress policy) as the real
-limit on where it can connect.
+through. Anyone who can name a server URL can then aim the gateway at your network: not
+only workspace admins, but also any API key holder in a workspace where
+**Let requests name their own MCP servers** is on. New workspaces start with it
+off, but a workspace that existed before access lists keeps it on. Check that
+switch in every workspace before you turn the setting on, and keep the gateway's
+own network rules (a firewall or an egress policy) as the real limit on where it
+can connect.
 
 These two settings are shown on the dashboard's settings page for reference but
 cannot be changed there. Change them through the environment or the config file.
@@ -168,10 +208,9 @@ tells you what failed if it did.
 
 A reachable server is not a safe one until you decide who may use it.
 
-1. On the server's page, set **Exposed tools** to the few tools you want the
-   model to see, rather than leaving it blank, which exposes everything the
-   server offers. A tool that is not exposed is out of reach whatever any rule
-   says.
+1. On the server's page, set **Exposed tools** to a short list of the tools you
+   want the model to see, rather than **Every tool the server offers**. A tool
+   that is not exposed is out of reach whatever any rule says.
 2. Set the **Default policy** to **Deny**, then add rules for the keys or users
    who need it. [Control access to an MCP server](control-access-to-an-mcp-server.md)
    has the steps.
