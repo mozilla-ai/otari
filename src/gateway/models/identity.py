@@ -85,8 +85,10 @@ class OAuthIdentityLink(Base):
     The primary key is the provider's ``(provider, subject)`` pair, which names one person at that provider.
     An account holds at most one link per provider.
 
-    NOTE: ``email_at_link`` and ``email_assertion_at_link`` record what the provider said when the link was made.
-    They must not be used to look an account up.
+    NOTE: ``email_at_link`` and ``email_assertion_at_link`` record what the provider last asserted, refreshed
+    on each sign-in. They must not resolve which account an identity signs in as, which is what
+    ``(provider, subject)`` is for: a provider asserting somebody else's address must not reach their account.
+    Finding the accounts an address reaches, so that blocking it ends their sessions, is a read they do serve.
     """
 
     __tablename__ = "oauth_identity_link"

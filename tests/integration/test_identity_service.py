@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import GatewayConfig
@@ -32,6 +32,7 @@ from gateway.models.identity import (
 )
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
+    DashboardSession,
     Organization,
     OrganizationDomain,
     OrganizationDomainRole,
@@ -405,6 +406,74 @@ async def test_one_issuer_shared_by_two_organizations_is_one_account_with_two_me
     members = OrganizationMemberRepository(async_db)
     assert await members.get_active_by_organization_and_user(acme.id, signed_in.account.id) is not None
     assert await members.get_active_by_organization_and_user(globex.id, signed_in.account.id) is not None
+
+
+async def test_blocking_an_address_ends_a_session_reached_through_a_connection(
+    async_db: AsyncSession,
+) -> None:
+    """The account holds no address of its own, so only what its provider asserted can match it."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert signed_in.account.email is None
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    blocked = await _sso_service(async_db).block_email(actor=actor, value="ada@acme.example", reason=None)
+
+    assert blocked.blocked_account_count == 1
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
+
+
+async def test_blocking_the_address_a_provider_asserts_now_ends_the_session(
+    async_db: AsyncSession,
+) -> None:
+    """The address is taken again on each sign-in, so a block matches what the provider asserts now."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    service = _sso_service(async_db)
+    await service.sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    signed_in = await service.sign_in_with_oauth(_sso_identity(email="ada.lovelace@acme.example"))
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    blocked = await service.block_email(actor=actor, value="ada.lovelace@acme.example", reason=None)
+
+    assert blocked.blocked_account_count == 1
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
+
+
+async def test_blocking_a_domain_ends_a_session_reached_through_a_connection(
+    async_db: AsyncSession,
+) -> None:
+    """A domain entry covers the addresses under it, whichever column carries them."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    await _sso_service(async_db).block_email(actor=actor, value="acme.example", reason=None)
+
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
 
 
 async def test_a_first_sso_sign_in_takes_the_terms_gate(async_db: AsyncSession) -> None:

@@ -349,7 +349,9 @@ class IdentityService:
     async def _accounts_matching(self, pattern: str) -> set[uuid.UUID]:
         """The ids of every account whose address the entry ``pattern`` blocks.
 
-        Queried by every spelling of the domain a stored address may carry, then matched exactly by ``blocklist_keys``.
+        An address reaches an account either as the account's own or as the one a provider asserts for it, and
+        both are matched. Queried by every spelling of the domain a stored address may carry, then matched
+        exactly by ``blocklist_keys``.
         """
         is_domain = "@" not in pattern
         domain = pattern if is_domain else pattern.rsplit("@", 1)[1]
@@ -361,6 +363,9 @@ class IdentityService:
         # A stored address may carry its domain composed or decomposed; ``blocklist_keys`` reads both alike.
         spellings |= {unicodedata.normalize("NFC", decoded), unicodedata.normalize("NFD", decoded)}
         candidates = await self._users.list_with_email_at(spellings, include_subdomains=is_domain)
+        # An account reached through an organization's own connection holds no address, so the only
+        # address that can match it is the one its provider asserted.
+        candidates += await self._links.list_with_email_at(spellings, include_subdomains=is_domain)
         return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
 
     async def issue_password_link(self, account_id: uuid.UUID) -> PasswordLink:
@@ -458,6 +463,7 @@ class IdentityService:
             account = await self._active_account(link.user_id, label)
             password_removed = await self._prove_vouched_address(account)
             self._take_display_name_from_sso(account, external)
+            self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
 
         if external.provider.startswith(OIDC_PROVIDER_PREFIX):
