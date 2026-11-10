@@ -98,8 +98,10 @@ class YouDotComProvider(AnyFetch):
                 default=DEFAULT_PARSE_EFFORT,
                 cost_tier=True,
                 description=(
-                    "PDF pages only. lite, sent unless passed, reads embedded text at the URL price; standard also "
-                    "reads charts and images, and You.com bills each PDF page."
+                    "Parse effort, when fetching PDFs. lite runs at the same listed price, "
+                    "and reads text-focused pages. "
+                    "standard uses an advanced model to parse complex pages with components "
+                    "like charts, tables and images. Additional charge per PDF fetched."
                 ),
             ),
         ],
@@ -147,8 +149,7 @@ class YouDotComProvider(AnyFetch):
 def _with_markdown(full_page: Any, provider: str) -> dict[str, Any]:
     """``full_page`` as given, with ``markdown`` among its formats, since the text is the Markdown.
 
-    A list without formats is You.com's ``["markdown"]`` already, and a value of the wrong type is
-    You.com's to refuse.
+    A list without formats is You.com's ``["markdown"]`` already. Incorrect values handled accordingly by You.com
     """
     if not isinstance(full_page, dict):
         raise ProviderError(provider, None, "invalid_option")
