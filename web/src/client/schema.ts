@@ -3024,8 +3024,9 @@ export interface paths {
          *     a deletion never takes spend history with it.
          *
          *     Answers with the caller's context in the organization they are moved to: the
-         *     oldest of their other memberships that admits them, which an organization
-         *     requiring sign-in through its own connection does not.
+         *     oldest of their other memberships that admits them. One requiring sign-in
+         *     through its own connection admits a member who holds a link to it, and the
+         *     account its enforcement exempts, and nobody else.
          */
         delete: operations["organizations-delete_active_organization"];
         options?: never;
