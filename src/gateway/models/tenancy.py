@@ -111,6 +111,10 @@ MAX_BULK_INVITATIONS = 100
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
 MANAGEMENT_ROLES = frozenset({"owner", "admin"})
+# The role that owns an organization, as distinct from managing it.
+OWNER_ROLE = "owner"
+# The status a membership holds while it grants anything.
+ACTIVE_MEMBERSHIP_STATUS = "active"
 
 
 def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
@@ -149,12 +153,10 @@ class UserBase(SQLModel):
 class UserCreate(UserBase):
     """Everything an identity needs to exist: its wire fields plus its scope.
 
-    Separate from ``UserBase`` because ``active_organization_id`` is NOT NULL
-    and has no wire representation, so a create schema without it describes a
-    row the database will refuse.
+    Separate from ``UserBase`` because ``active_organization_id`` has no wire representation.
     """
 
-    active_organization_id: uuid.UUID
+    active_organization_id: uuid.UUID | None
 
 
 class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -224,10 +226,12 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     email_verification_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     password_reset_token_hash: str | None = Field(default=None, unique=True, index=True, max_length=64)
     password_reset_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
-    # NOT NULL: every identity is always looking at exactly one organization,
-    # which is what lets the tenancy routes resolve a scope from the caller
-    # alone. Provisioning therefore creates the organization first.
-    active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
+    # Null where no organization the identity belongs to admits it, which is a state the sign-in
+    # response and the wire contract already answer. Whatever writes this column applies that rule,
+    # so a reader may trust the value it finds.
+    active_organization_id: uuid.UUID | None = Field(
+        default=None, foreign_key="organization.id", index=True, nullable=True
+    )
     # The organization provisioned for this identity, which never moves when the
     # active one does. Nothing in this edition reads it, and it is written when
     # the identity is created: switching (mozilla-ai/otari#715) moves
@@ -403,6 +407,29 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
             index=True,
         ),
     )
+
+    sso_required: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # Null until an admin names a break-glass exception. Enabling enforcement requires this or an
+    # explicit waiver to be set, so a half-configured organization cannot exist.
+    #
+    # A second foreign key to user.id, needing the same explicit, named, altered column to stay
+    # droppable.
+    sso_break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            "sso_break_glass_user_id",
+            Uuid(),
+            ForeignKey(
+                "user.id",
+                name="fk_organization_sso_break_glass_user_id",
+                ondelete="SET NULL",
+                use_alter=True,
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
+    sso_break_glass_waived: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
 
 
 class CallerWorkspaceMembershipPublic(SQLModel):

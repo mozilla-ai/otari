@@ -39,7 +39,8 @@ from gateway.exceptions.identity_exceptions import (
     OAuthStateError,
 )
 from gateway.log_config import logger as gateway_logger
-from gateway.models.identity import EmailAssertion
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion
+from gateway.repositories.identity import OAuthPendingStateRepository
 from gateway.services import oauth_service
 
 
@@ -693,7 +694,7 @@ class TestDatabaseStateStore:
             async def flush(self) -> None:
                 return None
 
-        return oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), provider)
+        return oauth_service.DatabaseStateStore(OAuthPendingStateRepository(cast("AsyncSession", _Session())), provider)
 
     @pytest.mark.asyncio
     async def test_a_row_that_asked_for_openid_without_a_nonce_is_refused(self) -> None:
@@ -732,7 +733,9 @@ class TestDatabaseStateStore:
             async def flush(self) -> None:
                 return None
 
-        store = oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), "google")
+        store = oauth_service.DatabaseStateStore(
+            OAuthPendingStateRepository(cast("AsyncSession", _Session())), "google"
+        )
         await store.save(
             PendingState(
                 state="a-state",
@@ -748,7 +751,7 @@ class TestDatabaseStateStore:
     @pytest.mark.asyncio
     async def test_database_state_store_refuses_carried_state(self) -> None:
         """A pending state carrying apron-auth context is refused, because no column holds it."""
-        store = oauth_service._DatabaseStateStore(fake_db(), "google")
+        store = oauth_service.DatabaseStateStore(OAuthPendingStateRepository(fake_db()), "google")
         state = PendingState(
             state="s",
             redirect_uri="https://otari.example.com/auth/google/callback",
@@ -981,6 +984,14 @@ class TestProviderLabel:
         # The only caller is a refusal, and one that fails to render is worse
         # than one naming a provider nobody configured.
         assert oauth_service.provider_label("acme-oidc") == "acme-oidc"
+
+    def test_an_organizations_own_connection_is_named_for_what_a_person_chose(self) -> None:
+        """The value carries this deployment's key for an issuer, which a refusal must not read out."""
+        label = oauth_service.provider_label(f"{OIDC_PROVIDER_PREFIX}https://login.acme.example")
+
+        assert OIDC_PROVIDER_PREFIX not in label
+        assert "acme.example" not in label
+        assert label == "company sign-in"
 
 
 @pytest.mark.parametrize(("provider", "trusted"), [("github", True), ("google", True), ("acme-oidc", False)])

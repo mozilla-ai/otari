@@ -16,6 +16,14 @@ from gateway.models.tenancy import AVATAR_FACE_COUNT, OrganizationDomainRole
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
+# A provider's authorization code is a few hundred characters at most; this is a sanity ceiling
+# on an unauthenticated request body, not a format.
+_MAX_SSO_CODE_LENGTH = 2048
+# A state of the wrong length matches nothing stored; this bounds what an unauthenticated caller
+# can make this process hash.
+_MAX_SSO_STATE_LENGTH = 512
+# A sanity ceiling on an issuer URL, not a format.
+_MAX_SSO_ISS_LENGTH = 2048
 
 
 class PasswordLinkPublic(BaseModel):
@@ -189,6 +197,175 @@ class OIDCConnectionPublic(BaseModel):
     )
 
 
+class OrganizationSsoEnforcementRequest(BaseModel):
+    """What an organization administrator submits to require, or stop requiring, sign-in through its own connection."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        description="One of the organization's own owners who keeps a non-SSO sign-in route when required is true.",
+    )
+    break_glass_waived: bool = Field(
+        default=False,
+        description="Whether the organization explicitly waives a break-glass owner when enforcement is required.",
+    )
+
+
+class OrganizationSsoEnforcementPublic(BaseModel):
+    """The caller's organization's current sign-in enforcement, as its admins see it."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        description="One of the organization's own owners who keeps a non-SSO sign-in route, where the "
+        "organization named one."
+    )
+    break_glass_waived: bool = Field(
+        description="Whether the organization has explicitly waived naming a break-glass owner."
+    )
+
+
+class OrganizationSsoPublic(BaseModel):
+    """An organization's own OIDC connection, and what to register at the provider."""
+
+    redirect_uri: str | None = Field(
+        description=(
+            "The absolute callback address to register at the identity provider, whether or not a "
+            "connection is saved yet. Null where this deployment has no public address of its own "
+            "configured, because there is no address to register until it has one."
+        )
+    )
+    connection: OIDCConnectionPublic | None = Field(
+        description="The organization's own connection, or null until one is saved."
+    )
+    enforcement: OrganizationSsoEnforcementPublic = Field(
+        description="The organization's current sign-in enforcement. Independent of whether a connection exists."
+    )
+
+
+class OrganizationSsoPreflightMemberPublic(BaseModel):
+    """One active member who holds no sign-in link to the caller's organization's own connection."""
+
+    user_id: uuid.UUID
+    email: str | None = Field(description="The member's sign-in address, or null for an identity with none.")
+    full_name: str | None = Field(description="The member's display name, or null when none is set.")
+
+
+class OrganizationSsoPreflightPublic(BaseModel):
+    """What requiring sign-in through the caller's organization's own connection would cost today.
+
+    ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+    would get a new account the first time they use it. ``affected_members`` samples those people,
+    bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+
+    ``break_glass_candidates`` is who may be named as the exception, so naming one of them is never
+    refused. It leaves out the deployment's own operator, who is never subject to enforcement and so
+    needs no exception.
+    """
+
+    total_members: int = Field(description="The organization's active membership count.")
+    break_glass_candidates: list[OrganizationSsoPreflightMemberPublic] = Field(
+        description=(
+            "The owners who may be named to keep a route in that does not depend on this connection. "
+            "An owner this connection provisioned is not among them, because exempting an account that "
+            "cannot sign in without the connection keeps no route open."
+        )
+    )
+    affected_count: int = Field(description="How many active members hold no sign-in link to this connection.")
+    affected_members: list[OrganizationSsoPreflightMemberPublic] = Field(
+        description="A sample of the affected members, for recognizing who they are."
+    )
+    affected_members_truncated: bool = Field(
+        description="Whether affected_members leaves out some of the members affected_count counts."
+    )
+
+
+class SsoLookupRequest(BaseModel):
+    """An address to resolve an organization's own sign-in connection from."""
+
+    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to resolve an organization from.")
+
+
+class SsoLookupResponse(BaseModel):
+    """Whether an organization's own connection admits a sign-in at this address.
+
+    An unknown domain, one no organization has proven, and a proven one whose organization holds
+    no enabled connection all answer alike: ``found`` is false and the other two fields are null,
+    so the response cannot be read as a directory of which organizations use Otari.
+    """
+
+    found: bool = Field(description="Whether an organization's own connection admits a sign-in at this address.")
+    organization_name: str | None = Field(default=None, description="The organization's own name, set only when found.")
+    slug: str | None = Field(
+        default=None, description="The organization's slug, to start the sign-in with, set only when found."
+    )
+
+
+class SsoAuthorizeResponse(BaseModel):
+    """Where to send the browser, and the state to check when it comes back."""
+
+    authorization_url: str = Field(description="The identity provider's consent screen to navigate to.")
+    state: str = Field(
+        description=(
+            "An opaque CSRF value to keep for the length of the redirect and send back with the "
+            "authorization code. The response also sets an HttpOnly cookie that the callback requires, "
+            "so the exchange can only be completed from the browser this call was made from."
+        )
+    )
+
+
+class SsoCallbackRequest(BaseModel):
+    """The authorization code a provider handed the browser, for a sign-in through one organization's own connection.
+
+    No ``slug``: the pending authorization the ``state`` names already resolves to one connection,
+    so a browser cannot redeem a code against a connection other than the one that minted the state.
+    """
+
+    code: str = Field(
+        max_length=_MAX_SSO_CODE_LENGTH, description="The authorization code from the provider's redirect."
+    )
+    state: str = Field(
+        max_length=_MAX_SSO_STATE_LENGTH,
+        description="The 'state' from the provider's redirect, as issued by /authorize.",
+    )
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the person accepted this deployment's terms before going to the provider. Required where "
+            "the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has "
+            "claimed yet; ignored otherwise."
+        ),
+    )
+    iss: str | None = Field(
+        default=None,
+        max_length=_MAX_SSO_ISS_LENGTH,
+        description=(
+            "The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this "
+            "connection's issuer when its discovery document advertises the parameter; a provider that does "
+            "not advertise it sends none."
+        ),
+    )
+
+
+class SsoSessionPublic(BaseModel):
+    """A dashboard session minted by signing in through an organization's own connection."""
+
+    expires_at: datetime = Field(description="When the session cookie stops being accepted.")
+    user_id: uuid.UUID = Field(description="The identity this session speaks for.")
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. Null when it "
+            "is an active member of none."
+        )
+    )
+    password_removed: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in removed a password the account held: the first provider sign-in on an "
+            "address nobody had proven removes the password set before then."
+        ),
+    )
+
+
 __all__ = [
     "BlockedEmailCreateRequest",
     "BlockedEmailCreatedPublic",
@@ -199,6 +376,16 @@ __all__ = [
     "OIDCConnectionDomain",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
+    "OrganizationSsoEnforcementPublic",
+    "OrganizationSsoEnforcementRequest",
+    "OrganizationSsoPreflightMemberPublic",
+    "OrganizationSsoPreflightPublic",
+    "OrganizationSsoPublic",
     "PasswordLinkPublic",
+    "SsoAuthorizeResponse",
+    "SsoCallbackRequest",
+    "SsoLookupRequest",
+    "SsoLookupResponse",
+    "SsoSessionPublic",
     "UpdateAvatarRequest",
 ]
