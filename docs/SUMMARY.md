@@ -14,17 +14,6 @@
 
 # Guides
 
-## Organize
-
-* [Organizations and workspaces](workspaces.md)
-* [Provider keys](provider-keys.md)
-* [Billing](billing.md)
-* [Manage workspaces](manage-workspaces.md)
-* [Invite and manage organization members](invite-and-manage-organization-members.md)
-* [Members and invitations](members.md)
-* [Manage provider keys](manage-provider-keys.md)
-* [Rotate a provider key](rotate-a-provider-key.md)
-
 ## Build
 
 * [Playground](playground.md)
@@ -40,6 +29,13 @@
 * [Use with LangChain](use-with-langchain.md)
 * [Use with LangGraph](use-with-langgraph.md)
 
+## Observe
+
+* [Review usage and requests](review-usage-and-requests.md)
+* [Track spend per end user](end-users.md)
+* [Agent traces](traces.md)
+* [Importing external usage](external-usage.md)
+
 ## Control
 
 * [Budgets](budgets.md)
@@ -52,12 +48,16 @@
 * [Inference Guardrails](guardrails.md)
 * [Agent Guardrails](agent-guardrails.md)
 
-## Observe
+## Organize
 
-* [Review usage and requests](review-usage-and-requests.md)
-* [Track spend per end user](end-users.md)
-* [Agent traces](traces.md)
-* [Importing external usage](external-usage.md)
+* [Organizations and workspaces](workspaces.md)
+* [Provider keys](provider-keys.md)
+* [Billing](billing.md)
+* [Manage workspaces](manage-workspaces.md)
+* [Invite and manage organization members](invite-and-manage-organization-members.md)
+* [Members and invitations](members.md)
+* [Manage provider keys](manage-provider-keys.md)
+* [Rotate a provider key](rotate-a-provider-key.md)
 
 # Self-Hosting
 
