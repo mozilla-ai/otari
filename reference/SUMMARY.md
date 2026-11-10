@@ -38,6 +38,7 @@
   * [Organization guardrails](api-endpoints/organization-guardrails.md)
   * [Organization keys](api-endpoints/organization-keys.md)
   * [Organization pricing](api-endpoints/organization-pricing.md)
+  * [Organization sso](api-endpoints/organization-sso.md)
   * [Organization traces](api-endpoints/organization-traces.md)
   * [Organization usage](api-endpoints/organization-usage.md)
   * [Organizations](api-endpoints/organizations.md)

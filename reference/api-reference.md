@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/4edd20a1e09a8b68ce5d1b40f3bceea63bdb1cc2/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/9e6ebc9e30f52294cfb9e7f5cc04bb43e3af1a5c/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -1123,7 +1123,7 @@ at the top level of the body.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |

@@ -50,13 +50,14 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/4edd20a1e09a8b68ce5d1b40f3bceea63bdb1cc2/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/9e6ebc9e30f52294cfb9e7f5cc04bb43e3af1a5c/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
 Send the end user's id in the request's `user` field (`metadata.user_id` on
-Messages). To start a new end user on a budget other than the default, name it
-in the `Otari-End-User-Budget` header:
+Messages). A new end user starts on the key's **Default end-user budget**, or
+with no budget of its own when the key has none. To start it on another budget on the key's
+list, name that budget in the `Otari-End-User-Budget` header:
 
 ```http
 POST /v1/chat/completions
@@ -72,11 +73,11 @@ Otari-End-User-Budget: <memories budget id>
 - An id is 1 to 256 characters and can be any string, `/` included. An empty
   id counts as naming no one.
 - The header only matters when the request creates the end user. An existing end
-  user keeps its budget.
+  user keeps its budget; to change it, [move the end user](#4-manage-end-users).
 - A budget not on the key's list is refused with `403`
   (`end_user_budget_not_allowed`), even for an existing end user.
 - The response's `Otari-End-User-Budget` header names the budget the end user is
-  actually on.
+  actually on, including on a `403` (`budget_exceeded`) from that budget.
 
 A request that names no one, or the key's own user, bills the key's user as on
 any other key.

@@ -358,7 +358,7 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 ## Configuration
 
-See [config.example.yml](https://github.com/mozilla-ai/otari/blob/4edd20a1e09a8b68ce5d1b40f3bceea63bdb1cc2/config.example.yml) for the full list. Key knobs:
+See [config.example.yml](https://github.com/mozilla-ai/otari/blob/9e6ebc9e30f52294cfb9e7f5cc04bb43e3af1a5c/config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
   upload storage (see [Storage backends](#storage-backends)). With
