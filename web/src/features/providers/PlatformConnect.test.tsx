@@ -9,7 +9,8 @@ import * as apiClient from "@/shared/api/client"
 
 const STARTED: PlatformConnectStart = {
   user_code: "WXYZ-1234",
-  verification_uri_complete: "https://otari.test/connect?code=WXYZ-1234",
+  verification_uri_complete:
+    "https://otari.test/dashboard/?region=us#/connect?code=WXYZ-1234",
   expires_in: 600,
 }
 const PENDING: PlatformConnectStatus = { status: "pending", ...STARTED }
@@ -155,7 +156,9 @@ it("offers no link to an approval page that is not a web address", async () => {
   )
 
   expect(await screen.findByText("WXYZ-1234")).toBeInTheDocument()
-  expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("link", { name: "Open the approval page" }),
+  ).not.toBeInTheDocument()
   expect(tab.location.replace).not.toHaveBeenCalled()
   expect(tab.close).toHaveBeenCalled()
 })
@@ -194,6 +197,12 @@ it("does not report a connection that was made before the page opened", async ()
   expect(
     screen.getByRole("button", { name: "Connect again" }),
   ).toBeInTheDocument()
+  // The earlier key outlives a reconnect, so the way to revoke it is on hand.
+  expect(screen.getByText(/earlier one stays valid/)).toBeInTheDocument()
+  expect(screen.getByRole("link", { name: "API keys page" })).toHaveAttribute(
+    "href",
+    "https://otari.ai/dashboard/#/keys",
+  )
   // One read, however the provider lists were refreshed around it.
   expect(requests).toEqual(["GET /platform/connect"])
 })

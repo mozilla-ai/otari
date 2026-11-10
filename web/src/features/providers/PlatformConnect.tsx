@@ -124,7 +124,18 @@ export function PlatformConnect({
           {state === "connected" ? (
             <p className="text-sm text-foreground" role="status">
               Connected. Models are served as{" "}
-              <code>otari-ai:&lt;vendor&gt;:&lt;model&gt;</code>.
+              <code>otari-ai:&lt;vendor&gt;/&lt;model&gt;</code>. Connecting
+              again issues a new key; the earlier one stays valid until you
+              revoke it on otari.ai&rsquo;s{" "}
+              <a
+                href={PLATFORM_KEYS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-link hover:text-link-hover"
+              >
+                API keys page
+              </a>
+              .
             </p>
           ) : null}
           {ended ? (

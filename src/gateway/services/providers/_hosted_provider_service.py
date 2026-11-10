@@ -103,7 +103,7 @@ from gateway.services.providers._hosted_name_index import (
     remember_hosted_name,
     remember_hosted_zero_data_retention,
 )
-from gateway.services.providers._hosted_offers import HostedOffers
+from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedSource, HostedSources
 from gateway.services.providers._model_kinds import page_by_kind
@@ -855,6 +855,8 @@ class HostedProviderService:
         if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=name) for model in declared]
             return ProviderDiscovery(provider=name, models=models)
+        if implementation == OTARI_IMPLEMENTATION:
+            self.offers.remember_listing(name, discovery.models)
         return dataclasses.replace(discovery, provider=name)
 
     @staticmethod

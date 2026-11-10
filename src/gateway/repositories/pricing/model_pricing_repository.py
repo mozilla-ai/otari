@@ -92,6 +92,32 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
                 latest[row.model_key] = row
         return latest
 
+    @staticmethod
+    def transient_version(
+        model_key: str,
+        effective_at: datetime,
+        *,
+        input_price_per_million: Decimal,
+        output_price_per_million: Decimal,
+        cache_read_price_per_million: Decimal | None,
+        cache_write_price_per_million: Decimal | None,
+        pricing_tiers: Sequence[dict[str, Any]],
+        unit: str,
+        origin: str,
+    ) -> ModelPricing:
+        """One version that is a lookup result and not a stored price: never added to a session."""
+        return ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price_per_million,
+            output_price_per_million=output_price_per_million,
+            cache_read_price_per_million=cache_read_price_per_million,
+            cache_write_price_per_million=cache_write_price_per_million,
+            pricing_tiers=list(pricing_tiers),
+            unit=unit,
+            origin=origin,
+        )
+
     def add_version(
         self,
         model_key: str,

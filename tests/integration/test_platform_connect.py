@@ -7,6 +7,7 @@ rule is checked against. Model discovery is stubbed, so no case dials a provider
 
 import json
 import logging
+import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,6 +38,33 @@ PLATFORM = "https://platform.test"
 DEVICE_CODE = "device-code-never-shown"
 ISSUED_KEY = "tk-issued-once-9876"
 API_BASE = "https://inference.platform.test/api/v1"
+
+
+# What otari.ai lists: its own ids, each with the price it sells the model at where it has one.
+LISTING: list[tuple[str, float | None, float | None]] = [
+    ("openai/gpt-4o-mini", 3.0, 15.0),
+    ("openai/gpt-4o", None, None),
+    ("x/new", None, None),
+]
+
+
+def _listed(model_id: str, input_rate: float | None, output_rate: float | None) -> Model:
+    """One model as any-llm hands back an Otari's listing: the ``pricing`` block rides as an extra field."""
+    pricing: dict[str, Any] | None = (
+        None
+        if input_rate is None
+        else {
+            "input_price_per_million": input_rate,
+            "output_price_per_million": output_rate,
+            "cache_read_price_per_million": None,
+            "cache_write_price_per_million": None,
+            "pricing_tiers": [],
+            "unit": "token",
+        }
+    )
+    return Model.model_validate(
+        {"id": model_id, "object": "model", "created": 0, "owned_by": model_id.split("/")[0], "pricing": pricing}
+    )
 
 
 class FakePlatform:
@@ -105,11 +133,15 @@ def _discovery(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
     async def _stub(impl_name: str, **kwargs: Any) -> ProviderDiscovery:
         dials.append({"implementation": impl_name, **kwargs})
-        models = [Model(id=name, object="model", created=0, owned_by=impl_name) for name in ("openai:gpt-4o", "x:new")]
-        return ProviderDiscovery(provider=impl_name, models=models)
+        return ProviderDiscovery(provider=impl_name, models=[_listed(*model) for model in LISTING])
 
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _stub)
     return dials
+
+
+@pytest.fixture(autouse=True)
+def _machine_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gateway.api.routes.platform_connect.socket.gethostname", lambda: "gateway-host")
 
 
 @pytest.fixture
@@ -184,7 +216,7 @@ def test_start_returns_the_code_and_link_and_never_the_device_code(
     }
     assert DEVICE_CODE not in response.text
     [(_, sent)] = platform.requests
-    assert sent == {"gateway_name": "testserver"}
+    assert sent == {"gateway_name": "gateway-host"}
 
     pending = client.get(PATH, headers=master_key_header)
     assert pending.json()["status"] == "pending"
@@ -335,7 +367,7 @@ def test_approval_stores_the_provider_for_the_operators_organization_and_lists_i
     assert _discovery[-1]["api_base"] == "https://inference.platform.test"
 
     models = client.get(f"{HOSTED}/otari-ai/models", headers=master_key_header).json()["data"]
-    assert sorted(model["model"] for model in models) == ["openai:gpt-4o", "x:new"]
+    assert sorted(model["model"] for model in models) == ["openai/gpt-4o", "openai/gpt-4o-mini", "x/new"]
 
     row = test_db.execute(text("SELECT status, encrypted_device_code FROM platform_connect_attempts")).one()
     assert tuple(row) == ("connected", None)
@@ -569,11 +601,16 @@ def test_on_a_default_configuration_a_connected_model_serves_a_request_at_once(
 
         models = client.get(f"{HOSTED}/otari-ai/models", headers=headers).json()["data"]
         by_name = {model["model"]: model for model in models}
-        assert by_name["openai:gpt-4o"]["enabled"] is True
-        assert by_name["openai:gpt-4o"]["price_source"] == "defaults"
-        assert by_name["openai:gpt-4o"]["input_price_per_million"] is not None
-        # No vendor entry prices it, so it waits for a rate as on any hosted provider.
-        assert (by_name["x:new"]["enabled"], by_name["x:new"]["disabled_reason"]) == (False, "unpriced")
+        # The price otari.ai listed, stored as its own and not as an estimate.
+        listed = by_name["openai/gpt-4o-mini"]
+        assert (listed["enabled"], listed["price_source"]) == (True, "provider")
+        assert (listed["input_price_per_million"], listed["output_price_per_million"]) == (3.0, 15.0)
+        # None listed, so the vendor's models.dev rate stands in, as an estimate.
+        estimated = by_name["openai/gpt-4o"]
+        assert (estimated["enabled"], estimated["price_source"]) == (True, "defaults")
+        assert estimated["input_price_per_million"] == 2.5
+        # Neither prices it, so it waits for a rate as on any hosted provider.
+        assert (by_name["x/new"]["enabled"], by_name["x/new"]["disabled_reason"]) == (False, "unpriced")
 
         assert client.post(f"{API_ROOT}/users", json={"user_id": "u1"}, headers=headers).status_code == 200
         completion = ChatCompletion(
@@ -582,7 +619,7 @@ def test_on_a_default_configuration_a_connected_model_serves_a_request_at_once(
                 Choice(finish_reason="stop", index=0, message=ChatCompletionMessage(role="assistant", content="hi"))
             ],
             created=0,
-            model="openai:gpt-4o",
+            model="openai/gpt-4o-mini",
             object="chat.completion",
             usage=CompletionUsage(prompt_tokens=1000, completion_tokens=1000, total_tokens=2000),
         )
@@ -590,20 +627,27 @@ def test_on_a_default_configuration_a_connected_model_serves_a_request_at_once(
         with patch("gateway.api.routes.chat.acompletion", new=provider):
             response = client.post(
                 f"{API_ROOT}/chat/completions",
-                json={"model": "otari-ai:openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}], "user": "u1"},
+                json={
+                    "model": "otari-ai:openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "user": "u1",
+                },
                 headers=headers,
             )
 
         assert response.status_code == 200, response.text
-        assert float(response.json()["usage"]["cost_usd"]) > 0
+        # A thousand tokens each way at otari.ai's 3 and 15 per million.
+        assert float(response.json()["usage"]["cost_usd"]) == pytest.approx(0.018)
+        assert provider.await_args is not None
+        assert provider.await_args.kwargs["model"] == "otari:openai/gpt-4o-mini"
         assert provider.await_args is not None
         assert provider.await_args.kwargs["api_key"] == ISSUED_KEY
 
         # With its stored rate deleted, the page shows none: the dataset is not what a request would be priced on.
-        deleted = client.delete(f"{API_ROOT}/pricing/otari-ai:openai:gpt-4o", headers=headers)
+        deleted = client.delete(f"{API_ROOT}/pricing/otari-ai:openai/gpt-4o", headers=headers)
         assert deleted.status_code == 204, deleted.text
         models = client.get(f"{HOSTED}/otari-ai/models", headers=headers).json()["data"]
-        shown = next(model for model in models if model["model"] == "openai:gpt-4o")
+        shown = next(model for model in models if model["model"] == "openai/gpt-4o")
         assert (shown["price_source"], shown["input_price_per_million"]) == (None, None)
 
 
@@ -623,3 +667,37 @@ def test_the_toggle_still_decides_for_every_other_hosted_provider(
         assert created.status_code == 201, created.text
         [model] = client.get(f"{HOSTED}/openai/models", headers=headers).json()["data"]
         assert (model["enabled"], model["disabled_reason"]) == (False, "unpriced")
+
+
+def test_a_refresh_moves_a_listed_price_with_the_listing_and_leaves_an_operators_rate_alone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    platform: FakePlatform,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _start(client, master_key_header)
+    _approve(platform)
+    clock.advance(5)
+    assert _status(client, master_key_header)["status"] == "connected"
+    rows = client.get(f"{HOSTED}/otari-ai/models", headers=master_key_header).json()["data"]
+    chosen = next(row for row in rows if row["model"] == "openai/gpt-4o")
+    set_rate = client.patch(
+        f"{HOSTED}/otari-ai/models/{chosen['id']}",
+        json={"input_price_per_million": 9, "output_price_per_million": 9},
+        headers=master_key_header,
+    )
+    assert set_rate.status_code == 200, set_rate.text
+
+    relisted = [("openai/gpt-4o-mini", 4.0, 20.0), ("openai/gpt-4o", 1.0, 2.0), ("x/new", None, None)]
+    monkeypatch.setattr(sys.modules[__name__], "LISTING", relisted)
+    refreshed = client.post(f"{HOSTED}/otari-ai/models/refresh", headers=master_key_header)
+
+    assert refreshed.json()["repriced"] == ["openai/gpt-4o-mini"]
+    by_name = {
+        row["model"]: row for row in client.get(f"{HOSTED}/otari-ai/models", headers=master_key_header).json()["data"]
+    }
+    moved = by_name["openai/gpt-4o-mini"]
+    assert (moved["price_source"], moved["input_price_per_million"]) == ("provider", 4.0)
+    kept = by_name["openai/gpt-4o"]
+    assert (kept["price_source"], kept["input_price_per_million"]) == ("deployment", 9.0)

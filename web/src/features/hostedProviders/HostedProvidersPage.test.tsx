@@ -1861,8 +1861,18 @@ describe("HostedProvidersPage, named providers and the move", () => {
       ).toHaveAttribute("href", "https://otari.ai/dashboard/#/keys")
     })
 
-    it("names a default rate on an otari provider an estimate", async () => {
-      mockApi({ providers: [platform()] })
+    it("names a default rate on an otari provider an estimate, and a listed one listed", async () => {
+      mockApi({
+        providers: [platform()],
+        models: [
+          hostedModel({ id: "m1", model: "openai/gpt-4o" }),
+          hostedModel({
+            id: "m2",
+            model: "openai/gpt-4o-mini",
+            price_source: "provider",
+          }),
+        ],
+      })
       const user = userEvent.setup()
       await renderPage()
 
@@ -1874,6 +1884,7 @@ describe("HostedProvidersPage, named providers and the move", () => {
         name: "Models on otari-ai",
       })
       expect(await within(panel).findByText("Estimate")).toBeInTheDocument()
+      expect(within(panel).getByText("Listed")).toBeInTheDocument()
       expect(within(panel).queryByText("Default")).not.toBeInTheDocument()
     })
   })
