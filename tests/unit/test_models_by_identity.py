@@ -7,7 +7,9 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.services import catalog as selectors
 from gateway.services.merged_catalog_service import ALIAS_OWNED_BY, ModelObject, ModelPricingInfo
-from gateway.services.selector_index_service import answered_by_listing, models_by_identity
+from gateway.services.model_identity import group_offerings
+from gateway.services.selector_index_service import answered_by_listing, models_by_identity, seed_for
+from gateway.types.models_dev import ModelsDevCatalog, ModelsDevModel, ModelsDevProvider
 
 _NEBIUS = "nebius:zai-org/GLM-5.3"
 _FIREWORKS = "fireworks:accounts/fireworks/models/glm-5p3"
@@ -136,6 +138,26 @@ def test_a_name_an_alias_already_takes_is_left_to_the_alias(config: GatewayConfi
     listed = models_by_identity(config, None, [alias, _offering("openai:gpt-4o", 2.5)])
 
     assert [(row.id, row.owned_by) for row in listed] == [("openai/gpt-4o", ALIAS_OWNED_BY)]
+
+
+def test_an_organization_key_offering_is_listed_under_the_id_the_index_builds(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """A key slug is no configured instance, so only the slug map says which provider's models.dev entry names it."""
+    model = ModelsDevModel(id="deepseek-flash", name="DeepSeek V4.1 Flash 1017")
+    catalog = ModelsDevCatalog(
+        providers={"deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={model.id: model})}
+    )
+    slug_providers = {"acme-ds": "deepseek"}
+    selector = "acme-ds:deepseek-flash"
+    seed, _metadata, _provider_type = seed_for(config, catalog, selector, "acme-ds", "deepseek-flash", slug_providers)
+    (indexed,) = group_offerings([seed]).values()
+
+    listed = models_by_identity(
+        config, catalog, [ModelObject(id=selector, created=0, owned_by="acme-ds")], slug_providers=slug_providers
+    )
+
+    assert [row.id for row in listed] == [indexed.id] == ["deepseek/deepseek-v4.1-flash-1017"]
 
 
 @pytest.mark.parametrize(
