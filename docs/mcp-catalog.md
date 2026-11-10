@@ -5,9 +5,11 @@ hunting for a URL. Otari fills it by copying the official
 [MCP Registry](https://registry.modelcontextprotocol.io), and each organization
 can mark the servers it recommends on a featured shelf.
 
-The catalog permits nothing. A workspace reaches an MCP server only once the
-server is added to that workspace, so a workspace's own servers stay its allow
-list. See [Configure an MCP server](configure-an-mcp-server.md#add-servers-from-the-catalog).
+The catalog permits nothing. A workspace's stored MCP servers are the ones it
+adds, so being listed here gives a workspace no access. A request can still name
+a server by URL where the workspace allows it, and the master key can do so even
+when the workspace does not. See
+[Configure an MCP server](configure-an-mcp-server.md).
 
 ## In the dashboard
 
@@ -65,7 +67,8 @@ A sync that reaches the registry's last page is `complete`, and removes the
 servers the registry no longer lists. A sync that stops earlier is `partial`:
 it keeps the pages it read, removes nothing, and the next sync resumes at the
 page where it stopped, for up to six hours. After that the next sync starts
-over. A sync that could not read even its first page is `failed` and leaves the
+over. It also starts over when the resumed sync cannot read its first page,
+because the saved page may no longer be one the registry accepts. A sync that could not read even its first page is `failed` and leaves the
 catalog as it was.
 
 A sync stops early when the registry fails three attempts at a page, when a
@@ -91,7 +94,9 @@ replica, should it come back, stops without storing anything more.
 A sync calls `https://registry.modelcontextprotocol.io` and nothing else. It
 follows no redirect and reads at most 4 MB per page. The registry's address
 goes through the same check as an MCP server's, so it is refused if it resolves
-to a private address, unless `mcp_allow_private_hosts` is on.
+to a private address, unless `mcp_allow_private_hosts` is on. Loopback
+addresses pass by default (`mcp_allow_loopback`, on unless you turn it off),
+even while private hosts are refused.
 
 A sync never connects to the servers it lists. A server's address is resolved
 and checked when someone adds it to a workspace, and again on every request
@@ -140,6 +145,11 @@ most 50 servers.
 The shelf belongs to the organization, not to the deployment. Which servers are
 vetted is a company's call, and on a deployment that serves several
 organizations each one makes its own.
+
+These routes act on the caller's active organization. The master key acts as
+the deployment's bootstrap operator, whose active organization may not be the
+one you mean, so for a shelf use the session of a member of that organization.
+The examples below use the master key to keep them short.
 
 ```bash
 # Feature a catalog server, by the id the search returned.
