@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
+from gateway.core.config import GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 from gateway.services.model_catalog_service import ModelsDevRefusedError
 from gateway.services.pricing import (
@@ -179,6 +180,43 @@ async def test_the_preview_sees_a_changed_per_unit_price(session: AsyncSession, 
 
     assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
     assert [(c.model_key, c.change) for c in preview.changes] == [("test:clip", "changed")]
+
+
+@pytest.mark.asyncio
+async def test_the_preview_stores_the_catalog_of_facts_it_downloaded(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The kinds and details the dashboard shows come from the stored catalog, so a preview refreshes it too."""
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    row = await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE)
+    assert row is not None
+    assert set(json.loads(row.snapshot)["providers"]["test"]["models"]) == {"model"}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_without_metadata_stores_no_catalog(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=False))
+
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_a_database_error_storing_the_catalog_is_logged_without_it_and_the_preview_goes_on(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def fail(_session: AsyncSession, _catalog: ModelsDevCatalog) -> bool:
+        raise TimeoutError("the-catalog-payload")
+
+    monkeypatch.setattr(refresh, "store_models_dev_catalog", fail)
+    preview = await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    assert preview.added_count == 1
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert "Unable to store the models.dev catalog" in caplog.text
+    assert "the-catalog-payload" not in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 @pytest.mark.asyncio

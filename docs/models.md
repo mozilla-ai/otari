@@ -216,6 +216,11 @@ The models.dev catalog is refreshed as follows:
 - The stored catalog records the `models_dev_base_url` it came from. After a
   restart with another one, it is served until a download from the new source
   replaces it, which is tried within a minute rather than after the interval.
+- A catalog update, **Update catalog** on the Hosted providers page or
+  `POST /api/v1/hosted-providers/catalog-update/preview`, stores the catalog
+  it downloads for the prices at once when `models_dev_metadata` is on, so a
+  new model's kind and details arrive with its price. A database error there
+  is logged and does not fail the update.
 - A failed download is tried again a minute later. The gateway reads
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
