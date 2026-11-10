@@ -1628,6 +1628,10 @@ class OAuthPendingState(SQLModel, table=True):
     # The OpenID nonce the authorization request sent, which the exchange
     # checks the ID token against. Null for GitHub, which is not OpenID.
     nonce: str | None = Field(default=None, max_length=128)
+    # Recorded rather than re-derived at exchange time, because the library's
+    # state store contract requires every saved field back and because what the
+    # request asked for is not what configuration says minutes later.
+    openid_requested: bool
     # Kept rather than re-derived at exchange time so the URI sent with the
     # exchange is the one the authorization request was actually built with,
     # even across a ``public_base_url`` change mid-flight.

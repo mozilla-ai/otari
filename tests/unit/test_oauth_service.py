@@ -16,6 +16,7 @@ check, behind an opt-in flag.
 import logging
 import string
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from typing import Any, cast
@@ -671,6 +672,79 @@ class TestState:
 
 
 class TestDatabaseStateStore:
+    @staticmethod
+    def _store_over_row(provider: str, *, nonce: str | None, openid_requested: bool) -> Any:
+        """A store whose one pending row holds ``nonce`` and ``openid_requested``, as a reload reads it."""
+        now = datetime.now(UTC)
+        row = (
+            provider,
+            "a-code-verifier",
+            nonce,
+            openid_requested,
+            "https://otari.example.com/callback",
+            now,
+            now + timedelta(minutes=5),
+        )
+
+        class _Session:
+            async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+                return SimpleNamespace(first=lambda: row)
+
+            async def flush(self) -> None:
+                return None
+
+        return oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), provider)
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_asked_for_openid_without_a_nonce_is_refused(self) -> None:
+        """A guard over a row this code cannot write, because the two fields agree by construction.
+
+        The library refuses a pending state whose nonce and flag disagree, in either direction, so
+        rebuilding one from such a row would raise where a refusal belongs. The row is written here
+        directly to reach the guard at all.
+        """
+        store = self._store_over_row("google", nonce=None, openid_requested=True)
+
+        assert await store.consume("a-state") is None
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_asked_for_no_openid_loads_without_a_nonce(self) -> None:
+        """The nonce is withheld for those on purpose, so the refusal above must not reach them."""
+        loaded = self._store_over_row("github", nonce=None, openid_requested=False)
+
+        state = await loaded.consume("a-state")
+
+        assert state is not None
+        assert state.openid_requested is False
+
+    @pytest.mark.asyncio
+    async def test_save_records_the_flag_the_request_carried(self) -> None:
+        """The contract asks for every saved field back, so the write has to keep this one."""
+        staged: list[Any] = []
+
+        class _Session:
+            async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+                return None
+
+            def add(self, row: Any) -> None:
+                staged.append(row)
+
+            async def flush(self) -> None:
+                return None
+
+        store = oauth_service._DatabaseStateStore(cast("AsyncSession", _Session()), "google")
+        await store.save(
+            PendingState(
+                state="a-state",
+                redirect_uri="https://otari.example.com/callback",
+                nonce="a-nonce",
+                openid_requested=True,
+                created_at=0.0,
+            )
+        )
+
+        assert staged[0].openid_requested is True
+
     @pytest.mark.asyncio
     async def test_database_state_store_refuses_carried_state(self) -> None:
         """A pending state carrying apron-auth context is refused, because no column holds it."""

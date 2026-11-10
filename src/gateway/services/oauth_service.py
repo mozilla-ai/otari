@@ -245,6 +245,7 @@ class _DatabaseStateStore:
                 provider=self._provider,
                 code_verifier=state.code_verifier,
                 nonce=state.nonce,
+                openid_requested=state.openid_requested,
                 redirect_uri=state.redirect_uri,
                 expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
             )
@@ -276,6 +277,7 @@ class _DatabaseStateStore:
                     col(OAuthPendingState.provider),
                     col(OAuthPendingState.code_verifier),
                     col(OAuthPendingState.nonce),
+                    col(OAuthPendingState.openid_requested),
                     col(OAuthPendingState.redirect_uri),
                     col(OAuthPendingState.created_at),
                     col(OAuthPendingState.expires_at),
@@ -284,16 +286,15 @@ class _DatabaseStateStore:
         ).first()
         if row is None:
             return None
-        provider, code_verifier, nonce, redirect_uri, created_at, expires_at = row
+        provider, code_verifier, nonce, openid_requested, redirect_uri, created_at, expires_at = row
         if provider != self._provider:
             logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
             return None
         if expires_at <= datetime.now(UTC):
             return None
-        if nonce is None and "openid" in _PROVIDERS[provider].scopes:
-            # Minted before the column existed. apron-auth would refuse it as a
-            # nonce failure; as a state no longer pending, the person is told to
-            # start again.
+        if nonce is None and openid_requested:
+            # The library refuses a state whose nonce and flag disagree, as a nonce failure. Refused
+            # here instead, as a state no longer pending, so the person is told to start again.
             logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", provider)
             return None
         return PendingState(
@@ -301,9 +302,7 @@ class _DatabaseStateStore:
             redirect_uri=redirect_uri,
             code_verifier=code_verifier,
             nonce=nonce,
-            # A nonce is minted for an OpenID request and withheld otherwise, which is the same
-            # fact the library records, and it refuses a state whose two disagree.
-            openid_requested=nonce is not None,
+            openid_requested=openid_requested,
             created_at=created_at.timestamp(),
         )
 
