@@ -1838,3 +1838,46 @@ async def test_a_user_spelled_like_an_account_is_not_shown_as_that_account(
     )
 
     assert [(entry.user_id, entry.email, entry.full_name) for entry in listed.data] == [(lookalike, None, None)]
+
+
+async def test_both_resolvers_survive_a_release_that_rolls_back_while_renewing(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A rolled-back release expires every row the request loaded, including the servers not yet read."""
+    world = await _world(async_db, config)
+    second = await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCreate(name="mail", url=OTHER_PUBLIC_URL, credential_mode=McpCredentialMode.PER_USER),
+    )
+    shared = await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCreate(name="wiki", url=PUBLIC_URL + "/wiki", authorization_token="shared-token"),
+    )
+    member_id, workspace_id, first_id = str(world.member.id), world.workspace.id, world.server.id
+    for server_id in (first_id, second.id):
+        world.server = await _service(async_db, config).get_server(
+            user=world.owner, workspace_id=workspace_id, server_id=server_id
+        )
+        await _sign_in(async_db, config, world, world.member)
+        await _expire(async_db, server_id)
+
+    async def failed_release() -> None:
+        await async_db.rollback()
+
+    releasing = McpUserTokens(
+        McpUserConnectionRepository(async_db), unit_of_work=tokens._unit_of_work, release=failed_release
+    )
+    servers = WorkspaceMcpServers(async_db, releasing)
+
+    resolved = await servers.resolve_many(workspace_id, [second.id, shared.id, first_id], _access(member_id))
+
+    assert [(entry.name, entry.authorization_token) for entry in resolved] == [
+        ("mail", "renewed-1"),
+        ("wiki", "shared-token"),
+        ("drive", "renewed-2"),
+    ]
+    await _expire(async_db, second.id)
+    one = await servers.resolve_one(workspace_id, second.id, _access(member_id))
+    assert one is not None and (one.name, one.authorization_token) == ("mail", "renewed-3")
