@@ -749,10 +749,17 @@ async def _resolve_for_request(
             continue
         granted = patterns[server_id]
         per_user = row.credential_mode == McpCredentialMode.PER_USER
+        try:
+            shared_token = None if per_user else _stored_token(row)
+        except (SecretDecryptionError, SecretBoxUnavailableError):
+            if server_id in named:
+                raise
+            _leave_out_unreadable(row.id)
+            continue
         config = McpServerConfig(
             name=row.name,
             url=row.url,
-            authorization_token=None if per_user else _stored_token(row),
+            authorization_token=shared_token,
             purpose_hint=row.purpose_hint,
             allowed_tools=row.allowed_tools,
             caller_tool_patterns=None if "*" in granted else granted,
@@ -786,8 +793,22 @@ async def _resolve_for_request(
                     raise
                 resolved.sign_in.append(dataclasses.replace(need, reason=McpSignInReason.RENEWAL_FAILED))
                 continue
+            except (SecretDecryptionError, SecretBoxUnavailableError):
+                if not config.attached:
+                    raise
+                _leave_out_unreadable(need.server_id)
+                continue
         resolved.servers.append(config)
     return resolved
+
+
+def _leave_out_unreadable(server_id: uuid.UUID) -> None:
+    """Log an attached server left out of a request because a credential it sends will not decrypt.
+
+    A named server fails the request instead: connecting without the credential would send an
+    unauthenticated request. An attached one joins every request of its workspace, so it cannot fail them all.
+    """
+    logger.error("Attached MCP server left out: a stored credential will not decrypt server_id=%s", server_id)
 
 
 def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:

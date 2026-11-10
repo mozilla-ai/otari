@@ -45,8 +45,10 @@ if TYPE_CHECKING:
     from gateway.models.mcp import McpServerConfig
 
 
-# How long an attached server may take to answer its first two requests before a request goes on without it.
+# How long an attached server may take to answer its first two requests before a request goes on without it,
+# and how long all of a request's attached servers may take between them, since they connect one at a time.
 ATTACHED_CONNECT_DEADLINE_S = 10.0
+ATTACHED_CONNECT_BUDGET_S = 15.0
 
 
 def _cancelling() -> bool:
@@ -239,6 +241,8 @@ class MCPClientPool:
         owner.result()
 
     async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
+        loop = asyncio.get_running_loop()
+        attached_by = loop.time() + ATTACHED_CONNECT_BUDGET_S
         async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
@@ -246,8 +250,11 @@ class MCPClientPool:
                 started = datetime.now(UTC)
                 # An attached server gets a stack of its own, so one that cannot be reached is closed and left out.
                 stack = await self._stack.enter_async_context(AsyncExitStack()) if cfg.attached else self._stack
+                deadline = min(ATTACHED_CONNECT_DEADLINE_S, attached_by - loop.time()) if cfg.attached else None
                 try:
-                    server = await self._connect(cfg, stack)
+                    if deadline is not None and deadline <= 0:
+                        raise TimeoutError
+                    server = await self._connect(cfg, stack, deadline)
                 except BaseException as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
@@ -273,7 +280,7 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig, stack: AsyncExitStack) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, stack: AsyncExitStack, deadline: float | None) -> _ConnectedServer:
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
@@ -283,7 +290,7 @@ class MCPClientPool:
         session = await stack.enter_async_context(ClientSession(read, write))
         # An attached server joins every request of its workspace, so one that accepts the connection and
         # never answers is given up on quickly rather than holding each request for the read timeout.
-        with anyio.fail_after(ATTACHED_CONNECT_DEADLINE_S) if cfg.attached else contextlib.nullcontext():
+        with anyio.fail_after(deadline) if deadline is not None else contextlib.nullcontext():
             await session.initialize()
             listed = await session.list_tools()
 

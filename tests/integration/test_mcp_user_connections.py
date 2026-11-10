@@ -53,7 +53,7 @@ from gateway.repositories.tools import (
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.model_access import McpAccess, revoke_user_mcp_grants
-from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
+from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
@@ -1315,3 +1315,27 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     assert outcome.query() == {"connected": str(world.server.id)}
     with pytest.raises(McpConnectionFlowError):
         await connections.start_from_link(ticket[:-3] + "AAA")
+
+
+async def test_an_attached_server_whose_token_will_not_decrypt_is_left_out_and_a_named_one_fails(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    created = await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCreate(
+            name="broken", url=PUBLIC_URL, authorization_token="token", attach_by_default=True
+        ),
+    )
+    await async_db.execute(
+        update(WorkspaceMcpServer).where(WorkspaceMcpServer.id == created.id).values(encrypted_token="not-a-token")
+    )
+    await async_db.commit()
+    servers = WorkspaceMcpServers(async_db)
+    member = _access(str(world.member.id))
+
+    attached = await servers.resolve_for_request(world.workspace.id, [], member, attach=True)
+    assert attached.servers == []
+    with pytest.raises(SecretDecryptionError):
+        await servers.resolve_for_request(world.workspace.id, [created.id], member, attach=True)

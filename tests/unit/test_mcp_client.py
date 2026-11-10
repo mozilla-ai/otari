@@ -27,7 +27,9 @@ from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin
 async def test_aenter_rejects_duplicate_server_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two configs sharing a name raise instead of the second silently overwriting the first."""
 
-    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, stack: object) -> _ConnectedServer:
+    async def fake_connect(
+        self: MCPClientPool, cfg: McpServerConfig, stack: object, deadline: object
+    ) -> _ConnectedServer:
         return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
 
     monkeypatch.setattr(MCPClientPool, "_connect", fake_connect)
@@ -47,7 +49,9 @@ async def test_aenter_connects_distinct_names(monkeypatch: pytest.MonkeyPatch) -
 
     connected: list[str] = []
 
-    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, stack: object) -> _ConnectedServer:
+    async def fake_connect(
+        self: MCPClientPool, cfg: McpServerConfig, stack: object, deadline: object
+    ) -> _ConnectedServer:
         connected.append(cfg.name)
         return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
 
@@ -816,9 +820,10 @@ async def test_an_attached_server_whose_transport_fails_is_left_out_and_a_named_
 
     async with asyncio.timeout(5), MCPClientPool([_ATTACHED]) as pool:
         assert pool.openai_tools == []
-    with pytest.raises(BaseException):  # noqa: B017, PT011 - the transport's own failure, as before
+    with pytest.raises(BaseExceptionGroup) as raised:
         async with asyncio.timeout(5), MCPClientPool([_TASK_GROUP_CONFIG]):
             pass
+    assert raised.group_contains(ConnectionError)
 
 
 @pytest.mark.asyncio
@@ -833,3 +838,19 @@ async def test_a_request_canceled_while_an_attached_server_connects_is_still_can
 
     with pytest.raises(asyncio.CancelledError):
         await opening
+
+
+@pytest.mark.asyncio
+async def test_attached_servers_share_one_time_budget(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _HangingSession)
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_DEADLINE_S", 0.2)
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_BUDGET_S", 0.3)
+    configs = [_ATTACHED.model_copy(update={"name": f"attached-{n}"}) for n in range(5)]
+    started = asyncio.get_running_loop().time()
+
+    async with asyncio.timeout(5), MCPClientPool(configs) as pool:
+        assert pool.openai_tools == []
+
+    assert asyncio.get_running_loop().time() - started < 0.8, "five hung servers cost one budget, not five deadlines"
