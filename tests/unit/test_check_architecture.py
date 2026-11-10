@@ -707,6 +707,7 @@ def test_a_commit_or_rollback_outside_the_unit_of_work_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, call: str
 ) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", source)
     line = source.count("\n")
     assert check.check_transaction_control(tmp_path) == [
@@ -716,6 +717,7 @@ def test_a_commit_or_rollback_outside_the_unit_of_work_is_flagged(
 
 def test_the_unit_of_work_may_commit_and_roll_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(
         tmp_path,
         "gateway/core/unit_of_work.py",
@@ -726,6 +728,7 @@ def test_the_unit_of_work_may_commit_and_roll_back(tmp_path: Path, monkeypatch: 
 
 def test_a_module_on_the_transaction_baseline_may_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(
         tmp_path, "gateway/services/thing_service.py", "async def save(db: object) -> None:\n    await db.commit()\n"
     )
@@ -737,12 +740,49 @@ def test_a_transaction_baseline_entry_that_ends_no_transaction_must_leave_the_ba
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
 ) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(tmp_path, "gateway/services/other_service.py", "")
     if source is not None:
         _write(tmp_path, "gateway/services/thing_service.py", source)
     assert check.check_transaction_control(tmp_path) == [
-        "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit nor "
-        "rollback; remove it from the baseline"
+        "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit, "
+        "rollback nor begin_nested; remove it from the baseline"
+    ]
+
+
+_SAVEPOINT_REMEDY = "a repository opens a savepoint only to diagnose a refusal of its own write"
+_SAVEPOINT_SOURCE = "async def add(db: object) -> None:\n    async with db.begin_nested():\n        pass\n"
+
+
+def test_a_savepoint_off_the_savepoint_baseline_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
+    _write(tmp_path, "gateway/repositories/thing_repository.py", _SAVEPOINT_SOURCE)
+    assert check.check_transaction_control(tmp_path) == [
+        f"gateway/repositories/thing_repository.py:2 calls begin_nested; {_SAVEPOINT_REMEDY}"
+    ]
+
+
+def test_the_savepoint_baseline_allows_a_savepoint_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ("gateway/repositories/thing_repository.py",))
+    _write(tmp_path, "gateway/repositories/thing_repository.py", _SAVEPOINT_SOURCE + "    await db.commit()\n")
+    assert check.check_transaction_control(tmp_path) == [
+        f"gateway/repositories/thing_repository.py:4 calls commit; {_TRANSACTION_REMEDY}"
+    ]
+
+
+def test_a_savepoint_baseline_entry_that_opens_no_savepoint_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ("gateway/repositories/thing_repository.py",))
+    _write(tmp_path, "gateway/repositories/thing_repository.py", "async def add(db: object) -> None:\n    pass\n")
+    assert check.check_transaction_control(tmp_path) == [
+        "gateway/repositories/thing_repository.py is on the savepoint baseline but opens no savepoint; "
+        "remove it from the baseline"
     ]
 
 
