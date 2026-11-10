@@ -17,9 +17,7 @@ from any_llm import LLMProvider
 
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError
-from gateway.services import model_catalog_service
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model, deferred_charge
-from gateway.types.models_dev import parse_catalog
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 IDENTITY_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
@@ -273,40 +271,32 @@ async def test_a_gateway_tools_admission_bills_no_model_and_names_its_tools() ->
     [
         ("groq", "openai/gpt-oss-120b", True),
         (LLMProvider.GROQ, "openai/gpt-oss-120b", True),
+        ("openai", "gpt-oss-120b", True),
+        ("gemini", "gemma-3-27b-it", True),
+        ("deepinfra", "Qwen/Qwen3-Coder", True),
+        ("together", "moonshotai/Kimi-K2", True),
+        ("mistral", "a-model-no-catalog-lists", True),
         ("openai", "gpt-4o", False),
+        ("openai", "o3-mini", False),
         ("openai", "a-model-no-catalog-lists", False),
-        ("mistral", "a-provider-no-catalog-lists", False),
+        ("anthropic", "claude-sonnet-4", False),
+        ("vertexai", "gemini-2.5-pro", False),
+        ("xai", "grok-4", False),
+        ("openrouter", "anthropic/claude-sonnet-4", False),
+        ("openrouter", "x-ai/grok-4", False),
+        ("deepinfra", "google/gemini-2.5-flash", False),
     ],
 )
-def test_a_model_is_open_weight_only_where_the_catalog_says_so(
-    provider: str | LLMProvider, model: str, open_weights: bool, monkeypatch: pytest.MonkeyPatch
+def test_a_model_is_open_weight_unless_it_is_closed(
+    provider: str | LLMProvider, model: str, open_weights: bool
 ) -> None:
-    catalog = parse_catalog(
-        {
-            "groq": {
-                "id": "groq",
-                "models": {"openai/gpt-oss-120b": {"id": "openai/gpt-oss-120b", "open_weights": True}},
-            },
-            "openai": {"id": "openai", "models": {"gpt-4o": {"id": "gpt-4o", "open_weights": False}}},
-        }
-    )
-    monkeypatch.setattr(model_catalog_service, "_fallback", lambda: catalog)
     assert billed_model(provider, model) == BilledModel(
         provider=LLMProvider(provider).value, model=model, open_weights=open_weights
     )
 
 
-def test_a_deferred_job_is_charged_to_its_creator_on_the_model_it_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_deferred_job_is_charged_to_its_creator_on_the_model_it_requested() -> None:
     """A batch or video settled later bills its creator, its requested model and its implementation."""
-    catalog = parse_catalog(
-        {
-            "deepinfra": {
-                "id": "deepinfra",
-                "models": {"Wan-AI/Wan2.1": {"id": "Wan-AI/Wan2.1", "open_weights": True}},
-            }
-        }
-    )
-    monkeypatch.setattr(model_catalog_service, "_fallback", lambda: catalog)
     billing = cast(BillingPort, _Billing())
 
     charge = deferred_charge(
@@ -333,10 +323,6 @@ def test_a_deferred_job_whose_creator_names_no_identity_is_charged_to_no_one() -
         model="gpt-4o",
     )
     assert charge.actor_user_id is None
-
-
-def test_with_no_catalog_no_model_is_open_weight() -> None:
-    assert billed_model("groq", "openai/gpt-oss-120b").open_weights is False
 
 
 @pytest.mark.asyncio

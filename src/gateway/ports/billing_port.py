@@ -38,8 +38,8 @@ FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked
 class BilledModel:
     """The model a deployment-paid call is served on, so an adapter can fund models differently.
 
-    ``open_weights`` is the model catalog's answer, and ``False`` where the
-    catalog does not know the model.
+    ``open_weights`` is ``False`` only for a closed model (Claude, GPT, Gemini,
+    Grok and their providers); any other model counts as open-weight.
     """
 
     provider: str

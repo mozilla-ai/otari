@@ -107,7 +107,7 @@ the cardholder's emails offer changes to the auto top-up; everyone else's offer
 
 ## Subscription plans
 
-Otari Go ($10 a month) and Otari Pro ($40 a month) are early-access plans. A plan includes a monthly usage allowance for the open-weight models otari.ai serves ($30 on Go, $120 on Pro), plus monthly allowances of web searches, web fetches and code runs. Plans are by invitation: an owner or admin redeems the invitation code on the **Billing** page and pays on Stripe.
+Otari Go ($10 a month) and Otari Pro ($40 a month) are early-access plans. A plan includes a monthly usage allowance for the open-weight models otari.ai serves ($30 on Go, $120 on Pro), plus monthly allowances of web searches, web fetches and code runs. Every model counts as open-weight except the closed ones: Claude, GPT (but not gpt-oss), Gemini (but not Gemma) and Grok, whichever provider serves them. Plans are by invitation: an owner or admin redeems the invitation code on the **Billing** page and pays on Stripe.
 
 A plan is personal. It covers only requests made with the subscriber's own API keys. Requests from other members, and requests to closed models such as Claude, GPT and Gemini, are paid from the balance as usual.
 

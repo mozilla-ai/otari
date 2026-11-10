@@ -6,6 +6,7 @@ concurrent requests can pass on the same funds, the charge allows the overdraft
 that leaves, and the next request is refused.
 """
 
+import re
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
@@ -16,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
 from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
-from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.provider_kwargs import provider_key
 
 if TYPE_CHECKING:
@@ -37,17 +37,36 @@ def actor_user_id_for(user_id: str | None) -> uuid.UUID | None:
         return None
 
 
-def billed_model(provider: "str | LLMProvider", model: str) -> BilledModel:
-    """The model a deployment-paid call on ``provider`` is billed as, with the catalog's open-weights answer.
+# Providers whose own models are all closed. Anything not ruled closed here or
+# by name below is treated as open-weight: the closed labs are few and change
+# slowly, where a list of open models would trail every release.
+_CLOSED_PROVIDERS = frozenset(
+    {"anthropic", "azureanthropic", "vertexaianthropic", "gemini", "vertexai", "xai", "openai", "azureopenai"}
+)
+# Closed model families, matched on the model's own name, whichever provider or
+# aggregator serves it (``openrouter``'s ``anthropic/claude-sonnet-4``).
+_CLOSED_MODEL = re.compile(r"^(claude|gemini|grok|gpt-(?!oss)|chatgpt|o[1-9]\b)", re.IGNORECASE)
+# The open-weight releases a closed provider serves.
+_OPEN_ON_CLOSED_PROVIDER = re.compile(r"^(gpt-oss|gemma)", re.IGNORECASE)
 
-    Read from the catalog the worker already holds, so it costs no I/O. A model
-    the catalog does not list is not open-weight, which keeps an unknown model
-    off anything an adapter funds for open-weight models only.
+
+def is_closed_model(provider: str, model: str) -> bool:
+    """Whether ``model`` on ``provider`` (a wire name) is a closed model, which no open-weight plan covers."""
+    name = model.rsplit("/", 1)[-1]
+    if _OPEN_ON_CLOSED_PROVIDER.match(name):
+        return False
+    return provider in _CLOSED_PROVIDERS or bool(_CLOSED_MODEL.match(name))
+
+
+def billed_model(provider: "str | LLMProvider", model: str) -> BilledModel:
+    """The model a deployment-paid call on ``provider`` is billed as, open-weight unless it is a closed one.
+
+    Decided from a short list of closed providers and model families
+    (:func:`is_closed_model`), so a new open model is covered without waiting
+    on any catalog to list it.
     """
     wire_name = provider_key(provider)
-    catalog = cached_models_dev_catalog()
-    listed = catalog.model_for(wire_name, model) if catalog is not None else None
-    return BilledModel(provider=wire_name, model=model, open_weights=listed is not None and listed.open_weights)
+    return BilledModel(provider=wire_name, model=model, open_weights=not is_closed_model(wire_name, model))
 
 
 @dataclass(frozen=True)
