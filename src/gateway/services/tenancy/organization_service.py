@@ -18,6 +18,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,6 +89,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -219,6 +221,29 @@ def _refuse_address_vouched_elsewhere(target: User, membership: OrganizationMemb
     """
     if membership is None and target.email_vouched_at is not None:
         raise OrganizationMemberAddressUnprovenError(email)
+
+
+async def _report_invitations(
+    growth: GrowthSignalPort | None,
+    background_tasks: BackgroundTasks | None,
+    *,
+    user: User,
+    organization: Organization,
+    role: str,
+    count: int,
+) -> None:
+    """Report ``count`` committed invitations to ``role``, one per address, when there is somewhere to report them."""
+    if growth is None or background_tasks is None:
+        return
+    for _ in range(count):
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.MEMBER_INVITED,
+            user_id=user.id,
+            email=user.email,
+            organization_id=organization.id,
+            details={"role": role},
+        )
 
 
 def _invitation_accept_path(token: str) -> str:
@@ -1365,6 +1390,8 @@ class OrganizationService:
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
         blocked_addresses: BlockedAddresses,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> InviteOrganizationMemberResultPublic:
         """Invite an address to the caller's organization by email.
 
@@ -1383,6 +1410,9 @@ class OrganizationService:
         below that re-adding a removed address already goes through, since
         without that a link nobody ever opened would dead-end every future
         invite to the same address with no way through but revoke-then-invite.
+
+        With ``growth``, the invitation is reported as ``MEMBER_INVITED`` once
+        it commits.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -1423,7 +1453,7 @@ class OrganizationService:
             # The Unit of Work rolled back on the way out.
             raise OrganizationMemberAlreadyExistsError(email) from None
 
-        return await self._mail_invitation(
+        result = await self._mail_invitation(
             mailer=Mailer(config),
             user=user,
             organization=organization,
@@ -1433,6 +1463,11 @@ class OrganizationService:
             config=config,
             mail_limit=mail_limit,
         )
+        # Last, so nothing an adapter does can stand between a committed invitation and its email.
+        await _report_invitations(
+            growth, background_tasks, user=user, organization=organization, role=request.role, count=1
+        )
+        return result
 
     async def invite_active_organization_members_for_user(
         self,
@@ -1442,6 +1477,8 @@ class OrganizationService:
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
         blocked_addresses: BlockedAddresses,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> BulkInviteOrganizationMembersResultPublic:
         """Invite several addresses to the caller's organization at once.
 
@@ -1449,7 +1486,8 @@ class OrganizationService:
         own savepoint, so one that is refused (already a member, say) is reported
         in ``failed`` and does not stop the rest. The invitations commit together
         and the emails then go out concurrently, so every result still carries
-        whether its own email was sent.
+        whether its own email was sent. With ``growth``, each address invited is
+        reported as ``MEMBER_INVITED`` once the batch commits.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -1522,6 +1560,9 @@ class OrganizationService:
                 )
 
         invited = await asyncio.gather(*(mail(*one) for one in staged))
+        await _report_invitations(
+            growth, background_tasks, user=user, organization=organization, role=request.role, count=len(staged)
+        )
         return BulkInviteOrganizationMembersResultPublic(invited=list(invited), failed=failed)
 
     async def _stage_invitation(

@@ -342,7 +342,7 @@ export async function completeOAuthSignIn(
   code: string,
   state: string,
   termsAccepted: boolean,
-): Promise<SignInResult & { passwordRemoved: boolean }> {
+): Promise<SignInResult & { passwordRemoved: boolean; newAccount: boolean }> {
   const payload: OAuthCallbackRequest = {
     code,
     state,
@@ -358,10 +358,15 @@ export async function completeOAuthSignIn(
       message: finished.message,
       status: finished.status,
       passwordRemoved: false,
+      newAccount: false,
     }
   }
   const session = finished.body as Partial<OAuthSessionResponse> | undefined
-  return { isOk: true, passwordRemoved: session?.password_removed === true }
+  return {
+    isOk: true,
+    passwordRemoved: session?.password_removed === true,
+    newAccount: session?.new_account === true,
+  }
 }
 
 // One unauthenticated GET, with the same error handling `publicPost` gives its

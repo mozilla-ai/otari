@@ -3,6 +3,8 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
 
+from fastapi import BackgroundTasks
+
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.settings.budgets import BudgetConfig
@@ -16,6 +18,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
@@ -193,11 +196,38 @@ class BudgetService:
             return await self._member_policies.create_policy(user=user, workspace_id=workspace_id, request=request)
 
     async def create_organization_budget(
-        self, *, user: User, request: OrganizationBudgetCreate
+        self,
+        *,
+        user: User,
+        request: OrganizationBudgetCreate,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> OrganizationBudgetPublic:
-        """Create a budget owned by the caller's organization."""
+        """Create a budget owned by the caller's organization.
+
+        With ``growth``, the budget is reported as ``BUDGET_CREATED`` once it
+        commits, and the organization's first as ``BUDGET_RULE_SET`` too.
+        """
         async with self._uow:
-            return await self._organization.create_budget(user=user, request=request)
+            budget = await self._organization.create_budget(user=user, request=request)
+            first = await self._budgets.count_by_organization(budget.organization_id) == 1
+        if growth is None or background_tasks is None:
+            return budget
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.BUDGET_CREATED,
+            user_id=user.id,
+            email=user.email,
+            organization_id=budget.organization_id,
+        )
+        if first and user.email is not None:
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.BUDGET_RULE_SET,
+                user_id=user.id,
+                email=user.email,
+            )
+        return budget
 
     async def create_organization_ceiling(
         self, *, user: User, request: OrganizationScopedBudgetCreate

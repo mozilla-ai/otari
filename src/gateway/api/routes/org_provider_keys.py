@@ -15,12 +15,13 @@ parameter the way `workspaces.py` does, unlike the organization surface's
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from gateway.api.deps import (
     CurrentIdentity,
     OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
+    PersonGrowthSignalPortDep,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -89,6 +90,8 @@ async def create_org_provider_key(
     models: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     body: OrgProviderKeyCreateRequest,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> OrgProviderKeyPublic:
     """Create a provider key in the caller's organization. Organization owners and admins only.
 
@@ -100,7 +103,9 @@ async def create_org_provider_key(
     name. The response is the key either way; the models are read back through
     ``GET /{key_id}/models``.
     """
-    return await models.add_provider_key(user=current_identity, request=body)
+    return await models.add_provider_key(
+        user=current_identity, request=body, growth=growth, background_tasks=background_tasks
+    )
 
 
 @org_router.patch("/{key_id}")
