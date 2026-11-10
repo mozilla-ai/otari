@@ -198,7 +198,9 @@ def _identity_service(db: AsyncSession) -> IdentityService:
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=1,
         terms_url=None,
         mailer=Mailer(GatewayConfig(mail_transport="none")),

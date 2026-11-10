@@ -76,13 +76,16 @@ def _service_with(
     db: AsyncSession, uow: UnitOfWork, policy: IdentityProviderPort, *, terms_url: str | None = None
 ) -> IdentityService:
     """Build the service as its request builder does, on ``policy``."""
+    organizations = OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow)
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
-        organizations=OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow),
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        organizations=organizations,
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=1,
         terms_url=terms_url,
         mailer=Mailer(GatewayConfig(mail_transport="none")),

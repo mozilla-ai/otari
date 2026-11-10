@@ -40,6 +40,7 @@ sign-in.
 import secrets
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +69,7 @@ from gateway.models.tenancy import (
     OrganizationDomain,
     OrganizationDomainCreateRequest,
     OrganizationDomainPublic,
+    OrganizationDomainRole,
     OrganizationDomainsPublic,
     OrganizationDomainUpdateRequest,
     OrganizationMember,
@@ -88,9 +90,15 @@ _VERIFICATION_TOKEN_BYTES = 24
 class DomainAutoJoinListener:
     """Add a person who signs in to the organization that has proven their email domain."""
 
-    def __init__(self, domains: OrganizationDomainRepository, members: OrganizationMemberRepository) -> None:
+    def __init__(
+        self,
+        domains: OrganizationDomainRepository,
+        members: OrganizationMemberRepository,
+        organizations: OrganizationService,
+    ) -> None:
         self.domains = domains
         self.members = members
+        self.organizations = organizations
 
     async def account_signed_in(self, account: User) -> None:
         """Run the domain auto-join for an account that has just signed in."""
@@ -118,6 +126,10 @@ class DomainAutoJoinListener:
         - ``active_organization_id`` is never moved. Auto-join adds a
           membership; hijacking where the caller is pointed on every sign-in is
           a different and much ruder thing.
+        - The organization's default workspace is granted on the membership this
+          creates and on no other. Removal suspends a membership rather than
+          deleting it, so an established member leaves through the return above
+          and nothing here can restore a workspace an admin took away.
 
         Rows are staged, not committed: the caller owns the transaction, and the
         sign-in that triggered this commits the membership and the session
@@ -151,6 +163,12 @@ class DomainAutoJoinListener:
             organization_id=claim.organization_id, user_id=user.id, role=claim.default_role
         )
         if created:
+            await self.organizations.grant_default_workspace(
+                user_id=user.id,
+                organization_id=claim.organization_id,
+                # NOTE: The column is a plain string. Every writer validates it against this Literal first.
+                role=cast(OrganizationDomainRole, claim.default_role),
+            )
             logger.info(
                 "Identity %s auto-joined organization %s as %s by email domain %s",
                 user.id,

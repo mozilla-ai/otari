@@ -1732,7 +1732,9 @@ def get_identity_service(
         identity_provider=identity_provider,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=config.dashboard_session_ttl_hours,
         terms_url=config.terms_url,
         mailer=Mailer(config),

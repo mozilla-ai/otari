@@ -44,8 +44,13 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
+    WorkspaceMemberRepository,
 )
 from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
+from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+
+from .tenancy_helpers import create_workspace, membership_writes
 
 _SERVICE_MODULE = "gateway.services.tenancy.organization_domain_service"
 
@@ -114,8 +119,16 @@ async def _claim(
 
 
 async def _auto_join(db: AsyncSession, user: User) -> OrganizationMember | None:
-    """Run the sign-in auto-join over ``db``, built as the request path builds it."""
-    return await DomainAutoJoinListener(OrganizationDomainRepository(db), OrganizationMemberRepository(db)).join(user)
+    """Run the sign-in auto-join over ``db``, inside the block the sign-in that triggers it holds."""
+    writes = membership_writes(db)
+    uow = writes["uow"]
+    listener = DomainAutoJoinListener(
+        OrganizationDomainRepository(uow),
+        OrganizationMemberRepository(uow),
+        OrganizationService(db, **writes),
+    )
+    async with uow:
+        return await listener.join(user)
 
 
 # =============================================================================
@@ -356,6 +369,74 @@ async def test_a_verified_address_joins_the_organization_that_proved_its_domain(
     assert membership.organization_id == organization.id
     assert membership.role == "viewer"
     assert membership.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_a_newcomer_joins_the_organizations_default_workspace(async_db: AsyncSession) -> None:
+    """Nothing else would give them one, and only a manager can create one."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    await _auto_join(async_db, newcomer)
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id)
+    assert member is not None
+    assert member.role == "member"
+
+
+@pytest.mark.asyncio
+async def test_a_viewer_claim_makes_a_viewer_of_the_default_workspace(async_db: AsyncSession) -> None:
+    """A viewer of the organization is a viewer of its workspaces, as the invitation form has it."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example", default_role="viewer")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    await _auto_join(async_db, newcomer)
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id)
+    assert member is not None
+    assert member.role == "viewer"
+
+
+@pytest.mark.asyncio
+async def test_no_workspace_is_granted_where_none_carries_the_default_name(async_db: AsyncSession) -> None:
+    """The cost of keying on the name: the membership still lands, with no workspace granted."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name="Renamed", owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    membership = await _auto_join(async_db, newcomer)
+
+    assert membership is not None
+    assert await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_later_sign_in_does_not_restore_a_workspace_membership_an_admin_deleted(
+    async_db: AsyncSession,
+) -> None:
+    """Being dropped from the default workspace is a decision; the next sign-in must not undo it."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+    await _auto_join(async_db, newcomer)
+    members = WorkspaceMemberRepository(async_db)
+    granted = await members.get_by_workspace_and_user(workspace.id, newcomer.id)
+    assert granted is not None
+    await members.delete(granted)
+
+    await _auto_join(async_db, newcomer)
+
+    assert await members.get_by_workspace_and_user(workspace.id, newcomer.id) is None
 
 
 @pytest.mark.asyncio
