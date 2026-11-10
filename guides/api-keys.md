@@ -117,7 +117,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e4a487c5f024d810a258b065a21391712a7b3efe/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/50251c15cb728f2e53ba9a297f4ed100e2ed44c1/docs/public/openapi.json).
 
 ### Model and search tool access
 
