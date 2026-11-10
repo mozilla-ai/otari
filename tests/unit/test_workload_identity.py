@@ -231,6 +231,17 @@ async def test_an_unreachable_issuer_is_unavailable_not_refused() -> None:
         await _verifier(issuer).verify(_token())
 
 
+@pytest.mark.asyncio
+async def test_a_workload_key_set_past_the_ceiling_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway.services.api_keys import _federation
+
+    monkeypatch.setattr(_federation, "MAX_FEDERATION_FETCH_BYTES", 16)
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+
+    with pytest.raises(FederationUnavailableError):
+        await _verifier(issuer).verify(_token())
+
+
 # Recognizing a token
 
 
