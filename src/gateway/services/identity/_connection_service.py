@@ -168,6 +168,11 @@ class OIDCConnectionService:
             raise OIDCDiscoveryError
 
         async with self._uow:
+            # Serialized against the enforcement switch on the organization row. The two rules are
+            # read-then-write over each other's column: without this, one transaction can turn
+            # enforcement on while another disables the connection it would enforce, and both
+            # commit, leaving an organization that admits nobody.
+            await self._organizations.organizations.lock_settings(organization.id)
             if not request.enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
                 raise OIDCConnectionDisabledError
             connection = await self._connections.get_for_organization(organization.id)
@@ -487,6 +492,7 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
 
         async with self._uow:
+            await self._organizations.organizations.lock_settings(organization.id)
             connection: OIDCConnection | None = None
             if break_glass_user_id is not None:
                 await self._require_break_glass_account(break_glass_user_id)

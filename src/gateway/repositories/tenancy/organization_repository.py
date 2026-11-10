@@ -48,6 +48,22 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
             select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update()
         )
 
+    async def lock_settings(self, organization_id: uuid.UUID) -> None:
+        """Serialize a read-then-write of this organization's own settings against another.
+
+        ``FOR NO KEY UPDATE`` rather than the ``FOR UPDATE`` that :meth:`lock` takes. Both modes
+        hold off a second writer taking either, which is what makes two settings decisions
+        serialize. Unlike ``FOR UPDATE``, this one does not block a concurrent insert of a row
+        that references this organization: a foreign key takes ``FOR KEY SHARE`` on the parent,
+        which ``FOR UPDATE`` conflicts with and this does not.
+
+        ``FOR NO KEY UPDATE`` is a no-op on SQLite, as ``FOR UPDATE`` is, for the reason
+        :meth:`lock` gives.
+        """
+        await self.db.execute(
+            select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update(key_share=True)
+        )
+
     async def is_sso_enforced(self, organization_id: uuid.UUID) -> bool:
         """Whether this organization requires sign-in through its own connection, read from the row.
 

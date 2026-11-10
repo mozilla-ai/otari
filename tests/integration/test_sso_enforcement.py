@@ -4,14 +4,16 @@
 ``tests/unit`` so the whole layer this task adds reads as one file.
 """
 
+import asyncio
 import functools
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
@@ -486,6 +488,69 @@ async def test_turning_enforcement_off_still_refuses_an_account_this_deployment_
         await _connection_service(async_db).set_sso_enforcement_for_user(
             user=owner, required=False, break_glass_user_id=uuid.uuid4(), break_glass_waived=False
         )
+
+
+async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobody_can_enter(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Turning enforcement on and disabling the connection are read-then-write over each other.
+
+    Neither has a unique index to lose to, so only the row lock on the organization keeps what each
+    one read still true when it writes. Without it both commit, and the organization then requires
+    a connection it has disabled, which admits nobody.
+    """
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    _stub_discovery(monkeypatch, resolved_issuer=_ISSUER)
+    owner_id, organization_id = owner.id, organization.id
+    engine = create_async_engine(async_db.get_bind().engine.url)
+
+    async def enforce(session: AsyncSession) -> object:
+        actor = await UserRepository(session).get(owner_id)
+        assert actor is not None
+        await _connection_service(session).set_sso_enforcement_for_user(
+            user=actor, required=True, break_glass_user_id=None, break_glass_waived=True
+        )
+        return None
+
+    async def disable(session: AsyncSession) -> object:
+        actor = await UserRepository(session).get(owner_id)
+        assert actor is not None
+        return await _connection_service(session).save_for_user(
+            user=actor,
+            request=OIDCConnectionRequest(
+                issuer=_ISSUER,
+                client_id="a-client-id",
+                client_secret="s3cr3t-client-value",
+                display_name="Acme SSO",
+                default_role="member",
+                enabled=False,
+            ),
+        )
+
+    async def run(attempt: Callable[[AsyncSession], Awaitable[object]]) -> object:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            try:
+                return await attempt(session)
+            except Exception as error:  # noqa: BLE001 - the outcome is the assertion
+                return error
+
+    try:
+        await asyncio.gather(run(enforce), run(disable))
+    finally:
+        await engine.dispose()
+
+    stored = await _reloaded(async_db, organization)
+    enabled = (
+        await async_db.execute(
+            select(OIDCConnection.enabled).where(col(OIDCConnection.organization_id) == organization_id)
+        )
+    ).scalar_one()
+    assert not (stored.sso_required and not enabled)
 
 
 async def test_enforcement_is_permitted_once_the_connection_has_signed_somebody_in(async_db: AsyncSession) -> None:
