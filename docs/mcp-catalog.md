@@ -7,7 +7,7 @@ can mark the servers it recommends on a featured shelf.
 
 The catalog permits nothing. A workspace reaches an MCP server only once the
 server is added to that workspace, so a workspace's own servers stay its allow
-list. See [Add an MCP server](add-an-mcp-server.md).
+list. See [Configure an MCP server](configure-an-mcp-server.md#add-servers-from-the-catalog).
 
 ## Settings
 
