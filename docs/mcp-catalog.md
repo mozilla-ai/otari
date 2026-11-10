@@ -7,7 +7,7 @@ can mark the servers it recommends on a featured shelf.
 
 The catalog permits nothing. A workspace reaches an MCP server only once the
 server is added to that workspace, so a workspace's own servers stay its allow
-list. See [Add an MCP server](add-an-mcp-server.md).
+list. See [Configure an MCP server](configure-an-mcp-server.md#add-servers-from-the-catalog).
 
 ## In the dashboard
 
@@ -21,7 +21,7 @@ Open **Organization → MCP catalog**.
   minute. The button is disabled while `mcp_catalog_sync` is `off`.
 
 People add servers from the catalog on **Tools → MCP servers**, with
-**Browse catalog**. See [Add an MCP server](add-an-mcp-server.md).
+**Browse catalog**. See [Configure an MCP server](configure-an-mcp-server.md#add-servers-from-the-catalog).
 
 ## Settings
 

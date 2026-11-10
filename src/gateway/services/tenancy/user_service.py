@@ -260,12 +260,22 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     return identity
 
 
+async def update_avatar_face(db: AsyncSession, identity: User, *, face: int | None) -> User:
+    """Set the preset face an identity is drawn with, or clear it back to the one its id gives it, and commit."""
+    identity.avatar_face = face
+    db.add(identity)
+    await db.commit()
+    await db.refresh(identity)
+    return identity
+
+
 async def describe_caller(db: AsyncSession, identity: User) -> CallerIdentityPublic:
     """The identity as it is published to itself, whether or not it belongs to an organization."""
     return CallerIdentityPublic(
         user_id=identity.id,
         email=identity.email,
         full_name=identity.full_name,
+        avatar_face=identity.avatar_face,
         has_password=identity.hashed_password is not None,
         claims_deployment=await password_claims_deployment(db, identity),
     )
@@ -943,6 +953,7 @@ __all__ = [
     "reset_password",
     "set_password",
     "unverified_identity_is_claimable",
+    "update_avatar_face",
     "update_full_name",
     "update_password",
     "verify_email",

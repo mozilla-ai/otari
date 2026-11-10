@@ -25,9 +25,8 @@ on:
       - 'any-search/**'
       - 'any-fetch/**'
       - 'tests/unit/**'
-      # The bundle these tests are served, and the guide bundled into it.
+      # The bundle these tests are served.
       - 'web/**'
-      - 'docs/dashboard.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-dashboard-serving.yml'
@@ -40,7 +39,6 @@ on:
       - 'any-fetch/**'
       - 'tests/unit/**'
       - 'web/**'
-      - 'docs/dashboard.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-dashboard-serving.yml'

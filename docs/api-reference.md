@@ -1249,7 +1249,7 @@ and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Agent traces
 
-The sessions [Agent traces](traces.md) describes are read on these routes.
+The sessions [Sessions](sessions.md) describes are read on these routes.
 
 | Endpoint | Who |
 | --- | --- |

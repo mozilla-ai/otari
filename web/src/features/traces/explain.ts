@@ -35,8 +35,8 @@ export interface NoInput {
 }
 
 export const KEEPING_CONTENT = docsSourceHref(
-  "traces.md",
-  "keeping-what-a-span-was-about",
+  "sessions.md",
+  "keep-what-a-session-was-about",
 )
 
 // The tools Claude Code reports a command or a file path for. Otari keeps

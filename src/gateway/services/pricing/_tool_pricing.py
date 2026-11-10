@@ -31,8 +31,11 @@ from gateway.types.tool_charges import (
 # Default pricing prices a provider-run search at its list price when the operator
 # set no rate, as models.dev prices a model. Anthropic: $10 per 1,000 searches
 # (https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool), read 2026-10-17.
+# OpenAI: $10 per 1,000 calls (https://platform.openai.com/docs/pricing), as every
+# OpenAI model in the bundled models.dev catalog prices it, read 2026-11-10.
 PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
     "anthropic:web_search": Decimal("0.01"),
+    "openai:web_search": Decimal("0.01"),
 }
 
 

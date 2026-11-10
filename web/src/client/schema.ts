@@ -603,6 +603,29 @@ export interface paths {
         patch: operations["auth-update_own_profile"];
         trace?: never;
     };
+    "/api/v1/auth/profile/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Own Avatar
+         * @description Change the avatar the caller is drawn with, everywhere their organization lists them.
+         *
+         *     Always the caller's own identity, and the same answer as ``PATCH``, for the
+         *     same reason.
+         */
+        put: operations["auth-update_own_avatar"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/resend-verification": {
         parameters: {
             query?: never;
@@ -8399,6 +8422,11 @@ export interface components {
             /** Attribution User Id */
             attribution_user_id?: string | null;
             /**
+             * Avatar Face
+             * @description The preset avatar face this member picked, or null when they have picked none.
+             */
+            avatar_face?: number | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -9786,6 +9814,11 @@ export interface components {
          *     has to be ready to draw either one alone.
          */
         CallerIdentityPublic: {
+            /**
+             * Avatar Face
+             * @description The preset avatar face this identity picked, or null when it has picked none.
+             */
+            avatar_face?: number | null;
             /**
              * Claims Deployment
              * @description Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.
@@ -19720,6 +19753,20 @@ export interface components {
             unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
+         * UpdateAvatarRequest
+         * @description The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them.
+         * @example {
+         *       "face": 1234
+         *     }
+         */
+        UpdateAvatarRequest: {
+            /**
+             * Face
+             * @description The index of a preset face from the dashboard's avatar set, or null to go back to the face this identity's id gives it.
+             */
+            face: number | null;
+        };
+        /**
          * UpdateBudgetRequest
          * @description Request model for updating a budget.
          */
@@ -22645,6 +22692,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerIdentityPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-update_own_avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAvatarRequest"];
             };
         };
         responses: {

@@ -1,21 +1,23 @@
 import { useState } from "react"
 
 import { Button } from "@/design-system/actions/Button"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Section } from "@/design-system/layout/Section"
-import { useSessionCaller } from "@/shared/api/auth"
+import { useUpdateAvatar } from "@/shared/api/auth"
 
 import { AvatarFace } from "./AvatarFace"
 import { AvatarPickerDialog } from "./AvatarPickerDialog"
-import { saveAvatarChoice, useAvatar } from "./avatarChoice"
+import { useOwnAvatar } from "./avatarChoice"
 import { face } from "./faces"
 
 /**
- * The face drawn for you on the account control. Everybody starts with one
- * picked at random; this is where you choose another.
+ * The face drawn for you on the account control and in every member list of
+ * your organization. Everybody starts with one picked at random; this is where
+ * you choose another.
  */
 export function AvatarCard() {
-  const userId = useSessionCaller()?.user_id
-  const current = useAvatar(userId)
+  const current = useOwnAvatar()
+  const update = useUpdateAvatar()
   const [isOpen, setIsOpen] = useState(false)
 
   return (
@@ -28,8 +30,9 @@ export function AvatarCard() {
         Avatar
       </h2>
       <p className="max-w-3xl text-sm text-muted">
-        The face drawn beside your name at the foot of the sidebar. You started
-        with one at random; pick any other here. Kept in this browser for now.
+        The face drawn beside your name in the sidebar and wherever your
+        organization lists its members. You started with one at random; pick any
+        other here.
       </p>
       <div className="flex flex-wrap items-center gap-3">
         {current === null ? (
@@ -49,12 +52,13 @@ export function AvatarCard() {
           Change
         </Button>
       </div>
-      {isOpen && userId && current !== null ? (
+      <ErrorBanner error={update.error} />
+      {isOpen && current !== null ? (
         <AvatarPickerDialog
           isOpen
           onOpenChange={setIsOpen}
           initial={current}
-          onSave={(id) => saveAvatarChoice(userId, id)}
+          onSave={(id) => update.mutate(id)}
         />
       ) : null}
     </Section>
