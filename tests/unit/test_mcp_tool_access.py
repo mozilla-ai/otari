@@ -209,3 +209,29 @@ async def test_an_attached_server_gives_way_to_a_request_server_of_the_same_name
 
     assert admitted.servers is not None
     assert [server.url for server in admitted.servers] == ["https://93.184.216.35/mcp"]
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_whose_url_fails_its_check_is_left_out() -> None:
+    class _Attached:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                servers=[
+                    McpServerConfig(name="moved", url="https://10.0.0.1/mcp", attached=True),
+                    McpServerConfig(name="fine", url="https://93.184.216.34/mcp", attached=True),
+                ]
+            )
+
+    admitted = await admit_mcp_servers(
+        None,
+        None,
+        servers=cast(WorkspaceMcpServers, _Attached()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert admitted.servers is not None
+    assert [server.name for server in admitted.servers] == ["fine"]

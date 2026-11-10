@@ -91,6 +91,32 @@ async def _validate_mcp_server_urls(
         raise McpServerConfigurationError(MCP_SERVER_URL_UNSAFE_DETAIL) from exc
 
 
+async def _safe_attached(servers: list[McpServerConfig], workspace_id: uuid.UUID) -> list[McpServerConfig]:
+    """The attached servers whose URL passes its safety check; one that fails is left out of the request.
+
+    An attached server joins every request of its workspace, so a host that stops resolving to a public
+    address must not refuse them all. Why it was left out goes to the log, as a named one's refusal does.
+    """
+    checks = await asyncio.gather(
+        *(validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token)) for server in servers),
+        return_exceptions=True,
+    )
+    safe: list[McpServerConfig] = []
+    for server, outcome in zip(servers, checks, strict=True):
+        if isinstance(outcome, UnsafeURLError):
+            logger.warning(
+                "Attached MCP server left out for workspace %s server_id=%s: %s",
+                workspace_id,
+                server.stored_server_id,
+                outcome,
+            )
+        elif isinstance(outcome, BaseException):
+            raise outcome
+        else:
+            safe.append(server)
+    return safe
+
+
 # Tool fields through which a provider is handed MCP servers to dial itself: Gemini's ``Tool.mcp_servers``, in
 # either of the spellings its SDK accepts.
 _PROVIDER_MCP_FIELDS = frozenset({"mcp_servers", "mcpServers"})
@@ -175,7 +201,11 @@ async def admit_mcp_servers(
             server for server in resolved.servers if not (server.attached and server.name in inline_names)
         ]
         sign_in = resolved.sign_in
-        await _validate_mcp_server_urls(stored_servers, stored=True, workspace_id=workspace_id)
+        named_servers = [server for server in stored_servers if not server.attached]
+        await _validate_mcp_server_urls(named_servers, stored=True, workspace_id=workspace_id)
+        stored_servers = named_servers + await _safe_attached(
+            [server for server in stored_servers if server.attached], workspace_id
+        )
         stored_name_counts = Counter(server.name for server in stored_servers)
         # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
         if len(stored_name_counts) != len(stored_servers):

@@ -90,8 +90,10 @@ changes in your Claude Code setup.
 When the server uses each person's own account and you have not signed in yet:
 
 1. Ask, for example "check my open Jira tasks".
-2. Claude answers with a sign-in link starting with your Otari address. Open it
-   within 30 minutes and sign in with your own account.
+2. Claude answers with a sign-in link. Check that it is on your own Otari
+   address, exactly, followed by `/api/v1/mcp-connections/sign-in?ticket=`, then
+   open it within 30 minutes and sign in with your own account. Keep the link to
+   yourself: whoever opens it connects their account to you.
 3. A page says you are signed in. Go back to Claude Code and ask again.
 
 The second ask runs against your own account. The key you set in

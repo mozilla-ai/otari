@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gc
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -767,3 +768,68 @@ async def test_pool_abandoned_owner_that_fails_later_is_logged_by_type_only(
 
     assert [context["message"] for context in unhandled] == []
     assert warnings[-1] == "Abandoned MCP sessions failed to close: RuntimeError"
+
+
+# --------------------------------------------------------------------------- #
+# An attached server the request did not name
+# --------------------------------------------------------------------------- #
+
+
+_ATTACHED = McpServerConfig(name="attached", url="https://93.184.216.34/mcp", attached=True)
+
+
+class _HangingSession(_FakeSession):
+    async def initialize(self) -> None:
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_that_never_answers_is_left_out_after_its_deadline(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _HangingSession)
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_DEADLINE_S", 0.05)
+
+    async with asyncio.timeout(5), MCPClientPool([_ATTACHED]) as pool:
+        assert pool.openai_tools == []
+
+
+@contextlib.asynccontextmanager
+async def _failing_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
+    """A transport whose own task fails while the session starts, which cancels the task holding it."""
+
+    async def fail() -> None:
+        await asyncio.sleep(0)
+        raise ConnectionError("refused")
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(fail)
+        yield object(), object()
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_whose_transport_fails_is_left_out_and_a_named_one_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", _failing_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _HangingSession)
+
+    async with asyncio.timeout(5), MCPClientPool([_ATTACHED]) as pool:
+        assert pool.openai_tools == []
+    with pytest.raises(BaseException):  # noqa: B017, PT011 - the transport's own failure, as before
+        async with asyncio.timeout(5), MCPClientPool([_TASK_GROUP_CONFIG]):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_a_request_canceled_while_an_attached_server_connects_is_still_canceled(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _HangingSession)
+    opening = asyncio.create_task(MCPClientPool([_ATTACHED]).__aenter__())
+    await asyncio.sleep(0.05)
+
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening

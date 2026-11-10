@@ -45,6 +45,16 @@ if TYPE_CHECKING:
     from gateway.models.mcp import McpServerConfig
 
 
+# How long an attached server may take to answer its first two requests before a request goes on without it.
+ATTACHED_CONNECT_DEADLINE_S = 10.0
+
+
+def _cancelling() -> bool:
+    """Whether the running task has a cancellation pending from outside it."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 def _effective_port(url: httpx2.URL) -> int | None:
     if url.port is not None:
         return url.port
@@ -238,18 +248,22 @@ class MCPClientPool:
                 stack = await self._stack.enter_async_context(AsyncExitStack()) if cfg.attached else self._stack
                 try:
                     server = await self._connect(cfg, stack)
-                except Exception as exc:
+                except BaseException as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
-                    if not cfg.attached:
+                    if not cfg.attached or not isinstance(exc, Exception | asyncio.CancelledError):
+                        raise
+                    # A transport whose own task failed cancels this task inside it. Closing the server's
+                    # stack ends that cancellation; one aimed at the request itself is passed on.
+                    with contextlib.suppress(Exception):
+                        await stack.aclose()
+                    if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
                         raise
                     logger.warning(
                         "Attached MCP server left out of the request server_id=%s reason=%s",
                         cfg.stored_server_id,
                         failure_class(exc),
                     )
-                    with contextlib.suppress(Exception):
-                        await stack.aclose()
                     continue
                 if self._trace is not None:
                     self._trace.record_mcp_connect(
@@ -267,9 +281,12 @@ class MCPClientPool:
         client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
         read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
         session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
+        # An attached server joins every request of its workspace, so one that accepts the connection and
+        # never answers is given up on quickly rather than holding each request for the read timeout.
+        with anyio.fail_after(ATTACHED_CONNECT_DEADLINE_S) if cfg.attached else contextlib.nullcontext():
+            await session.initialize()
+            listed = await session.list_tools()
 
-        listed = await session.list_tools()
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         not_granted: list[str] = []

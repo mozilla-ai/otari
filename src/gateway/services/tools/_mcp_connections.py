@@ -257,7 +257,28 @@ def _client_for(server: WorkspaceMcpServer, *, client_id: str, auth_method: str)
         SecretDecryptionError: the stored client secret will not decrypt.
         SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
     """
-    stored = stored_oauth_client(server)
+    return _client_from(stored_oauth_client(server), client_id=client_id, auth_method=auth_method)
+
+
+@dataclass(frozen=True, slots=True)
+class McpServerRef:
+    """What reading a user's token needs of their server, copied while the row is still loaded.
+
+    A request's session may be released while a token is renewed, and a release whose commit fails
+    rolls back, which expires every row it loaded; a copy is still readable after that.
+    """
+
+    @classmethod
+    def of(cls, row: WorkspaceMcpServer) -> McpServerRef:
+        return cls(row.id, row.name, stored_oauth_client(row))
+
+    id: uuid.UUID
+    name: str
+    client: StoredMcpOAuthClient | None
+
+
+def _client_from(stored: StoredMcpOAuthClient | None, *, client_id: str, auth_method: str) -> McpOAuthClient | None:
+    """See :func:`_client_for`, from a client already read off its server."""
     if stored is None or stored.client_id != client_id:
         return None
     secret = decrypt_secret(stored.encrypted_secret) if stored.encrypted_secret else None
@@ -723,7 +744,7 @@ class McpUserTokens:
             return set()
         return await self._connections.connected_server_ids(user_id, server_ids)
 
-    async def token_for(self, server: WorkspaceMcpServer, user_id: str) -> str:
+    async def token_for(self, row: WorkspaceMcpServer | McpServerRef, user_id: str) -> str:
         """The access token to send to a per-user server for one user.
 
         Raises:
@@ -732,30 +753,31 @@ class McpUserTokens:
             SecretDecryptionError: a stored token or client secret will not decrypt.
             SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
         """
-        connection = await self._connections.find(server.id, user_id)
+        held = row if isinstance(row, McpServerRef) else McpServerRef.of(row)
+        connection = await self._connections.find(held.id, user_id)
         if connection is None:
-            raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
+            raise McpSignInRequiredError(held.id, name=held.name, user_id=user_id)
         now = datetime.now(UTC)
         if not _needs_refresh(connection, now):
             return decrypt_secret(connection.encrypted_access_token)
         stale, expired = connection.encrypted_access_token, _is_expired(connection.expires_at, now)
         try:
-            outcome = await self._renew(server, user_id, stale=stale)
+            outcome = await self._renew(held, user_id, stale=stale)
         except DATABASE_ERRORS as exc:
             logger.warning(
-                "MCP token renewal could not run server_id=%s error=%s", server.id, describe_database_error(exc)
+                "MCP token renewal could not run server_id=%s error=%s", held.id, describe_database_error(exc)
             )
             outcome = _Refreshed()
         if outcome.sign_in_required:
-            raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
+            raise McpSignInRequiredError(held.id, name=held.name, user_id=user_id)
         if outcome.token is not None:
             return outcome.token
         if expired:
-            raise McpConnectionUnavailableError(server.id)
+            raise McpConnectionUnavailableError(held.id)
         # The renewal failed for now and the token is still inside its lifetime, so it is used.
         return decrypt_secret(stale)
 
-    async def _renew(self, server: WorkspaceMcpServer, user_id: str, *, stale: str) -> _Refreshed:
+    async def _renew(self, server: McpServerRef, user_id: str, *, stale: str) -> _Refreshed:
         """Renew a connection's tokens unless another caller already has.
 
         An authorization server may rotate refresh tokens and end the whole grant when a spent one
@@ -778,7 +800,9 @@ class McpUserTokens:
             now = datetime.now(UTC)
             if connection.encrypted_access_token != stale and not _needs_refresh(connection, now):
                 return _Refreshed(token=decrypt_secret(connection.encrypted_access_token))
-            client = _client_for(server, client_id=connection.client_id, auth_method=connection.client_auth_method)
+            client = _client_from(
+                server.client, client_id=connection.client_id, auth_method=connection.client_auth_method
+            )
             if connection.encrypted_refresh_token is None or client is None:
                 # Nothing to renew with. Once the token is past its expiry only a new sign-in helps.
                 if not _is_expired(connection.expires_at, now):
@@ -802,7 +826,7 @@ class McpUserTokens:
                 # A refused client is a setting to fix, which then renews every connection again.
                 # Only a client Otari registered itself has nobody to fix it: it is replaced at the
                 # next sign-in, so its grants end here.
-                registered = stored_oauth_client(server)
+                registered = server.client
                 gone = exc.is_permanent or (exc.refuses_client and registered is not None and registered.dynamic)
                 if not gone:
                     logger.warning(

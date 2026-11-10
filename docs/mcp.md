@@ -170,8 +170,9 @@ row under **Tools → MCP servers**, and in the form that adds one.
   them goes back to the client as before, and where a server's tool has the same
   name as one of the client's, the client's wins and the server's is not offered.
 - **A server that is down is left out.** An attached server that cannot be
-  reached is dropped from that request and the request goes on without it. A
-  server the request named still fails it.
+  reached, does not answer within 10 seconds, or whose URL fails its safety check
+  is dropped from that request, with the reason in the log, and the request goes
+  on without it. A server the request named still fails it.
 - **Streaming works the same way.** The loop runs gateway tool calls between
   rounds and streams only what the model writes for the user.
 - **Loop limits and the bill.** The loop stops after `max_tool_iterations` rounds

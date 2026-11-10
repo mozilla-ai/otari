@@ -79,13 +79,21 @@ You do not have to open the dashboard. When a workspace manager has clicked
 `mcp_server_ids`, just ask your agent for something the server does:
 
 1. Ask, for example "check my open Jira tasks".
-2. The agent answers with a sign-in link that starts with your Otari address.
-   Open it within 30 minutes and sign in with your own account.
+2. The agent answers with a sign-in link. Open it within 30 minutes and sign in
+   with your own account.
 3. A page says you are signed in. Go back to the conversation and ask again.
 
-The second ask uses your account. The link is made for you alone, from the key
-your agent uses, and only an Otari address is a real sign-in link: if an answer
-shows you one that points anywhere else, do not open it.
+The second ask uses your account.
+
+Before you open the link, check where it goes. A real one is on your own Otari
+address, exactly, followed by `/api/v1/mcp-connections/sign-in?ticket=`, for
+example `https://otari.example.com/api/v1/mcp-connections/sign-in?ticket=...`.
+An address that only starts the same way, such as
+`https://otari.example.com.other.site/...`, is not Otari: do not open it.
+
+Keep the link to yourself. It is made for you, from the key your agent uses, and
+whoever opens it within its 30 minutes connects the account they sign in with to
+you.
 
 ## What your keys see before you connect
 

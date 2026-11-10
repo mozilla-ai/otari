@@ -109,6 +109,7 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
     McpConnectionService,
+    McpServerRef,
     McpSignInNeeded,
     McpSignInReason,
     McpUserTokens,
@@ -780,47 +781,54 @@ async def _resolve_for_request(
         if row.attach_by_default and row.id not in named and patterns[row.id] and not _needs_a_user(row, access)
     ]
 
-    resolved = RequestMcpServers()
+    # Every row is read before any token is: reading one may release the session, and a release
+    # whose commit fails rolls back, which expires the rows still to come.
+    planned: list[tuple[McpServerConfig, McpServerRef | None, McpSignInNeeded]] = []
     for server_id in named + attached:
         row = by_id[server_id]
         if not row.enabled:
             continue
-        try:
-            token = await _caller_token(row, access, tokens)
-        except (McpSignInRequiredError, WorkspaceMcpServerNotFoundError):
-            if not defer:
-                raise
-            resolved.sign_in.append(_sign_in_needed(row, access, McpSignInReason.NOT_SIGNED_IN))
-            continue
-        except McpConnectionUnavailableError:
-            if not defer:
-                raise
-            resolved.sign_in.append(_sign_in_needed(row, access, McpSignInReason.RENEWAL_FAILED))
-            continue
         granted = patterns[server_id]
-        resolved.servers.append(
-            McpServerConfig(
-                name=row.name,
-                url=row.url,
-                authorization_token=token,
-                purpose_hint=row.purpose_hint,
-                allowed_tools=row.allowed_tools,
-                caller_tool_patterns=None if "*" in granted else granted,
-                caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
-                stored_server_id=str(row.id),
-                attached=server_id not in named,
-            )
+        per_user = row.credential_mode == McpCredentialMode.PER_USER
+        config = McpServerConfig(
+            name=row.name,
+            url=row.url,
+            authorization_token=None if per_user else _stored_token(row),
+            purpose_hint=row.purpose_hint,
+            allowed_tools=row.allowed_tools,
+            caller_tool_patterns=None if "*" in granted else granted,
+            caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
+            stored_server_id=str(row.id),
+            attached=server_id not in named,
         )
+        need = McpSignInNeeded(
+            server_id=row.id,
+            name=row.name,
+            purpose_hint=row.purpose_hint,
+            user_id=access.user_id,
+            reason=McpSignInReason.NOT_SIGNED_IN if access.user_id else McpSignInReason.NO_USER,
+        )
+        planned.append((config, McpServerRef.of(row) if per_user else None, need))
+
+    resolved = RequestMcpServers()
+    for config, ref, need in planned:
+        if ref is not None:
+            try:
+                if access.user_id is None:
+                    raise WorkspaceMcpServerNotFoundError(need.server_id)
+                config.authorization_token = await tokens.token_for(ref, access.user_id)
+            except (McpSignInRequiredError, WorkspaceMcpServerNotFoundError):
+                if not defer:
+                    raise
+                resolved.sign_in.append(need)
+                continue
+            except McpConnectionUnavailableError:
+                if not defer:
+                    raise
+                resolved.sign_in.append(dataclasses.replace(need, reason=McpSignInReason.RENEWAL_FAILED))
+                continue
+        resolved.servers.append(config)
     return resolved
-
-
-def _sign_in_needed(row: WorkspaceMcpServer, access: McpAccess, reason: McpSignInReason) -> McpSignInNeeded:
-    """A per-user server the caller may reach and this request cannot open, and why."""
-    if access.user_id is None:
-        reason = McpSignInReason.NO_USER
-    return McpSignInNeeded(
-        server_id=row.id, name=row.name, purpose_hint=row.purpose_hint, user_id=access.user_id, reason=reason
-    )
 
 
 def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
