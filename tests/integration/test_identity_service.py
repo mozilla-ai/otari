@@ -2,7 +2,7 @@
 
 import functools
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
@@ -30,7 +30,14 @@ from gateway.models.identity import (
     ProviderIdentity,
     oidc_identity_provider,
 )
-from gateway.models.tenancy import Organization, OrganizationDomain, OrganizationDomainRole, User, Workspace
+from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
+    Organization,
+    OrganizationDomain,
+    OrganizationDomainRole,
+    User,
+    Workspace,
+)
 from gateway.models.users import User as BillingUser
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository, OIDCConnectionRepository
@@ -209,6 +216,52 @@ async def test_a_linked_sso_sign_in_is_refused_when_the_address_is_blocked(async
     await _block_address(async_db, "ada@acme.example")
 
     with pytest.raises(SignInBlockedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_domain_claim_is_disabled(async_db: AsyncSession) -> None:
+    """A link is a way in only while an organization still proves the domain it was admitted on."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    claim = await _add_claim(async_db, organization.id, domain="acme.example")
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert first.new_account is True
+
+    claim.enabled = False
+    async_db.add(claim)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_proof_has_expired(async_db: AsyncSession) -> None:
+    """The proof is current or it is not, and a link does not stand in for one."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    claim = await _add_claim(async_db, organization.id, domain="acme.example")
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    claim.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL - timedelta(days=1)
+    async_db.add(claim)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_connection_is_disabled(async_db: AsyncSession) -> None:
+    """A disabled connection admits nobody, the rule the break-glass check already applies."""
+    organization = await create_organization(async_db, slug="acme")
+    connection = await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    connection.enabled = False
+    async_db.add(connection)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
         await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
 
 

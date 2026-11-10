@@ -31,6 +31,7 @@ from gateway.models.identity import (
     BlockedEmail,
     EmailAssertion,
     MailedLinkStatus,
+    OIDCConnection,
     ProviderIdentity,
 )
 from gateway.models.tenancy import Organization, OrganizationDomainRole, User
@@ -158,6 +159,8 @@ class IdentityService:
         except an identity from one organization's own OIDC connection, which instead signs in to the one account
         that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
         reaches the identity provider policy.
+        Such an identity is held to that admission on every sign-in, so a link does not outlive the proof or the
+        connection it was admitted on.
         An account holds at most one link for each provider.
         Where the deployment publishes terms, a sign-in that creates the account, or is the first way in to one
         nobody had claimed, needs ``terms_accepted`` and records it, as the signup form does.
@@ -450,6 +453,8 @@ class IdentityService:
     async def _account_for(self, external: ProviderIdentity, label: str) -> IdentityResolution:
         link = await self._links.get_by_identity(provider=external.provider, subject=external.subject)
         if link is not None:
+            if external.provider.startswith(OIDC_PROVIDER_PREFIX):
+                await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
             password_removed = await self._prove_vouched_address(account)
             self._take_display_name_from_sso(account, external)
@@ -485,11 +490,7 @@ class IdentityService:
                 holds a connection to the issuer that authenticated it.
 
         """
-        connection = await organization_for_sso_identity(
-            external, connections=self._connections, domains=self._domain_claims, now=datetime.now(UTC)
-        )
-        if connection is None:
-            raise SsoIdentityNotAdmittedError
+        connection = await self._require_admitting_connection(external)
         account = await self._organizations.provision_sso_tenancy(
             organization_id=connection.organization_id,
             full_name=external.full_name,
@@ -500,6 +501,21 @@ class IdentityService:
         self._users.stage(account)
         await self._links.add(external, user_id=account.id)
         return IdentityResolution(identity=account, new_account=True)
+
+    async def _require_admitting_connection(self, external: ProviderIdentity) -> OIDCConnection:
+        """The connection admitting ``external``, asked on every sign-in rather than once.
+
+        Raises:
+            SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
+                holds an enabled connection to the issuer that authenticated it.
+
+        """
+        connection = await organization_for_sso_identity(
+            external, connections=self._connections, domains=self._domain_claims, now=datetime.now(UTC)
+        )
+        if connection is None:
+            raise SsoIdentityNotAdmittedError
+        return connection
 
     def _take_display_name_from_sso(self, account: User, external: ProviderIdentity) -> None:
         """Take the display name an organization's own provider reports, for an account only it names.
