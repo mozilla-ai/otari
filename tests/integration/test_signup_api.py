@@ -16,6 +16,7 @@ verify-email routes share.
 
 import logging
 import re
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -150,7 +151,7 @@ class _Invites:
 
 
 @pytest.fixture
-def invites(client: TestClient):
+def invites(client: TestClient) -> Iterator[None]:
     from fastapi import FastAPI
 
     from gateway.api.deps import get_signup_invite_port

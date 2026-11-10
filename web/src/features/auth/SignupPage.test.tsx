@@ -142,6 +142,37 @@ describe("SignupPage", () => {
     session.mockRestore()
   })
 
+  it("sends an invited address to sign in when the session cannot start", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      message: "…",
+      verified: true,
+    } as never)
+    const session = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("offline"))
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com&invite=tok")
+
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/")
+    })
+    expect(readSignInAddress()).toBe("ada@example.com")
+    expect(
+      recordEvent.mock.calls.filter(
+        ([name]) => name === TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+      ),
+    ).toEqual([
+      [
+        TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+        { authentication_method: "password", requires_verification: false },
+      ],
+    ])
+    session.mockRestore()
+  })
+
   // otari-ai#2100: the same form, reading as registration where the deployment
   // takes an address nobody added.
   it("reads as registration where signup is open", async () => {

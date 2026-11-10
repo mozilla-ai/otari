@@ -158,15 +158,19 @@ export function SignupPage({ hash }: { hash: string }) {
               authentication_method: "password",
               requires_verification: false,
             })
-            const session = await createSession({
+            rememberSignInAddress(email.trim())
+            // The account is verified either way; a sign-in that fails here
+            // leaves the person on the sign-in screen with their address in it.
+            const signedIn = await createSession({
               email: email.trim(),
               password,
-            })
-            if (session.isOk) {
-              window.location.hash = "#/"
-              login()
-              return
-            }
+            }).then(
+              (session) => session.isOk,
+              () => false,
+            )
+            window.location.hash = "#/"
+            if (signedIn) login()
+            return
           }
           // Always verification-bound, and not a reading of the response: this
           // endpoint is enumeration-safe and says nothing about the address, so
