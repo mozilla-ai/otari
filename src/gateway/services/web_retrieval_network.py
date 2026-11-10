@@ -635,15 +635,20 @@ class BoundedFederationTransport(httpx.AsyncBaseTransport):
             extensions=request.extensions,
         )
         response = await self._transport.handle_async_request(uncompressed_request)
+        stream = response.stream
+        if not isinstance(stream, httpx.AsyncByteStream):
+            raise httpx.TransportError("federation transport returned a synchronous stream")
         encoding = response.headers.get("content-encoding", "identity").strip().lower()
         if encoding not in ("", "identity"):
+            # Closed before refusing, because nothing else will: the connection the wrapped
+            # transport leased is released by the stream, and closing the transport does not
+            # reach a response whose body no caller ever read.
+            await stream.aclose()
             raise FederationResponseEncodedError("federation response declares a content encoding other than identity")
-        if not isinstance(response.stream, httpx.AsyncByteStream):
-            raise httpx.TransportError("federation transport returned a synchronous stream")
         return httpx.Response(
             status_code=response.status_code,
             headers=response.headers,
-            stream=CappedFederationStream(response.stream, max_bytes=self._max_bytes),
+            stream=CappedFederationStream(stream, max_bytes=self._max_bytes),
             extensions=response.extensions,
         )
 

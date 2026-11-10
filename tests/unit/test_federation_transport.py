@@ -121,6 +121,29 @@ async def test_the_shared_transport_refuses_a_compressed_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_refused_encoding_closes_the_response_it_refuses() -> None:
+    """The stream holds the connection the wrapped transport leased, so refusing has to release it."""
+    closed: list[bool] = []
+
+    class _RecordingStream(_ChunkStream):
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-encoding": "gzip"}, stream=_RecordingStream([gzip.compress(b"{}")])
+        )
+
+    transport = BoundedFederationTransport(_StubTransport(respond), max_bytes=1024)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(FederationResponseEncodedError):
+            await client.get(FETCH_URL)
+
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
 async def test_the_shared_transport_refuses_a_response_past_the_ceiling() -> None:
     """A response that would otherwise succeed, split so the first chunk alone crosses the ceiling."""
     payload = b'{"keys": []}' + b" " * 64
