@@ -19,6 +19,7 @@ import ssl
 from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 from typing import Protocol
 
 from gateway.core.addresses import normalized_address
@@ -61,11 +62,15 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     """
     message = MIMEMultipart("alternative")
     message["Subject"] = sanitize_header_value(envelope.message.subject)
-    # sender_name is operator config, not a caller-supplied value a caller would
-    # already have sanitized (unlike the subject): a stray CR/LF in it would
-    # raise HeaderParseError on every send, silently and from then on, with one
-    # warning line that never points at the From name as the cause.
-    message["From"] = f"{sanitize_header_value(envelope.sender_name)} <{sanitize_header_value(envelope.sender_email)}>"
+    # sender_name is operator config or a relayed sender's address, not a value a
+    # caller would already have sanitized (unlike the subject): a stray CR/LF in
+    # it would raise HeaderParseError on every send, silently and from then on,
+    # with one warning line that never points at the From name as the cause.
+    # formataddr quotes a name holding "@" or ".", which unquoted turns the name
+    # into the address a mail client reads, and encodes one outside ASCII.
+    message["From"] = formataddr(
+        (sanitize_header_value(envelope.sender_name), sanitize_header_value(envelope.sender_email))
+    )
     message["To"] = sanitize_header_value(envelope.to)
     if envelope.reply_to:
         message["Reply-To"] = sanitize_header_value(envelope.reply_to)
