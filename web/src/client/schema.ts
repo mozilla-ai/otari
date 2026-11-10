@@ -23201,7 +23201,7 @@ export interface operations {
             query?: {
                 /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
                 at_context?: number | null;
-                /** @description Case-insensitive words, each in a model's name, vendor, id, or a selector's model part; a whole selector matches too. Provider instances are the `provider` filter's. */
+                /** @description Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; a pasted selector, or part of one with a colon or slash, matches too. Provider instances are the `provider` filter's. */
                 search?: string | null;
                 /** @description For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace. */
                 workspace_id?: string | null;

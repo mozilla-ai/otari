@@ -111,8 +111,9 @@ class CatalogQuery(BaseModel):
         default=None,
         max_length=200,
         description=(
-            "Case-insensitive words, each in a model's name, vendor, id, or a selector's model part; "
-            "a whole selector matches too. Provider instances are the `provider` filter's."
+            "Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; "
+            "a pasted selector, or part of one with a colon or slash, matches too. "
+            "Provider instances are the `provider` filter's."
         ),
     )
     workspace_id: uuid.UUID | None = Field(
