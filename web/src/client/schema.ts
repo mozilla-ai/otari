@@ -4252,8 +4252,11 @@ export interface paths {
          *     The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
          *     who may see the workspace, which is who may already read its policies here.
          *     ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
-         *     A draft ``spec`` must only target models the organization reaches, as saving
-         *     it would, so a draft cannot probe what an unsaved policy would resolve to.
+         *     Every candidate, from a draft or a stored policy, is held to what the
+         *     organization reaches, narrowed further by ``allowed_models`` when sent: one
+         *     outside it is listed as dropped, so a draft cannot show where a model the
+         *     organization lacks would resolve, and a stored policy whose target the
+         *     organization lost still explains.
          */
         post: operations["routing-explain_organization_routing_policy"];
         delete?: never;

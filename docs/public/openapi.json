@@ -42904,7 +42904,7 @@
     },
     "/api/v1/organizations/me/routing-policies/explain": {
       "post": {
-        "description": "Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.\n\nThe tenant reading of ``POST /api/v1/routing/policies/explain``: any member\nwho may see the workspace, which is who may already read its policies here.\n``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.\nA draft ``spec`` must only target models the organization reaches, as saving\nit would, so a draft cannot probe what an unsaved policy would resolve to.",
+        "description": "Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.\n\nThe tenant reading of ``POST /api/v1/routing/policies/explain``: any member\nwho may see the workspace, which is who may already read its policies here.\n``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.\nEvery candidate, from a draft or a stored policy, is held to what the\norganization reaches, narrowed further by ``allowed_models`` when sent: one\noutside it is listed as dropped, so a draft cannot show where a model the\norganization lacks would resolve, and a stored policy whose target the\norganization lost still explains.",
         "operationId": "routing-explain_organization_routing_policy",
         "requestBody": {
           "content": {

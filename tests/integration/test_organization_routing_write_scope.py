@@ -366,12 +366,33 @@ def test_a_draft_is_explained_without_being_saved(client: TestClient, world: _Wo
     assert "unsaved" not in {row["name"] for row in _get(client, world, "alpha_admin", _POLICIES).json()}
 
 
-def test_a_draft_targeting_what_the_organization_cannot_reach_is_refused(client: TestClient, world: _World) -> None:
-    """The same guard as a save, so a draft cannot show what an unreachable target would resolve to."""
+def test_a_target_the_organization_cannot_reach_is_dropped_not_resolved(client: TestClient, world: _World) -> None:
+    """Held to the organization's reach, so a draft cannot show where a model it lacks resolves.
+
+    Dropped rather than refused, so a stored policy whose target the organization
+    has since lost still explains, naming the target it can no longer use.
+    """
     draft = {"select": [{"default": _ALPHA_TARGET}], "on_failure": [_BETA_TARGET]}
-    refused = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, spec=draft))
-    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
-    assert _BETA_TARGET in refused.json()["detail"]
+    explained = _post(client, world, "alpha_admin", _EXPLAIN, _explain_body(world, spec=draft))
+    assert explained.status_code == status.HTTP_200_OK, explained.text
+    plan = explained.json()
+    assert [f"{row['instance']}:{row['model']}" for row in plan["candidates"]] == [_ALPHA_TARGET]
+    assert [(row["selector"], row["reason"]) for row in plan["dropped"]] == [(_BETA_TARGET, "not_allowed")]
+
+
+def test_allowed_models_narrows_the_organizations_reach_but_cannot_widen_it(client: TestClient, world: _World) -> None:
+    draft = {"select": [{"default": _ALPHA_TARGET}], "on_failure": ["openai:gpt-4o", _BETA_TARGET]}
+    explained = _post(
+        client,
+        world,
+        "alpha_admin",
+        _EXPLAIN,
+        _explain_body(world, spec=draft, allowed_models=["openai:gpt-4o", "anthropic:*"]),
+    )
+    assert explained.status_code == status.HTTP_200_OK, explained.text
+    plan = explained.json()
+    assert [row["model"] for row in plan["candidates"]] == ["gpt-4o"]
+    assert {row["selector"] for row in plan["dropped"]} == {_ALPHA_TARGET, _BETA_TARGET}
 
 
 def test_explain_resolves_a_name_only_in_the_callers_workspace(client: TestClient, world: _World) -> None:

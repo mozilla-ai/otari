@@ -227,8 +227,9 @@ try it with. On a deployment you run, the API equivalent is
 `POST /api/v1/routing/policies/explain`, which needs the operator; it can also
 validate an unsaved draft. Members of an organization use
 `POST /api/v1/organizations/me/routing-policies/explain` instead, from a
-dashboard session, naming one of their workspaces in `workspace_id`. A draft
-sent there may only target models the organization can already reach.
+dashboard session, naming one of their workspaces in `workspace_id`. There, a
+model the organization cannot reach is listed as left out, whether it comes from
+a draft or a saved policy.
 
 ## Agent model recommendations
 
