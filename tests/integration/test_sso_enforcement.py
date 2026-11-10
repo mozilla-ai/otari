@@ -634,9 +634,15 @@ async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobo
                 return error
 
     try:
-        await asyncio.gather(run(enforce), run(disable))
+        outcomes = list(await asyncio.gather(run(enforce), run(disable)))
     finally:
         await engine.dispose()
+
+    # One of the two has to win, or the test would pass on a pair that both failed for an unrelated
+    # reason. Either way round the loser reads the winner's column and refuses on it.
+    refused = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert len(refused) == 1
+    assert isinstance(refused[0], OIDCConnectionDisabledError)
 
     stored = await _reloaded(async_db, organization)
     enabled = (
