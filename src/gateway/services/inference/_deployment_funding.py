@@ -22,6 +22,7 @@ from gateway.core.settings.inference import (
 from gateway.log_config import logger
 from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
 from gateway.services.provider_kwargs import provider_key
+from gateway.types.closed_models import ClosedModels
 
 if TYPE_CHECKING:
     from any_llm import LLMProvider
@@ -45,15 +46,10 @@ def actor_user_id_for(user_id: str | None) -> uuid.UUID | None:
 # as open-weight: the closed labs are few and change slowly, where a list of open
 # models would trail every release. Set from the deployment's settings at startup
 # (``configure_closed_models``), since a model is billed deep in code that holds no config.
-@dataclass(frozen=True)
-class _ClosedModels:
-    providers: frozenset[str]
-    closed_families: tuple[str, ...]
-    open_families: tuple[str, ...]
-
-
-_closed = _ClosedModels(
-    frozenset(DEFAULT_CLOSED_MODEL_PROVIDERS), DEFAULT_CLOSED_MODEL_FAMILIES, DEFAULT_OPEN_MODEL_FAMILIES
+_closed = ClosedModels.of(
+    providers=DEFAULT_CLOSED_MODEL_PROVIDERS,
+    closed_families=DEFAULT_CLOSED_MODEL_FAMILIES,
+    open_families=DEFAULT_OPEN_MODEL_FAMILIES,
 )
 
 
@@ -62,32 +58,12 @@ def configure_closed_models(
 ) -> None:
     """Set which models count as closed, from the deployment's settings."""
     global _closed
-    _closed = _ClosedModels(
-        providers=frozenset(provider.lower() for provider in providers),
-        closed_families=tuple(family.lower() for family in closed_families),
-        open_families=tuple(family.lower() for family in open_families),
-    )
-
-
-def _is_family(name: str, family: str) -> bool:
-    """Whether ``name`` belongs to ``family``: it starts with it, as a whole word unless the family ends in ``-``."""
-    if not name.startswith(family):
-        return False
-    rest = name[len(family) :]
-    return family.endswith("-") or not rest or not rest[0].isalnum()
+    _closed = ClosedModels.of(providers=providers, closed_families=closed_families, open_families=open_families)
 
 
 def is_closed_model(provider: str, model: str) -> bool:
-    """Whether ``model`` on ``provider`` (a wire name) is a closed model, which no open-weight plan covers.
-
-    The model's own name decides first, whichever provider or aggregator serves
-    it (``openrouter``'s ``anthropic/claude-sonnet-4``): an open family is open
-    even on a closed provider, and a closed family closed anywhere.
-    """
-    name = model.rsplit("/", 1)[-1].lower()
-    if any(_is_family(name, family) for family in _closed.open_families):
-        return False
-    return provider.lower() in _closed.providers or any(_is_family(name, family) for family in _closed.closed_families)
+    """Whether ``model`` on ``provider`` (a wire name) is closed under the deployment's settings."""
+    return _closed.is_closed(provider, model)
 
 
 def billed_model(provider: "str | LLMProvider", model: str) -> BilledModel:
