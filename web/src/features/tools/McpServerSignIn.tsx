@@ -50,6 +50,8 @@ export function McpServerSignIn({
     (entry) => entry.server_id === server.id,
   )
   const ids = { workspaceId, serverId: server.id }
+  // Nothing is claimed either way until the read has answered, and not after it failed.
+  const isKnown = mine.data !== undefined
 
   const connect = () =>
     start.mutate(
@@ -71,7 +73,11 @@ export function McpServerSignIn({
               <Dot className={connection ? "bg-success" : "bg-text-subtle"} />
               {connection
                 ? `Connected since ${formatDate(connection.connected_at)}`
-                : "Not connected"}
+                : isKnown
+                  ? "Not connected"
+                  : mine.isError
+                    ? "Status unavailable"
+                    : "Checking…"}
             </span>
             {connection ? (
               <div className="flex flex-wrap gap-2">
@@ -92,7 +98,7 @@ export function McpServerSignIn({
                 variant="primary"
                 onPress={connect}
                 isPending={start.isPending}
-                isDisabled={mine.isPending && !mine.data}
+                isDisabled={!isKnown}
                 className="min-h-11 md:min-h-0"
               >
                 Connect your account

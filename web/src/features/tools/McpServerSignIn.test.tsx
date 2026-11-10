@@ -114,6 +114,20 @@ describe("McpServerSignIn", () => {
     expect(calls.some((call) => call.url.includes("/connections?"))).toBe(false)
   })
 
+  it("claims nothing while the status loads, and says so when it cannot be read", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "boom" }, { status: 500 }),
+    )
+    renderSignIn()
+
+    expect(screen.getByText("Checking…")).toBeVisible()
+    expect(screen.queryByText("Not connected")).not.toBeInTheDocument()
+    expect(await screen.findByText("Status unavailable")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Connect your account" }),
+    ).toBeDisabled()
+  })
+
   it("shows a connection and ends it after a confirmation", async () => {
     const calls = mockApi({ mine: [MINE] })
     renderSignIn()
