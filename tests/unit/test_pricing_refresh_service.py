@@ -134,6 +134,53 @@ async def test_the_preview_reports_changed_rates_against_the_active_snapshot(
     assert await refresh.preview_pending_refresh(session) is None
 
 
+def _clip(price: float) -> dict[str, Any]:
+    """A video model priced per second of output, which only the v2 price block can state."""
+    return {"id": "clip", "pricing": {"modalities": {"video": {"output": {"price": price, "unit": "second"}}}}}
+
+
+def _painter(image_price: float) -> dict[str, Any]:
+    """A chat model with full text rates that also prices an image, per image, in its block."""
+    image = {"output": {"price": image_price, "unit": "image"}}
+    return {"id": "painter", "cost": {"input": 1, "output": 2}, "pricing": {"modalities": {"image": image}}}
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_image_rate_beside_unchanged_text_rates(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The rate columns are the same, so only the block tells the two prices apart."""
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.04)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "painter")
+    assert entry is not None and entry.priced and entry.slot_columns is None
+
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.05)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:painter", "changed")]
+    assert not preview.changes_nothing
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_per_unit_price(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    """A per-second rate has no v1 field; the stored snapshot must still carry it and compare it."""
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.02)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "clip")
+    assert entry is not None and entry.priced and entry.slot_columns is not None
+    assert entry.slot_columns.unit == "second"
+
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.03)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:clip", "changed")]
+
+
 @pytest.mark.asyncio
 async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     async def fail(**_: Any) -> dict[str, Any]:

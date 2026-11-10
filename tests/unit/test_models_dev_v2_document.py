@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from gateway.services.pricing.models_dev_index import ModelsDevPriceIndex
 from gateway.types.models_dev import (
     MODELS_DEV_SOURCES,
     ModelsDevApi,
@@ -332,11 +333,32 @@ def test_conditions_and_factors_are_read_only(catalog: ModelsDevCatalog) -> None
 
 
 def test_a_snapshot_cut_from_v2_reads_back_as_the_same_prices(catalog: ModelsDevCatalog) -> None:
-    """The bundled snapshot is cut from v2 and stored in the v1 shape, which every gateway reads."""
+    """A snapshot is cut from v2 into the v1 shape plus each model's price block, which every gateway reads."""
     again = parse_catalog(snapshot_document(catalog))
-    assert [(p.id, m.id, m.cost, m.context_window) for p, m in again.models()] == [
-        (p.id, m.id, m.cost, m.context_window) for p, m in catalog.models()
+    assert [(p.id, m.id, m.cost, m.context_window, m.pricing) for p, m in again.models()] == [
+        (p.id, m.id, m.cost, m.context_window, m.pricing) for p, m in catalog.models()
     ]
+    assert any(m.pricing is not None for _, m in again.models())
+
+
+def test_a_snapshot_keeps_a_per_unit_price(catalog: ModelsDevCatalog) -> None:
+    """A per-image price has no v1 field, so only the kept price block makes the model priced after a store."""
+    snapshot = json.loads(json.dumps(snapshot_document(catalog)))
+    assert snapshot["openrouter"]["models"]["qwen/qwen-image-3-pro"]["pricing"]["modalities"]["image"]["output"] == {
+        "price": 0.04,
+        "unit": "image",
+        "overrides": [{"when": {"resolution": {"equals": "2K"}}, "price": 0.075}],
+    }
+    entry = ModelsDevPriceIndex.from_document(snapshot).resolve("openrouter", "qwen/qwen-image-3-pro")
+    assert entry is not None and entry.priced and entry.slot_columns is not None
+    assert entry.slot_columns.unit == "image"
+
+
+def test_a_damaged_price_block_in_a_snapshot_is_an_issue_not_a_crash() -> None:
+    catalog = parse_catalog({"p": {"models": {"m": {"cost": {"input": 1, "output": 2}, "pricing": {"modalities": 3}}}}})
+    model = catalog.model_for("p", "m")
+    assert model is not None and model.pricing is None and model.cost is not None
+    assert catalog.issues.count == 1 and "p.models.m.pricing" in catalog.issues.examples[0]
 
 
 def test_v2_is_tried_before_v1() -> None:

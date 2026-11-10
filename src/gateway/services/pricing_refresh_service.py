@@ -130,10 +130,16 @@ class PricingRefreshPreview:
 
 
 def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]]:
-    """Each priced model's rates, keyed by its models.dev provider and model ids."""
+    """Each priced model's rates and its price block, keyed by its models.dev provider and model ids.
+
+    The block is compared whole: an image or web search price beside a text
+    price moves no rate column, and is a price change all the same.
+    """
 
     return {
-        f"{entry.provider_id}:{entry.model_id}": entry.price_signature() for entry in index.entries() if entry.priced
+        f"{entry.provider_id}:{entry.model_id}": (entry.price_signature(), entry.pricing)
+        for entry in index.entries()
+        if entry.priced
     }
 
 
