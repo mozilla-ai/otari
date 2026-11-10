@@ -12,7 +12,7 @@ from typing import Never
 from sqlalchemy import ColumnElement, delete, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, SessionTransaction
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import McpUserConnection
@@ -115,22 +115,35 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
 
         For work that must not happen before the removal it follows is durable, such as asking an
         authorization server to end tokens, from code that does not own the commit.
+
+        SQLAlchemy fires both events for savepoints too, so each is narrowed. ``after_commit`` counts
+        only the outermost commit, when no savepoint is open. A rollback counts only when it undoes
+        the transaction the callback was registered in, or one around it; a savepoint beside it
+        rolling back leaves it pending. The listeners stay on the session until it closes, inert
+        once settled, rather than being removed from inside their own dispatch.
         """
         session = self.db.sync_session
+        scope = session.get_nested_transaction() or session.get_transaction()
         settled = False
 
-        def committed(_session: Session) -> None:
+        def committed(committing: Session) -> None:
             nonlocal settled
-            if not settled:
-                settled = True
-                callback()
-
-        def rolled_back(_session: Session) -> None:
-            nonlocal settled
+            if settled or committing.get_nested_transaction() is not None:
+                return
             settled = True
+            callback()
+
+        def rolled_back(_session: Session, previous: SessionTransaction) -> None:
+            nonlocal settled
+            transaction = scope
+            while transaction is not None:
+                if transaction is previous:
+                    settled = True
+                    return
+                transaction = transaction.parent
 
         event.listen(session, "after_commit", committed)
-        event.listen(session, "after_rollback", rolled_back)
+        event.listen(session, "after_soft_rollback", rolled_back)
 
     async def count_for_server(self, server_id: uuid.UUID) -> int:
         """How many users are connected to a server."""

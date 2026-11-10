@@ -182,10 +182,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   removed and the caller is told `mcp_sign_in_required`.
 - **What ends a connection.** The user disconnecting, a manager removing it,
   deleting the server, deleting the user, the user leaving the workspace, and a
-  change to the server's URL, its OAuth client or its credential mode. Otari
-  asks the authorization server to revoke the tokens too, best effort and
-  after the removal has committed, everywhere except a user leaving the
-  workspace, whose removal belongs to another change Otari cannot wait on.
+  change to the server's URL, its OAuth client or its credential mode. For
+  each of these, Otari also asks the authorization server to revoke the
+  tokens, best effort and only after the removal has committed; a removal
+  that rolls back revokes nothing.
 - **Moving the server to another host drops its OAuth client.** A client ID
   and secret a manager entered were issued for the old host, so a URL change
   to another scheme or host clears them, unless the same change names a new

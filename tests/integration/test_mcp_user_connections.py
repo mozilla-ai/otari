@@ -1756,3 +1756,61 @@ async def test_the_public_callback_checks_iss_for_a_sign_in_with_no_dashboard_se
     assert (outcome.connected == world.server.id) is connects
     assert (outcome.error == "sign_in_failed") is not connects
     assert (await _connection(async_db, world.server.id, "alice") is not None) is connects
+
+
+async def test_a_savepoint_released_before_the_commit_sends_nothing_yet(async_db: AsyncSession) -> None:
+    """SQLAlchemy fires after_commit for a savepoint too; only the outermost commit counts."""
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+        async with uow.savepoint():
+            pass
+        assert fired == [], "a released savepoint is not the removal committing"
+    assert fired == ["sent"]
+
+
+async def test_a_savepoint_beside_it_rolling_back_does_not_cancel_it(async_db: AsyncSession) -> None:
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+        with pytest.raises(RuntimeError):
+            async with uow.savepoint():
+                raise RuntimeError("an unrelated step failed and was undone")
+
+    assert fired == ["sent"]
+
+
+async def test_a_savepoint_it_was_registered_in_rolling_back_cancels_it(async_db: AsyncSession) -> None:
+    fired: list[str] = []
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        with pytest.raises(RuntimeError):
+            async with uow.savepoint():
+                McpUserConnectionRepository(uow).after_commit(lambda: fired.append("sent"))
+                raise RuntimeError("the removal inside the savepoint was undone")
+
+    assert fired == []
+
+
+async def test_disconnecting_does_not_wait_on_a_slow_authorization_server(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+
+    async def slow(*args: object, **kwargs: object) -> bool:
+        await asyncio.sleep(5)
+        return True
+
+    monkeypatch.setattr(_mcp_oauth, "revoke", slow)
+    monkeypatch.setattr(_mcp_connections, "_REVOCATION_DEADLINE_SECONDS", 0.05)
+
+    async with asyncio.timeout(2):
+        await _service(async_db, config).disconnect(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id
+        )

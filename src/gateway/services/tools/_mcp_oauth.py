@@ -580,7 +580,13 @@ def _lifetime(value: object) -> int | None:
         # ASCII digits only: str.isdigit() also admits characters int() refuses, and int() refuses very long ones.
         digits = value.strip()
         value = int(digits) if _DIGITS.fullmatch(digits) else None
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        # Only a float can be infinite or NaN, and math.isfinite overflows on a huge int.
+        or (isinstance(value, float) and not math.isfinite(value))
+        or value <= 0
+    ):
         return None
     # A number no clock can hold is read as the largest one that is kept.
     return int(min(value, _MAX_SECONDS))
