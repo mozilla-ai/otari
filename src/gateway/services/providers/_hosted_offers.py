@@ -207,6 +207,10 @@ class HostedOffers:
         for key, version in versions.items():
             source = PRICE_SOURCE_DEFAULT if version.origin == SEED_ORIGIN else PRICE_SOURCE_DEPLOYMENT
             rates[keys[key]] = HostedModelRates.from_version(version, source)
+        if not default_pricing_enabled():
+            # The dataset is what a request falls back to only while it is consulted, an
+            # ``otari`` provider's included: its seeded rates are stored, and read above.
+            return rates
         missing = [model for model in keys.values() if model not in rates]
         for model, default in (await self.defaults_for(provider, missing, implementation=implementation)).items():
             rates[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
