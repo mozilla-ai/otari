@@ -1,4 +1,4 @@
-<!-- Translated from README.md at commit 4fe759f211. `git diff 4fe759f211 -- README.md` shows what this translation has not caught up with. -->
+<!-- Translated from README.md at commit fe8cf5d1. `git diff fe8cf5d1 -- README.md` shows what this translation has not caught up with. -->
 
 <p align="center">
   <img src="assets/otari-logo.svg" width="320" alt="Otari 标志"/>
