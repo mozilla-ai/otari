@@ -7,7 +7,7 @@ that leaves, and the next request is refused.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -15,7 +15,7 @@ from typing import Any
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
-from gateway.ports.billing_port import BillingPort
+from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 
 
 def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
@@ -147,3 +147,37 @@ async def admit_deployment_paid(
         actor_user_id=_actor_user_id(user_id),
         request_id=request_id,
     )
+
+
+@dataclass(frozen=True)
+class WorkspaceFunding:
+    """Whether a workspace's organization passes the gate :func:`admit_deployment_paid` applies.
+
+    ``organization_for`` names a workspace's organization, ``None`` for one with
+    none, which that gate admits.
+    """
+
+    billing: BillingPort
+    organization_for: Callable[[uuid.UUID], Awaitable[uuid.UUID | None]]
+
+    async def funded(self, workspace_id: uuid.UUID) -> bool:
+        """Whether a deployment-paid request from the workspace would be admitted, granting any credit owed first.
+
+        A port that fails to answer is logged and reads as funded: this answers
+        what to advertise, and the request's own gate still decides.
+        """
+        organization_id = await self.organization_for(workspace_id)
+        if organization_id is None:
+            return True
+        try:
+            await self.billing.apply_due_credit(organization_id=organization_id)
+            await self.billing.require_funds_on_deposit(organization_id=organization_id)
+        except InsufficientFundsError:
+            return False
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to read an organization's funds: organization=%s: %s",
+                organization_id,
+                describe_port_error(exc),
+            )
+        return True

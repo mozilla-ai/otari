@@ -6572,8 +6572,10 @@ export interface paths {
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
          *     Called with an API key, a tool its workspace does not allow is listed as
-         *     unavailable. Every other `tools[]` entry, including provider-native keywords
-         *     not listed here, is forwarded to the upstream provider untouched.
+         *     unavailable, and so is a tool that runs on the deployment's account while
+         *     the key's organization has no funds. Every other `tools[]` entry, including
+         *     provider-native keywords not listed here, is forwarded to the upstream
+         *     provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -14018,7 +14020,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for a tool that runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -14053,9 +14055,9 @@ export interface components {
             object: "tool";
             /**
              * Reason
-             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool runs on the deployment's account and the API key's organization has no funds paid in, which adding funds changes.
              */
-            reason?: ("not_configured" | "workspace_disabled") | null;
+            reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
         };
         /**
          * McpErrorBody

@@ -7,16 +7,21 @@ deployment paid for. The check at admission
 looks the same rows up the same way, so a request it admits settles priced. The
 lookup needs the request's database session, so the caller makes it; this
 module says which rows to look up, which requests skip the check, and what the
-refusal says.
+refusal says, as well as the refusal of a tool the organization's funds cannot pay for.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.tools import BUILTIN_FETCH, effective_fetch_instances, effective_search_instances
+from gateway.exceptions import TenancyError
+from gateway.exceptions.tools_exceptions import WebAccessRefusedError
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
+from gateway.services.tools._declarations import Tool
 from gateway.services.tools._registry import BUILTIN_TOOLS
-from gateway.services.tools._web_admission import AdmittedWebTools, enrichment_for
+from gateway.services.tools._web_admission import AdmittedWebTools, DeclaredWebTools, admit_web_access, enrichment_for
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch, resolve_fetch, resolve_in_loop_search
 from gateway.types.tool_charges import (
@@ -43,6 +48,18 @@ class PricedTool:
     rate_keys: tuple[RateKey, ...]
     deployment_paid: bool
     enrichment: bool = False
+
+    @property
+    def type(self) -> Tool:
+        """The ``tools[]`` type a request declares the tool by."""
+        return _TOOL_TYPES[self.name]
+
+
+_TOOL_TYPES = {
+    CODE_EXECUTION_TOOL_NAME: Tool.CODE_EXECUTION,
+    WEB_FETCH_TOOL_NAME: Tool.WEB_FETCH,
+    WEB_SEARCH_TOOL_NAME: Tool.WEB_SEARCH,
+}
 
 
 def _on_its_own_row(name: str, *, deployment_paid: bool) -> PricedTool:
@@ -96,6 +113,26 @@ def admitted_tools(*, code_execution: bool, web: AdmittedWebTools) -> list[Price
     if web.fetch is not None:
         used[WEB_FETCH_TOOL_NAME] = [_priced_fetch(web.fetch)]
     return [priced for tool in BUILTIN_TOOLS for priced in used.get(tool.name, ())]
+
+
+def deployment_paid_web_tools(config: GatewayConfig, policy: ResolvedWebSearchConfig | None) -> frozenset[Tool]:
+    """The web tools a request under ``policy`` declaring one alone would run on the deployment's account.
+
+    Each is admitted as the request path admits it, its search's pages included.
+    One that admission refuses is left out: it is unavailable on other grounds.
+    """
+    declarations = (
+        DeclaredWebTools(fetch_tool_entry=None, remaining_user_tools=None, search_tool_entry={"type": Tool.WEB_SEARCH}),
+        DeclaredWebTools(fetch_tool_entry={"type": Tool.WEB_FETCH}, remaining_user_tools=None, search_tool_entry=None),
+    )
+    paid: set[Tool] = set()
+    for declared in declarations:
+        try:
+            web = admit_web_access(declared, policy=policy, config=config)
+        except (TenancyError, WebAccessRefusedError):
+            continue
+        paid.update(tool.type for tool in admitted_tools(code_execution=False, web=web) if tool.deployment_paid)
+    return frozenset(paid)
 
 
 def tools_to_price(
@@ -182,4 +219,22 @@ def unpriced_tool_detail(name: str, rate_key: RateKey | None = None, *, enrichme
         "require_pricing enabled, so it will not run work it cannot bill. Set a "
         f"per-request price for {row} ({where}), or set require_pricing to false to serve it unpriced."
         + (" With web_search_extract set to false, a search reads no page." if enrichment else "")
+    )
+
+
+def unfunded_tool_detail(names: Sequence[str], funds_detail: str, *, declared: bool) -> str:
+    """The refusal of gateway tools the deployment's account runs, for an organization with no funds to pay for them.
+
+    ``funds_detail`` is the billing port's refusal, which says what the
+    organization has. Naming the tools is what tells this refusal from a model's,
+    which carries the same code. ``declared`` says the request put the tools in
+    ``tools[]``, so leaving them out is a way past the refusal.
+    """
+    quoted = [f"'{name}'" for name in names]
+    one = len(names) == 1
+    listed = quoted[0] if one else f"{', '.join(quoted[:-1])} and {quoted[-1]}"
+    remedy = f"Add funds, or leave {'it' if one else 'them'} out of tools[]." if declared else "Add funds to run it."
+    return (
+        f"{funds_detail} The gateway tool{'' if one else 's'} {listed} {'runs' if one else 'run'} on this "
+        f"deployment's account, which this organization's funds pay for. {remedy}"
     )

@@ -41,6 +41,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.log_config import logger
 from gateway.models.tools import WebTool
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
+from gateway.services.tools._tool_prices import unfunded_tool_detail
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
     organization_key_search_instance,
@@ -587,7 +588,9 @@ class DirectToolService:
                 )
             except InsufficientFundsError as exc:
                 raise await refused_after_hold(
-                    exc.public_message, HTTPStatus.PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
+                    unfunded_tool_detail([tool.name], exc.public_message, declared=False),
+                    HTTPStatus.PAYMENT_REQUIRED,
+                    error_headers(INSUFFICIENT_FUNDS),
                 ) from exc
             except FundsCheckFailedError as exc:
                 logger.error(

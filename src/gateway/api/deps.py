@@ -144,6 +144,7 @@ from gateway.services.inference import (
     InferenceService,
     VideoJobService,
     VideoRateLookup,
+    WorkspaceFunding,
     admit_deployment_paid,
     describe_port_error,
 )
@@ -230,6 +231,7 @@ from gateway.services.usage_and_telemetry import UsageScope, UsageService
 from gateway.services.workspace_scope import (
     default_workspace_id,
     organization_for_key_id,
+    organization_for_workspace_id,
     workspace_for_key_id,
 )
 from gateway.types.tool_charges import InstanceRateKey
@@ -1616,6 +1618,14 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
+
+
+def get_workspace_funding(db: PortSessionDep, billing: BillingPortDep) -> WorkspaceFunding:
+    """Read a workspace's organization's funds the way a deployment-paid request's gate reads them."""
+    return WorkspaceFunding(billing, partial(organization_for_workspace_id, db))
+
+
+WorkspaceFundingDep = Annotated[WorkspaceFunding, Depends(get_workspace_funding)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]

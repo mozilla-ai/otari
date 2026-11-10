@@ -423,6 +423,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
     tools_to_price,
+    unfunded_tool_detail,
     unpriced_tool_detail,
     validate_web_declarations,
 )
@@ -4369,8 +4370,8 @@ async def _admit_tool_funding(
     The model's gate (:func:`_admit_or_refuse`) only sees the model call, so a
     request whose organization pays for its model would otherwise run searches
     and sandboxes on the deployment's account with nothing paid in. The gate is
-    the same one, and so is the refusal. Sets ``ctx.tool_funding``, which
-    settlement charges those calls through.
+    the same one; the refusal names the tools, so a caller can tell it from the
+    model's. Sets ``ctx.tool_funding``, which settlement charges those calls through.
     """
     paid = [
         tool
@@ -4396,10 +4397,11 @@ async def _admit_tool_funding(
             ctx.organization_id,
             ctx.request_id,
         )
-        await _refuse_tool_funding(ctx, adapter, tool_key, exc.public_message, status.HTTP_402_PAYMENT_REQUIRED)
-        raise adapter.error(
-            402, exc.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
-        ) from exc
+        detail = unfunded_tool_detail(
+            list(dict.fromkeys(tool.type for tool in paid)), exc.public_message, declared=True
+        )
+        await _refuse_tool_funding(ctx, adapter, tool_key, detail, status.HTTP_402_PAYMENT_REQUIRED)
+        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
     except Exception as exc:
         logger.error(
             "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",

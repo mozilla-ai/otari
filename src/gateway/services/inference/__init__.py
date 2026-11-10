@@ -25,6 +25,7 @@ from gateway.services.inference._decisions import (
 )
 from gateway.services.inference._deployment_funding import (
     DeploymentCharge,
+    WorkspaceFunding,
     admit_deployment_paid,
     describe_port_error,
 )
@@ -126,6 +127,7 @@ __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
     "CompletedVideoUsage",
     "ESTIMATED_VIDEO_SECONDS",
+    "WorkspaceFunding",
     "admit_deployment_paid",
     "describe_port_error",
     "EMBEDDINGS_BILLING",

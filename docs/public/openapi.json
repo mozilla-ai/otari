@@ -12691,7 +12691,7 @@
             "type": "array"
           },
           "available": {
-            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
+            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for a tool that runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
             "title": "Available",
             "type": "boolean"
           },
@@ -12728,7 +12728,8 @@
               {
                 "enum": [
                   "not_configured",
-                  "workspace_disabled"
+                  "workspace_disabled",
+                  "insufficient_funds"
                 ],
                 "type": "string"
               },
@@ -12736,7 +12737,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.",
+            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool runs on the deployment's account and the API key's organization has no funds paid in, which adding funds changes.",
             "title": "Reason"
           }
         },
@@ -51487,7 +51488,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable, and so is a tool that runs on the deployment's account while\nthe key's organization has no funds. Every other `tools[]` entry, including\nprovider-native keywords not listed here, is forwarded to the upstream\nprovider untouched.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {

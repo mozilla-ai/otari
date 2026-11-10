@@ -16,15 +16,16 @@ import pytest
 
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
-from gateway.services.inference import DeploymentCharge, admit_deployment_paid
+from gateway.services.inference import DeploymentCharge, WorkspaceFunding, admit_deployment_paid
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 IDENTITY_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
 
 
 class _Billing:
-    def __init__(self, *, refuse: bool = False) -> None:
+    def __init__(self, *, refuse: bool = False, fail: bool = False) -> None:
         self.refuse = refuse
+        self.fail = fail
         self.calls: list[tuple[Any, ...]] = []
 
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
@@ -32,6 +33,8 @@ class _Billing:
 
     async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
+        if self.fail:
+            raise RuntimeError("billing down")
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
 
@@ -203,3 +206,40 @@ async def test_a_failed_charge_is_rolled_back_and_logged_without_its_text(
     assert "RuntimeError" in message
     assert "secret row data" not in message
     assert record.exc_info is None
+
+
+WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+
+def _funding(billing: _Billing, organization_id: uuid.UUID | None = ORGANIZATION_ID) -> WorkspaceFunding:
+    async def organization_for(workspace_id: uuid.UUID) -> uuid.UUID | None:
+        assert workspace_id == WORKSPACE_ID
+        return organization_id
+
+    return WorkspaceFunding(cast(BillingPort, billing), organization_for)
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_is_funded_by_the_gate_admission_applies() -> None:
+    billing = _Billing()
+    assert await _funding(billing).funded(WORKSPACE_ID)
+    assert billing.calls == [("apply_due_credit", ORGANIZATION_ID), ("require_funds_on_deposit", ORGANIZATION_ID)]
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_whose_organization_has_no_funds_is_not_funded() -> None:
+    assert not await _funding(_Billing(refuse=True)).funded(WORKSPACE_ID)
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_with_no_organization_is_funded_without_asking_the_port() -> None:
+    billing = _Billing(refuse=True)
+    assert await _funding(billing, organization_id=None).funded(WORKSPACE_ID)
+    assert billing.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_port_that_fails_reads_as_funded_and_is_logged(gateway_logs: pytest.LogCaptureFixture) -> None:
+    assert await _funding(_Billing(fail=True)).funded(WORKSPACE_ID)
+    assert "BillingPort failed to read an organization's funds" in gateway_logs.text
+    assert "billing down" not in gateway_logs.text
