@@ -66,6 +66,7 @@ from .tenancy_helpers import (
     NO_TERMS,
     create_member,
     create_organization,
+    membership_listener_on,
     membership_writes,
 )
 
@@ -187,7 +188,7 @@ def _identity_service(db: AsyncSession) -> IdentityService:
     identity-provider policy it is built with is never consulted.
     """
     uow = UnitOfWork(db)
-    organizations = OrganizationService(db, membership_listener=None, uow=uow)
+    organizations = OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow)
     policy = DeploymentIdentityProviderAdapter(
         UserRepository(db), organizations, functools.partial(forget_unproven_access, db), open_signup=False
     )

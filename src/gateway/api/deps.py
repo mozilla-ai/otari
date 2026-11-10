@@ -1716,18 +1716,22 @@ def get_identity_service(
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     identity_provider: IdentityProviderPortDep,
+    membership_listener: MembershipListenerDep,
 ) -> IdentityService:
     """Build the identity service on the request's Unit of Work.
 
     Its own organization service is built on the same Unit of Work, not the deployment's shared
-    read-only one, because provisioning an SSO sign-in's account writes through it.
+    read-only one, because provisioning an SSO sign-in's account writes through it. It carries
+    the membership listener because the sign-in paths built here grant a workspace membership,
+    which has to be announced.
     """
+    organizations = OrganizationService(db, membership_listener=membership_listener, uow=uow)
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=identity_provider,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
-        organizations=OrganizationService(db, membership_listener=None, uow=uow),
+        organizations=organizations,
         sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
         session_ttl_hours=config.dashboard_session_ttl_hours,
         terms_url=config.terms_url,

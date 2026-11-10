@@ -52,6 +52,7 @@ from gateway.exceptions.organizations_exceptions import (
     SignupRegistrationUnresolvedError,
     WorkspaceNotFoundError,
 )
+from gateway.log_config import logger
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
@@ -910,8 +911,8 @@ class OrganizationService:
         """Create an address-less account as a member of one existing organization.
 
         Unlike ``provision_signup_tenancy``, there is no address to match an existing account against,
-        so this always creates a new identity, and it creates no personal organization or workspace of
-        its own.
+        so this always creates a new identity, and it founds no organization of its own. It works in
+        the admitting organization's default workspace instead.
 
         The writes run in a block of this service's Unit of Work, so they join a block the caller
         already holds.
@@ -932,7 +933,41 @@ class OrganizationService:
             # without which this account carries no attribution id and could never be offered as
             # the owner of a key.
             await get_or_create_attribution_user(self.db, user_id=str(identity.id), alias=full_name)
+            await self.grant_default_workspace(user_id=identity.id, organization_id=organization_id, role=default_role)
             return identity
+
+    async def grant_default_workspace(
+        self, *, user_id: uuid.UUID, organization_id: uuid.UUID, role: OrganizationDomainRole
+    ) -> None:
+        """Grant the organization's default workspace to a member admitted without one named.
+
+        A member with no workspace sits where ``delete_workspace`` refuses to leave an
+        organization: no surface to hold a key, a budget or a usage row. Provisioning one
+        takes the management authority a plain member has not got, so nobody but a manager
+        could resolve it.
+
+        Keyed on ``DEFAULT_WORKSPACE_NAME``, the name every path that provisions a workspace
+        gives the first one. An organization whose workspaces are all named something else is
+        granted nothing. A membership of that workspace the user already holds is set to the
+        role named here and made active.
+
+        NOTE: The caller must have just created an active organization membership, inside the
+        open block the membership listener writes through.
+        Nothing here proves either.
+        """
+        workspace = await self.workspace_rows.get_by_organization_and_name(organization_id, DEFAULT_WORKSPACE_NAME)
+        if workspace is None:
+            logger.info(
+                "Organization %s has no workspace named %r, so identity %s holds none in it",
+                organization_id,
+                DEFAULT_WORKSPACE_NAME,
+                user_id,
+            )
+            return
+        await self._apply_workspace_assignments(
+            user_id=user_id,
+            assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role=role)],
+        )
 
     async def provision_tenancy_for_claim(
         self,
