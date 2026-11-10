@@ -167,6 +167,24 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
         cursor.close()
 
 
+def _begin_sqlite_transactions(engine: AsyncEngine) -> None:
+    """Begin a SQLite transaction before a savepoint that would otherwise open one.
+
+    The driver begins a transaction only before a write, so a savepoint opened
+    before any write is the outermost transaction: releasing it commits, and a
+    later rollback cannot undo it. Beginning first makes the savepoint nest, as it
+    does on PostgreSQL. Only that case changes: beginning every transaction at its
+    start instead would hold each session's reads in a transaction, and a write
+    after another session's commit would then fail at once as "database is
+    locked" rather than wait.
+    """
+
+    @event.listens_for(engine.sync_engine, "savepoint")
+    def _begin_before_savepoint(connection: Any, _name: str) -> None:  # noqa: ANN001, ANN202
+        if not connection.connection.driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN")
+
+
 # What a database call can raise once a client-side ``command_timeout`` is set.
 #
 # asyncpg raises a bare ``asyncio.TimeoutError`` (``builtins.TimeoutError`` on
@@ -519,6 +537,7 @@ def init_db(config: GatewayConfig) -> None:
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
+        _begin_sqlite_transactions(_engine)
         # No second engine on SQLite. It would gain nothing (``NullPool``
         # ignores ``db_log_pool_size``) and would cost something: a second set
         # of connections to the same file, contending for its single writer

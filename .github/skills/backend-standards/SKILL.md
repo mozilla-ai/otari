@@ -139,7 +139,9 @@ commits move into blocks when the domain moves
 ([step 4](../../../DOMAINS.md#what-one-domain-change-does)).
 
 The boundary check refuses a `commit()` or `rollback()` call outside `core/unit_of_work.py`, except
-in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It also refuses an import
+in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It refuses `begin_nested()`
+the same way, except in a repository on `SAVEPOINT_BASELINE`, which may open a savepoint to diagnose
+a refusal of its own write ([DOMAINS.md](../../../DOMAINS.md)). It also refuses an import
 of `session_for` outside `repositories/`, and a `UnitOfWork(...)` call outside `get_unit_of_work`
 and the worker factories in `core/unit_of_work.py`, so nothing builds a second one over a session
 that already has one.

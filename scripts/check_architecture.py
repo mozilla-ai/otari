@@ -574,7 +574,8 @@ def check_database_imports(src_root: Path) -> list[str]:
     ]
 
 
-TRANSACTION_CALLS = ("commit", "rollback")
+TRANSACTION_CALLS = ("commit", "rollback", "begin_nested")
+SAVEPOINT_CALL = "begin_nested"
 UNIT_OF_WORK = "gateway/core/unit_of_work.py"
 # Modules that ended a transaction themselves when rule 14 landed. An entry
 # that stops calling commit and rollback fails the check until it is removed,
@@ -626,10 +627,29 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/tenancy/workspace_web_search_service.py",
     "gateway/services/usage_admin_service.py",
 )
+# Repositories that open a savepoint, which DOMAINS.md allows only to diagnose a
+# refusal of the repository's own write. A module added here has been read for
+# that purpose; an entry that stops opening one fails the check until removed.
+SAVEPOINT_BASELINE = (
+    "gateway/repositories/api_keys/api_key_repository.py",
+    "gateway/repositories/budgets/budget_repository.py",
+    "gateway/repositories/budgets/end_user_repository.py",
+    "gateway/repositories/budgets/reservation_repository.py",
+    "gateway/repositories/budgets/scoped_budget_repository.py",
+    "gateway/repositories/budgets/workspace_budget_default_repository.py",
+    "gateway/repositories/health_checks/health_check_settings_repository.py",
+    "gateway/repositories/identity/blocked_email_repository.py",
+    "gateway/repositories/providers/workspace_hosted_access_repository.py",
+    "gateway/repositories/tenancy/organization_guardrail_definition_repository.py",
+    "gateway/repositories/tenancy/organization_member_repository.py",
+    "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
+    "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
+    "gateway/repositories/users_repository.py",
+)
 
 
 def _transaction_calls(tree: ast.Module) -> list[tuple[int, str]]:
-    """Return the line and name of each commit or rollback call in a module."""
+    """Return the line and name of each commit, rollback or begin_nested call in a module."""
     return sorted(
         (node.lineno, node.func.attr)
         for node in ast.walk(tree)
@@ -638,23 +658,31 @@ def _transaction_calls(tree: ast.Module) -> list[tuple[int, str]]:
 
 
 def check_transaction_control(src_root: Path) -> list[str]:
-    """Check that no module off the baseline ends a transaction itself, and that every baseline entry still does."""
+    """Check that no module off its baseline ends a transaction or opens a savepoint, and every entry still does."""
     violations: list[str] = []
     ending: set[str] = set()
+    saving: set[str] = set()
     for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
-        calls = _transaction_calls(tree)
-        if not calls:
-            continue
-        ending.add(relative_path)
-        if relative_path not in TRANSACTION_CONTROL_BASELINE:
-            violations.extend(
-                f"{relative_path}:{line} calls {call}; only a Unit of Work block ends a transaction"
-                for line, call in calls
-            )
+        for line, call in _transaction_calls(tree):
+            if call == SAVEPOINT_CALL and relative_path in SAVEPOINT_BASELINE:
+                saving.add(relative_path)
+                continue
+            ending.add(relative_path)
+            if relative_path not in TRANSACTION_CONTROL_BASELINE:
+                remedy = (
+                    "a repository opens a savepoint only to diagnose a refusal of its own write"
+                    if call == SAVEPOINT_CALL
+                    else "only a Unit of Work block ends a transaction"
+                )
+                violations.append(f"{relative_path}:{line} calls {call}; {remedy}")
     violations.extend(
-        f"{relative_path} is on the transaction control baseline but calls neither commit nor rollback; "
-        "remove it from the baseline"
+        f"{relative_path} is on the transaction control baseline but calls neither commit, rollback nor "
+        "begin_nested; remove it from the baseline"
         for relative_path in sorted(set(TRANSACTION_CONTROL_BASELINE) - ending)
+    )
+    violations.extend(
+        f"{relative_path} is on the savepoint baseline but opens no savepoint; remove it from the baseline"
+        for relative_path in sorted(set(SAVEPOINT_BASELINE) - saving)
     )
     return violations
 

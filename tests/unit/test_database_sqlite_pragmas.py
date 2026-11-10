@@ -38,3 +38,24 @@ async def test_sqlite_connection_pragmas_applied(tmp_path: Path) -> None:
         assert int(foreign_keys) == 1
     finally:
         reset_db()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("end", "kept"), [("rollback", 0), ("commit", 1)])
+async def test_a_savepoint_opened_before_any_write_ends_with_its_transaction(
+    tmp_path: Path, end: str, kept: int
+) -> None:
+    """#2535: such a savepoint was the outermost transaction, so releasing it committed and a rollback undid nothing."""
+    init_db(GatewayConfig(database_url=f"sqlite:///{tmp_path / 'savepoint.db'}", auto_migrate=False))
+    try:
+        async with create_session() as db:
+            await db.execute(text("CREATE TABLE things (name TEXT)"))
+            await db.commit()
+        async with create_session() as db:
+            async with db.begin_nested():
+                await db.execute(text("INSERT INTO things VALUES ('written in the savepoint')"))
+            await getattr(db, end)()
+        async with create_session() as db:
+            assert (await db.execute(text("SELECT COUNT(*) FROM things"))).scalar_one() == kept
+    finally:
+        reset_db()
