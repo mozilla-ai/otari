@@ -248,4 +248,55 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
       ).toBe(true),
     )
   })
+
+  it("moves a server to each user's own sign-in, which drops the shared token box", async () => {
+    const calls = mockMcpServerApi({ server: SERVER })
+    const user = userEvent.setup()
+    await editConnection(user)
+
+    expect(screen.getByRole("radio", { name: "Shared token" })).toBeChecked()
+    await user.click(screen.getByRole("radio", { name: "Each user signs in" }))
+    expect(
+      screen.queryByLabelText("Authorization token"),
+    ).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText("OAuth client ID"), "otari-client")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    const body = await patchBody(calls)
+    expect(body).toMatchObject({
+      credential_mode: "per_user",
+      oauth_client_id: "otari-client",
+    })
+    expect(body).not.toHaveProperty("authorization_token")
+  })
+
+  it("shows a per-user server's sign-in and warns before a change that ends everyone's", async () => {
+    const perUser = workspaceMcpServer({
+      workspace_id: WORKSPACE,
+      credential_mode: "per_user",
+      oauth_client_id: "otari-client",
+      has_oauth_client_secret: true,
+    })
+    const calls = mockMcpServerApi({ server: perUser })
+    const user = userEvent.setup()
+    await editConnection(user)
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Your account" }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Connect your account" }),
+    ).toBeVisible()
+    // A rename keeps every connection, so it says nothing and sends no mode.
+    expect(screen.queryByText(/disconnects everyone/)).not.toBeInTheDocument()
+    await user.clear(screen.getByLabelText("OAuth client ID"))
+    expect(screen.getByText(/disconnects everyone/)).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    const body = await patchBody(calls)
+    // An emptied box goes back to the client Otari registers itself.
+    expect(body).toMatchObject({ oauth_client_id: "" })
+    expect(body).not.toHaveProperty("credential_mode")
+    expect(body).not.toHaveProperty("oauth_client_secret")
+  })
 })

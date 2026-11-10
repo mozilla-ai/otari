@@ -1,6 +1,7 @@
 import { useState } from "react"
 
 import type {
+  McpCredentialMode,
   UpdateWorkspaceMcpServerRequest,
   WorkspaceMcpServer,
 } from "@/client"
@@ -9,8 +10,10 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { CREDENTIAL_MODES } from "@/features/tools/McpServerDialog"
 import { urlProblem } from "@/features/tools/mcpServerForm"
 import {
   healthDetail,
@@ -49,6 +52,9 @@ export function McpServerConnection({
   const [token, setToken] = useState("")
   const [clearToken, setClearToken] = useState(false)
   const [hint, setHint] = useState(server.purpose_hint ?? "")
+  const [mode, setMode] = useState<McpCredentialMode>(server.credential_mode)
+  const [clientId, setClientId] = useState(server.oauth_client_id ?? "")
+  const [clientSecret, setClientSecret] = useState("")
   // What the last save's connection check found, when it found something.
   const [checked, setChecked] = useState<WorkspaceMcpServer>()
   // The stored row moves under the form too (the page's Disable button, a save
@@ -57,6 +63,8 @@ export function McpServerConnection({
     server.name,
     server.url,
     server.purpose_hint,
+    server.credential_mode,
+    server.oauth_client_id,
   ])
   const [seenFields, setSeenFields] = useState(storedFields)
   if (storedFields !== seenFields) {
@@ -64,31 +72,65 @@ export function McpServerConnection({
     setName(server.name)
     setUrl(server.url)
     setHint(server.purpose_hint ?? "")
+    setMode(server.credential_mode)
+    setClientId(server.oauth_client_id ?? "")
   }
 
-  const typedToken = token.trim() !== ""
+  const isPerUser = mode === "per_user"
+  const wasPerUser = server.credential_mode === "per_user"
+  const typedToken = !isPerUser && token.trim() !== ""
   // What the row will hold once this save lands, which is what the https rule
   // is about: a rename that leaves a stored token in place still has to satisfy
   // it, and a save that only clears the token no longer does.
-  const willHaveToken = typedToken || (!clearToken && server.has_token)
+  const willHaveToken =
+    isPerUser || typedToken || (!clearToken && server.has_token)
   const urlReason = urlProblem(url, willHaveToken)
-  const tokenField = typedToken ? token.trim() : clearToken ? "" : undefined
+  const tokenField = isPerUser
+    ? undefined
+    : typedToken
+      ? token.trim()
+      : clearToken
+        ? ""
+        : undefined
+  // The client follows the token's three states: untouched keeps it, a value
+  // sets it, and an emptied box goes back to the one Otari registers itself.
+  const clientIdField =
+    isPerUser && clientId.trim() !== (server.oauth_client_id ?? "")
+      ? clientId.trim()
+      : undefined
+  const clientSecretField =
+    isPerUser && clientId.trim() !== "" && clientSecret.trim() !== ""
+      ? clientSecret.trim()
+      : undefined
   const body: UpdateWorkspaceMcpServerRequest = {
     name: name.trim(),
     url: url.trim(),
     purpose_hint: hint.trim() === "" ? null : hint.trim(),
     // `JSON.stringify` drops an `undefined`, which is what keeps the token.
     authorization_token: tokenField,
+    credential_mode: mode === server.credential_mode ? undefined : mode,
+    oauth_client_id: clientIdField,
+    oauth_client_secret: clientSecretField,
   }
   const isChanged =
     body.name !== server.name ||
     body.url !== server.url ||
     body.purpose_hint !== server.purpose_hint ||
-    tokenField !== undefined
+    tokenField !== undefined ||
+    body.credential_mode !== undefined ||
+    clientIdField !== undefined ||
+    clientSecretField !== undefined
+  // The tokens people hold were issued for the server and the client as they were.
+  const endsConnections =
+    wasPerUser &&
+    (!isPerUser || body.url !== server.url || clientIdField !== undefined)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // The gateway checks the server again when its URL or token changes.
-  const rechecks = body.url !== server.url || tokenField !== undefined
+  const rechecks =
+    body.url !== server.url ||
+    tokenField !== undefined ||
+    body.credential_mode !== undefined
 
   const save = () => {
     if (isInvalid) return
@@ -98,9 +140,13 @@ export function McpServerConnection({
         onSuccess: (saved) => {
           setToken("")
           setClearToken(false)
+          setClientSecret("")
           setEditing(false)
+          // A per-user server with no health was not checked because nobody
+          // asking has connected yet, which the section above already says.
           setChecked(
             rechecks &&
+              saved.credential_mode === "shared" &&
               (saved.health === null || healthNeedsAttention(saved.health))
               ? saved
               : undefined,
@@ -117,6 +163,9 @@ export function McpServerConnection({
     setHint(server.purpose_hint ?? "")
     setToken("")
     setClearToken(false)
+    setMode(server.credential_mode)
+    setClientId(server.oauth_client_id ?? "")
+    setClientSecret("")
     update.reset()
   }
 
@@ -153,8 +202,21 @@ export function McpServerConnection({
             <dd className="min-w-0 font-mono text-sm break-all">
               {server.url}
             </dd>
-            <dt className="text-caption">Token</dt>
-            <dd>{server.has_token ? "Stored, never shown" : "None"}</dd>
+            <dt className="text-caption">Credentials</dt>
+            <dd>{wasPerUser ? "Each user signs in" : "Shared token"}</dd>
+            {wasPerUser ? (
+              <>
+                <dt className="text-caption">OAuth client</dt>
+                <dd className="min-w-0 break-all">
+                  {server.oauth_client_id ?? "Registered by Otari"}
+                </dd>
+              </>
+            ) : (
+              <>
+                <dt className="text-caption">Token</dt>
+                <dd>{server.has_token ? "Stored, never shown" : "None"}</dd>
+              </>
+            )}
           </dl>
         </div>
       </SettingsGroup>
@@ -185,6 +247,50 @@ export function McpServerConnection({
             errorMessage={urlReason}
           />
           {canManage ? (
+            <RadioGroup
+              label="Credentials"
+              value={mode}
+              onChange={(next) => setMode(next as McpCredentialMode)}
+              options={CREDENTIAL_MODES}
+            />
+          ) : null}
+          {endsConnections ? (
+            <InfoBanner tone="warning">
+              Saving this disconnects everyone who has connected their account.
+              They connect again afterwards.
+            </InfoBanner>
+          ) : null}
+          {!canManage ? (
+            <p className="text-body">
+              {wasPerUser
+                ? "Credentials: each user signs in"
+                : `Token: ${server.has_token ? "stored" : "none"}`}
+            </p>
+          ) : isPerUser ? (
+            <div className="flex flex-col gap-4">
+              <Field
+                label="OAuth client ID"
+                value={clientId}
+                onChange={setClientId}
+                placeholder="Registered by Otari"
+                description="Only for a server that does not let Otari register itself. Blank registers automatically."
+              />
+              {clientId.trim() !== "" ? (
+                <SecretField
+                  label="OAuth client secret"
+                  value={clientSecret}
+                  onChange={setClientSecret}
+                  placeholder={
+                    server.has_oauth_client_secret &&
+                    clientIdField === undefined
+                      ? "Leave blank to keep the stored secret"
+                      : "Optional"
+                  }
+                  description="Encrypted, never shown again."
+                />
+              ) : null}
+            </div>
+          ) : (
             <div className="flex flex-col gap-2">
               {/* Masked: the gateway stores this encrypted and never reads it
                   back, so it must not sit in the clear here either. */}
@@ -221,10 +327,6 @@ export function McpServerConnection({
                 </Checkbox>
               ) : null}
             </div>
-          ) : (
-            <p className="text-body">
-              Token: {server.has_token ? "stored" : "none"}
-            </p>
           )}
           <Field
             label="Purpose hint"

@@ -202,11 +202,7 @@ export function WorkspaceMcpServersCard({
   // access list and every later change live.
   const submit = (draft: McpServerDraft) =>
     create.mutate(
-      {
-        workspaceId: selected.workspace_id,
-        // One workspace token for every caller, which is all this form offers.
-        body: { ...draft, credential_mode: "shared" },
-      },
+      { workspaceId: selected.workspace_id, body: draft },
       { onSuccess: (server) => openServer(server.id) },
     )
 

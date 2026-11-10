@@ -159,7 +159,8 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   clients on its own, set `oauth_client_id` (and `oauth_client_secret` if it
   has one) on the server, with
   `<public_base_url>/api/v1/mcp-connections/callback` as the client's redirect
-  URI.
+  URI. [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
+  walks through it in the dashboard.
 - **What it needs.** `public_base_url`, because the redirect URI is derived
   from it, `OTARI_SECRET_KEY`, because the tokens are encrypted with it, and an
   `https://` server URL. Every URL the server and its authorization server

@@ -16,6 +16,7 @@ import { McpExposedTools } from "@/features/tools/McpExposedTools"
 import { McpReadTools } from "@/features/tools/McpReadTools"
 import { McpServerAcl } from "@/features/tools/McpServerAcl"
 import { McpServerConnection } from "@/features/tools/McpServerConnection"
+import { McpServerSignIn } from "@/features/tools/McpServerSignIn"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useDeleteWorkspaceMcpServer,
@@ -141,6 +142,13 @@ export function McpServerDetailPage({
       )}
 
       <div className="flex flex-col gap-8">
+        {server.credential_mode === "per_user" ? (
+          <McpServerSignIn
+            workspaceId={server.workspace_id}
+            server={server}
+            canManage={canManage}
+          />
+        ) : null}
         <McpExposedTools
           key={JSON.stringify(server.allowed_tools)}
           workspaceId={server.workspace_id}
@@ -170,7 +178,7 @@ export function McpServerDetailPage({
         isOpen={isDeleting}
         onOpenChange={setDeleting}
         heading="Delete MCP server"
-        body={`${server.name}, the token stored with it and its access list are removed. A request that still names its id is refused, so update the callers that use it.`}
+        body={`${server.name}, the token stored with it, its access list and every user's connection to it are removed. A request that still names its id is refused, so update the callers that use it.`}
         confirmLabel="Delete server"
         isPending={remove.isPending}
         error={remove.error}

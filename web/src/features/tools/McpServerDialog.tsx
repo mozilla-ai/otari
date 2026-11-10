@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { FiCheck } from "react-icons/fi"
-
+import type { McpCredentialMode } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -28,7 +28,27 @@ export interface McpServerDraft {
   everyone_tools: string[]
   /** Absent when the box was left blank. */
   authorization_token: string | undefined
+  /** Whose credential a call carries: the workspace's token, or each user's own. */
+  credential_mode: McpCredentialMode
+  /** Absent to let Otari register itself with the server's authorization server. */
+  oauth_client_id: string | undefined
+  oauth_client_secret: string | undefined
 }
+
+export const CREDENTIAL_MODES: RadioOption[] = [
+  {
+    value: "shared",
+    label: "Shared token",
+    description:
+      "One token for the whole workspace. Every caller acts as the account that token belongs to.",
+  },
+  {
+    value: "per_user",
+    label: "Each user signs in",
+    description:
+      "No shared token. Each user connects their own account, and their keys act as them.",
+  },
+]
 
 type WhoCanUse = "everyone" | "nobody"
 
@@ -134,9 +154,14 @@ export function McpServerDialog({
   const [allowedTools, setAllowedTools] = useState("")
   const [enabled, setEnabled] = useState(true)
   const [whoCanUse, setWhoCanUse] = useState<WhoCanUse>("everyone")
+  const [mode, setMode] = useState<McpCredentialMode>("shared")
+  const [clientId, setClientId] = useState("")
+  const [clientSecret, setClientSecret] = useState("")
 
-  const typedToken = token.trim() !== ""
-  const urlReason = urlProblem(url, typedToken)
+  const isPerUser = mode === "per_user"
+  const typedToken = !isPerUser && token.trim() !== ""
+  // A user's own token travels to a per-user server, so it needs https as one with a token does.
+  const urlReason = urlProblem(url, typedToken || isPerUser)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there
@@ -149,6 +174,9 @@ export function McpServerDialog({
     allowedTools,
     enabled,
     whoCanUse,
+    mode,
+    clientId,
+    clientSecret,
   })
 
   const tokenField = typedToken ? token.trim() : undefined
@@ -190,6 +218,13 @@ export function McpServerDialog({
       enabled,
       everyone_tools: whoCanUse === "everyone" ? [ALL_TOOLS] : [],
       authorization_token: tokenField,
+      credential_mode: mode,
+      oauth_client_id:
+        isPerUser && clientId.trim() !== "" ? clientId.trim() : undefined,
+      oauth_client_secret:
+        isPerUser && clientId.trim() !== "" && clientSecret.trim() !== ""
+          ? clientSecret.trim()
+          : undefined,
     })
   }
 
@@ -213,13 +248,17 @@ export function McpServerDialog({
       isDirty={isDirty}
       error={error}
       footerStart={
-        <Button
-          onPress={runTest}
-          isPending={test.isPending}
-          isDisabled={url.trim() === "" || urlReason !== undefined}
-        >
-          Test connection
-        </Button>
+        // A per-user server is checked with a person's own connection, which
+        // exists only once the server is stored.
+        isPerUser ? null : (
+          <Button
+            onPress={runTest}
+            isPending={test.isPending}
+            isDisabled={url.trim() === "" || urlReason !== undefined}
+          >
+            Test connection
+          </Button>
+        )
       }
     >
       <Field
@@ -244,17 +283,48 @@ export function McpServerDialog({
         errorMessage={urlReason}
       />
 
-      {/* Masked, like the provider API key it is the sibling of: the gateway
-          stores this encrypted and never reads it back, so it must not sit in
-          the clear on the one form that collects it, nor be offered to a
-          password manager. */}
-      <SecretField
-        label="Authorization token"
-        value={token}
-        onChange={setToken}
-        placeholder="Optional"
-        description="Sent as a bearer token. Encrypted, never shown again."
+      <RadioGroup
+        label="Credentials"
+        value={mode}
+        onChange={(next) => setMode(next as McpCredentialMode)}
+        options={CREDENTIAL_MODES}
       />
+      {isPerUser ? (
+        <>
+          <InfoBanner>
+            Once it is added, connect your own account on the server's page to
+            check it and list its tools.
+          </InfoBanner>
+          <Field
+            label="OAuth client ID"
+            value={clientId}
+            onChange={setClientId}
+            placeholder="Optional"
+            description="Only for a server that does not let Otari register itself. Blank registers automatically."
+          />
+          {clientId.trim() !== "" ? (
+            <SecretField
+              label="OAuth client secret"
+              value={clientSecret}
+              onChange={setClientSecret}
+              placeholder="Optional"
+              description="Encrypted, never shown again."
+            />
+          ) : null}
+        </>
+      ) : (
+        // Masked, like the provider API key it is the sibling of: the gateway
+        // stores this encrypted and never reads it back, so it must not sit in
+        // the clear on the one form that collects it, nor be offered to a
+        // password manager.
+        <SecretField
+          label="Authorization token"
+          value={token}
+          onChange={setToken}
+          placeholder="Optional"
+          description="Sent as a bearer token. Encrypted, never shown again."
+        />
+      )}
 
       <Field
         label="Purpose hint"

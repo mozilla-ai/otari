@@ -28,6 +28,7 @@
 * [Configure code execution](configure-code-execution.md)
 * [Add an MCP server](add-an-mcp-server.md)
 * [Control access to an MCP server](control-access-to-an-mcp-server.md)
+* [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
 
 ## Integrations
 

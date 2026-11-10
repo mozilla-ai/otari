@@ -718,6 +718,13 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+export type McpCredentialMode = Schemas["McpCredentialMode"]
+export type McpConnection = Schemas["McpConnectionPublic"]
+export type McpConnections = Schemas["McpConnectionsPublic"]
+export type McpConnectionStarted = Schemas["McpConnectionStarted"]
+export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
+export type McpServerConnection = Schemas["McpServerConnectionPublic"]
+export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
 
 // ---------------------------------------------------------------------------
 // Playground

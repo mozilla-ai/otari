@@ -31,6 +31,13 @@ test("add an MCP server", async ({ page }) => {
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Name").fill(SERVER)
     await dialog.getByLabel("URL").fill("https://example.com/mcp")
+    const credentials = dialog.getByRole("radiogroup", { name: "Credentials" })
+    await expect(
+      credentials.getByRole("radio", { name: "Shared token" }),
+    ).toBeChecked()
+    await expect(
+      credentials.getByRole("radio", { name: "Each user signs in" }),
+    ).toBeVisible()
     await dialog.getByLabel("Authorization token").fill("ghp_example")
     await dialog
       .getByLabel("Purpose hint")

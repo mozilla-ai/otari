@@ -7,6 +7,10 @@ import type {
   CreateWorkspaceMcpServerGrantsRequest,
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
+  McpConnectionCompleted,
+  McpConnectionStarted,
+  McpConnections,
+  McpServerConnections,
   OrganizationGuardrail,
   OrganizationGuardrailTestResult,
   SandboxCredentialPublic,
@@ -780,6 +784,143 @@ export function useTestWorkspaceMcpServerConnection() {
         `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
         { method: "POST", body: JSON.stringify(body) },
       ),
+  })
+}
+
+function mcpConnectionsKey(workspaceId: string) {
+  return [WORKSPACES, workspaceId, "mcp-connections"] as const
+}
+
+function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
+  return [
+    WORKSPACES,
+    workspaceId,
+    "mcp-servers",
+    serverId,
+    "connections",
+  ] as const
+}
+
+/** The caller's own sign-ins to this workspace's per-user servers. */
+export function useMyMcpConnections(workspaceId: string | null) {
+  return useQuery({
+    queryKey: mcpConnectionsKey(workspaceId ?? ""),
+    enabled: workspaceId !== null,
+    queryFn: ({ signal }) =>
+      apiFetch<McpConnections>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-connections`,
+        { signal },
+      ),
+  })
+}
+
+/** Starts the caller's sign-in: the answer is where to send the browser. */
+export function useStartMcpConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      returnTo,
+    }: {
+      workspaceId: string
+      serverId: string
+      returnTo: string
+    }) =>
+      apiFetch<McpConnectionStarted>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-connections/${encodeURIComponent(serverId)}`,
+        { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+      ),
+  })
+}
+
+/** Finishes a sign-in from the code its authorization server returned. */
+export function useCompleteMcpConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ state, code }: { state: string; code: string }) =>
+      apiFetch<McpConnectionCompleted>("/mcp-connections/complete", {
+        method: "POST",
+        body: JSON.stringify({ state, code }),
+      }),
+    onSuccess: (done) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(done.workspace_id),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(done.workspace_id, done.server_id),
+      })
+    },
+  })
+}
+
+/** Ends the caller's own connection to a server. */
+export function useDisconnectMcp() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<void>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-connections/${encodeURIComponent(serverId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+      })
+    },
+  })
+}
+
+/** Who is connected to a per-user server. Workspace managers only. */
+export function useMcpServerConnections(
+  workspaceId: string,
+  serverId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+    enabled,
+    queryFn: ({ signal }) =>
+      apiFetch<McpServerConnections>(
+        `${mcpServerPath(workspaceId, serverId)}/connections`,
+        { signal },
+      ),
+  })
+}
+
+/** Ends one user's connection to a server. Workspace managers only. */
+export function useRemoveMcpServerConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      userId,
+    }: {
+      workspaceId: string
+      serverId: string
+      userId: string
+    }) =>
+      apiFetch<void>(
+        `${mcpServerPath(workspaceId, serverId)}/connections/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(workspaceId),
+      })
+    },
   })
 }
 

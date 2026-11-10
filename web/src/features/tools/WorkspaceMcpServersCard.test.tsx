@@ -285,6 +285,56 @@ describe("WorkspaceMcpServersCard", () => {
     // No `authorization_token` key at all rather than an explicit null: the
     // operator typed no token, so the request says nothing about one.
     expect(post?.body).not.toHaveProperty("authorization_token")
+    expect(post?.body).not.toHaveProperty("oauth_client_id")
+  })
+
+  it("registers a server each user signs in to, which takes no shared token", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    const dialog = within(screen.getByRole("dialog"))
+    expect(screen.getByRole("radio", { name: "Shared token" })).toBeChecked()
+    await user.type(screen.getByLabelText("Name"), "drive")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "http://mcp.example.com/drive",
+    )
+    await user.click(screen.getByRole("radio", { name: "Each user signs in" }))
+
+    // The token box and the pre-save test go: there is no shared token to send.
+    expect(
+      screen.queryByLabelText("Authorization token"),
+    ).not.toBeInTheDocument()
+    expect(
+      dialog.queryByRole("button", { name: "Test connection" }),
+    ).not.toBeInTheDocument()
+    // A person's own token travels to it, so it needs https as a token does.
+    expect(
+      dialog.getByRole("button", { name: "Add MCP server" }),
+    ).toBeDisabled()
+    await user.clear(screen.getByLabelText("URL"))
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/drive",
+    )
+    // The secret is asked for only once there is a client for it to belong to.
+    expect(
+      screen.queryByLabelText("OAuth client secret"),
+    ).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText("OAuth client ID"), "otari-client")
+    await user.type(screen.getByLabelText("OAuth client secret"), "s3cret")
+    await user.click(dialog.getByRole("button", { name: "Add MCP server" }))
+
+    const post = writes(calls).find((call) => call.method === "POST")
+    expect(post?.body).toMatchObject({
+      name: "drive",
+      credential_mode: "per_user",
+      oauth_client_id: "otari-client",
+      oauth_client_secret: "s3cret",
+    })
+    expect(post?.body).not.toHaveProperty("authorization_token")
   })
 
   it("surfaces the 409 a duplicate name earns rather than hiding it", async () => {
