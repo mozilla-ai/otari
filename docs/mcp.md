@@ -77,9 +77,12 @@ as an unknown id does, and the tools it may not run are never offered to the
 model.
 
 A stored server sends either one token for the whole workspace or each user's
-own, as its [credential mode](#credential-mode) says. A request that names a
-server its user has not signed in to is refused with `403` and the code
-`mcp_sign_in_required`.
+own, as its [credential mode](#credential-mode) says. A request that reaches a
+server its user has not signed in to is not refused: the model is given a
+[sign-in link](#signing-in-from-the-conversation) to show instead.
+
+A server can also be [attached to every request](#attached-to-every-request), so
+a client that never sends `mcp_server_ids`, such as a coding agent, gets it too.
 
 [Caller-orchestrated MCP](#caller-orchestrated-mcp) refers to the same stored
 servers by id. It treats a disabled server differently: its endpoints answer
@@ -131,6 +134,60 @@ an owner/admin of that workspace.
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
 - `credential_mode` (default `shared`) says whose credential a call carries;
   see [Credential mode](#credential-mode).
+- `attach_by_default` (default `false`) adds the server to every model request
+  from the workspace's keys; see [Attached to every request](#attached-to-every-request).
+
+#### Attached to every request
+
+Claude Code, Pi and most other clients never send `mcp_server_ids`. Set
+`attach_by_default: true` on a server and Otari adds it to every chat
+completions, Messages and Responses request made with one of the workspace's API
+keys, as if the request had named it, and runs its tools in its own loop.
+
+```bash
+curl -X PATCH http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers/$SERVER_ID \
+  -H "Otari-Key: $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"attach_by_default": true}'
+```
+
+In the dashboard it is **Attach to every request**, on the server's page, on its
+row under **Tools → MCP servers**, and in the form that adds one.
+
+- **The access list still decides.** An attached server joins only the requests
+  whose key it grants something, with the tools that key holds and under the
+  server's `allowed_tools`. A key it denies is left without it, silently. To keep
+  one key off an attached server, give that key a rule with no tools.
+- **A key with no user gets no per-user server.** An attached per-user server is
+  left out for a key that belongs to nobody, rather than offering a sign-in no
+  one can complete.
+- **It adds to what the request names.** The servers in `mcp_server_ids` come
+  first, then the attached ones it did not name. A named server keeps its strict
+  answers (`404` for one the key cannot reach); an attached one never refuses a
+  request.
+- **The client's own tools stay the client's.** A request that declares its own
+  tools, as a coding agent does with dozens, keeps them all. A call to one of
+  them goes back to the client as before, and where a server's tool has the same
+  name as one of the client's, the client's wins and the server's is not offered.
+- **A server that is down is left out.** An attached server that cannot be
+  reached is dropped from that request and the request goes on without it. A
+  server the request named still fails it.
+- **Streaming works the same way.** The loop runs gateway tool calls between
+  rounds and streams only what the model writes for the user.
+- **Loop limits and the bill.** The loop stops after `max_tool_iterations` rounds
+  (10 unless the request sets it, at most 25), the same as for a named server.
+  Each extra round is an ordinary model call billed to the key and held against
+  its budget, so a request that uses an attached server costs what it would have
+  cost had the client named it.
+- **What it costs on every request.** The server's tool definitions are sent with
+  every request from the workspace, so they cost input tokens even when the model
+  uses none of them, and Otari connects to the server to list its tools each
+  time. The list is not cached, because each request needs its own live session
+  to call a tool and a per-user server's list is per user; the definitions are
+  sent in the same order every time, so a provider's prompt cache absorbs most of
+  the token cost. Use `allowed_tools` to send only the tools people need.
+- **Only API keys.** The Playground names the servers it uses, and the master key
+  belongs to no workspace, so neither gets attached servers.
 
 #### Credential mode
 
@@ -191,8 +248,44 @@ or the master key:
 | `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count` | Workspace or organization owners and admins |
 | `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
 
-A sign-in is single-use, expires after ten minutes, and finishes only in the
-dashboard session that started it. No route returns a token.
+A sign-in started here is single-use, expires after ten minutes, and finishes
+only in the dashboard session that started it. No route returns a token.
+
+#### Signing in from the conversation
+
+A request whose tool loop reaches a per-user server its user has not signed in
+to is not refused. The model gets one stand-in tool for that server,
+`sign_in_to_<name>`, whose description says the server exists and needs the
+user's own sign-in. When the user asks for something that server does, the model
+calls it, and the result carries a link to show:
+`<public_base_url>/api/v1/mcp-connections/sign-in?ticket=...`. The person opens
+it, signs in with their own account, and lands on a plain Otari page that tells
+them to go back to the conversation. The next request uses the new connection.
+
+- **The link is minted for the key's own user, and only when the model reaches
+  for the server.** Making one stores nothing: it carries the server and the user
+  sealed with `OTARI_SECRET_KEY` and works for 30 minutes. Opening it starts a
+  sign-in that finishes on its state alone, since the person may have no
+  dashboard session; opening it again replaces the sign-in it started before.
+- **Treat a link like a short-lived invitation.** Whoever opens it within its 30
+  minutes connects the account they sign in with to that user. It never carries
+  a token or the sign-in's state, and the log masks it.
+- **Only Otari makes the link.** It always starts with the deployment's own
+  `public_base_url`, and the stand-in tool tells the model to show no sign-in
+  link that came from anywhere else. A server's name reaches the model with
+  anything but letters, digits, spaces, `.`, `_` and `-` removed.
+- **A key with no user gets no link.** A server it names explicitly gets the
+  stand-in, which tells the model the key belongs to nobody and to use a personal
+  key. An attached one is simply left out.
+- **A token that cannot be renewed right now** gets the same stand-in, telling
+  the user to try again shortly and offering a fresh sign-in if it keeps failing.
+- **Needs** `public_base_url` and `OTARI_SECRET_KEY`, as any per-user server does.
+  Without them the stand-in says the deployment cannot make sign-in links.
+
+A stand-in tool is used rather than a note in the system message because a tool
+reaches the model the same way in all three API shapes, sits beside the many
+tools a coding agent already sends without rewriting its system prompt, and lets
+the link be made only when it is wanted.
 
 #### Connection checks
 
@@ -281,10 +374,11 @@ server can mark any tool read-only, so a hint counts only once a manager saves i
   execution answer `404 mcp_server_not_found`. To see why a key was turned
   away, use `GET .../access/check` (below).
 - **A key the ACL admits, on a per-user server its user has not signed in to,
-  is told so.** `GET /api/v1/mcp/servers` lists the server with
-  `sign_in_required: true`, a completion naming it gets a `403` with the code
-  `mcp_sign_in_required`, and discovery and execution answer
-  `403 mcp_sign_in_required`. See [Credential mode](#credential-mode).
+  is told so, with a link to sign in.** `GET /api/v1/mcp/servers` lists the
+  server with `sign_in_required: true` and a `sign_in_url`, a completion that
+  reaches it hands the model that link through a stand-in tool, and discovery
+  and execution answer `403 mcp_sign_in_required` with the same `sign_in_url`.
+  See [Signing in from the conversation](#signing-in-from-the-conversation).
 - **A tool outside the key's rule is never offered to the model.** On
   `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
 - **In a completion, the model is told what it may not use.** The server's line in
@@ -433,8 +527,10 @@ Authorization: Bearer <token>
 The enabled stored servers of the key's workspace whose
 [access list](#server-access) grants it something, which is what to send in
 `mcp_server_ids`. `sign_in_required` is true for a
-[per-user server](#credential-mode) the key's user has not signed in to yet; a
-key with no user does not see such a server at all. The URL and the token are
+[per-user server](#credential-mode) the key's user has not signed in to yet, and
+`sign_in_url` is then a link that starts their sign-in, good for 30 minutes.
+Making the link stores nothing, so listing costs nothing. A key with no user does
+not see such a server at all. The URL and the token are
 never returned. A master key has no
 workspace and is refused with `404`, as on the other routes of this section; the
 route is rate limited and refuses a blocked user as they are.
@@ -621,7 +717,7 @@ exception text.
 | Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
 | Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
-| Per-user server the key's user has not signed in to | 403 | `mcp_sign_in_required` | `not_started` |
+| Per-user server the key's user has not signed in to (the body adds `sign_in_url`) | 403 | `mcp_sign_in_required` | `not_started` |
 | That user's sign-in has expired and cannot be renewed right now | 503 | `mcp_credentials_unavailable` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
 | Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |

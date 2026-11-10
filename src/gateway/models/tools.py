@@ -155,6 +155,8 @@ class WorkspaceMcpServer(Base):
     # The OAuth client users of a per-user server sign in through, in the shape ``StoredMcpOAuthClient``
     # reads: a manager's own, or one the gateway registered itself. Its secret is encrypted inside it.
     oauth_client: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Whether a model request from any key of the workspace gets this server without naming it.
+    attach_by_default: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False)
     # The last connection check, in the shape ``WorkspaceMcpServerHealth``
     # publishes; null until one has run, and cleared when the URL, the token or
     # the allow-list changes, since it described the old ones.

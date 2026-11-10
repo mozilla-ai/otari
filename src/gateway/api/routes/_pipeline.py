@@ -392,12 +392,15 @@ from gateway.services.tools import (
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
     AdmittedCodeExecution,
+    AdmittedMcpServers,
     AdmittedWebTools,
     CandidateTools,
     CombinedToolBackend,
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    McpSignInBackend,
+    McpSignInNeeded,
     PricedTool,
     ProviderToolDeclaration,
     ToolUseBudget,
@@ -421,6 +424,8 @@ from gateway.services.tools import (
     read_web_fetch_max_uses,
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
+    sign_in_link,
+    sign_in_link_prefix,
     tools_to_price,
     unpriced_tool_detail,
     validate_web_declarations,
@@ -3624,6 +3629,7 @@ class ToolContext:
         self,
         *,
         mcp_server_configs: list[McpServerConfig] | None,
+        mcp_sign_in: Sequence[McpSignInNeeded] = (),
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         code_execution_port: CodeExecutionPort | None,
@@ -3645,6 +3651,8 @@ class ToolContext:
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
+        # The per-user servers the loop offers a sign-in link for instead of opening.
+        self.mcp_sign_in = tuple(mcp_sign_in)
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
         # of Otari's or a provider's sandbox land in. None when files are disabled.
@@ -3850,7 +3858,13 @@ class ToolContext:
 
     @property
     def use_tool_loop(self) -> bool:
-        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
+        return (
+            bool(self.mcp_server_configs)
+            or bool(self.mcp_sign_in)
+            or self.use_sandbox
+            or self.use_web_search
+            or self.use_web_fetch
+        )
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
         """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
@@ -4161,7 +4175,7 @@ async def prepare_gateway_tools(
     try:
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         await _admit_guardrails(adapter, ctx, response, declared)
-        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
+        mcp = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(adapter, ctx, code, candidates, web_policy=web_policy)
@@ -4210,7 +4224,8 @@ async def prepare_gateway_tools(
         code, web, web_access = answer.code, answer.web, answer.web_access
         return ToolContext(
             config=ctx.config,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=mcp.servers,
+            mcp_sign_in=mcp.sign_in,
             use_sandbox=code.use_sandbox,
             sandbox_tool_entry=code.tool_entry,
             code_execution_port=backends.ports.code_execution,
@@ -4542,15 +4557,20 @@ async def _admit_guardrails(
 
 async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
-) -> list[McpServerConfig] | None:
-    """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+) -> AdmittedMcpServers:
+    """The MCP servers the request may reach: its own, the stored ones its IDs name, and its workspace's attached ones.
+
+    Only a request made with an API key gets the attached servers. The Playground names the servers it
+    uses, and a master key belongs to no workspace.
+    """
     provider_mcp = declares_provider_mcp(declared.tools)
     try:
+        attach = ctx.api_key is not None and not ctx.session and await servers.any_attached(ctx.workspace_id)
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp or attach
             else McpAccess()
         )
         return await admit_mcp_servers(
@@ -4560,6 +4580,7 @@ async def _admit_mcp_servers(
             workspace_id=ctx.workspace_id,
             access=access,
             provider_mcp=provider_mcp,
+            attach=attach,
         )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError, McpSignInRequiredError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -5739,6 +5760,16 @@ async def _open_tool_backends(
         backends.append(sandbox)
     if mcp is not None:
         backends.append(mcp)
+    if tool_ctx.mcp_sign_in:
+        taken = {tool["function"]["name"] for backend in backends for tool in backend.openai_tools}
+        backends.append(
+            McpSignInBackend(
+                tool_ctx.mcp_sign_in,
+                mint=lambda server_id, user_id: sign_in_link(tool_ctx.config, server_id=server_id, user_id=user_id),
+                link_prefix=sign_in_link_prefix(tool_ctx.config),
+                taken=taken | tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
+        )
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
 
 
@@ -5828,7 +5859,7 @@ class _ToolBackendKind(StrEnum):
         declared = [
             kind
             for kind, used in (
-                (cls.MCP, bool(tool_ctx.mcp_server_configs)),
+                (cls.MCP, bool(tool_ctx.mcp_server_configs) or bool(tool_ctx.mcp_sign_in)),
                 (cls.SANDBOX, tool_ctx.use_sandbox),
                 (cls.WEB_RETRIEVAL, tool_ctx.use_web_search or tool_ctx.use_web_fetch),
             )

@@ -54,6 +54,9 @@ class McpServerConfig(BaseModel):
     caller_access_source: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
     # Admission's too: the stored server's id, so a trace's tool span links to its page.
     stored_server_id: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
+    # Admission's too: the workspace attached it and the request did not name it, so one that cannot be
+    # reached is left out of the request rather than failing it.
+    attached: SkipJsonSchema[bool] = Field(default=False, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):

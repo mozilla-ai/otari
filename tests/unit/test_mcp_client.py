@@ -26,7 +26,7 @@ from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin
 async def test_aenter_rejects_duplicate_server_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two configs sharing a name raise instead of the second silently overwriting the first."""
 
-    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig) -> _ConnectedServer:
+    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, stack: object) -> _ConnectedServer:
         return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
 
     monkeypatch.setattr(MCPClientPool, "_connect", fake_connect)
@@ -46,7 +46,7 @@ async def test_aenter_connects_distinct_names(monkeypatch: pytest.MonkeyPatch) -
 
     connected: list[str] = []
 
-    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig) -> _ConnectedServer:
+    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, stack: object) -> _ConnectedServer:
         connected.append(cfg.name)
         return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
 

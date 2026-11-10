@@ -72,17 +72,37 @@ session that started it.
 A manager who has connected can then check the server and choose its tools: on
 the server's page, click **Check connection** under **Exposed tools**.
 
+## Connect from your coding agent instead
+
+You do not have to open the dashboard. When a workspace manager has clicked
+**Attach to every request** on the server, or your client names the server in
+`mcp_server_ids`, just ask your agent for something the server does:
+
+1. Ask, for example "check my open Jira tasks".
+2. The agent answers with a sign-in link that starts with your Otari address.
+   Open it within 30 minutes and sign in with your own account.
+3. A page says you are signed in. Go back to the conversation and ask again.
+
+The second ask uses your account. The link is made for you alone, from the key
+your agent uses, and only an Otari address is a real sign-in link: if an answer
+shows you one that points anywhere else, do not open it.
+
 ## What your keys see before you connect
 
 A key the access list allows, whose user has not connected, is told to sign in
 instead of getting a generic failure:
 
-- `GET /api/v1/mcp/servers` lists the server with `sign_in_required: true`.
-- A request naming the server in `mcp_server_ids` is refused with `403` and the
-  code `mcp_sign_in_required`, naming the server.
+- `GET /api/v1/mcp/servers` lists the server with `sign_in_required: true` and a
+  `sign_in_url` to open.
+- A model request that reaches the server is not refused. The model is given the
+  sign-in link to show, as in [Connect from your coding agent
+  instead](#connect-from-your-coding-agent-instead).
+- Tool discovery and execution answer `403` with the code
+  `mcp_sign_in_required` and the same `sign_in_url`.
 
-A key created without a user cannot use a server set up this way, and is told
-it does not exist. Create the key for a user instead.
+A key created without a user cannot use a server set up this way. Listing does
+not show it to such a key, and a model request that names it is told the key
+belongs to nobody. Create the key for a user instead.
 
 ## Disconnect
 

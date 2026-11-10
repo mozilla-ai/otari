@@ -893,6 +893,8 @@ export function workspaceMcpServer(
     credential_mode: "shared",
     oauth_client_id: null,
     has_oauth_client_secret: false,
+    // Reached only by a request that names it, as a create defaults to.
+    attach_by_default: false,
     // Never checked, which is how a row stored before checks existed reads.
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",

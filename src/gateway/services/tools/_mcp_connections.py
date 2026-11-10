@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import secrets
 import uuid
@@ -24,7 +25,9 @@ from collections.abc import Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlencode
 
+from cryptography.fernet import InvalidToken
 from pydantic import BaseModel
 
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -49,7 +52,13 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerRepository,
 )
 from gateway.repositories.users_repository import DEFAULT_USER_ID
-from gateway.services.secret_box import SecretBoxUnavailableError, decrypt_secret, encrypt_secret, secret_box_configured
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    decrypt_secret,
+    encrypt_secret,
+    get_secret_box,
+    secret_box_configured,
+)
 from gateway.services.tools import _mcp_oauth
 from gateway.services.tools._mcp_oauth import (
     McpOAuthClient,
@@ -69,6 +78,11 @@ EXPIRY_SKEW = timedelta(minutes=5)
 # How long one renewal may hold a connection's row while it waits on the authorization server.
 RENEWAL_DEADLINE_SECONDS = 20.0
 CALLBACK_PATH = "/mcp-connections/callback"
+# The gateway's own path a sign-in link opens, under the API root. It starts the sign-in when clicked.
+SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
+# How long a sign-in link handed to a conversation can be clicked. Nothing is stored until it is.
+SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
+_SIGN_IN_LINK_PURPOSE = "mcp-sign-in"
 # The dashboard route that finishes a sign-in a dashboard session started.
 DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
@@ -134,13 +148,62 @@ def callback_url(config: GatewayConfig) -> str:
     Raises:
         McpConnectionSetupError: ``public_base_url`` is unset, so the gateway cannot name itself.
     """
-    base = (config.public_base_url or "").strip().rstrip("/")
+    base = _gateway_base(config)
     if not base:
         raise McpConnectionSetupError(
             "Signing in to an MCP server needs public_base_url set, because the address the "
             "authorization server returns to is derived from it"
         )
     return f"{base}{API_ROOT}{CALLBACK_PATH}"
+
+
+def _gateway_base(config: GatewayConfig) -> str:
+    """The gateway's own public address, from ``public_base_url``, or ``""`` when unset."""
+    return (config.public_base_url or "").strip().rstrip("/")
+
+
+def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -> str:
+    """A link that starts ``user_id``'s sign-in to a per-user server when it is opened, for a conversation to show.
+
+    Minting stores nothing: the link carries the server and the user sealed with ``OTARI_SECRET_KEY``,
+    and the sign-in, with its single-use state, starts only when somebody opens it, within
+    ``SIGN_IN_LINK_LIFETIME``. It always points at this gateway, never at an authorization server,
+    so a conversation can tell it apart from any other link by its address. The caller has decided
+    that this user may sign in to this server.
+
+    Raises:
+        McpConnectionSetupError: ``public_base_url`` is unset, or the user is the shared ``default`` one.
+        SecretBoxUnavailableTenancyError: ``OTARI_SECRET_KEY`` is unset.
+    """
+    if user_id == DEFAULT_USER_ID:
+        raise McpConnectionSetupError("The shared default user stands for keys with no owner and cannot sign in")
+    callback_url(config)
+    sealed = _encrypted(
+        json.dumps({"p": _SIGN_IN_LINK_PURPOSE, "s": str(server_id), "u": user_id}, separators=(",", ":"))
+    )
+    # Fernet's padding is dropped and put back on reading, so the link has no character a chat may mangle.
+    return f"{_gateway_base(config)}{API_ROOT}{SIGN_IN_LINK_PATH}?{urlencode({'ticket': sealed.rstrip('=')})}"
+
+
+def sign_in_link_prefix(config: GatewayConfig) -> str | None:
+    """What every sign-in link on this deployment starts with, or ``None`` where none can be made."""
+    base = _gateway_base(config)
+    return f"{base}{API_ROOT}{SIGN_IN_LINK_PATH}?ticket=" if base else None
+
+
+def read_sign_in_link(ticket: str) -> tuple[uuid.UUID, str] | None:
+    """The server and the user a sign-in link's ticket names, or ``None`` for one that is forged, altered or old."""
+    if not ticket or len(ticket) > 1024:
+        return None
+    try:
+        sealed = ticket + "=" * (-len(ticket) % 4)
+        plain = get_secret_box().decrypt(sealed.encode(), ttl=int(SIGN_IN_LINK_LIFETIME.total_seconds()))
+        payload = json.loads(plain)
+        if not isinstance(payload, dict) or payload.get("p") != _SIGN_IN_LINK_PURPOSE:
+            return None
+        return uuid.UUID(payload["s"]), str(payload["u"])
+    except (InvalidToken, SecretBoxUnavailableError, ValueError, KeyError, TypeError):
+        return None
 
 
 def require_per_user_support(config: GatewayConfig) -> None:
@@ -222,6 +285,10 @@ class CallbackOutcome:
     connected: uuid.UUID | None = None
     return_to: str | None = None
     error: str | None = None
+    # A sign-in a conversation's link started: it ends on the gateway's own page rather than the dashboard's.
+    conversation: bool = False
+    # The connected server's name, for that page. Never part of the query.
+    server_name: str | None = None
 
     def query(self) -> dict[str, str]:
         """The outcome as query parameters, leaving out what it does not carry."""
@@ -335,6 +402,10 @@ class McpConnectionService:
             if server.url != url or current is None or current.client_id != client.client_id:
                 raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
             await self._flows.purge_expired(now)
+            if identity_id is None:
+                # A link opened again replaces the sign-in it started before, so opening one
+                # repeatedly holds one pending sign-in rather than one per click.
+                await self._flows.remove_unbound(server_id, user_id)
             await self._flows.add(
                 state_hash=_state_hash(state),
                 server_id=server_id,
@@ -355,6 +426,25 @@ class McpConnectionService:
         return _mcp_oauth.authorization_url(
             metadata, client_id=client.client_id, redirect_uri=redirect_uri, state=state, verifier=verifier
         )
+
+    async def start_from_link(self, ticket: str) -> str:
+        """Start the sign-in a link from :func:`sign_in_link` names, and return the authorization URL.
+
+        The sign-in finishes on its state alone, since the person opening the link need not have a
+        dashboard session, and lands on a page telling them to go back to their conversation.
+
+        Raises:
+            McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
+            WorkspaceMcpServerNotFoundError: the server is gone.
+            McpConnectionModeError: the server no longer takes each user's own sign-in.
+            McpConnectionSetupError: the sign-in cannot start on this deployment.
+            McpConnectionUpstreamError: the server's authorization setup could not be discovered.
+        """
+        named = read_sign_in_link(ticket)
+        if named is None:
+            raise McpConnectionFlowError("This sign-in link is not valid or has expired. Ask again for a new one.")
+        server_id, user_id = named
+        return await self.start(server_id=server_id, user_id=user_id)
 
     async def _per_user_server(self, server_id: uuid.UUID, *, lock: bool = False) -> WorkspaceMcpServer:
         server = await self._servers.find(server_id, lock=lock)
@@ -417,11 +507,13 @@ class McpConnectionService:
         """
         if not state:
             return CallbackOutcome(error="invalid_request")
+        landing = await self.landing(state)
+        conversation = landing.known and not landing.needs_dashboard
         if error or not code:
             await self.abandon(state)
             # A short code the authorization server chose; anything else is not passed on.
-            return CallbackOutcome(error=error if error and _SAFE_ERROR.fullmatch(error) else "invalid_request")
-        landing = await self.landing(state)
+            refused = error if error and _SAFE_ERROR.fullmatch(error) else "invalid_request"
+            return CallbackOutcome(error=refused, conversation=conversation)
         if not landing.known:
             return CallbackOutcome(error="unknown_state")
         if landing.needs_dashboard:
@@ -430,8 +522,10 @@ class McpConnectionService:
             done = await self.complete(state=state, code=code)
         except (McpConnectionFlowError, McpConnectionUpstreamError) as exc:
             logger.info("MCP sign-in callback refused reason=%s", type(exc).__name__)
-            return CallbackOutcome(error="sign_in_failed")
-        return CallbackOutcome(connected=done.server_id, return_to=done.return_to)
+            return CallbackOutcome(error="sign_in_failed", conversation=True)
+        return CallbackOutcome(
+            connected=done.server_id, return_to=done.return_to, conversation=True, server_name=done.server_name
+        )
 
     async def landing(self, state: str) -> FlowLanding:
         """What a callback's ``state`` names, without consuming it."""

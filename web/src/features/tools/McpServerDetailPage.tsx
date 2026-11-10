@@ -16,6 +16,7 @@ import { McpExposedTools } from "@/features/tools/McpExposedTools"
 import { McpReadTools } from "@/features/tools/McpReadTools"
 import { McpServerAcl } from "@/features/tools/McpServerAcl"
 import { McpServerConnection } from "@/features/tools/McpServerConnection"
+import { ATTACH_DESCRIPTION } from "@/features/tools/McpServerDialog"
 import { McpServerSignIn } from "@/features/tools/McpServerSignIn"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
@@ -104,8 +105,28 @@ export function McpServerDetailPage({
               />
               {server.enabled ? "ENABLED" : "DISABLED"}
             </span>
+            {server.attach_by_default ? (
+              <span className="flex items-center gap-2 text-mono-caption text-muted">
+                <Dot className="bg-accent" />
+                ATTACHED
+              </span>
+            ) : null}
             {canManage ? (
               <>
+                <Button
+                  onPress={() =>
+                    update.mutate({
+                      ...ids,
+                      body: { attach_by_default: !server.attach_by_default },
+                    })
+                  }
+                  isPending={update.isPending}
+                  className="min-h-11 md:min-h-0"
+                >
+                  {server.attach_by_default
+                    ? "Stop attaching"
+                    : "Attach to every request"}
+                </Button>
                 <Button
                   onPress={() =>
                     update.mutate({
@@ -132,6 +153,11 @@ export function McpServerDetailPage({
         {server.purpose_hint ? (
           <span className="break-words">{server.purpose_hint}</span>
         ) : null}
+        <span className="text-caption">
+          {server.attach_by_default
+            ? `Attached to every request. ${ATTACH_DESCRIPTION}`
+            : "Requests reach this server only by naming its id in mcp_server_ids. Attach it to give it to every request."}
+        </span>
       </PageIntro>
       <ErrorBanner error={update.error} />
       {canManage ? null : (

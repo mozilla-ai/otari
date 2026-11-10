@@ -189,11 +189,15 @@ class McpExecutionError(Exception):
     what must not travel.
     """
 
-    def __init__(self, code: str, execution_state: ExecutionState, status_code: int) -> None:
+    def __init__(
+        self, code: str, execution_state: ExecutionState, status_code: int, *, sign_in_url: str | None = None
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.execution_state = execution_state
         self.status_code = status_code
+        # With ``mcp_sign_in_required``: the link that starts the caller's own sign-in, when one could be made.
+        self.sign_in_url = sign_in_url
 
 
 # --------------------------------------------------------------------------- #

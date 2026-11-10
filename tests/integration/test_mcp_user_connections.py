@@ -65,9 +65,11 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 from gateway.services.tools import (
     McpConnectionService,
     McpGrantMembershipListener,
+    McpSignInReason,
     McpUserTokens,
     _mcp_connections,
     _mcp_oauth,
+    sign_in_link,
     stored_oauth_client,
 )
 from gateway.services.tools._mcp_connections import checked_return_to
@@ -1203,3 +1205,93 @@ async def test_a_connection_whose_client_the_server_no_longer_holds_cannot_be_re
         await tokens.token_for(row, str(world.member.id))
 
     assert wire.refreshes == []
+
+
+# --------------------------------------------------------------------------- #
+# A model request: attached servers, and sign-ins it cannot do without
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_never_a_denied_one(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config, attach_by_default=True)
+    service = _service(async_db, config)
+
+    async def shared(name: str, **fields: object) -> uuid.UUID:
+        created = await service.create_server(
+            user=world.owner,
+            workspace_id=world.workspace.id,
+            request=WorkspaceMcpServerCreate(name=name, url=PUBLIC_URL, **fields),  # type: ignore[arg-type]
+        )
+        return created.id
+
+    named = await shared("named")
+    await shared("attached", attach_by_default=True)
+    await shared("off", attach_by_default=True, enabled=False)
+    await shared("denied", attach_by_default=True, everyone_tools=[])
+    await shared("plain")
+    servers = WorkspaceMcpServers(async_db)
+    member = _access(str(world.member.id))
+
+    resolved = await servers.resolve_for_request(world.workspace.id, [named], member, attach=True)
+    without = await servers.resolve_for_request(world.workspace.id, [named], member, attach=False)
+
+    assert [server.name for server in resolved.servers] == ["named", "attached"]
+    assert [(need.name, need.reason, need.user_id) for need in resolved.sign_in] == [
+        ("drive", McpSignInReason.NOT_SIGNED_IN, str(world.member.id))
+    ]
+    assert [server.name for server in without.servers] == ["named"] and without.sign_in == []
+    assert await servers.any_attached(world.workspace.id) is True
+    # A key with no user is not handed an attached per-user server at all.
+    nobody = await servers.resolve_for_request(world.workspace.id, [], _access(None), attach=True)
+    assert [server.name for server in nobody.servers] == ["attached"] and nobody.sign_in == []
+    # A named one it may not reach still answers as unknown, as it always has.
+    with pytest.raises(WorkspaceMcpServerNotFoundError):
+        await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
+
+
+async def test_a_named_per_user_server_is_a_sign_in_for_a_user_and_a_no_user_note_for_a_key_without_one(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    servers = WorkspaceMcpServers(async_db, tokens)
+    ids = [world.server.id]
+
+    signed_in = await servers.resolve_for_request(world.workspace.id, ids, _access(str(world.member.id)), attach=False)
+    nobody = await servers.resolve_for_request(world.workspace.id, ids, _access(None), attach=False)
+    wire.refresh_error = McpOAuthTokenError("unavailable", status_code=503)
+    await _expire(async_db, world.server.id)
+    stale = await servers.resolve_for_request(world.workspace.id, ids, _access(str(world.member.id)), attach=False)
+
+    assert [server.authorization_token for server in signed_in.servers] == ["access-1"]
+    assert [(need.reason, need.user_id) for need in nobody.sign_in] == [(McpSignInReason.NO_USER, None)]
+    assert stale.servers == []
+    assert [need.reason for need in stale.sign_in] == [McpSignInReason.RENEWAL_FAILED]
+
+
+async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_one_is_kept(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = sign_in_link(config, server_id=world.server.id, user_id="alice").split("ticket=", 1)[1]
+    await _service(async_db, config).start_connection(
+        user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+    )
+
+    await connections.start_from_link(ticket)
+    second = await connections.start_from_link(ticket)
+    flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()
+
+    assert sorted((flow.user_id, flow.identity_id is None) for flow in flows) == sorted(
+        [("alice", True), (str(world.member.id), False)]
+    )
+    outcome = await connections.receive_callback(state=_state(second), code="code", error=None)
+    assert (outcome.conversation, outcome.connected, outcome.server_name) == (True, world.server.id, "drive")
+    assert outcome.query() == {"connected": str(world.server.id)}
+    with pytest.raises(McpConnectionFlowError):
+        await connections.start_from_link(ticket[:-3] + "AAA")

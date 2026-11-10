@@ -82,6 +82,27 @@ describe("McpServerDetailPage, Access", () => {
     ).toBeInTheDocument()
   })
 
+  it("attaches the server to every request, saying what that does", async () => {
+    const calls = mockMcpServerApi({ server: SERVER })
+    const user = userEvent.setup()
+    await openPage()
+
+    expect(
+      screen.getByText(/Requests reach this server only by naming its id/),
+    ).toBeVisible()
+    await user.click(
+      screen.getByRole("button", { name: "Attach to every request" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find(
+          (call) => call.method === "PATCH" && call.url.endsWith(path),
+        )?.body,
+      ).toEqual({ attach_by_default: true }),
+    )
+  })
+
   it("edits the default policy to allow specific tools", async () => {
     const calls = mockMcpServerApi({ server: SERVER })
     const user = userEvent.setup()

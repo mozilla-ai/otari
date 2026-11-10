@@ -93,3 +93,13 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
                 return
             query = query.where(McpOAuthFlow.server_id.in_(list(server_ids)))
         await self.db.execute(query)
+
+    async def remove_unbound(self, server_id: uuid.UUID, user_id: str) -> None:
+        """Stage the removal of a user's pending sign-ins to a server that no dashboard session started."""
+        await self.db.execute(
+            delete(McpOAuthFlow).where(
+                McpOAuthFlow.server_id == server_id,
+                McpOAuthFlow.user_id == user_id,
+                McpOAuthFlow.identity_id.is_(None),
+            )
+        )

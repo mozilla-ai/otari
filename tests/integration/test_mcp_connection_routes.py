@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
-from gateway.core.error_codes import ERROR_CODE_HEADER, MCP_SIGN_IN_REQUIRED
+from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tools import McpOAuthFlow, McpUserConnection
@@ -277,24 +277,16 @@ def test_a_key_is_told_to_sign_in_until_its_user_has(
         "server_revision": "0" * 32,
         "client_execution_id": str(uuid.uuid4()),
     }
-    completion = {
-        "model": "openai:gpt-4o-mini",
-        "messages": [{"role": "user", "content": "hi"}],
-        "mcp_server_ids": [server_id],
-    }
 
     listed = client.get(f"{API_ROOT}/mcp/servers", headers=headers)
     tools = client.get(f"{API_ROOT}/mcp/servers/{server_id}/tools", headers=headers)
     executed = client.post(f"{API_ROOT}/mcp/execute", json=execute, headers=headers)
-    completed = client.post(f"{API_ROOT}/chat/completions", json=completion, headers=headers)
 
     assert [(server["id"], server["sign_in_required"]) for server in listed.json()["servers"]] == [(server_id, True)]
     for refused in (tools, executed):
         assert refused.status_code == 403, refused.text
         assert refused.json()["code"] == MCP_SIGN_IN_REQUIRED
-    assert completed.status_code == 403, completed.text
-    assert completed.headers[ERROR_CODE_HEADER] == MCP_SIGN_IN_REQUIRED
-    assert "drive" in completed.text and server_id in completed.text
+        assert refused.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
 
     _connect(test_db, server_id, "alice")
     seen: list[ResolvedMcpServer] = []
@@ -312,7 +304,9 @@ def test_a_key_is_told_to_sign_in_until_its_user_has(
     listed = client.get(f"{API_ROOT}/mcp/servers", headers=headers)
     tools = client.get(f"{API_ROOT}/mcp/servers/{server_id}/tools", headers=headers)
 
-    assert [server["sign_in_required"] for server in listed.json()["servers"]] == [False]
+    assert [(server["sign_in_required"], server["sign_in_url"]) for server in listed.json()["servers"]] == [
+        (False, None)
+    ]
     assert tools.status_code == 200, tools.text
     assert [tool["name"] for tool in tools.json()["tools"]] == ["list_files"]
     assert seen[0].authorization_token == SECRETS[0], "the call carries the key's own user's token"

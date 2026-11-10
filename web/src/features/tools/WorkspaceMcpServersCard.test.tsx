@@ -279,6 +279,7 @@ describe("WorkspaceMcpServersCard", () => {
       purpose_hint: null,
       allowed_tools: ["list_issues", "get_issue"],
       enabled: true,
+      attach_by_default: false,
       everyone_tools: ["*"],
       credential_mode: "shared",
     })
@@ -286,6 +287,32 @@ describe("WorkspaceMcpServersCard", () => {
     // operator typed no token, so the request says nothing about one.
     expect(post?.body).not.toHaveProperty("authorization_token")
     expect(post?.body).not.toHaveProperty("oauth_client_id")
+  })
+
+  it("attaches a server to every request from its row, and says so", async () => {
+    const servers = [workspaceMcpServer()]
+    const calls = mockApi({
+      servers,
+      written: workspaceMcpServer({ attach_by_default: true }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Attach github" }))
+
+    const patch = writes(calls).find((call) => call.method === "PATCH")
+    expect(patch?.body).toEqual({ attach_by_default: true })
+  })
+
+  it("shows which servers are attached to every request", async () => {
+    const servers = [workspaceMcpServer({ attach_by_default: true })]
+    mockApi({ servers })
+    await renderLoaded(servers)
+
+    expect(screen.getByText("ATTACHED TO EVERY REQUEST")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Stop attaching github" }),
+    ).toBeVisible()
   })
 
   it("registers a server each user signs in to, which takes no shared token", async () => {

@@ -1,6 +1,11 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi"
+import {
+  FiChevronRight,
+  FiPaperclip,
+  FiRefreshCw,
+  FiTrash2,
+} from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -32,6 +37,7 @@ import {
   useCheckWorkspaceMcpServer,
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
+  useUpdateWorkspaceMcpServer,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
 import { useWorkspace } from "@/shared/api/workspaces"
@@ -145,6 +151,7 @@ export function WorkspaceMcpServersCard({
   const create = useCreateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const check = useCheckWorkspaceMcpServer()
+  const update = useUpdateWorkspaceMcpServer()
   const navigate = useNavigate()
   // The workspace row carries the request-named servers switch; only a manager
   // is offered it, so only a manager pays for the read.
@@ -280,6 +287,12 @@ export function WorkspaceMcpServersCard({
               />
               {defaultPolicySummary(row.everyone_tools)}
             </span>
+            {row.attach_by_default ? (
+              <span className="flex items-center gap-2">
+                <Dot className="bg-accent" />
+                ATTACHED TO EVERY REQUEST
+              </span>
+            ) : null}
           </span>
         )
       },
@@ -300,6 +313,25 @@ export function WorkspaceMcpServersCard({
               check.mutate({
                 workspaceId: selected.workspace_id,
                 serverId: row.id,
+              })
+            }
+          />
+          <RowAction
+            icon={FiPaperclip}
+            label={
+              row.attach_by_default
+                ? "Stop attaching to every request"
+                : "Attach to every request"
+            }
+            ariaLabel={`${row.attach_by_default ? "Stop attaching" : "Attach"} ${row.name}`}
+            isDisabled={
+              update.isPending && update.variables?.serverId === row.id
+            }
+            onPress={() =>
+              update.mutate({
+                workspaceId: selected.workspace_id,
+                serverId: row.id,
+                body: { attach_by_default: !row.attach_by_default },
               })
             }
           />
@@ -341,7 +373,9 @@ export function WorkspaceMcpServersCard({
       <p className="max-w-prose text-sm text-muted">
         Requests billed to {selected.name} use these by listing their ids in{" "}
         <code className="font-mono">mcp_server_ids</code>, with no URL or token
-        of their own. Tokens are encrypted and never shown again.
+        of their own. A server attached to every request reaches requests that
+        name nothing, such as a coding agent's. Tokens are encrypted and never
+        shown again.
         {manages
           ? null
           : " Only an owner or admin of the workspace or organization can change them."}
@@ -349,6 +383,7 @@ export function WorkspaceMcpServersCard({
 
       <ErrorBanner error={query.error} />
       <ErrorBanner error={check.error} />
+      <ErrorBanner error={update.error} />
       <ErrorBanner error={workspace.error} />
 
       <TableScrollFrame className="otari-mcp-table">

@@ -35,6 +35,7 @@ configuration rather than a narrowing of one.
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Awaitable
 from datetime import UTC, datetime
@@ -42,7 +43,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,6 +109,8 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
     McpConnectionService,
+    McpSignInNeeded,
+    McpSignInReason,
     McpUserTokens,
     StoredMcpOAuthClient,
     require_per_user_support,
@@ -196,6 +199,11 @@ class WorkspaceMcpServerCreate(BaseModel):
         max_length=8192,
         description="The secret of oauth_client_id, when it has one. Encrypted at rest, never returned",
     )
+    attach_by_default: bool = Field(
+        default=False,
+        description="Add this server to every model request from the workspace's keys, as if the request named it "
+        "in mcp_server_ids. A key the server's access rules grant nothing is left without it",
+    )
 
     @model_validator(mode="after")
     def _check_tool_patterns(self) -> WorkspaceMcpServerCreate:
@@ -245,6 +253,7 @@ class WorkspaceMcpServerUpdate(BaseModel):
     credential_mode: McpCredentialMode | SkipJsonSchema[None] = None
     oauth_client_id: str | None = Field(default=None, max_length=MAX_OAUTH_CLIENT_ID_LENGTH)
     oauth_client_secret: str | None = Field(default=None, max_length=8192)
+    attach_by_default: bool | SkipJsonSchema[None] = None
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> WorkspaceMcpServerUpdate:
@@ -260,7 +269,15 @@ class WorkspaceMcpServerUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("name", "url", "enabled", "everyone_tools", "read_tools", "credential_mode")
+            for field in (
+                "name",
+                "url",
+                "enabled",
+                "everyone_tools",
+                "read_tools",
+                "credential_mode",
+                "attach_by_default",
+            )
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
@@ -351,6 +368,9 @@ class WorkspaceMcpServerPublic(BaseModel):
         description="The OAuth client ID a manager supplied for a per_user server; null when Otari registers itself"
     )
     has_oauth_client_secret: bool
+    attach_by_default: bool = Field(
+        description="Whether every model request from the workspace's keys gets this server without naming it"
+    )
     health: WorkspaceMcpServerHealth | None = Field(description="The last connection check; null until one has run")
     created_at: str
     updated_at: str
@@ -383,6 +403,7 @@ class WorkspaceMcpServerPublic(BaseModel):
             credential_mode=McpCredentialMode(server.credential_mode),
             oauth_client_id=own_client.client_id if own_client is not None else None,
             has_oauth_client_secret=own_client is not None and own_client.encrypted_secret is not None,
+            attach_by_default=server.attach_by_default,
             health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
             created_at=server.created_at.isoformat(),
             updated_at=server.updated_at.isoformat(),
@@ -498,6 +519,11 @@ class McpServerSummary(BaseModel):
         default=False,
         description="The server sends each user's own credential and this key's user has not signed in to it, "
         "so a call is refused with mcp_sign_in_required until they do",
+    )
+    sign_in_url: str | None = Field(
+        default=None,
+        description="With sign_in_required: a link that starts this key's user's own sign-in to the server, "
+        "working for 30 minutes",
     )
 
 
@@ -666,18 +692,72 @@ async def resolve_workspace_mcp_servers(
     unauthenticated request to a server the workspace configured a credential
     for, so the request fails instead.
     """
-    if not server_ids:
-        return []
+    resolved = await _resolve_for_request(
+        db, workspace_id=workspace_id, server_ids=server_ids, attach=False, access=access, tokens=tokens, defer=False
+    )
+    return resolved.servers
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RequestMcpServers:
+    """The stored servers one model request reaches, and the per-user ones it reaches only through a sign-in."""
+
+    servers: list[McpServerConfig] = dataclasses.field(default_factory=list)
+    sign_in: list[McpSignInNeeded] = dataclasses.field(default_factory=list)
+
+
+async def resolve_request_mcp_servers(
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    server_ids: list[uuid.UUID],
+    attach: bool,
+    access: McpAccess,
+    tokens: McpUserTokens | None = None,
+) -> RequestMcpServers:
+    """The stored servers a model request reaches: the ones it names, then with ``attach`` the attached ones.
+
+    A named server follows :func:`resolve_workspace_mcp_servers`, except that a per-user one the
+    request cannot open does not fail it: it comes back in ``sign_in``, with why. A server marked
+    ``attach_by_default`` that the request did not name is added as if it had been, after the named
+    ones, and is silently left out where the caller's access grants nothing on it, where the caller
+    has no user to sign in as, or where it is disabled.
+
+    Raises:
+        WorkspaceMcpServerNotFoundError: a named ID is unknown or grants the caller nothing.
+        SecretDecryptionError: a stored token will not decrypt.
+    """
+    return await _resolve_for_request(
+        db, workspace_id=workspace_id, server_ids=server_ids, attach=attach, access=access, tokens=tokens, defer=True
+    )
+
+
+async def _resolve_for_request(
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    server_ids: list[uuid.UUID],
+    attach: bool,
+    access: McpAccess,
+    tokens: McpUserTokens | None,
+    defer: bool,
+) -> RequestMcpServers:
+    if not server_ids and not attach:
+        return RequestMcpServers()
     tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
 
-    ordered_ids = list(dict.fromkeys(server_ids))
+    named = list(dict.fromkeys(server_ids))
+    wanted = (
+        or_(WorkspaceMcpServer.id.in_(named), WorkspaceMcpServer.attach_by_default.is_(True))
+        if attach
+        else WorkspaceMcpServer.id.in_(named)
+    )
     rows = (
         (
             await db.execute(
-                select(WorkspaceMcpServer).where(
-                    WorkspaceMcpServer.workspace_id == workspace_id,
-                    WorkspaceMcpServer.id.in_(ordered_ids),
-                )
+                select(WorkspaceMcpServer)
+                .where(WorkspaceMcpServer.workspace_id == workspace_id, wanted)
+                .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
             )
         )
         .scalars()
@@ -686,33 +766,61 @@ async def resolve_workspace_mcp_servers(
     by_id = {row.id: row for row in rows}
 
     patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, row.read_tools) for row in rows}
+    # Only a deferring caller is told a per-user server needs a user it does not have; the others answer 404.
     missing = [
         server_id
-        for server_id in ordered_ids
-        if server_id not in by_id or not patterns[server_id] or _needs_a_user(by_id[server_id], access)
+        for server_id in named
+        if server_id not in by_id or not patterns[server_id] or (not defer and _needs_a_user(by_id[server_id], access))
     ]
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
+    attached = [
+        row.id
+        for row in rows
+        if row.attach_by_default and row.id not in named and patterns[row.id] and not _needs_a_user(row, access)
+    ]
 
-    resolved: list[McpServerConfig] = []
-    for server_id in ordered_ids:
+    resolved = RequestMcpServers()
+    for server_id in named + attached:
         row = by_id[server_id]
         if not row.enabled:
             continue
+        try:
+            token = await _caller_token(row, access, tokens)
+        except (McpSignInRequiredError, WorkspaceMcpServerNotFoundError):
+            if not defer:
+                raise
+            resolved.sign_in.append(_sign_in_needed(row, access, McpSignInReason.NOT_SIGNED_IN))
+            continue
+        except McpConnectionUnavailableError:
+            if not defer:
+                raise
+            resolved.sign_in.append(_sign_in_needed(row, access, McpSignInReason.RENEWAL_FAILED))
+            continue
         granted = patterns[server_id]
-        resolved.append(
+        resolved.servers.append(
             McpServerConfig(
                 name=row.name,
                 url=row.url,
-                authorization_token=await _caller_token(row, access, tokens),
+                authorization_token=token,
                 purpose_hint=row.purpose_hint,
                 allowed_tools=row.allowed_tools,
                 caller_tool_patterns=None if "*" in granted else granted,
                 caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
                 stored_server_id=str(row.id),
+                attached=server_id not in named,
             )
         )
     return resolved
+
+
+def _sign_in_needed(row: WorkspaceMcpServer, access: McpAccess, reason: McpSignInReason) -> McpSignInNeeded:
+    """A per-user server the caller may reach and this request cannot open, and why."""
+    if access.user_id is None:
+        reason = McpSignInReason.NO_USER
+    return McpSignInNeeded(
+        server_id=row.id, name=row.name, purpose_hint=row.purpose_hint, user_id=access.user_id, reason=reason
+    )
 
 
 def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
@@ -883,6 +991,32 @@ class WorkspaceMcpServers:
         return await resolve_workspace_mcp_servers(
             self._db, workspace_id=workspace_id, server_ids=server_ids, access=access, tokens=self._tokens
         )
+
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+    ) -> RequestMcpServers:
+        """See :func:`resolve_request_mcp_servers`."""
+        return await resolve_request_mcp_servers(
+            self._db,
+            workspace_id=workspace_id,
+            server_ids=server_ids,
+            attach=attach,
+            access=access,
+            tokens=self._tokens,
+        )
+
+    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+        """Whether the workspace has an enabled server marked ``attach_by_default``, in one indexed read."""
+        found = await self._db.execute(
+            select(WorkspaceMcpServer.id)
+            .where(
+                WorkspaceMcpServer.workspace_id == workspace_id,
+                WorkspaceMcpServer.attach_by_default.is_(True),
+                WorkspaceMcpServer.enabled.is_(True),
+            )
+            .limit(1)
+        )
+        return found.first() is not None
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -1094,6 +1228,7 @@ class WorkspaceMcpServerService:
             read_tools=request.read_tools,
             credential_mode=request.credential_mode,
             oauth_client=_own_client(request.oauth_client_id, request.oauth_client_secret),
+            attach_by_default=request.attach_by_default,
         )
         self.db.add(server)
         # The unique index is the arbiter, not a preceding existence check: two
@@ -1637,6 +1772,7 @@ __all__ = [
     "MAX_MCP_SERVERS_PER_WORKSPACE",
     "MAX_GRANTS_PER_SERVER",
     "McpServerSummary",
+    "RequestMcpServers",
     "WorkspaceMcpServerAccess",
     "WorkspaceMcpServerAccessCheck",
     "WorkspaceMcpServerGrantPublic",
@@ -1652,6 +1788,7 @@ __all__ = [
     "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
     "list_reachable_mcp_servers",
+    "resolve_request_mcp_servers",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",
 ]

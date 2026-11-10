@@ -15,7 +15,7 @@ from gateway.services.model_access import (
     validate_mcp_read_tools,
     validate_mcp_tool_patterns,
 )
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers, WorkspaceMcpServers
 from gateway.services.tools import admit_mcp_servers
 from gateway.services.tools._mcp_admission import INLINE_MCP_SERVER_REFUSED_DETAIL
 
@@ -109,11 +109,13 @@ class _Servers:
     def __init__(self) -> None:
         self.asked: list[McpAccess | None] = []
 
-    async def resolve_many(
-        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess | None = None
-    ) -> list[McpServerConfig]:
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+    ) -> RequestMcpServers:
         self.asked.append(access)
-        return [McpServerConfig(name="github", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])]
+        return RequestMcpServers(
+            servers=[McpServerConfig(name="github", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])]
+        )
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
@@ -153,8 +155,8 @@ async def test_admission_passes_the_callers_access_to_the_stored_servers_and_cle
     )
 
     assert fake.asked == [access]
-    assert admitted is not None
-    assert [(server.name, server.caller_tool_patterns) for server in admitted] == [
+    assert admitted.servers is not None
+    assert [(server.name, server.caller_tool_patterns) for server in admitted.servers] == [
         ("mine", None),
         ("github", ["list_*"]),
     ]
@@ -172,8 +174,8 @@ async def test_a_callers_inline_servers_pass_where_the_workspace_allows_them() -
         access=McpAccess(),
     )
 
-    assert admitted is not None
-    assert [server.name for server in admitted] == ["mine"]
+    assert admitted.servers is not None
+    assert [server.name for server in admitted.servers] == ["mine"]
 
 
 def test_the_callers_patterns_are_off_the_wire_the_schema_and_the_revision() -> None:

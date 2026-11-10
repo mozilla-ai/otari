@@ -33,6 +33,8 @@ export interface McpServerDraft {
   /** Absent to let Otari register itself with the server's authorization server. */
   oauth_client_id: string | undefined
   oauth_client_secret: string | undefined
+  /** Added to every model request from the workspace's keys without being named. */
+  attach_by_default: boolean
 }
 
 export const CREDENTIAL_MODES: RadioOption[] = [
@@ -49,6 +51,10 @@ export const CREDENTIAL_MODES: RadioOption[] = [
       "No shared token. Each user connects their own account, and their keys act as them.",
   },
 ]
+
+/** What attaching a server does, said the same way wherever it can be turned on. */
+export const ATTACH_DESCRIPTION =
+  "Every model request from this workspace's keys gets this server's tools without naming it, so coding agents like Claude Code can use it. Keys the server's rules deny are left out."
 
 type WhoCanUse = "everyone" | "nobody"
 
@@ -153,6 +159,7 @@ export function McpServerDialog({
   const [hint, setHint] = useState("")
   const [allowedTools, setAllowedTools] = useState("")
   const [enabled, setEnabled] = useState(true)
+  const [attach, setAttach] = useState(false)
   const [whoCanUse, setWhoCanUse] = useState<WhoCanUse>("everyone")
   const [mode, setMode] = useState<McpCredentialMode>("shared")
   const [clientId, setClientId] = useState("")
@@ -173,6 +180,7 @@ export function McpServerDialog({
     hint,
     allowedTools,
     enabled,
+    attach,
     whoCanUse,
     mode,
     clientId,
@@ -216,6 +224,7 @@ export function McpServerDialog({
       purpose_hint: hint.trim() === "" ? null : hint.trim(),
       allowed_tools: parseAllowedTools(allowedTools),
       enabled,
+      attach_by_default: attach,
       everyone_tools: whoCanUse === "everyone" ? [ALL_TOOLS] : [],
       authorization_token: tokenField,
       credential_mode: mode,
@@ -361,6 +370,13 @@ export function McpServerDialog({
           Enabled
         </Checkbox>
         <span className="text-caption">Requests skip a disabled server.</span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <Checkbox isSelected={attach} onChange={setAttach}>
+          Attach to every request
+        </Checkbox>
+        <span className="text-caption">{ATTACH_DESCRIPTION}</span>
       </div>
 
       <RadioGroup

@@ -14,7 +14,9 @@ the last into ``AdmittedWebTools``,
 ``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
 ``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
 through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
-that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in,
+that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in;
+``sign_in_link`` mints the link a conversation shows a user to start their sign-in, and ``McpSignInBackend`` gives a
+request's tool loop one stand-in tool per server ``McpSignInNeeded`` names, whose result carries that link,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -108,6 +110,7 @@ from gateway.services.tools._direct_tool_call import (
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import (
+    AdmittedMcpServers,
     admit_mcp_servers,
     declares_provider_mcp,
     refuse_shadowed_builtin_tools,
@@ -120,9 +123,12 @@ from gateway.services.tools._mcp_connections import (
     McpUserTokens,
     StoredMcpOAuthClient,
     require_per_user_support,
+    sign_in_link,
+    sign_in_link_prefix,
     stored_oauth_client,
 )
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
+from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -297,9 +303,15 @@ __all__ = [
     "FlowLanding",
     "McpConnectionService",
     "McpUserTokens",
+    "McpSignInBackend",
+    "McpSignInNeeded",
+    "McpSignInReason",
+    "sign_in_link",
+    "sign_in_link_prefix",
     "StoredMcpOAuthClient",
     "require_per_user_support",
     "stored_oauth_client",
+    "AdmittedMcpServers",
     "admit_mcp_servers",
     "declares_provider_mcp",
     "admit_web_access",

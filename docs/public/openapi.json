@@ -12908,6 +12908,18 @@
           "request_id": {
             "title": "Request Id",
             "type": "string"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. It works for 30 minutes and stores nothing until it is opened",
+            "title": "Sign In Url"
           }
         },
         "required": [
@@ -13125,6 +13137,18 @@
             "description": "The server sends each user's own credential and this key's user has not signed in to it, so a call is refused with mcp_sign_in_required until they do",
             "title": "Sign In Required",
             "type": "boolean"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With sign_in_required: a link that starts this key's user's own sign-in to the server, working for 30 minutes",
+            "title": "Sign In Url"
           }
         },
         "required": [
@@ -28214,6 +28238,12 @@
             "description": "Allow-list of tool names; null exposes every tool the server offers",
             "title": "Allowed Tools"
           },
+          "attach_by_default": {
+            "default": false,
+            "description": "Add this server to every model request from the workspace's keys, as if the request named it in mcp_server_ids. A key the server's access rules grant nothing is left without it",
+            "title": "Attach By Default",
+            "type": "boolean"
+          },
           "authorization_token": {
             "anyOf": [
               {
@@ -28645,6 +28675,11 @@
             ],
             "title": "Allowed Tools"
           },
+          "attach_by_default": {
+            "description": "Whether every model request from the workspace's keys gets this server without naming it",
+            "title": "Attach By Default",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -28752,6 +28787,7 @@
           "credential_mode",
           "oauth_client_id",
           "has_oauth_client_secret",
+          "attach_by_default",
           "health",
           "created_at",
           "updated_at"
@@ -28777,6 +28813,10 @@
               }
             ],
             "title": "Allowed Tools"
+          },
+          "attach_by_default": {
+            "title": "Attach By Default",
+            "type": "boolean"
           },
           "authorization_token": {
             "anyOf": [
@@ -38447,7 +38487,7 @@
     },
     "/api/v1/mcp/servers": {
       "get": {
-        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, and is left out for a key that has no user. Tool discovery and\nexecution answer such a server with a 403 and the code `mcp_sign_in_required`.",
+        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` that starts their sign-in, and is left out for a\nkey that has no user. Tool discovery and execution answer such a server with a 403, the code\n`mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.",
         "operationId": "mcp-list_mcp_servers",
         "responses": {
           "200": {

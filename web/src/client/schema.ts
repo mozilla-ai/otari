@@ -2660,8 +2660,9 @@ export interface paths {
          *     the token are never returned. A master key has no workspace and is refused with a 404.
          *
          *     A server that sends each user's own credential is listed with `sign_in_required` true until this
-         *     key's user has signed in to it, and is left out for a key that has no user. Tool discovery and
-         *     execution answer such a server with a 403 and the code `mcp_sign_in_required`.
+         *     key's user has signed in to it, with a `sign_in_url` that starts their sign-in, and is left out for a
+         *     key that has no user. Tool discovery and execution answer such a server with a 403, the code
+         *     `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
          */
         get: operations["mcp-list_mcp_servers"];
         put?: never;
@@ -14206,6 +14207,11 @@ export interface components {
             execution_state: components["schemas"]["ExecutionState"];
             /** Request Id */
             request_id: string;
+            /**
+             * Sign In Url
+             * @description With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. It works for 30 minutes and stores nothing until it is opened
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpExecuteRequest
@@ -14336,6 +14342,11 @@ export interface components {
              * @default false
              */
             sign_in_required: boolean;
+            /**
+             * Sign In Url
+             * @description With sign_in_required: a link that starts this key's user's own sign-in to the server, working for 30 minutes
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpServersResponse
@@ -20993,6 +21004,12 @@ export interface components {
              */
             allowed_tools?: string[] | null;
             /**
+             * Attach By Default
+             * @description Add this server to every model request from the workspace's keys, as if the request named it in mcp_server_ids. A key the server's access rules grant nothing is left without it
+             * @default false
+             */
+            attach_by_default: boolean;
+            /**
              * Authorization Token
              * @description Bearer token for the server; requires an https URL. Encrypted at rest, never returned
              */
@@ -21205,6 +21222,11 @@ export interface components {
         WorkspaceMcpServerPublic: {
             /** Allowed Tools */
             allowed_tools: string[] | null;
+            /**
+             * Attach By Default
+             * @description Whether every model request from the workspace's keys gets this server without naming it
+             */
+            attach_by_default: boolean;
             /** Created At */
             created_at: string;
             /** @description 'shared': one workspace token for every caller. 'per_user': each user's own connection */
@@ -21271,6 +21293,8 @@ export interface components {
         WorkspaceMcpServerUpdate: {
             /** Allowed Tools */
             allowed_tools?: string[] | null;
+            /** Attach By Default */
+            attach_by_default?: boolean;
             /** Authorization Token */
             authorization_token?: string | null;
             /** Credential Mode */

@@ -15,6 +15,7 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -233,12 +234,23 @@ class MCPClientPool:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
+                # An attached server gets a stack of its own, so one that cannot be reached is closed and left out.
+                stack = await self._stack.enter_async_context(AsyncExitStack()) if cfg.attached else self._stack
                 try:
-                    server = await self._connect(cfg)
-                except Exception:
+                    server = await self._connect(cfg, stack)
+                except Exception as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
-                    raise
+                    if not cfg.attached:
+                        raise
+                    logger.warning(
+                        "Attached MCP server left out of the request server_id=%s reason=%s",
+                        cfg.stored_server_id,
+                        failure_class(exc),
+                    )
+                    with contextlib.suppress(Exception):
+                        await stack.aclose()
+                    continue
                 if self._trace is not None:
                     self._trace.record_mcp_connect(
                         server=cfg.name, tool_count=len(server.tools), started=started, ok=True
@@ -247,14 +259,14 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, stack: AsyncExitStack) -> _ConnectedServer:
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
 
-        client = await self._stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
-        read, write = await self._stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
-        session = await self._stack.enter_async_context(ClientSession(read, write))
+        client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
+        read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
         listed = await session.list_tools()

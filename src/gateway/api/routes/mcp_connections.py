@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import RedirectResponse
 
 from gateway.api.deps import (
@@ -23,7 +23,16 @@ from gateway.api.deps import (
     get_config,
     verify_master_key,
 )
+from gateway.api.routes._mcp_sign_in_pages import SignInPage, conversation_page
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.tools_exceptions import (
+    McpConnectionFlowError,
+    McpConnectionModeError,
+    McpConnectionSetupError,
+    McpConnectionUpstreamError,
+    WorkspaceMcpServerNotFoundError,
+)
+from gateway.log_config import logger
 from gateway.schemas.tools import (
     McpConnectionComplete,
     McpConnectionCompleted,
@@ -166,6 +175,31 @@ async def complete_mcp_connection(
     return await service.complete_connection(user=current_identity, state=body.state, code=body.code)
 
 
+@callback_router.get("/sign-in", include_in_schema=False)
+async def open_mcp_sign_in_link(
+    connections: McpConnectionServiceDep,
+    ticket: Annotated[str, Query(max_length=1024)] = "",
+) -> Response:
+    """Open a sign-in link a conversation showed, and send the browser on to the server's sign-in page.
+
+    The link names its server and user itself, so no session is needed. One that is
+    forged, altered or expired gets a plain page saying to ask for a new one.
+    """
+    try:
+        url = await connections.start_from_link(ticket)
+    except McpConnectionFlowError:
+        return conversation_page(SignInPage.LINK_EXPIRED)
+    except (
+        WorkspaceMcpServerNotFoundError,
+        McpConnectionModeError,
+        McpConnectionSetupError,
+        McpConnectionUpstreamError,
+    ) as exc:
+        logger.info("MCP sign-in link refused reason=%s", type(exc).__name__)
+        return conversation_page(SignInPage.CANNOT_START)
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @callback_router.get("/callback", include_in_schema=False)
 async def mcp_connection_callback(
     connections: McpConnectionServiceDep,
@@ -173,13 +207,19 @@ async def mcp_connection_callback(
     state: Annotated[str | None, Query(max_length=512)] = None,
     code: Annotated[str | None, Query(max_length=4096)] = None,
     error: Annotated[str | None, Query(max_length=256)] = None,
-) -> RedirectResponse:
-    """Receive an authorization server's redirect and send the browser on into the dashboard.
+) -> Response:
+    """Receive an authorization server's redirect and send the browser on to where the sign-in began.
 
-    The browser always ends on the dashboard's own page: a person is here
-    because an authorization server sent them, so a refusal is shown there too.
+    A sign-in started from the dashboard ends on the dashboard's own page, a
+    refusal included. One started from a conversation's link ends on a plain
+    page saying to go back to the conversation, since that person may have no
+    dashboard session at all.
     """
     outcome = await connections.receive_callback(state=state, code=code, error=error)
+    if outcome.conversation:
+        if outcome.connected is not None:
+            return conversation_page(SignInPage.CONNECTED, server_name=outcome.server_name)
+        return conversation_page(SignInPage.FAILED)
     return RedirectResponse(
         url=config.ui_link(f"{DASHBOARD_CALLBACK_ROUTE}?{urlencode(outcome.query())}"),
         status_code=status.HTTP_303_SEE_OTHER,
