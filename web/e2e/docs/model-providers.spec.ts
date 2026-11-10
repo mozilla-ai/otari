@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 
-import { dismissComboBoxInDialog, login, nav } from "../helpers"
+import { dismissComboBoxInDialog, gotoRoute, login, nav } from "../helpers"
 import { call, docScreenshot, listed } from "./fixtures"
 
 const KEYS = ["production", "backup"] as const
@@ -8,9 +8,15 @@ const KEYS = ["production", "backup"] as const
 /** Archive and delete the keys the walk added: a key is deleted once archived. */
 async function cleanUp(page: Page): Promise<void> {
   const base = "/organizations/me/provider-keys"
-  for (const key of await listed<{ id: string; name: string }>(page, base)) {
+  for (const key of await listed<{
+    id: string
+    name: string
+    archived_at: string | null
+  }>(page, base)) {
     if ((KEYS as readonly string[]).includes(key.name)) {
-      await call(page, "POST", `${base}/${key.id}/archive`)
+      if (!key.archived_at) {
+        await call(page, "POST", `${base}/${key.id}/archive`)
+      }
       await call(page, "DELETE", `${base}/${key.id}`)
     }
   }
@@ -24,9 +30,9 @@ async function openProviders(page: Page): Promise<void> {
 
 // Each key's credential is fake: adding a key tries the provider for its model
 // list and keeps the key when that fails.
-test("add provider keys and choose which ones a workspace uses", async ({
-  page,
-}) => {
+test("add, choose and rotate provider keys", async ({ page }) => {
+  // Two keys, a default, a workspace pin and an archive, against a cold gateway.
+  test.setTimeout(60_000)
   await cleanUp(page)
   try {
     await login(page)
@@ -86,6 +92,18 @@ test("add provider keys and choose which ones a workspace uses", async ({
       page.getByRole("menuitem", { name: "Always use this key" }),
     ).toBeVisible()
     await page.keyboard.press("Escape")
+
+    // Rotate a provider key: confirm on the Overview's Requests tab, then
+    // archive the old key.
+    // Out of the organization rail, which has no Overview, into the workspace.
+    await gotoRoute(page, "/")
+    await nav(page).getByRole("link", { name: "Overview" }).click()
+    await page.getByRole("link", { name: "Requests", exact: true }).click()
+    await openProviders(page)
+    const old = page.getByRole("row", { name: /production/ })
+    await old.getByRole("button", { name: "Archive" }).click()
+    await old.getByRole("button", { name: "Archive" }).click()
+    await expect(old).toBeHidden()
   } finally {
     await cleanUp(page)
   }

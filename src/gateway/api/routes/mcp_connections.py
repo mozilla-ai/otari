@@ -166,8 +166,10 @@ async def complete_mcp_connection(
     The dashboard calls this from the page the callback lands on. The state
     is consumed whatever happens next, so it finishes one sign-in at most, and
     it must be one the caller started: another person's is refused with a 400.
+    Send the redirect's `iss` too when it had one: an answer naming another
+    authorization server is refused (RFC 9207).
     """
-    return await service.complete_connection(user=current_identity, state=body.state, code=body.code)
+    return await service.complete_connection(user=current_identity, state=body.state, code=body.code, iss=body.iss)
 
 
 @callback_router.get("/sign-in", include_in_schema=False)
@@ -199,6 +201,7 @@ async def mcp_connection_callback(
     state: Annotated[str | None, Query(max_length=512)] = None,
     code: Annotated[str | None, Query(max_length=4096)] = None,
     error: Annotated[str | None, Query(max_length=256)] = None,
+    iss: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> Response:
     """Receive an authorization server's redirect and send the browser on to where the sign-in began.
 
@@ -207,7 +210,7 @@ async def mcp_connection_callback(
     page saying to go back to the conversation, since that person may have no
     dashboard session at all.
     """
-    outcome = await connections.receive_callback(state=state, code=code, error=error)
+    outcome = await connections.receive_callback(state=state, code=code, error=error, iss=iss)
     if outcome.conversation:
         if outcome.connected is not None:
             return conversation_page(SignInPage.CONNECTED, server_name=outcome.server_name)

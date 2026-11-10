@@ -25,7 +25,7 @@ import uuid
 from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from any_llm import LLMProvider
 from sqlalchemy import select
@@ -54,6 +54,9 @@ from gateway.services.tenancy.org_provider_key_service import (
     cached_org_provider_kwargs,
     cached_org_slug_provider,
 )
+
+if TYPE_CHECKING:
+    from gateway.services.tools import McpRevocation
 
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
@@ -139,6 +142,21 @@ def is_allowlist_subset(child: list[str] | None, parent: list[str] | None, *, to
     if child is None or parent is None:
         return True
     return all(entry in parent if entry in tool_keys else _covers(parent, entry) for entry in child)
+
+
+def intersect_allowlists(first: list[str] | None, second: list[str] | None) -> list[str] | None:
+    """One allow-list permitting exactly the keys both permit.
+
+    Two entries that match a common key are nested, one covering the other, so
+    keeping each entry the other list covers loses nothing either allows.
+    """
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return [entry for entry in first if _covers(second, entry)] + [
+        entry for entry in second if _covers(first, entry) and entry not in first
+    ]
 
 
 def _entry_matches(entry: str, canonical_key: str) -> bool:
@@ -407,14 +425,22 @@ async def resolve_request_mcp_access(
     )
 
 
-async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> None:
+async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "tuple[list[McpRevocation], int]":
     """Stage the removal of a deleted user's MCP grants, connections and pending sign-ins.
 
-    A soft delete leaves all three behind otherwise.
+    A soft delete leaves all three behind otherwise. Returns what to ask the authorization servers
+    to end once the caller has committed, read while the servers still hold the clients, and how
+    many connections it ends past the page it reads.
     """
+    # Imported here: the tools package reaches back into this module while it loads.
+    from gateway.services.tools import collect_revocations
+
+    connections = McpUserConnectionRepository(db)
+    revocations = await collect_revocations(connections, WorkspaceMcpServerRepository(db), user_id=user_id)
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
-    await McpUserConnectionRepository(db).remove_for_user(user_id)
+    await connections.remove_for_user(user_id)
     await McpOAuthFlowRepository(db).remove_for_user(user_id)
+    return revocations
 
 
 def tool_not_allowed_detail(

@@ -14,7 +14,3 @@ To configure code execution for a workspace:
 4. Configure **Who runs provider code tools** to control whether supported provider-native code tools or the Otari sandbox handle execution.
 
 ![A workspace's Code execution page, with the switch and who runs provider code tools.](assets/screenshots/configure-code-execution.png)
-
-Workspace settings can restrict what is allowed at the deployment level, but they **cannot enable code execution if no sandbox has been configured for the deployment**. Without one, a provider's own code tool still runs on the provider, and these settings do not apply to it.
-
-The prompt hint, the tool-loop iteration cap, the execution timeout, and the sandbox image are set through the API; see [Per-workspace code policy](tools.md#per-workspace-code-policy).

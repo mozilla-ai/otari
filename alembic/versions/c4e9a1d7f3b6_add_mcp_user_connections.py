@@ -6,7 +6,7 @@ holds each user's own tokens for a per-user server, and ``mcp_oauth_flows`` the
 sign-ins that have started and not yet come back; both start empty.
 
 Revision ID: c4e9a1d7f3b6
-Revises: c4f9e2a7d5b8
+Revises: e1b7c3a9d5f2
 Create Date: 2026-11-10
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4e9a1d7f3b6"
-down_revision: str | Sequence[str] | None = "c4f9e2a7d5b8"
+down_revision: str | Sequence[str] | None = "e1b7c3a9d5f2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -63,6 +63,8 @@ def upgrade() -> None:
         sa.Column("resource", sa.Text(), nullable=True),
         sa.Column("redirect_uri", sa.Text(), nullable=False),
         sa.Column("scope", sa.Text(), nullable=True),
+        sa.Column("issuer", sa.Text(), nullable=True),
+        sa.Column("requires_iss", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("return_to", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

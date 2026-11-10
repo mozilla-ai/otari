@@ -119,13 +119,19 @@ from gateway.services.tools._mcp_connections import (
     DASHBOARD_CALLBACK_ROUTE,
     CompletedConnection,
     FlowLanding,
+    McpConnectionEligibility,
     McpConnectionService,
+    McpRevocation,
     McpServerRef,
     McpUserTokens,
     StoredMcpOAuthClient,
+    collect_revocations,
     require_per_user_support,
+    revocations_for,
+    revoke_in_background,
     sign_in_link,
     sign_in_link_prefix,
+    sign_in_problem,
     stored_oauth_client,
 )
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
@@ -237,7 +243,11 @@ from gateway.services.tools._web_search import (
     web_search_configured,
 )
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
-from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
+from gateway.services.tools._web_search_responses import (
+    WEB_SEARCH_CALL_ID_PREFIX,
+    provider_web_searches,
+    with_provider_web_searches,
+)
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._web_tool_failure import WebToolFailure
 
@@ -302,7 +312,10 @@ __all__ = [
     "DASHBOARD_CALLBACK_ROUTE",
     "CompletedConnection",
     "FlowLanding",
+    "McpConnectionEligibility",
     "McpConnectionService",
+    "McpRevocation",
+    "McpServerRef",
     "McpUserTokens",
     "McpServerRef",
     "McpSignInBackend",
@@ -310,6 +323,10 @@ __all__ = [
     "McpSignInReason",
     "sign_in_link",
     "sign_in_link_prefix",
+    "collect_revocations",
+    "revocations_for",
+    "revoke_in_background",
+    "sign_in_problem",
     "StoredMcpOAuthClient",
     "require_per_user_support",
     "stored_oauth_client",
@@ -335,12 +352,14 @@ __all__ = [
     "provider_attempt_kwargs",
     "provider_runs_code_natively",
     "provider_tools",
+    "provider_web_searches",
     "read_web_declarations",
     "read_web_fetch_max_uses",
     "read_web_search_max_uses",
     "refuse_shadowed_builtin_tools",
     "resolve_code_executor_preference",
     "with_native_code_execution_tool",
+    "with_provider_web_searches",
     "with_typed_code_execution_tool",
     "validate_web_declarations",
     "web_search_declaration_forms",

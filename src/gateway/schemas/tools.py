@@ -838,6 +838,11 @@ class McpConnectionComplete(pydantic.BaseModel):
 
     state: str = pydantic.Field(min_length=1, max_length=512, description="The state from the redirect")
     code: str = pydantic.Field(min_length=1, max_length=4096, description="The authorization code from the redirect")
+    iss: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="The redirect's iss, the authorization server's own name, if it sent one",
+    )
 
 
 class McpConnectionCompleted(pydantic.BaseModel):

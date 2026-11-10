@@ -14,11 +14,13 @@ beyond a status and a short, charset-checked OAuth error code.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import math
 import re
 import secrets
+import zlib
 from dataclasses import dataclass
 from email.utils import unquote
 from typing import Any
@@ -49,6 +51,10 @@ class McpOAuthError(Exception):
 
 class McpOAuthDiscoveryError(McpOAuthError):
     """The server's authorization setup could not be discovered, or is not one the gateway can use."""
+
+
+class McpOAuthPkceUnsupportedError(McpOAuthDiscoveryError):
+    """The authorization server does not say it supports S256 PKCE: a setting a manager has to see."""
 
 
 class McpOAuthRegistrationError(McpOAuthDiscoveryError):
@@ -99,6 +105,10 @@ class McpOAuthMetadata:
     # The RFC 8707 resource indicator, set when the server published protected-resource metadata.
     resource: str | None = None
     token_auth_methods: tuple[str, ...] = ()
+    # The issuer the metadata was fetched for and names itself as, which a callback's ``iss`` must match.
+    issuer: str | None = None
+    # RFC 9207: the authorization server sends ``iss`` with every authorization response.
+    sends_iss: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,27 +157,82 @@ async def _send(
     json: dict[str, Any] | None = None,
     data: dict[str, str] | None = None,
     auth: httpx.Auth | None = None,
+    deadline: float | None = None,
 ) -> tuple[httpx.Response, dict[str, Any] | None]:
-    """Send one request to a checked URL; return the response and its JSON object, if it sent one."""
-    await _checked(url, label)
+    """Send one request to a checked URL; return the response and its JSON object, if it sent one.
+
+    ``deadline`` bounds sending and reading, in seconds. It covers nothing after the body is read,
+    so an answer that arrived is always returned: a refresh token the server rotated is not lost
+    to a deadline that fires while the connection closes.
+    """
     body = bytearray()
+    client = _http_client(timeout)
+    response: httpx.Response | None = None
     try:
-        async with (
-            _http_client(timeout) as client,
-            client.stream(method, url, headers=headers, json=json, data=data, auth=auth) as response,
-        ):
-            async for chunk in response.aiter_bytes():
+        async with asyncio.timeout(deadline):
+            # Inside the deadline: the check resolves the host, and a renewal holds a row lock meanwhile.
+            await _checked(url, label)
+            # Identity, so the raw stream is the body: httpx's decoded iterator closes the response
+            # when it ends, which would put closing inside the deadline.
+            request = client.build_request(
+                method, url, headers={**(headers or {}), "Accept-Encoding": "identity"}, json=json, data=data
+            )
+            response = await client.send(request, auth=auth, stream=True)
+            stream = response.stream
+            assert isinstance(stream, httpx.AsyncByteStream)
+            async for chunk in stream:
                 body.extend(chunk)
                 if len(body) > _MAX_RESPONSE_BYTES:
                     raise McpOAuthDiscoveryError(f"The {label} answered with more than the gateway reads")
+    except TimeoutError:
+        logger.info("MCP OAuth request timed out label=%s", label)
+        raise McpOAuthDiscoveryError(f"The {label} did not answer in time") from None
     except httpx.HTTPError as exc:
         logger.info("MCP OAuth request failed label=%s error=%s", label, type(exc).__name__)
         raise McpOAuthDiscoveryError(f"The {label} could not be reached") from None
+    finally:
+        # Shielded: closing is not allowed to undo an answer already read.
+        await asyncio.shield(_close(client, response))
+    content = _decoded(bytes(body), response.headers.get("content-encoding"), label)
     try:
-        payload = httpx.Response(200, content=bytes(body)).json()
+        payload = httpx.Response(200, content=content).json()
     except ValueError:
         payload = None
     return response, payload if isinstance(payload, dict) else None
+
+
+def _decoded(body: bytes, encoding: str | None, label: str) -> bytes:
+    """An answer's body as sent before ``Content-Encoding``, which a server may apply though identity was asked for.
+
+    gzip and deflate are read, to the same size bound as the raw body. Any other encoding is a
+    failure, which leaves a refresh's old token in place rather than reading garbage as an answer.
+    """
+    encoding = (encoding or "identity").strip().lower()
+    if encoding in ("", "identity"):
+        return body
+    if encoding in ("gzip", "x-gzip"):
+        wbits_options = [16 + zlib.MAX_WBITS]
+    elif encoding == "deflate":
+        # RFC 9110 means zlib-wrapped; some servers send it raw.
+        wbits_options = [zlib.MAX_WBITS, -zlib.MAX_WBITS]
+    else:
+        raise McpOAuthDiscoveryError(f"The {label} answered in an encoding the gateway does not read")
+    for wbits in wbits_options:
+        inflater = zlib.decompressobj(wbits)
+        try:
+            content = inflater.decompress(body, _MAX_RESPONSE_BYTES + 1)
+        except zlib.error:
+            continue
+        if len(content) > _MAX_RESPONSE_BYTES or inflater.unconsumed_tail:
+            raise McpOAuthDiscoveryError(f"The {label} answered with more than the gateway reads")
+        return content
+    raise McpOAuthDiscoveryError(f"The {label} answered with a body that does not decode")
+
+
+async def _close(client: httpx.AsyncClient, response: httpx.Response | None) -> None:
+    if response is not None:
+        await response.aclose()
+    await client.aclose()
 
 
 # --------------------------------------------------------------------------- #
@@ -342,7 +407,7 @@ async def _discover(server_url: str) -> McpOAuthMetadata:
             raise McpOAuthDiscoveryError("The server publishes no OAuth metadata")
         if document.get("issuer") not in (origin, f"{origin}/"):
             raise McpOAuthDiscoveryError("The server's OAuth metadata names another origin as its issuer")
-        return await _metadata(document, scope=challenge_scope, resource=None)
+        return await _metadata(document, scope=challenge_scope, resource=None, issuer=_string(document, "issuer"))
 
     resource = _string(resource_document, "resource")
     if resource is not None and not _covers(resource, server_url):
@@ -362,18 +427,23 @@ async def _discover(server_url: str) -> McpOAuthMetadata:
         # RFC 8414 section 3.3: the metadata must name the issuer it was fetched for, as the fallback path requires.
         raise McpOAuthDiscoveryError("The authorization server's metadata does not name its own issuer")
     scope = challenge_scope or " ".join(_strings(resource_document, "scopes_supported")) or None
-    return await _metadata(document, scope=scope, resource=resource or server_url)
+    return await _metadata(document, scope=scope, resource=resource or server_url, issuer=issuer)
 
 
-async def _metadata(document: dict[str, Any], *, scope: str | None, resource: str | None) -> McpOAuthMetadata:
+async def _metadata(
+    document: dict[str, Any], *, scope: str | None, resource: str | None, issuer: str | None
+) -> McpOAuthMetadata:
     """Read an authorization server's metadata, checking every endpoint the gateway or a browser will be sent to."""
     authorization_endpoint = _string(document, "authorization_endpoint")
     token_endpoint = _string(document, "token_endpoint")
     if authorization_endpoint is None or token_endpoint is None:
         raise McpOAuthDiscoveryError("The authorization server's metadata lacks an endpoint")
-    challenge_methods = document.get("code_challenge_methods_supported")
-    if isinstance(challenge_methods, list) and "S256" not in challenge_methods:
-        raise McpOAuthDiscoveryError("The authorization server does not support S256 PKCE")
+    # The MCP authorization specification: a client refuses an authorization server that does not
+    # say it supports S256, including one that says nothing.
+    if "S256" not in _strings(document, "code_challenge_methods_supported"):
+        raise McpOAuthPkceUnsupportedError(
+            "The authorization server does not say it supports S256 PKCE, which signing in requires"
+        )
     registration_endpoint = _string(document, "registration_endpoint")
     revocation_endpoint = _string(document, "revocation_endpoint")
     await _checked(authorization_endpoint, "authorization endpoint")
@@ -390,6 +460,8 @@ async def _metadata(document: dict[str, Any], *, scope: str | None, resource: st
         scope=scope,
         resource=resource,
         token_auth_methods=tuple(_strings(document, "token_endpoint_auth_methods_supported")),
+        issuer=issuer,
+        sends_iss=document.get("authorization_response_iss_parameter_supported") is True,
     )
 
 
@@ -515,7 +587,13 @@ def _lifetime(value: object) -> int | None:
 
 
 async def _token_request(
-    token_endpoint: str, client: McpOAuthClient, form: dict[str, str], *, resource: str | None, action: str
+    token_endpoint: str,
+    client: McpOAuthClient,
+    form: dict[str, str],
+    *,
+    resource: str | None,
+    action: str,
+    deadline: float | None = None,
 ) -> McpOAuthTokens:
     if resource:
         form["resource"] = resource
@@ -528,7 +606,13 @@ async def _token_request(
             form["client_secret"] = client.client_secret
     try:
         response, payload = await _send(
-            "POST", token_endpoint, label="token endpoint", timeout=_TOKEN_TIMEOUT, data=form, auth=auth
+            "POST",
+            token_endpoint,
+            label="token endpoint",
+            timeout=_TOKEN_TIMEOUT,
+            data=form,
+            auth=auth,
+            deadline=deadline,
         )
     except McpOAuthDiscoveryError as exc:
         raise McpOAuthTokenError(str(exc)) from None
@@ -569,15 +653,22 @@ async def exchange_code(
 
 
 async def refresh(
-    token_endpoint: str, client: McpOAuthClient, *, refresh_token: str, resource: str | None
+    token_endpoint: str,
+    client: McpOAuthClient,
+    *,
+    refresh_token: str,
+    resource: str | None,
+    deadline: float | None = None,
 ) -> McpOAuthTokens:
     """Trade a refresh token for a new access token. The token sent is kept when the server issues no new one.
+
+    ``deadline`` bounds the exchange up to reading its answer, never after it (see ``_send``).
 
     Raises:
         McpOAuthTokenError: the token endpoint refused, or could not be reached; ``is_permanent`` says which.
     """
     form = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-    tokens = await _token_request(token_endpoint, client, form, resource=resource, action="refresh")
+    tokens = await _token_request(token_endpoint, client, form, resource=resource, action="refresh", deadline=deadline)
     if tokens.refresh_token is None:
         return McpOAuthTokens(
             access_token=tokens.access_token,

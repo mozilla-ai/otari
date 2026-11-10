@@ -49,6 +49,10 @@ then says to add an OAuth client ID.
    provider gave you one.
 4. Click **Save server**.
 
+A client ID and secret belong to one host. If you later change the server's
+**URL** to another host, saving clears them, and you enter the new host's
+client or leave it blank for Otari to register itself.
+
 ## Connect your account
 
 Anyone who can see the workspace can do this.
@@ -62,7 +66,7 @@ every API key you own in this workspace, and the Playground, use the server with
 your account.
 
 Connecting does not change who may use the server. Its
-[access list](control-access-to-an-mcp-server.md) still decides that: a key the
+[access list](configure-an-mcp-server.md#control-who-can-use-it) still decides that: a key the
 access list denies is told the server does not exist, whether or not you have
 connected.
 

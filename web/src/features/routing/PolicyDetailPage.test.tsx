@@ -8,6 +8,7 @@ import { API_ROOT } from "@/shared/api/client"
 import {
   adminContext,
   CHAIN,
+  EXPLAINED,
   mockApi,
   policy,
   policyWrites,
@@ -670,7 +671,11 @@ describe("PolicyDetailPage read-only", () => {
       await screen.findByText(/Set in config.yml, so it is read-only here/),
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull()
-    expect(screen.queryByRole("textbox")).toBeNull()
+    // The one field is the test's simulated budget, which writes nothing.
+    const test = await section("Test")
+    expect(screen.getAllByRole("textbox")).toEqual([
+      test.getByRole("textbox", { name: /Budget used/ }),
+    ])
     expect(
       screen.getByText(/From 80% of budget: gpt-5-nano · OpenAI/),
     ).toBeInTheDocument()
@@ -692,6 +697,100 @@ describe("PolicyDetailPage read-only", () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull()
     expect(screen.getByText(/"key_id": "k-1"/)).toBeInTheDocument()
+  })
+})
+
+describe("PolicyDetailPage test section", () => {
+  it("shows what the stored spec compiles to, and what it left out", async () => {
+    const { calls } = mockApi()
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(await test.findByText(/gpt-5-mini · OpenAI/)).toBeInTheDocument()
+    expect(test.getByText(/main model/)).toBeInTheDocument()
+    expect(
+      test.getByText(/is not in allowed_models for this caller/),
+    ).toBeInTheDocument()
+    const sent = calls.find((call) =>
+      call.url.endsWith(`${API_ROOT}/routing/policies/explain`),
+    )
+    expect(sent?.body).toMatchObject({ name: "fast", spec: CHAIN })
+    expect(policyWrites(calls)).toEqual([])
+  })
+
+  it("sends a config.yml policy by name and compiles again for a simulated budget", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi()
+    renderPolicy("auto")
+
+    const test = await section("Test")
+    await test.findByText(/gpt-5-mini · OpenAI/)
+    const explains = () =>
+      calls.filter((call) => call.url.endsWith("/routing/policies/explain"))
+    expect(explains()[0].body).not.toHaveProperty("spec")
+
+    const budget = test.getByRole("textbox", { name: /Budget used/ })
+    // Blank after trimming is no budget at all, so past the debounce nothing
+    // compiles again, rather than once more at 0%.
+    const before = explains().length
+    await user.type(budget, "  ")
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(explains()).toHaveLength(before)
+
+    // A budget that is not a number hides the plan rather than leaving the
+    // last one under the field as if it answered it.
+    await user.clear(budget)
+    await user.type(budget, "abc")
+    await waitFor(() =>
+      expect(test.queryByRole("list", { name: "Tried in order" })).toBeNull(),
+    )
+
+    await user.clear(budget)
+    await user.type(budget, "85")
+    // Until the new value compiles, the last plan is marked as not current.
+    expect(
+      test.getByRole("list", { name: "Tried in order" }).parentElement,
+    ).toHaveAttribute("aria-busy", "true")
+    await waitFor(() =>
+      expect(explains().at(-1)?.body).toMatchObject({
+        name: "auto",
+        budget_used_pct: 85,
+      }),
+    )
+  })
+
+  it("says so when no model is left", async () => {
+    mockApi(undefined, undefined, [], {
+      explain: { ...EXPLAINED, candidates: [], selection_reason: "none" },
+    })
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(
+      await test.findByText("No model can serve this policy."),
+    ).toBeInTheDocument()
+  })
+
+  it("asks the tenant surface, in the selected workspace", async () => {
+    const { calls } = mockApi([], undefined, [], {
+      context: adminContext(),
+      memberPolicies: [policy("tenant-fast", CHAIN)],
+    })
+    renderInWorkspace(
+      <PolicyDetailPage name="tenant-fast" />,
+      "/routing/tenant-fast",
+    )
+
+    await (await section("Test")).findByText(/gpt-5-mini · OpenAI/)
+    const sent = calls.find((call) =>
+      call.url.endsWith(
+        `${API_ROOT}/organizations/me/routing-policies/explain`,
+      ),
+    )
+    expect(sent?.body).toMatchObject({
+      name: "tenant-fast",
+      workspace_id: expect.any(String),
+    })
   })
 })
 

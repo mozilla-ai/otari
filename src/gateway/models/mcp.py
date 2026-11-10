@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from pydantic.json_schema import SkipJsonSchema
@@ -25,6 +26,9 @@ MAX_MCP_SERVER_IDS = 50
 # below the chance of a stored-server change going unnoticed for any other
 # reason, and stays well inside the 1-to-128-character wire format.
 REVISION_LENGTH = 32
+
+# Takes the token an MCP server refused, and returns the one to try instead.
+TokenRenewer = Callable[[str], Awaitable[str]]
 
 
 class McpServerConfig(BaseModel):
@@ -57,6 +61,8 @@ class McpServerConfig(BaseModel):
     # Admission's too: the workspace attached it and the request did not name it, so one that cannot be
     # reached is left out of the request rather than failing it.
     attached: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    # Admission's too, on a per-user stored server: a new token for the one the server refused.
+    renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):
@@ -88,6 +94,8 @@ class ResolvedMcpServer(BaseModel):
     read_tools: list[str] = Field(default_factory=list)
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
+    # On a per-user server: a new token for the one the server refused, for one retry. Not configuration.
+    renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
 
     @property
     def revision(self) -> str:

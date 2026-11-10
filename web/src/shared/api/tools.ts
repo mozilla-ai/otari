@@ -848,10 +848,19 @@ export function useStartMcpConnection() {
 export function useCompleteMcpConnection() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ state, code }: { state: string; code: string }) =>
+    mutationFn: ({
+      state,
+      code,
+      iss,
+    }: {
+      state: string
+      code: string
+      iss?: string
+    }) =>
       apiFetch<McpConnectionCompleted>("/mcp-connections/complete", {
         method: "POST",
-        body: JSON.stringify({ state, code }),
+        // `JSON.stringify` drops an absent `iss`.
+        body: JSON.stringify({ state, code, iss }),
       }),
     onSuccess: (done) => {
       void queryClient.invalidateQueries({

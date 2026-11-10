@@ -465,6 +465,18 @@
             ],
             "title": "Attribution User Id"
           },
+          "avatar_face": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preset avatar face this member picked, or null when they have picked none.",
+            "title": "Avatar Face"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3324,6 +3336,18 @@
       "CallerIdentityPublic": {
         "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\n``email`` and ``full_name`` are nullable for opposite reasons. A local\noperator identity has no address, because first boot provisions it with a\nname and nothing to sign in with but the master key; a member added by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
         "properties": {
+          "avatar_face": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The preset avatar face this identity picked, or null when it has picked none.",
+            "title": "Avatar Face"
+          },
           "claims_deployment": {
             "description": "Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.",
             "title": "Claims Deployment",
@@ -4907,7 +4931,9 @@
           "http_error",
           "not_mcp",
           "limits_exceeded",
-          "connection_failed"
+          "connection_failed",
+          "sign_in_unsupported",
+          "sign_in_unavailable"
         ],
         "title": "CheckFailure",
         "type": "string"
@@ -12736,6 +12762,19 @@
             "minLength": 1,
             "title": "Code",
             "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The redirect's iss, the authorization server's own name, if it sent one",
+            "title": "Iss"
           },
           "state": {
             "description": "The state from the redirect",
@@ -24368,6 +24407,33 @@
         "title": "UnitRate",
         "type": "object"
       },
+      "UpdateAvatarRequest": {
+        "description": "The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them.",
+        "example": {
+          "face": 1234
+        },
+        "properties": {
+          "face": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 203896.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The index of a preset face from the dashboard's avatar set, or null to go back to the face this identity's id gives it.",
+            "title": "Face"
+          }
+        },
+        "required": [
+          "face"
+        ],
+        "title": "UpdateAvatarRequest",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -31840,6 +31906,56 @@
         ]
       }
     },
+    "/api/v1/auth/profile/avatar": {
+      "put": {
+        "description": "Change the avatar the caller is drawn with, everywhere their organization lists them.\n\nAlways the caller's own identity, and the same answer as ``PATCH``, for the\nsame reason.",
+        "operationId": "auth-update_own_avatar",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAvatarRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerIdentityPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Own Avatar",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/resend-verification": {
       "post": {
         "description": "Mail a fresh verification link, or do nothing: the response never says which.",
@@ -33123,7 +33239,7 @@
             }
           },
           {
-            "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+            "description": "Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; a pasted selector, or part of one with a colon or slash, matches too. Provider instances are the `provider` filter's.",
             "in": "query",
             "name": "search",
             "required": false,
@@ -33137,7 +33253,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+              "description": "Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; a pasted selector, or part of one with a colon or slash, matches too. Provider instances are the `provider` filter's.",
               "title": "Search"
             }
           },
@@ -38369,7 +38485,7 @@
     },
     "/api/v1/mcp-connections/complete": {
       "post": {
-        "description": "Finish a sign-in to a per-user MCP server, from the code its authorization server returned.\n\nThe dashboard calls this from the page the callback lands on. The state\nis consumed whatever happens next, so it finishes one sign-in at most, and\nit must be one the caller started: another person's is refused with a 400.",
+        "description": "Finish a sign-in to a per-user MCP server, from the code its authorization server returned.\n\nThe dashboard calls this from the page the callback lands on. The state\nis consumed whatever happens next, so it finishes one sign-in at most, and\nit must be one the caller started: another person's is refused with a 400.\nSend the redirect's `iss` too when it had one: an answer naming another\nauthorization server is refused (RFC 9207).",
         "operationId": "mcp-connections-complete_mcp_connection",
         "requestBody": {
           "content": {
@@ -43420,6 +43536,56 @@
           }
         ],
         "summary": "Set Organization Routing Policy",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/routing-policies/explain": {
+      "post": {
+        "description": "Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.\n\nThe tenant reading of ``POST /api/v1/routing/policies/explain``: any member\nwho may see the workspace, which is who may already read its policies here.\n``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.\nEvery candidate, from a draft or a stored policy, is held to what the\norganization reaches, narrowed further by ``allowed_models`` when sent: one\noutside it is listed as dropped, so a draft cannot show where a model the\norganization lacks would resolve, and a stored policy whose target the\norganization lost still explains.",
+        "operationId": "routing-explain_organization_routing_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Explain Organization Routing Policy",
         "tags": [
           "routing"
         ]

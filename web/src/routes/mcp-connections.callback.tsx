@@ -21,6 +21,7 @@ export const Route = createFileRoute("/mcp-connections/callback")({
   ): McpConnectionCallbackSearch => ({
     state: text(search.state),
     code: text(search.code),
+    iss: text(search.iss),
     error: text(search.error),
     connected: text(search.connected),
     return_to: text(search.return_to),

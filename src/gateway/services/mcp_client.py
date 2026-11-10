@@ -27,10 +27,11 @@ import anyio.lowlevel
 import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ListToolsResult
 
-from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
+from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError, McpSignInRequiredError
 from gateway.log_config import logger
-from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, failure_class
+from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, closed_with, failure_class, refused_token
 from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
@@ -103,6 +104,9 @@ _ACCESS_NOTE_MAX_NAMES = 20
 # The note is system text, so a tool name enters it only if it cannot carry instructions; a server lists any string.
 _NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
+# The most of one tool result the model reads; a server can return any amount, and the rest would
+# crowd out the conversation or overflow the model's context window.
+MCP_RESULT_MAX_CHARS = 100_000
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
@@ -176,6 +180,8 @@ class MCPClientPool:
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
         self._spans = ToolSpans(trace, "mcp")
+        # Per-user servers that refused the user's token at connect time and whose sign-in is over.
+        self.signed_out: list[tuple[McpServerConfig, McpSignInRequiredError]] = []
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -248,22 +254,23 @@ class MCPClientPool:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
-                # An attached server gets a stack of its own, so one that cannot be reached is closed and left out.
-                stack = await self._stack.enter_async_context(AsyncExitStack()) if cfg.attached else self._stack
                 deadline = min(ATTACHED_CONNECT_DEADLINE_S, attached_by - loop.time()) if cfg.attached else None
                 try:
                     if deadline is not None and deadline <= 0:
                         raise TimeoutError
-                    server = await self._connect(cfg, stack, deadline)
+                    server = await self._connect(cfg, deadline)
                 except BaseException as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
+                    if isinstance(exc, McpSignInRequiredError):
+                        # The server refused the user's token and their sign-in turned out to be over:
+                        # the request goes on, and the model is told to offer a new sign-in.
+                        self.signed_out.append((cfg, exc))
+                        continue
                     if not cfg.attached or not isinstance(exc, Exception | asyncio.CancelledError):
                         raise
-                    # A transport whose own task failed cancels this task inside it. Closing the server's
-                    # stack ends that cancellation; one aimed at the request itself is passed on.
-                    with contextlib.suppress(Exception):
-                        await stack.aclose()
+                    # An attached server that cannot be reached is left out. A cancellation aimed at the
+                    # request itself is passed on; ``_connect`` has already closed the server's own stack.
                     if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
                         raise
                     logger.warning(
@@ -280,11 +287,41 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig, stack: AsyncExitStack, deadline: float | None) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, deadline: float | None = None) -> _ConnectedServer:
+        """Open one server's session; a per-user server that refuses its token with a 401 is tried once more.
+
+        The session is opened on a stack of its own, joined to the pool's once it is up, so an
+        attempt the server refused leaves nothing behind to close. ``deadline`` bounds how long
+        the server may take to answer its first two requests, in seconds.
+
+        Raises:
+            McpSignInRequiredError: the refused token's sign-in ended and the connection was removed.
+            McpConnectionUnavailableError: the refused token could not be renewed right now.
+        """
+        retried = False
+        while True:
+            stack = AsyncExitStack()
+            try:
+                session, listed = await self._open(stack, cfg, deadline)
+            except BaseException as exc:
+                failure = await closed_with(stack, exc)
+                if retried or cfg.renew_token is None or not refused_token(failure):
+                    raise failure from None
+                cfg = cfg.model_copy(
+                    update={"authorization_token": await cfg.renew_token(cfg.authorization_token or "")}
+                )
+                retried = True
+                continue
+            await self._stack.enter_async_context(stack)
+            return self._connected(cfg, session, listed)
+
+    async def _open(
+        self, stack: AsyncExitStack, cfg: McpServerConfig, deadline: float | None = None
+    ) -> tuple[ClientSession, ListToolsResult]:
+        """Connect, initialize and list one server's tools into ``stack``; a test stands in for the network here."""
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
-
         client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
         read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
         session = await stack.enter_async_context(ClientSession(read, write))
@@ -292,8 +329,9 @@ class MCPClientPool:
         # never answers is given up on quickly rather than holding each request for the read timeout.
         with anyio.fail_after(deadline) if deadline is not None else contextlib.nullcontext():
             await session.initialize()
-            listed = await session.list_tools()
+            return session, await session.list_tools()
 
+    def _connected(self, cfg: McpServerConfig, session: ClientSession, listed: ListToolsResult) -> _ConnectedServer:
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         not_granted: list[str] = []
@@ -459,7 +497,7 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        flattened = _result_text(result)
+        flattened = _bounded(_result_text(result))
         rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
@@ -473,11 +511,10 @@ class MCPClientPool:
         """Execute a tool call against its owning MCP server and flatten the result to text.
 
         MCP supports rich content blocks (image, embedded resource, structured data). This
-        flattener concatenates text blocks verbatim and renders non-text blocks as a brief
-        ``[type=…]`` placeholder so the model can at least see that *something* came back.
-        For tools that return images or large embedded resources, this is intentionally
-        lossy — fine for the current text-tool use case, but a future improvement is to
-        pass image content through as multimodal message blocks when the model supports it.
+        flattener concatenates text blocks and embedded text resources, renders other
+        blocks as a brief placeholder, and cuts the whole to :data:`MCP_RESULT_MAX_CHARS`.
+        Images are lossy; a future improvement is to pass them through as multimodal
+        message blocks when the model supports it.
 
         The call is recorded on the request's tally (see
         :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
@@ -571,3 +608,13 @@ def _render_content_block(block: Any) -> str:
 def _result_text(result: CallToolResult) -> str:
     """An MCP result as the text the model reads, without the error marker the loop adds."""
     return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)
+
+
+def _bounded(text: str) -> str:
+    """``text`` cut to :data:`MCP_RESULT_MAX_CHARS`, with a note saying how much the model is not shown."""
+    if len(text) <= MCP_RESULT_MAX_CHARS:
+        return text
+    return (
+        f"{text[:MCP_RESULT_MAX_CHARS]}\n[truncated: the tool returned {len(text)} characters; "
+        f"only the first {MCP_RESULT_MAX_CHARS} are shown]"
+    )

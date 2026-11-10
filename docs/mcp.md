@@ -226,25 +226,38 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   walks through it in the dashboard.
 - **What it needs.** `public_base_url`, because the redirect URI is derived
   from it, `OTARI_SECRET_KEY`, because the tokens are encrypted with it, and an
-  `https://` server URL. Every URL the server and its authorization server
-  publish passes the same SSRF check the server's own URL does.
+  `https://` server URL. The authorization server must say it supports S256
+  PKCE (`code_challenge_methods_supported`), as the MCP specification requires;
+  one that does not is refused. Every URL the server and its authorization
+  server publish passes the same SSRF check the server's own URL does.
 - **A connection belongs to one user on one server.** A server is a workspace's,
   so the same person signs in once per workspace, and one user's connection is
   never used for another's request.
 - **Tokens are renewed for you.** An access token close to its expiry is
   refreshed before the request uses it. When the authorization server ends the
-  grant, the connection is removed and the user is asked to sign in again. Otari
-  learns this only when it next renews: a grant revoked at the provider early,
-  or one whose token states no expiry, still shows as connected until a call
-  fails, and the user then reconnects from the server's page.
+  grant, the connection is removed and the user is asked to sign in again. A
+  token the MCP server refuses with a 401, such as one revoked at the provider
+  early or one that states no expiry, is renewed once and the call retried
+  once; with no refresh token, or a grant the provider ended, the connection is
+  removed and the caller is told `mcp_sign_in_required`.
 - **What ends a connection.** The user disconnecting, a manager removing it,
   deleting the server, deleting the user, the user leaving the workspace, and a
-  change to the server's URL, its OAuth client or its credential mode.
+  change to the server's URL, its OAuth client or its credential mode. Otari
+  asks the authorization server to revoke the tokens too, best effort and
+  after the removal has committed, everywhere except a user leaving the
+  workspace, whose removal belongs to another change Otari cannot wait on.
+- **Moving the server to another host drops its OAuth client.** A client ID
+  and secret a manager entered were issued for the old host, so a URL change
+  to another scheme or host clears them, unless the same change names a new
+  client. A change of path on the same host keeps them.
 - **The access list still comes first.** A key the ACL denies is told the
   server does not exist, whether or not its user has signed in.
 
 A per-user server's connection check runs with the connection of the person
-asking, so `health` stays `null` until a manager who has signed in checks it.
+asking. Until a manager who has signed in checks it, saving the server checks
+its sign-in setup instead: `health` reports `sign_in_unsupported` for an
+authorization server without S256 PKCE and `sign_in_unavailable` for metadata
+that could not be read, and stays `null` when the setup is usable.
 
 The routes, under `/api/v1/workspaces/{workspace_id}`, take a dashboard session
 or the master key:
@@ -262,8 +275,11 @@ only for the person who started it. The authorization server redirects the
 browser to `<public_base_url>/api/v1/mcp-connections/callback`, which passes
 `state` and `code` on to the dashboard and spends nothing. A client other than
 the dashboard finishes the sign-in by posting both, as JSON, to
-`POST /api/v1/mcp-connections/complete` as the same person. No route returns a
-token.
+`POST /api/v1/mcp-connections/complete` as the same person, with the
+redirect's `iss` when it had one. Since one redirect URI serves every server,
+the `iss` (RFC 9207) is what tells their answers apart: one naming another
+authorization server is refused, and so is a missing one from a server that
+says it always sends it. No route returns a token.
 
 #### Signing in from the conversation
 
@@ -338,7 +354,7 @@ skipped because a check once passed.
 
 Each stored server has an access list (ACL) that decides which keys reach it and
 which of its tools they may run. The dashboard steps are in
-[Control access to an MCP server](control-access-to-an-mcp-server.md).
+[Control who can use it](configure-an-mcp-server.md#control-who-can-use-it).
 
 An ACL has two parts:
 
@@ -455,6 +471,7 @@ one per key.
 
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request. [Combining tools](tools.md#combining-tools) describes how, including when a server tool named like a built-in is refused
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
+- The model reads at most 100,000 characters of each tool result. A longer result is cut there and ends with a note giving the full length, so the model knows it saw only part. The Messages `mcp_tool_result` activity block carries the same cut text. A text resource the tool embeds counts toward the limit as text; a binary one reaches the model only as its URI, type and size
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name:
   - two `mcp_servers` entries sharing a name: `400` naming it;
@@ -665,7 +682,7 @@ remote tool name, and final arguments to its authorization or approval record.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
-Each execution is recorded in the workspace's [agent traces](traces.md) as a
+Each execution is recorded in the workspace's [sessions](sessions.md) as a
 step with one tool span: the tool, its server, whether it ran, and which rule
 decided the call (the key's rule, its user's rule, the server's default policy,
 or the server's own tool list). A call the rules refuse is recorded too, as a

@@ -10,6 +10,8 @@ import { useCompleteMcpConnection } from "@/shared/api/tools"
 export interface McpConnectionCallbackSearch {
   state?: string
   code?: string
+  /** The authorization server's own name (RFC 9207), checked against the one the sign-in went to. */
+  iss?: string
   error?: string
   /** A server a sign-in started outside the dashboard has already connected. */
   connected?: string
@@ -46,7 +48,7 @@ export function McpConnectionCallbackPage({
   const complete = useCompleteMcpConnection()
   const { mutate } = complete
   const sent = useRef(false)
-  const { state, code, error, connected } = search
+  const { state, code, iss, error, connected } = search
   const returnTo = insideDashboard(search.return_to)
 
   useEffect(() => {
@@ -61,7 +63,7 @@ export function McpConnectionCallbackPage({
     if (error || !state || !code || sent.current) return
     sent.current = true
     mutate(
-      { state, code },
+      { state, code, iss },
       {
         onSuccess: (done) =>
           void navigate({
@@ -72,7 +74,7 @@ export function McpConnectionCallbackPage({
           }),
       },
     )
-  }, [connected, error, state, code, returnTo, mutate, navigate])
+  }, [connected, error, state, code, iss, returnTo, mutate, navigate])
 
   const refusal = error
     ? (REFUSALS[error] ??

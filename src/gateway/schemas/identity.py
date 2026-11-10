@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from gateway.models.identity import MAX_BLOCK_REASON_LENGTH, MAX_EMAIL_LENGTH, BlockedEmail, MailedLinkStatus
+from gateway.models.tenancy import AVATAR_FACE_COUNT
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
@@ -106,6 +107,23 @@ class BlockedEmailCreatedPublic(BlockedEmailPublic):
     )
 
 
+class UpdateAvatarRequest(BaseModel):
+    """The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them."""
+
+    model_config = {"json_schema_extra": {"example": {"face": 1234}}}
+
+    # Required, as ``UpdateProfileRequest.full_name`` is: a face, or null for none.
+    face: int | None = Field(
+        strict=True,
+        ge=0,
+        lt=AVATAR_FACE_COUNT,
+        description=(
+            "The index of a preset face from the dashboard's avatar set, or null to go back to "
+            "the face this identity's id gives it."
+        ),
+    )
+
+
 __all__ = [
     "BlockedEmailCreateRequest",
     "BlockedEmailCreatedPublic",
@@ -114,4 +132,5 @@ __all__ = [
     "MailedLinkRequest",
     "MailedLinkStatusResponse",
     "PasswordLinkPublic",
+    "UpdateAvatarRequest",
 ]

@@ -15,7 +15,9 @@ function litCells(id: number): Set<string> {
 
 describe("face", () => {
   it("holds enough faces that a team rarely shares one", () => {
-    // About 204,000: a team of 30 shares a face about 0.2% of the time.
+    // About 204,000: a team of 30 shares a face about 0.2% of the time. The
+    // gateway bounds a stored pick by the same number (`AVATAR_FACE_COUNT` in
+    // src/gateway/models/tenancy.py), so change both together.
     expect(FACE_COUNT).toBe(8 * 25_487)
   })
 

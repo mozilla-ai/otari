@@ -31,6 +31,16 @@ import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
 // Remove to clear it. That is why a save sends every other field and still
 // omits this one unless it changed.
 
+/** A URL's scheme and host, which an OAuth client is bound to; the whole text when it does not parse. */
+function hostOf(url: string): string {
+  try {
+    const parsed = new URL(url.trim())
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return url.trim()
+  }
+}
+
 /**
  * How otari reaches the server: name, URL, token and purpose hint, as a
  * summary with the form behind Edit. Enabling and deleting live in the page's
@@ -124,6 +134,11 @@ export function McpServerConnection({
   const willEndConnections =
     wasPerUser &&
     (!isPerUser || body.url !== server.url || clientIdField !== undefined)
+  // A client and its secret were issued for the old host, so the gateway drops them on a move.
+  const willDropClient =
+    server.oauth_client_id !== null &&
+    clientIdField === undefined &&
+    hostOf(body.url ?? server.url) !== hostOf(server.url)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // The gateway checks the server again when its URL or token changes.
@@ -258,6 +273,13 @@ export function McpServerConnection({
             <InfoBanner tone="warning">
               Saving this disconnects everyone who has connected their account.
               They connect again afterwards.
+            </InfoBanner>
+          ) : null}
+          {willDropClient ? (
+            <InfoBanner tone="warning">
+              This URL is on another host, so saving clears the OAuth client ID
+              and secret, which were for the old one. Enter the new host's
+              client, or leave it blank for Otari to register itself.
             </InfoBanner>
           ) : null}
           {!canManage ? (

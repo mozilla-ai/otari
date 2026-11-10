@@ -292,12 +292,15 @@ test("signup offering OAuth behind published terms", async ({ page }) => {
         open_signup: true,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })
   await page.goto("/#/signup")
   await expect(
-    page.getByRole("checkbox", { name: "I accept the terms of service" }),
+    page.getByRole("checkbox", {
+      name: "I accept the Terms of Service and the Privacy Policy",
+    }),
   ).toBeVisible()
   await captureScreenshot(page, "signup-oauth-terms")
 })
@@ -317,6 +320,7 @@ test("OAuth callback asking for the terms a new account needs", async ({
         ...bootstrap,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })

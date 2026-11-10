@@ -90,6 +90,39 @@ describe("WorkspaceMembersPage", () => {
     expect(await screen.findByText("Members of Alpha")).toBeInTheDocument()
   })
 
+  it("draws each member with the face they picked, matched by user id", async () => {
+    mockApi({
+      members: [
+        workspaceMember({ id: "m-1", user_id: USER }),
+        workspaceMember({ id: "m-2", user_id: SECOND_USER }),
+      ],
+      // The roster in the other order, so a lookup by position would swap them.
+      orgMembers: [
+        organizationMember({
+          organization_member_id: "o-2",
+          user_id: SECOND_USER,
+          full_name: "Blair Brook",
+          avatar_face: 7,
+        }),
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          avatar_face: 42,
+        }),
+      ],
+    })
+    await renderPage()
+
+    const faceOf = async (name: string) => {
+      const row = (await screen.findByText(name)).closest("li")
+      return Number(
+        row?.querySelector("[data-face]")?.getAttribute("data-face"),
+      )
+    }
+    expect(await faceOf("Alex Avery")).toBe(42)
+    expect(await faceOf("Blair Brook")).toBe(7)
+  })
+
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
     await renderPage()

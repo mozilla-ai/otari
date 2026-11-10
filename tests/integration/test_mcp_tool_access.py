@@ -817,10 +817,11 @@ def test_a_grant_sent_while_the_user_is_deleted_waits_and_is_refused(
     reached, release = threading.Event(), threading.Event()
     revoke = revoke_user_mcp_grants
 
-    async def paused_revoke(db: Any, user_id: str) -> None:
-        await revoke(db, user_id)
+    async def paused_revoke(db: Any, user_id: str) -> Any:
+        revoked = await revoke(db, user_id)
         reached.set()
         await anyio.to_thread.run_sync(release.wait)
+        return revoked
 
     monkeypatch.setattr("gateway.api.routes.users.revoke_user_mcp_grants", paused_revoke)
     answers: dict[str, Any] = {}

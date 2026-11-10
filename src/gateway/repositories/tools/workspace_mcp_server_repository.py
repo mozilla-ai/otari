@@ -29,6 +29,13 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             query = query.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(query)).scalar_one_or_none()
 
+    async def find_many(self, server_ids: Collection[uuid.UUID]) -> list[WorkspaceMcpServer]:
+        """The stored servers these ids name."""
+        if not server_ids:
+            return []
+        rows = await self.db.execute(select(WorkspaceMcpServer).where(WorkspaceMcpServer.id.in_(list(server_ids))))
+        return list(rows.scalars().all())
+
     async def ids_in_workspace(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
         """The ids of a workspace's stored servers."""
         return list(

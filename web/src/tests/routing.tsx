@@ -6,6 +6,7 @@ import { vi } from "vitest"
 import type {
   AutomaticFallback,
   CatalogModelSummary,
+  ExplainPolicyResponse,
   OrganizationContext,
   OrganizationMember,
   PolicySpec,
@@ -97,6 +98,30 @@ export const MEMBERS = [
   }),
 ]
 
+/** A plan with one candidate and one left out, what explain answers by default. */
+export const EXPLAINED: ExplainPolicyResponse = {
+  name: "fast",
+  selection_reason: "default",
+  is_dynamic: false,
+  candidates: [
+    {
+      position: 1,
+      instance: "openai",
+      model: "gpt-5-mini",
+      selection_reason: "default",
+      dispatch_model: "openai:gpt-5-mini",
+    },
+  ],
+  dropped: [
+    {
+      selector: "anthropic:claude-haiku-4-5",
+      reason: "not_allowed",
+      detail: "is not in allowed_models for this caller",
+    },
+  ],
+  guardrails: [],
+}
+
 export function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -143,6 +168,8 @@ export function mockApi(
     catalog?: CatalogModelSummary[]
     // What /api/v1/organizations/me/automatic-fallbacks answers.
     fallbacks?: AutomaticFallback[]
+    // What either surface's policy explain answers.
+    explain?: ExplainPolicyResponse
   } = {},
 ) {
   let list = [...policies]
@@ -160,6 +187,12 @@ export function mockApi(
         init?.body === undefined ? undefined : JSON.parse(String(init.body))
       calls.push({ url, method, body })
 
+      if (
+        url.endsWith(`${API_ROOT}/organizations/me/routing-policies/explain`) ||
+        url.endsWith(`${API_ROOT}/routing/policies/explain`)
+      ) {
+        return jsonResponse(opts.explain ?? EXPLAINED)
+      }
       if (url.includes(`${API_ROOT}/organizations/me/routing-policies`)) {
         if (method === "POST") {
           const row = policy(body.name, body.spec)
@@ -214,30 +247,6 @@ export function mockApi(
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         const members = opts.members ?? []
         return jsonResponse({ data: members, count: members.length })
-      }
-      if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
-        return jsonResponse({
-          name: "fast",
-          selection_reason: "default",
-          is_dynamic: false,
-          candidates: [
-            {
-              position: 1,
-              instance: "openai",
-              model: "gpt-5-mini",
-              selection_reason: "default",
-              dispatch_model: "openai:gpt-5-mini",
-            },
-          ],
-          dropped: [
-            {
-              selector: "anthropic:claude-haiku-4-5",
-              reason: "not_allowed",
-              detail: "is not in allowed_models for this caller",
-            },
-          ],
-          guardrails: [],
-        })
       }
       if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {
