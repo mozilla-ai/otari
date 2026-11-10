@@ -112,7 +112,6 @@ Compose profiles start the bundled service backends:
 ```bash
 docker compose --profile code-exec up -d
 docker compose --profile web-search up -d
-docker compose --profile guardrails up -d
 docker compose --profile object-storage up -d
 ```
 
