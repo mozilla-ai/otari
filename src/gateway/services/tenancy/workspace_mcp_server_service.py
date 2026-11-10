@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -707,32 +707,6 @@ class RequestMcpServers:
     sign_in: list[McpSignInNeeded] = dataclasses.field(default_factory=list)
 
 
-async def resolve_request_mcp_servers(
-    db: AsyncSession,
-    *,
-    workspace_id: uuid.UUID,
-    server_ids: list[uuid.UUID],
-    attach: bool,
-    access: McpAccess,
-    tokens: McpUserTokens | None = None,
-) -> RequestMcpServers:
-    """The stored servers a model request reaches: the ones it names, then with ``attach`` the attached ones.
-
-    A named server follows :func:`resolve_workspace_mcp_servers`, except that a per-user one the
-    request cannot open does not fail it: it comes back in ``sign_in``, with why. A server marked
-    ``attach_by_default`` that the request did not name is added as if it had been, after the named
-    ones, and is silently left out where the caller's access grants nothing on it, where the caller
-    has no user to sign in as, or where it is disabled.
-
-    Raises:
-        WorkspaceMcpServerNotFoundError: a named ID is unknown or grants the caller nothing.
-        SecretDecryptionError: a stored token will not decrypt.
-    """
-    return await _resolve_for_request(
-        db, workspace_id=workspace_id, server_ids=server_ids, attach=attach, access=access, tokens=tokens, defer=True
-    )
-
-
 async def _resolve_for_request(
     db: AsyncSession,
     *,
@@ -748,22 +722,7 @@ async def _resolve_for_request(
     tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
 
     named = list(dict.fromkeys(server_ids))
-    wanted = (
-        or_(WorkspaceMcpServer.id.in_(named), WorkspaceMcpServer.attach_by_default.is_(True))
-        if attach
-        else WorkspaceMcpServer.id.in_(named)
-    )
-    rows = (
-        (
-            await db.execute(
-                select(WorkspaceMcpServer)
-                .where(WorkspaceMcpServer.workspace_id == workspace_id, wanted)
-                .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = await WorkspaceMcpServerRepository(db).for_request(workspace_id, named, attached=attach)
     by_id = {row.id: row for row in rows}
 
     patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, row.read_tools) for row in rows}
@@ -1003,28 +962,31 @@ class WorkspaceMcpServers:
     async def resolve_for_request(
         self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
     ) -> RequestMcpServers:
-        """See :func:`resolve_request_mcp_servers`."""
-        return await resolve_request_mcp_servers(
+        """The stored servers a model request reaches: the ones it names, then with ``attach`` the attached ones.
+
+        A named server follows :func:`resolve_workspace_mcp_servers`, except that a per-user one the
+        request cannot open does not fail it: it comes back in ``sign_in``, with why. A server marked
+        ``attach_by_default`` that the request did not name is added as if it had been, after the named
+        ones, and is silently left out where the caller's access grants nothing on it, where the caller
+        has no user to sign in as, or where it is disabled.
+
+        Raises:
+            WorkspaceMcpServerNotFoundError: a named ID is unknown or grants the caller nothing.
+            SecretDecryptionError: a stored token will not decrypt.
+        """
+        return await _resolve_for_request(
             self._db,
             workspace_id=workspace_id,
             server_ids=server_ids,
             attach=attach,
             access=access,
             tokens=self._tokens,
+            defer=True,
         )
 
     async def any_attached(self, workspace_id: uuid.UUID) -> bool:
         """Whether the workspace has an enabled server marked ``attach_by_default``, in one indexed read."""
-        found = await self._db.execute(
-            select(WorkspaceMcpServer.id)
-            .where(
-                WorkspaceMcpServer.workspace_id == workspace_id,
-                WorkspaceMcpServer.attach_by_default.is_(True),
-                WorkspaceMcpServer.enabled.is_(True),
-            )
-            .limit(1)
-        )
-        return found.first() is not None
+        return await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id)
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -1796,7 +1758,6 @@ __all__ = [
     "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
     "list_reachable_mcp_servers",
-    "resolve_request_mcp_servers",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",
 ]

@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -54,3 +54,30 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             .scalars()
             .all()
         )
+
+    async def for_request(
+        self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID], *, attached: bool
+    ) -> list[WorkspaceMcpServer]:
+        """A workspace's servers with these ids, and with ``attached`` every one attached by default, oldest first."""
+        wanted: ColumnElement[bool] = WorkspaceMcpServer.id.in_(list(server_ids))
+        if attached:
+            wanted = or_(wanted, WorkspaceMcpServer.attach_by_default.is_(True))
+        query = (
+            select(WorkspaceMcpServer)
+            .where(WorkspaceMcpServer.workspace_id == workspace_id, wanted)
+            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+        )
+        return list((await self.db.execute(query)).scalars().all())
+
+    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+        """Whether a workspace has an enabled server attached by default."""
+        found = await self.db.execute(
+            select(WorkspaceMcpServer.id)
+            .where(
+                WorkspaceMcpServer.workspace_id == workspace_id,
+                WorkspaceMcpServer.attach_by_default.is_(True),
+                WorkspaceMcpServer.enabled.is_(True),
+            )
+            .limit(1)
+        )
+        return found.first() is not None
