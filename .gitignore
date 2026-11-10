@@ -28,7 +28,7 @@ otari-smoke.db
 *.db-shm
 *.db-wal
 # The generated secret key a SQLite deployment keeps beside its database file.
-*.db.secret-key
+*.secret-key
 
 .DS_Store
 
