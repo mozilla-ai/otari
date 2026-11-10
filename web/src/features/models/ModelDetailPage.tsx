@@ -49,6 +49,8 @@ import {
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { providerModelId } from "./modelKey"
 
 // One model, on a page of its own: the header with its facts, then every
@@ -384,6 +386,7 @@ export function ModelDetailView({
 }) {
   const organization = useOrganizationContext(!publicView)
   const { open_signup } = useDeployment()
+  const { recordEvent } = useTelemetry()
   // Not a pricing authority here: rates are set per model on Providers, which
   // answers to the organization role. It decides the two hints below that point
   // at deployment-wide pages.
@@ -408,6 +411,11 @@ export function ModelDetailView({
   }>({ column: "input", direction: "asc" })
 
   const model = selected.data
+  const recordUseModel = (id: string) =>
+    recordEvent(TELEMETRY_EVENTS.USE_MODEL_CLICKED, {
+      model: id,
+      signed_in: !publicView,
+    })
   // Only a failure with nothing to show replaces the page. A background
   // refetch that fails (every pricing, provider, alias and settings write
   // invalidates this key) keeps the rendered model and says so above it.
@@ -495,13 +503,22 @@ export function ModelDetailView({
               // model is reopened once the new session starts.
               <a
                 href={open_signup ? "#/signup" : "#/"}
-                onClick={() => rememberModel(model.id)}
+                onClick={() => {
+                  recordUseModel(model.id)
+                  rememberModel(model.id)
+                }}
                 className={buttonVariants({ variant: "primary" })}
               >
                 Use this model
               </a>
             ) : (
-              <Button variant="primary" onPress={() => setUseModel(true)}>
+              <Button
+                variant="primary"
+                onPress={() => {
+                  recordUseModel(model.id)
+                  setUseModel(true)
+                }}
+              >
                 Use this model
               </Button>
             )}

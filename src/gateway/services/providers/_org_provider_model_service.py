@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import BackgroundTasks
+
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
@@ -62,6 +64,7 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.schemas.providers import (
@@ -492,7 +495,14 @@ class OrgProviderModelService:
             await self.models.delete_row(row)
         await self.refresh_overlay()
 
-    async def add_provider_key(self, *, user: User, request: OrgProviderKeyCreateRequest) -> OrgProviderKeyPublic:
+    async def add_provider_key(
+        self,
+        *,
+        user: User,
+        request: OrgProviderKeyCreateRequest,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> OrgProviderKeyPublic:
         """Create a provider key and offer everything the credential reaches.
 
         One use case, so one method: a key starts with its real catalog rather
@@ -507,6 +517,9 @@ class OrgProviderModelService:
         endpoint, unreachable, credential refused) is already answered rather
         than raised, and a database failure is logged against the key and leaves
         an empty list the Refresh models button fills.
+
+        With ``growth``, the key is reported as ``PROVIDER_KEY_ADDED`` once both
+        steps are done.
         """
         key = await self.provider_keys.create_key_for_user(user=user, request=request)
         try:
@@ -517,6 +530,16 @@ class OrgProviderModelService:
             # authorization or not-found error on a key this call just created
             # would be a bug worth surfacing rather than swallowing.
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
+        # Last, so nothing an adapter does can stand between the durable key and its models.
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.PROVIDER_KEY_ADDED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=key.organization_id,
+                details={"provider": key.provider},
+            )
         return key
 
     async def refresh_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
