@@ -31,6 +31,9 @@ class NullBillingAdapter(BillingPort):
         # ever refused for want of funds.
         return None
 
+    async def has_funds_on_deposit(self, *, organization_id: uuid.UUID) -> bool:
+        return True
+
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         return None
 

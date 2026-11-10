@@ -33,10 +33,14 @@ class _Billing:
 
     async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
-        if self.fail:
-            raise RuntimeError("billing down")
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
+
+    async def has_funds_on_deposit(self, *, organization_id: uuid.UUID) -> bool:
+        self.calls.append(("has_funds_on_deposit", organization_id))
+        if self.fail:
+            raise RuntimeError("billing down")
+        return not self.refuse
 
     async def charge(self, **kwargs: Any) -> None:
         self.calls.append(("charge", kwargs))
@@ -220,10 +224,11 @@ def _funding(billing: _Billing, organization_id: uuid.UUID | None = ORGANIZATION
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_is_funded_by_the_gate_admission_applies() -> None:
+async def test_a_workspace_is_funded_on_the_read_alone() -> None:
     billing = _Billing()
     assert await _funding(billing).funded(WORKSPACE_ID)
-    assert billing.calls == [("apply_due_credit", ORGANIZATION_ID), ("require_funds_on_deposit", ORGANIZATION_ID)]
+    # Neither gate method: one grants credit and the other starts what a refusal starts.
+    assert billing.calls == [("has_funds_on_deposit", ORGANIZATION_ID)]
 
 
 @pytest.mark.asyncio

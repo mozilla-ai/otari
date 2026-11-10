@@ -97,6 +97,10 @@ class ProbeBilling:
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
 
+    async def has_funds_on_deposit(self, *, organization_id):
+        GATES.append(("has_funds_on_deposit", str(organization_id)))
+        return FUNDS["available"] > 0
+
     async def require_unheld_funds(self, *, organization_id):
         raise AssertionError("no holds on the completion path")
 
@@ -695,6 +699,8 @@ def test_tools_lists_a_search_on_the_deployments_account_as_unavailable_without_
     assert _tool_reasons(client, _auth(key))["otari_web_search"] == (False, "insufficient_funds")
     # A master key belongs to no organization the gate would read, so it gets the deployment's answer.
     assert _tool_reasons(client, MASTER)["otari_web_search"] == (True, None)
+    # Listing grants no credit and refuses nothing, so it starts none of what a refusal starts.
+    assert {gate for gate, _ in probe.GATES} == {"has_funds_on_deposit"}
 
 
 def test_tools_lists_a_search_on_the_organizations_key_as_available_without_funds(

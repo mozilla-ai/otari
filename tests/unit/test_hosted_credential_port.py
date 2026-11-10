@@ -804,6 +804,9 @@ class RecordingBilling:
         if self.refuse is not None:
             raise self.refuse
 
+    async def has_funds_on_deposit(self, *, organization_id: uuid.UUID) -> bool:
+        raise AssertionError("the completion path reads funds through its gate")
+
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         raise AssertionError("the completion path places no holds")
 

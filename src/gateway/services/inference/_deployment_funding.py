@@ -15,7 +15,7 @@ from typing import Any
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import BillingPort
 
 
 def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
@@ -161,7 +161,7 @@ class WorkspaceFunding:
     organization_for: Callable[[uuid.UUID], Awaitable[uuid.UUID | None]]
 
     async def funded(self, workspace_id: uuid.UUID) -> bool:
-        """Whether a deployment-paid request from the workspace would be admitted, granting any credit owed first.
+        """Whether a deployment-paid request from the workspace would be admitted, without the gate's side effects.
 
         A port that fails to answer is logged and reads as funded: this answers
         what to advertise, and the request's own gate still decides.
@@ -170,14 +170,11 @@ class WorkspaceFunding:
         if organization_id is None:
             return True
         try:
-            await self.billing.apply_due_credit(organization_id=organization_id)
-            await self.billing.require_funds_on_deposit(organization_id=organization_id)
-        except InsufficientFundsError:
-            return False
+            return await self.billing.has_funds_on_deposit(organization_id=organization_id)
         except Exception as exc:
             logger.error(
                 "BillingPort failed to read an organization's funds: organization=%s: %s",
                 organization_id,
                 describe_port_error(exc),
             )
-        return True
+            return True
