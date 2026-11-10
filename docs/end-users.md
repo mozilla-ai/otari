@@ -81,10 +81,10 @@ Otari-End-User-Budget: <memories budget id>
 A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
-End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/search` and
-`/v1/messages`. Other endpoints treat a service key as an ordinary key, so a
-`user` naming someone else there follows the key's
-[mismatched `user` field](api-keys.md#mismatched-user-fields) setting.
+End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`. Other endpoints treat a
+service key as an ordinary key, so a `user` naming someone else there follows
+the key's [mismatched `user` field](api-keys.md#mismatched-user-fields) setting.
 
 ## 4. Manage end users
 
