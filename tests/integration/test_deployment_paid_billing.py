@@ -416,17 +416,26 @@ def test_a_failover_canceled_while_waiting_for_a_slot_gives_its_reservation_back
     key = _key(client)
 
     waits: list[Any] = []
+    held: list[bool] = []
+    hold = pipeline._hold_organization_slot
 
     async def canceled(ctx: Any, charge: Any) -> None:
+        # The head (the gateway's own key) is admitted with nothing to charge; only the fleet fallback waits.
+        if charge is None:
+            await hold(ctx, charge)
+            return
         waits.append(charge)
+        held.append(ctx.reservation is not None)
         raise asyncio.CancelledError
 
     monkeypatch.setattr(pipeline, "_hold_organization_slot", canceled)
 
     with pytest.raises(BaseException):  # noqa: B017, PT011 - however the test client surfaces the cancellation
         _routed(client, key, "fleet_second", failing="anthropic:claude-opus-4")
+    # The head was tried and failed over: the fallback's wait is what was canceled.
 
     assert len(waits) == 1
+    assert held == [True]
     assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
