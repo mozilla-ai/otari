@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
@@ -132,18 +132,24 @@ function SetupFlow({
       workspace_id: workspaceId,
     })
   }, [isOffered, workspaceId, recordEvent])
+  // One showing is retired once, whichever way out lands first: a poll that
+  // finds the first request can arrive while a Skip is still in flight.
+  const retired = useRef(false)
+  const recordRetired = useCallback(
+    (reason: "skipped" | "left" | "activated") => {
+      if (retired.current) return
+      retired.current = true
+      recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
+        workspace_id: workspaceId,
+        reason,
+      })
+    },
+    [workspaceId, recordEvent],
+  )
   // A first request landing while the sheet was up retires it too.
-  const reportedActivation = useRef(false)
   useEffect(() => {
-    if (!isActivated || !wasOffered.current || reportedActivation.current) {
-      return
-    }
-    reportedActivation.current = true
-    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
-      workspace_id: workspaceId,
-      reason: "activated",
-    })
-  }, [isActivated, workspaceId, recordEvent])
+    if (isActivated && wasOffered.current) recordRetired("activated")
+  }, [isActivated, recordRetired])
 
   if (isFinished) return null
 
@@ -165,17 +171,16 @@ function SetupFlow({
 
   if (!isOffered) return null
 
-  const retire = (reason: "skipped" | "left") => {
-    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
-      workspace_id: workspaceId,
-      reason,
-    })
-    dismiss.mutate(workspaceId)
-  }
+  // Recorded once the server has retired the guide, so a Skip that fails and
+  // is pressed again is one dismissal rather than two.
+  const skip = () =>
+    dismiss.mutate(workspaceId, { onSuccess: () => recordRetired("skipped") })
 
+  // Recorded on the press: the sheet closes at once and the link navigates.
   const leave = () => {
     setIsClosed(true)
-    retire("left")
+    recordRetired("left")
+    dismiss.mutate(workspaceId)
   }
 
   const checkNow = async () => {
@@ -219,7 +224,7 @@ function SetupFlow({
       isSkipping={dismiss.isPending}
       onCreateKey={() => createKey.mutate(workspaceId)}
       onCheckNow={() => void checkNow()}
-      onSkip={() => retire("skipped")}
+      onSkip={skip}
       onLeave={leave}
     />
   )

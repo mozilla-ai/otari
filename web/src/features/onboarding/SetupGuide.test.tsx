@@ -702,18 +702,77 @@ describe("SetupGuide", () => {
       ])
     })
 
-    it("records Skip as a dismissal", async () => {
-      mockApi()
+    it("records Skip once the guide is retired, so a failed Skip and its retry are one dismissal", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let refusals = 1
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss") && refusals > 0) {
+          refusals -= 1
+          return Response.json({ detail: "try again" }, { status: 500 })
+        }
+        return answer(input, init)
+      })
       const user = userEvent.setup()
       await renderGuide()
 
       await user.click(await screen.findByRole("button", { name: "Skip" }))
+      await screen.findByText(/try again/)
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+      ])
+      await user.click(screen.getByRole("button", { name: "Skip" }))
+
+      await waitFor(() =>
+        expect(guideEvents()).toEqual([
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN,
+            { workspace_id: WORKSPACE },
+          ],
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+            { workspace_id: WORKSPACE, reason: "skipped" },
+          ],
+        ]),
+      )
+    })
+
+    it("records one dismissal for a showing the first request retires while Skip is in flight", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss")) await held
+        return answer(input, init)
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(await screen.findByRole("button", { name: "Skip" }))
+      fetchMock.setActivation(
+        workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      )
+      await user.click(screen.getByRole("button", { name: "Check now" }))
+      await screen.findByRole("heading", {
+        name: "Your first call went through",
+      })
+      await act(async () => {
+        release()
+        await held
+      })
 
       expect(guideEvents()).toEqual([
         [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
         [
           TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
-          { workspace_id: WORKSPACE, reason: "skipped" },
+          { workspace_id: WORKSPACE, reason: "activated" },
         ],
       ])
     })
