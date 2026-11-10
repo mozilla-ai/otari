@@ -1,14 +1,11 @@
 """The MCP server catalog: remote servers a workspace can add without hunting for a URL.
 
-The catalog is a copy of the official MCP Registry, kept only where Otari can
-connect: a streamable HTTP remote at a public https address. It grants nothing.
-A workspace's stored servers stay its allow list, and adding a catalog server
-goes through the same create a pasted URL does.
+Listing a server grants nothing. A workspace's stored servers stay its allow
+list, and a catalog server becomes one through the same create a pasted URL does.
 
-Three routers, because three rules apply. Any signed-in caller searches the
-catalog, which is public data. An organization's featured shelf is read by its
-members and changed by its owners and admins. The sync is the deployment's, so
-its router is operator-gated. Listed in ``CORE_FEATURES`` as ``FEATURE`` below.
+The sync is the deployment's and an organization's shelf is its own, so each
+has a router with its own gate rather than a route overriding one in place.
+Listed in ``CORE_FEATURES`` as ``FEATURE`` below.
 """
 
 import uuid
