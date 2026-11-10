@@ -290,7 +290,7 @@ async def test_the_claimed_address_is_recorded_on_the_link_only(async_db: AsyncS
 
     link = await async_db.get(OAuthIdentityLink, (oidc_identity_provider(SSO_ISSUER), "sso-subject"))
     assert link is not None
-    assert link.email_at_link == "ada@acme.example"
+    assert link.asserted_email == "ada@acme.example"
     assert signed_in.account.email is None
 
 

@@ -111,8 +111,8 @@ def _link(session: Session, *, provider: str, subject: str, user_id: uuid.UUID) 
         provider=provider,
         subject=subject,
         user_id=user_id,
-        email_at_link=None,
-        email_assertion_at_link=EmailAssertion.UNASSERTED,
+        asserted_email=None,
+        email_assertion=EmailAssertion.UNASSERTED,
     )
     session.add(link)
     session.commit()

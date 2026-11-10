@@ -158,8 +158,8 @@ async def _link_member(db: AsyncSession, member: User, connection: OIDCConnectio
             provider=oidc_identity_provider(connection.resolved_issuer),
             subject=f"subject-{member.id}",
             user_id=member.id,
-            email_at_link=member.email,
-            email_assertion_at_link=EmailAssertion.VERIFIED,
+            asserted_email=member.email,
+            email_assertion=EmailAssertion.VERIFIED,
         )
     )
     await db.flush()
@@ -1206,8 +1206,8 @@ async def test_a_link_at_a_provider_nobody_configured_is_not_a_route_in(async_db
             provider="google",
             subject="google-subject",
             user_id=owner.id,
-            email_at_link=owner.email,
-            email_assertion_at_link=EmailAssertion.VERIFIED,
+            asserted_email=owner.email,
+            email_assertion=EmailAssertion.VERIFIED,
         )
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
@@ -1242,8 +1242,8 @@ async def test_a_link_at_a_connection_nobody_can_use_is_not_a_route_in(async_db:
             provider=oidc_identity_provider(other_issuer),
             subject="other-subject",
             user_id=owner.id,
-            email_at_link=owner.email,
-            email_assertion_at_link=EmailAssertion.VERIFIED,
+            asserted_email=owner.email,
+            email_assertion=EmailAssertion.VERIFIED,
         )
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
@@ -1273,8 +1273,8 @@ async def test_a_link_at_a_connection_somebody_can_use_is_a_route_in(async_db: A
             provider=oidc_identity_provider(other_issuer),
             subject="other-subject",
             user_id=owner.id,
-            email_at_link=owner.email,
-            email_assertion_at_link=EmailAssertion.VERIFIED,
+            asserted_email=owner.email,
+            email_assertion=EmailAssertion.VERIFIED,
         )
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
@@ -1301,8 +1301,8 @@ async def test_a_link_at_a_configured_provider_is_a_route_in(async_db: AsyncSess
             provider="google",
             subject="google-subject",
             user_id=owner.id,
-            email_at_link=owner.email,
-            email_assertion_at_link=EmailAssertion.VERIFIED,
+            asserted_email=owner.email,
+            email_assertion=EmailAssertion.VERIFIED,
         )
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))

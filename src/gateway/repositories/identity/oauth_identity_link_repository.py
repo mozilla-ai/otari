@@ -63,21 +63,21 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
         Matched case-insensitively, as the identity table's own lookup is. ``domains`` are plain host names, so
         they hold no ``LIKE`` wildcard to escape.
         """
-        lowered = func.lower(OAuthIdentityLink.email_at_link)
+        lowered = func.lower(OAuthIdentityLink.asserted_email)
         conditions = [lowered.like(f"%@{domain.lower()}") for domain in domains]
         if include_subdomains:
             conditions.extend(lowered.like(f"%@%.{domain.lower()}") for domain in domains)
         if not conditions:
             return []
         result = await self.db.execute(
-            select(OAuthIdentityLink.user_id, OAuthIdentityLink.email_at_link).where(or_(*conditions))
+            select(OAuthIdentityLink.user_id, OAuthIdentityLink.asserted_email).where(or_(*conditions))
         )
         return [(user_id, email) for user_id, email in result.tuples().all() if email is not None]
 
     def record_asserted_address(self, link: OAuthIdentityLink, external: ProviderIdentity) -> None:
         """Stage what ``external``'s provider asserts about its address on this sign-in."""
-        link.email_at_link = external.email
-        link.email_assertion_at_link = external.email_verified
+        link.asserted_email = external.email
+        link.email_assertion = external.email_verified
         self.db.add(link)
 
     async def add(self, external: ProviderIdentity, *, user_id: uuid.UUID) -> OAuthIdentityLink:
@@ -91,8 +91,8 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
             provider=external.provider,
             subject=external.subject,
             user_id=user_id,
-            email_at_link=external.email,
-            email_assertion_at_link=external.email_verified,
+            asserted_email=external.email,
+            email_assertion=external.email_verified,
         )
         self.db.add(link)
         try:

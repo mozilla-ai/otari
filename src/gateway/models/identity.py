@@ -85,7 +85,7 @@ class OAuthIdentityLink(Base):
     The primary key is the provider's ``(provider, subject)`` pair, which names one person at that provider.
     An account holds at most one link per provider.
 
-    NOTE: ``email_at_link`` and ``email_assertion_at_link`` record what the provider last asserted, refreshed
+    NOTE: ``asserted_email`` and ``email_assertion`` record what the provider last asserted, refreshed
     on each sign-in. They must not resolve which account an identity signs in as, which is what
     ``(provider, subject)`` is for: a provider asserting somebody else's address must not reach their account.
     Finding the accounts an address reaches, so that blocking it ends their sessions, is a read they do serve.
@@ -98,8 +98,8 @@ class OAuthIdentityLink(Base):
     subject: Mapped[str] = mapped_column(String(MAX_SUBJECT_LENGTH), primary_key=True)
     # The unique constraint above leads with this column, so it also serves as the column's index.
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    email_at_link: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
-    email_assertion_at_link: Mapped[EmailAssertion] = mapped_column(
+    asserted_email: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
+    email_assertion: Mapped[EmailAssertion] = mapped_column(
         Enum(
             EmailAssertion,
             native_enum=False,
