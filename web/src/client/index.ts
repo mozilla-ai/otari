@@ -377,6 +377,8 @@ export type OrganizationSso = Schemas["OrganizationSsoPublic"]
 export type OidcConnection = Schemas["OIDCConnectionPublic"]
 export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
 export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+export type OidcConnectionEnabledRequest =
+  Schemas["OIDCConnectionEnabledRequest"]
 export type OrganizationSsoEnforcement =
   Schemas["OrganizationSsoEnforcementPublic"]
 export type OrganizationSsoEnforcementRequest =

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, status
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_config, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.schemas.identity import (
+    OIDCConnectionEnabledRequest,
     OIDCConnectionPublic,
     OIDCConnectionRequest,
     OrganizationSsoEnforcementPublic,
@@ -76,6 +77,25 @@ async def put_organization_sso(
     encrypted at rest and never served back.
     """
     connection = await connections.save_for_user(user=identity, request=request)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
+
+
+@router.patch("")
+async def patch_organization_sso(
+    request: OIDCConnectionEnabledRequest,
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OrganizationSsoPublic:
+    """Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.
+
+    Writes the one field, so the issuer is neither re-read nor re-submitted and the stored client
+    secret stands. Refused with 404 when the organization has not saved a connection yet, and with
+    409 when pausing a connection the organization still requires sign-in through: stop requiring
+    it first.
+    """
+    connection = await connections.set_enabled_for_user(user=identity, enabled=request.enabled)
     enforcement = await connections.get_enforcement_for_user(user=identity)
     return _settings(config, connection, enforcement)
 

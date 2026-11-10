@@ -21,6 +21,7 @@ import type {
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   OfferOrgProviderModelRequest,
+  OidcConnectionEnabledRequest,
   OidcConnectionRequest,
   Organization,
   OrganizationContext,
@@ -941,6 +942,20 @@ export function useSaveOrganizationSso() {
         body: JSON.stringify(body),
       }),
     onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
+  })
+}
+
+// Pausing a connection leaves who enforcement would affect alone: that report counts members by
+// the links they hold, which no change here moves.
+export function useSetOrganizationSsoEnabled() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OidcConnectionEnabledRequest) =>
+      apiFetch<OrganizationSso>("/organizations/me/sso", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
   })
 }
 

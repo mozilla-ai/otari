@@ -234,7 +234,6 @@ def _request(**overrides: Any) -> OIDCConnectionRequest:
         "client_secret": "s3cr3t-client-value",
         "display_name": "Example IdP",
         "default_role": "member",
-        "enabled": True,
     }
     fields.update(overrides)
     return OIDCConnectionRequest(**fields)
@@ -268,28 +267,21 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     assert stored.discovery_document == document
 
 
-async def test_save_refuses_disabling_a_connection_the_organization_requires(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The other half of the invariant: it must not be reachable by editing the connection instead."""
+async def test_a_save_cannot_pause_a_connection(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The submission carries no such field, so the stored setting survives every edit."""
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
-    organization_id = organization.id
-    await async_db.execute(
-        update(Organization)
-        .where(col(Organization.id) == organization_id)
-        .values(sso_required=True, sso_break_glass_waived=True)
-    )
-    await async_db.commit()
+    await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
 
-    with pytest.raises(OIDCConnectionDisabledError):
-        await _connection_service(async_db).save_for_user(user=admin, request=_request(enabled=False))
+    saved = await _connection_service(async_db).save_for_user(user=admin, request=_request(display_name="Renamed IdP"))
 
-    stored = await _stored(async_db, organization_id)
+    assert saved.enabled is False
+    assert saved.display_name == "Renamed IdP"
+    stored = await _stored(async_db, organization.id)
     assert stored is not None
-    assert stored.enabled is True
+    assert stored.enabled is False
 
 
 async def test_save_encrypts_the_client_secret_and_returns_only_last4(
@@ -396,7 +388,6 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
             client_secret="replacement-secret-9999",
             display_name="Renamed IdP",
             default_role="viewer",
-            enabled=False,
         ),
     )
 
@@ -411,7 +402,8 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
     assert stored.discovery_document == replacement_document
     assert stored.discovered_at == replacement_discovered_at
     assert stored.default_role == "viewer"
-    assert stored.enabled is False
+    # Not among the fields a save replaces, so it keeps the value the first store gave it.
+    assert stored.enabled is True
     assert decrypt_secret(stored.encrypted_client_secret) == "replacement-secret-9999"
 
 
@@ -561,6 +553,94 @@ async def test_a_first_save_that_loses_the_race_takes_over_the_row_that_won(
 
 
 # =============================================================================
+# Pausing and resuming
+# =============================================================================
+
+
+async def test_pausing_writes_the_one_field_and_reads_no_provider(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Why pausing is a write of its own: an unreachable provider is when it is most wanted."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    calls: list[str] = []
+    _stub_refused_discovery(monkeypatch, calls=calls)
+
+    paused = await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    assert paused.enabled is False
+    assert calls == []
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is False
+    assert stored.issuer == _ISSUER
+    assert stored.client_id == "a-client-id"
+    assert decrypt_secret(stored.encrypted_client_secret) == "s3cr3t-client-value"
+
+
+async def test_resuming_admits_sign_in_again(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    resumed = await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=True)
+
+    assert resumed.enabled is True
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_pausing_is_refused_while_the_organization_requires_the_connection(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization_id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    with pytest.raises(OIDCConnectionDisabledError):
+        await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_a_first_connection_admits_sign_in(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A connection is added to be signed in through, and nothing submitted says otherwise."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+
+    saved = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert saved.enabled is True
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_pausing_refuses_when_no_connection_is_configured(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+
+    with pytest.raises(OIDCConnectionNotFoundError):
+        await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+
+# =============================================================================
 # The authority gate
 # =============================================================================
 
@@ -569,6 +649,7 @@ _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object
     "delete_for_user": lambda service, user: service.delete_for_user(user=user),
     "get_for_user": lambda service, user: service.get_for_user(user=user),
     "save_for_user": lambda service, user: service.save_for_user(user=user, request=_request()),
+    "set_enabled_for_user": lambda service, user: service.set_enabled_for_user(user=user, enabled=False),
     "test_for_user": lambda service, user: service.test_for_user(user=user),
 }
 
@@ -578,7 +659,7 @@ _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object
 async def test_a_member_who_cannot_manage_the_organization_is_refused(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, role: str, method: str
 ) -> None:
-    """The organization's connection is neither served, re-discovered nor removed for such a caller."""
+    """No method on this unit acts for such a caller, and nothing stored changes."""
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)

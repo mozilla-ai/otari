@@ -148,7 +148,8 @@ class OIDCConnectionService:
 
         Discovery runs before any write, and only a successful discovery opens the transaction that
         stores it, so a refused issuer leaves an existing connection, its document, and its secret
-        exactly as they were.
+        exactly as they were. Whether the connection admits sign-in is not submitted here, so this
+        can neither pause nor resume one. A new connection is stored admitting sign-in.
 
         NOTE: Where the organization requires sign-in through this connection, storing it also
         revokes the live session of every active member the stored issuer leaves with no link.
@@ -174,13 +175,11 @@ class OIDCConnectionService:
             raise OIDCDiscoveryError
 
         async with self._uow:
-            # Serialized against the enforcement switch on the organization row. The two rules are
-            # read-then-write over each other's column: without this, one transaction can turn
-            # enforcement on while another disables the connection it would enforce, and both
-            # commit, leaving an organization that admits nobody.
+            # Serialized against the enforcement switch on the organization row. This write reads
+            # that switch and the issuer it is storing together, to sign out whoever enforcement
+            # now refuses. An enforcement change interleaved with it would answer that from a
+            # different pair.
             await self._organizations.organizations.lock_settings(organization.id)
-            if not request.enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
-                raise OIDCConnectionDisabledError
             connection = await self._connections.get_for_organization(organization.id)
             secret = _secret_to_store(request, connection)
             if connection is None:
@@ -194,6 +193,34 @@ class OIDCConnectionService:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.for_organization(organization.id)
             await self._revoke_blocked_sessions(organization, connection)
+            return self._to_public(connection, domains)
+
+    async def set_enabled_for_user(self, *, user: User, enabled: bool) -> OIDCConnectionPublic:
+        """Pause or resume sign-in through the caller's organization's connection. Owners and admins only.
+
+        Needs no credential and reaches no provider, so a connection can be paused while its
+        provider is unreachable, which is when an administrator is most likely to want to. The
+        only way to change the setting, which is what keeps storing a connection from moving it.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionDisabledError: The organization requires sign-in through this connection,
+                which pausing it would leave admitting nobody.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            # Serialized with the enforcement switch, which must not be turned on while this is
+            # turning sign-in off.
+            await self._organizations.organizations.lock_settings(organization.id)
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                raise OIDCConnectionNotFoundError
+            if not enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
+                raise OIDCConnectionDisabledError
+            connection.enabled = enabled
+            self._connections.stage(connection)
+            domains = await self._domains.for_organization(organization.id)
             return self._to_public(connection, domains)
 
     async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
@@ -243,10 +270,10 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
 
         async with self._uow:
-            # The third path deciding on the enforcement switch and the connection together, so it
-            # serializes on the same row as the other two. Without it, a delete that read the switch
-            # off and an enable that still saw the connection both commit, and the organization then
-            # requires a connection that does not exist.
+            # Every path deciding on the enforcement switch and the connection together serializes
+            # on this row. Without it, a delete that read the switch off and an enable that still
+            # saw the connection both commit, and the organization then requires a connection that
+            # does not exist.
             await self._organizations.organizations.lock_settings(organization.id)
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
@@ -706,7 +733,6 @@ class OIDCConnectionService:
                 discovery_document=discovered.document,
                 discovered_at=discovered.discovered_at,
                 default_role=request.default_role,
-                enabled=request.enabled,
             )
         except OIDCConnectionConflictError:
             winner = await self._connections.get_for_organization(organization_id)
@@ -733,7 +759,6 @@ class OIDCConnectionService:
         connection.discovery_document = discovered.document
         connection.discovered_at = discovered.discovered_at
         connection.default_role = request.default_role
-        connection.enabled = request.enabled
         self._connections.stage(connection)
 
     @staticmethod
