@@ -218,6 +218,7 @@ from gateway.services.tools import (
     DirectToolUsage,
     McpConnectionService,
     McpGrantMembershipListener,
+    McpUserTokens,
     SearchToolService,
     ToolRateInForce,
     WebSearchKeyService,
@@ -1358,7 +1359,7 @@ def get_identity_provider_port(
 
 async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
     """Build the request path's reader of a workspace's MCP servers, on the request's session."""
-    return WorkspaceMcpServers(db)
+    return WorkspaceMcpServers(db, McpUserTokens(McpUserConnectionRepository(db), release=lambda: release_session(db)))
 
 
 async def get_model_provider_port(

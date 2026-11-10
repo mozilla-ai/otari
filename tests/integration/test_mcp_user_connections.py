@@ -66,6 +66,7 @@ from gateway.services.tools import (
     McpConnectionService,
     McpGrantMembershipListener,
     McpUserTokens,
+    _mcp_connections,
     _mcp_oauth,
     stored_oauth_client,
 )
@@ -282,11 +283,19 @@ async def _connection(db: AsyncSession, server_id: uuid.UUID, user_id: str) -> M
     ).scalar_one_or_none()
 
 
-async def _expire(db: AsyncSession, server_id: uuid.UUID, *, ago: timedelta = timedelta(minutes=1)) -> None:
+async def _expire(
+    db: AsyncSession,
+    server_id: uuid.UUID,
+    *,
+    ago: timedelta = timedelta(minutes=1),
+    issued_ago: timedelta = timedelta(hours=1),
+) -> None:
+    """Move a connection's token to an hour-long one that expired ``ago`` (or, negative, expires that far ahead)."""
+    now = datetime.now(UTC)
     await db.execute(
         update(McpUserConnection)
         .where(McpUserConnection.server_id == server_id)
-        .values(expires_at=datetime.now(UTC) - ago)
+        .values(expires_at=now - ago, updated_at=now - issued_ago)
     )
     await db.commit()
 
@@ -468,6 +477,106 @@ async def test_a_server_that_registers_no_client_asks_for_a_client_id(
             user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
         )
     assert (await async_db.execute(select(McpOAuthFlow))).first() is None
+
+
+async def test_a_registered_client_that_expired_or_is_refused_is_registered_again(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    assert wire.registrations == [CALLBACK]
+
+    # Its secret's stated expiry has passed.
+    row = await _row(async_db, world.server.id)
+    row.oauth_client = {**(row.oauth_client or {}), "secret_expires_at": 1}
+    await async_db.commit()
+    await _sign_in(async_db, config, world, world.owner)
+    assert len(wire.registrations) == 2
+
+    # The authorization server no longer knows it.
+    async def refuse(*args: object, **kwargs: object) -> McpOAuthTokens:
+        raise McpOAuthTokenError("refused", status_code=401, error_code="invalid_client")
+
+    started = await service.start_connection(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+    )
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(_mcp_oauth, "exchange_code", refuse)
+        with pytest.raises(McpConnectionUpstreamError):
+            await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="c")
+    assert (await _row(async_db, world.server.id)).oauth_client is None
+    await _sign_in(async_db, config, world, world.owner)
+    assert len(wire.registrations) == 3
+
+
+async def test_a_managers_own_client_is_kept_when_the_authorization_server_refuses_it(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client")
+    service = _service(async_db, config)
+
+    async def refuse(*args: object, **kwargs: object) -> McpOAuthTokens:
+        raise McpOAuthTokenError("refused", status_code=401, error_code="invalid_client")
+
+    monkeypatch.setattr(_mcp_oauth, "exchange_code", refuse)
+    started = await service.start_connection(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+    )
+    with pytest.raises(McpConnectionUpstreamError):
+        await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="c")
+
+    client = stored_oauth_client(await _row(async_db, world.server.id))
+    assert client is not None and client.client_id == "my-client"
+
+
+async def test_a_sign_in_is_not_stored_against_a_server_edited_while_it_was_in_flight(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manager moves the server to another URL while a member's sign-in is discovering or exchanging."""
+    world = await _world(async_db, config, oauth_client_id="my-client")
+    service = _service(async_db, config)
+    engine = create_async_engine(_to_async_url(postgres_url))
+
+    async def edit_meanwhile(url: str) -> None:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as other:
+            await _service(other, config).update_server(
+                user=world.owner,
+                workspace_id=world.workspace.id,
+                server_id=world.server.id,
+                request=WorkspaceMcpServerUpdate(url=url),
+            )
+
+    async def discover_then_edit(server_url: str) -> McpOAuthMetadata:
+        await edit_meanwhile(OTHER_PUBLIC_URL)
+        return wire.metadata
+
+    async def exchange_then_edit(*args: object, **kwargs: object) -> McpOAuthTokens:
+        await edit_meanwhile(PUBLIC_URL)
+        return wire.issue
+
+    try:
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(_mcp_oauth, "discover", discover_then_edit)
+            with pytest.raises(McpConnectionFlowError, match="changed"):
+                await service.start_connection(
+                    user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+                )
+        assert (await async_db.execute(select(McpOAuthFlow))).first() is None
+        # The refusal rolled this session back, which expires what it had loaded.
+        for loaded in (world.owner, world.member, world.workspace):
+            await async_db.refresh(loaded)
+
+        started = await service.start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+        monkeypatch.setattr(_mcp_oauth, "exchange_code", exchange_then_edit)
+        with pytest.raises(McpConnectionFlowError, match="changed"):
+            await service.complete_connection(user=world.member, state=_state(started.authorization_url), code="code")
+    finally:
+        await engine.dispose()
+
+    assert (await async_db.execute(select(McpUserConnection))).first() is None
 
 
 async def test_a_state_finishes_one_sign_in_only(async_db: AsyncSession, config: GatewayConfig, wire: _Wire) -> None:
@@ -707,6 +816,75 @@ async def test_an_expiring_token_is_renewed_and_the_rotated_refresh_token_kept(
     assert after.revision == before.revision, "a renewal is not a change to the server's configuration"
 
 
+async def test_a_short_lived_token_is_not_renewed_on_every_request(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A five-minute token is inside a fixed five-minute margin from the moment it is issued."""
+    world = await _world(async_db, config)
+    wire.issue = McpOAuthTokens(access_token="short", refresh_token="refresh-1", expires_in=300)
+    await _sign_in(async_db, config, world, world.member)
+    user_id = str(world.member.id)
+    row = await _row(async_db, world.server.id)
+
+    assert await tokens.token_for(row, user_id) == "short"
+    assert await tokens.token_for(row, user_id) == "short"
+    assert wire.refreshes == []
+
+    # In its last quarter it is renewed.
+    await _expire(async_db, world.server.id, ago=timedelta(seconds=-60), issued_ago=timedelta(seconds=240))
+    assert await tokens.token_for(row, user_id) == "renewed-1"
+
+
+async def test_a_request_hands_its_connection_back_before_waiting_on_a_renewal(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    user_id = str(world.member.id)
+    row = await _row(async_db, world.server.id)
+    order: list[str] = []
+
+    async def release() -> None:
+        order.append("released")
+        await async_db.commit()
+
+    async def refresh(*args: object, **kwargs: object) -> McpOAuthTokens:
+        order.append("refreshed")
+        assert not async_db.in_transaction(), "the request's connection is back in the pool"
+        return McpOAuthTokens(access_token="renewed", refresh_token="rotated", expires_in=3600)
+
+    wire.refresh = refresh  # type: ignore[method-assign]
+    releasing = McpUserTokens(McpUserConnectionRepository(async_db), unit_of_work=tokens._unit_of_work, release=release)
+
+    assert await releasing.token_for(row, user_id) == "access-1"
+    assert order == [], "a token that needs no renewal costs the request nothing"
+
+    await _expire(async_db, world.server.id)
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(_mcp_oauth, "refresh", refresh)
+        assert await releasing.token_for(row, user_id) == "renewed"
+    assert order == ["released", "refreshed"]
+
+
+async def test_a_renewal_that_hangs_is_given_up_on(
+    async_db: AsyncSession,
+    config: GatewayConfig,
+    wire: _Wire,
+    tokens: McpUserTokens,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    wire.refresh_gate = asyncio.Event()
+    monkeypatch.setattr(_mcp_connections, "RENEWAL_DEADLINE_SECONDS", 0.05)
+
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.token_for(await _row(async_db, world.server.id), str(world.member.id))
+
+    assert await _connection(async_db, world.server.id, str(world.member.id)) is not None
+
+
 async def test_concurrent_requests_spend_a_refresh_token_once(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens, postgres_url: str
 ) -> None:
@@ -833,6 +1011,11 @@ async def test_a_manager_sees_who_is_connected_and_removes_one(
         (str(world.member.id), "Member"),
         ("service-user", None),
     ]
+    assert listed.count == 2
+    page = await service.server_connections(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, skip=1, limit=1
+    )
+    assert ([entry.user_id for entry in page.data], page.count) == (["service-user"], 2)
 
     await service.remove_connection(
         user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, user_id=str(world.member.id)

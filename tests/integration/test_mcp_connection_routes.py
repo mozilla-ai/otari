@@ -202,7 +202,7 @@ def test_a_manager_removes_another_users_connection(
 
     assert [(entry["user_id"], entry["email"]) for entry in listed.json()["data"]] == [("alice", None)]
     assert removed.status_code == 204, removed.text
-    assert client.get(connections, headers=master_key_header).json() == {"data": []}
+    assert client.get(connections, headers=master_key_header).json() == {"data": [], "count": 0}
     assert client.delete(f"{connections}/alice", headers=master_key_header).status_code == 404
     assert client.get(connections, headers=_bearer(user_key)).status_code in (401, 403)
 

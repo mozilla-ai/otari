@@ -187,7 +187,7 @@ or the master key:
 | `POST /mcp-connections/{server_id}` | Starts your sign-in and returns `authorization_url`. Takes an optional `return_to`, a dashboard path to land on afterwards | Any member who can see the workspace |
 | `GET /mcp-connections` | Lists your own connections in the workspace | Any member who can see the workspace |
 | `DELETE /mcp-connections/{server_id}` | Ends your connection, and asks the authorization server to revoke its tokens | Any member who can see the workspace |
-| `GET /mcp-servers/{server_id}/connections` | Lists who is connected | Workspace or organization owners and admins |
+| `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count` | Workspace or organization owners and admins |
 | `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
 
 A sign-in is single-use, expires after ten minutes, and finishes only in the

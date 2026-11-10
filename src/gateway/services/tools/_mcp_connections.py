@@ -19,7 +19,7 @@ import hashlib
 import secrets
 import uuid
 import weakref
-from collections.abc import Callable, Collection
+from collections.abc import Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -65,6 +65,8 @@ FLOW_LIFETIME = timedelta(minutes=10)
 # that may run for minutes, so the margin covers the request as well as the clock.
 EXPIRY_SKEW = timedelta(minutes=5)
 # The gateway's own path the authorization server sends the browser back to, under the API root.
+# How long one renewal may hold a connection's row while it waits on the authorization server.
+RENEWAL_DEADLINE_SECONDS = 20.0
 CALLBACK_PATH = "/mcp-connections/callback"
 # The dashboard route that finishes a sign-in a dashboard session started.
 DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
@@ -84,6 +86,15 @@ class StoredMcpOAuthClient(BaseModel):
     auth_method: str | None = None
     dynamic: bool = False
     redirect_uri: str | None = None
+    # When a registered client's secret stops working, as an epoch second; None when it does not expire.
+    secret_expires_at: int | None = None
+
+    def serves(self, redirect_uri: str, now: datetime) -> bool:
+        """Whether a sign-in can go through this client: a manager's always, a registered one while it holds."""
+        if not self.dynamic:
+            return True
+        expired = self.secret_expires_at is not None and self.secret_expires_at <= now.timestamp()
+        return self.redirect_uri == redirect_uri and not expired
 
 
 def stored_oauth_client(server: WorkspaceMcpServer) -> StoredMcpOAuthClient | None:
@@ -149,8 +160,16 @@ def _expiry(tokens: McpOAuthTokens, now: datetime) -> datetime | None:
     return now + timedelta(seconds=tokens.expires_in) if tokens.expires_in is not None else None
 
 
-def _needs_refresh(expires_at: datetime | None, now: datetime) -> bool:
-    return expires_at is not None and expires_at <= now + EXPIRY_SKEW
+def _needs_refresh(connection: McpUserConnection, now: datetime) -> bool:
+    """Whether a connection's token is close enough to its expiry to renew before use.
+
+    The margin is ``EXPIRY_SKEW``, and never more than a quarter of the token's own lifetime, so
+    a token issued for five minutes is not renewed on every request.
+    """
+    if connection.expires_at is None:
+        return False
+    lifetime = max(connection.expires_at - connection.updated_at, timedelta(0))
+    return connection.expires_at <= now + min(EXPIRY_SKEW, lifetime / 4)
 
 
 def _is_expired(expires_at: datetime | None, now: datetime) -> bool:
@@ -280,6 +299,12 @@ class McpConnectionService:
         state, verifier = secrets.token_urlsafe(32), _mcp_oauth.new_code_verifier()
         now = datetime.now(UTC)
         async with self._uow:
+            # Discovery took seconds. The row is locked and read again, so a sign-in found for the
+            # server as it was cannot be stored against the server as a manager has since made it.
+            server = await self._per_user_server(server_id, lock=True)
+            current = stored_oauth_client(server)
+            if server.url != url or current is None or current.client_id != client.client_id:
+                raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
             await self._flows.purge_expired(now)
             await self._flows.add(
                 state_hash=_state_hash(state),
@@ -319,7 +344,7 @@ class McpConnectionService:
         redirect_uri: str,
     ) -> McpOAuthClient:
         """The client this sign-in presents: the server's stored one, or one registered now and stored."""
-        if stored is not None and (not stored.dynamic or stored.redirect_uri == redirect_uri):
+        if stored is not None and stored.serves(redirect_uri, datetime.now(UTC)):
             secret = decrypt_secret(stored.encrypted_secret) if stored.encrypted_secret else None
             return McpOAuthClient(
                 client_id=stored.client_id,
@@ -336,7 +361,7 @@ class McpConnectionService:
             if server.url != url:
                 raise McpConnectionUpstreamError("The server's URL changed during the sign-in; start it again")
             current = stored_oauth_client(server)
-            if current is not None and (not current.dynamic or current.redirect_uri == redirect_uri):
+            if current is not None and current.serves(redirect_uri, datetime.now(UTC)):
                 secret = decrypt_secret(current.encrypted_secret) if current.encrypted_secret else None
                 return McpOAuthClient(
                     client_id=current.client_id,
@@ -349,6 +374,7 @@ class McpConnectionService:
                 auth_method=registered.auth_method,
                 dynamic=True,
                 redirect_uri=redirect_uri,
+                secret_expires_at=registered.secret_expires_at,
             ).model_dump()
         logger.info("MCP OAuth client registered server_id=%s", server_id)
         return registered
@@ -412,6 +438,8 @@ class McpConnectionService:
         )
         if server is None or client is None:
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
+        # Copied now: the row is read again below into this same object.
+        url_before = server.url
         try:
             tokens = await _mcp_oauth.exchange_code(
                 pending.token_endpoint,
@@ -422,8 +450,22 @@ class McpConnectionService:
                 resource=pending.resource,
             )
         except McpOAuthTokenError as exc:
+            if exc.error_code == "invalid_client" or exc.status_code == 401:
+                await self._forget_registered_client(pending.server_id, pending.client_id)
             raise McpConnectionUpstreamError(f"Could not finish the sign-in: {exc}") from None
         async with self._uow:
+            # The exchange took seconds. Tokens issued for the server as it was are not stored
+            # against the server as a manager has since made it.
+            current = await self._servers.find(pending.server_id, lock=True)
+            client_now = stored_oauth_client(current) if current is not None else None
+            if (
+                current is None
+                or current.url != url_before
+                or current.credential_mode != McpCredentialMode.PER_USER
+                or client_now is None
+                or client_now.client_id != pending.client_id
+            ):
+                raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
             await self._connections.put(
                 pending.server_id,
                 pending.user_id,
@@ -442,15 +484,17 @@ class McpConnectionService:
             server_id=server.id, workspace_id=server.workspace_id, server_name=server.name, return_to=pending.return_to
         )
 
-    async def of_user(self, user_id: str, server_ids: Collection[uuid.UUID]) -> list[McpUserConnection]:
-        """A user's connections to these servers, oldest first."""
-        async with self._uow:
-            return await self._connections.for_user(user_id, server_ids)
+    async def _forget_registered_client(self, server_id: uuid.UUID, client_id: str) -> None:
+        """Drop a client Otari registered that its authorization server no longer accepts.
 
-    async def of_server(self, server_id: uuid.UUID) -> list[McpUserConnection]:
-        """Every user's connection to a server, oldest first."""
+        The next sign-in registers a new one. A manager's own client is theirs to fix and is kept.
+        """
         async with self._uow:
-            return await self._connections.for_server(server_id)
+            server = await self._servers.find(server_id, lock=True)
+            stored = stored_oauth_client(server) if server is not None else None
+            if server is not None and stored is not None and stored.dynamic and stored.client_id == client_id:
+                server.oauth_client = None
+                logger.info("MCP OAuth client dropped server_id=%s reason=refused", server_id)
 
     async def disconnect(self, *, server_id: uuid.UUID, user_id: str) -> None:
         """End a user's connection to a server: drop its tokens, and ask the authorization server to end them.
@@ -500,9 +544,10 @@ _refresh_locks: weakref.WeakValueDictionary[tuple[uuid.UUID, str], asyncio.Lock]
 class McpUserTokens:
     """Reads the token a user's calls to a per-user MCP server carry, renewing it when it is about to expire.
 
-    The read runs on the session it was built on and commits nothing. A renewal runs in a Unit of
-    Work of its own, so the request's transaction is neither committed nor held across the call to
-    the authorization server.
+    The read runs on the session it was built on. A renewal runs in a Unit of Work of its own,
+    which holds the row's lock across the call to the authorization server. ``release`` hands the
+    caller's own pooled connection back first, so a request waiting on a renewal holds none: with
+    it, a burst of requests for one user costs the pool one connection, not one each plus one.
     """
 
     def __init__(
@@ -510,9 +555,11 @@ class McpUserTokens:
         connections: McpUserConnectionRepository,
         *,
         unit_of_work: Callable[[], AbstractAsyncContextManager[UnitOfWork]] = create_unit_of_work,
+        release: Callable[[], Awaitable[object]] | None = None,
     ) -> None:
         self._connections = connections
         self._unit_of_work = unit_of_work
+        self._release = release
 
     async def connected(self, user_id: str | None, server_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
         """Which of these servers a user has signed in to; none for a caller with no user."""
@@ -533,7 +580,7 @@ class McpUserTokens:
         if connection is None:
             raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
         now = datetime.now(UTC)
-        if not _needs_refresh(connection.expires_at, now):
+        if not _needs_refresh(connection, now):
             return decrypt_secret(connection.encrypted_access_token)
         stale, expired = connection.encrypted_access_token, _is_expired(connection.expires_at, now)
         try:
@@ -561,6 +608,8 @@ class McpUserTokens:
         used as it is. A compare-and-swap would not do, because the loser would already have sent
         the spent refresh token.
         """
+        if self._release is not None:
+            await self._release()
         key = (server.id, user_id)
         lock = _refresh_locks.get(key)
         if lock is None:
@@ -571,7 +620,7 @@ class McpUserTokens:
             if connection is None:
                 return _Refreshed(sign_in_required=True)
             now = datetime.now(UTC)
-            if connection.encrypted_access_token != stale and not _needs_refresh(connection.expires_at, now):
+            if connection.encrypted_access_token != stale and not _needs_refresh(connection, now):
                 return _Refreshed(token=decrypt_secret(connection.encrypted_access_token))
             client = _client_for(server, client_id=connection.client_id, auth_method=connection.client_auth_method)
             if connection.encrypted_refresh_token is None or client is None:
@@ -582,12 +631,17 @@ class McpUserTokens:
                 logger.info("MCP connection ended server_id=%s user_id=%s reason=not_renewable", server.id, user_id)
                 return _Refreshed(sign_in_required=True)
             try:
-                tokens = await _mcp_oauth.refresh(
-                    connection.token_endpoint,
-                    client,
-                    refresh_token=decrypt_secret(connection.encrypted_refresh_token),
-                    resource=connection.resource,
-                )
+                # A deadline on the whole call: its timeouts are per read, and the row stays locked meanwhile.
+                async with asyncio.timeout(RENEWAL_DEADLINE_SECONDS):
+                    tokens = await _mcp_oauth.refresh(
+                        connection.token_endpoint,
+                        client,
+                        refresh_token=decrypt_secret(connection.encrypted_refresh_token),
+                        resource=connection.resource,
+                    )
+            except TimeoutError:
+                logger.warning("MCP token renewal timed out server_id=%s", server.id)
+                return _Refreshed()
             except McpOAuthTokenError as exc:
                 if not exc.is_permanent:
                     logger.warning(

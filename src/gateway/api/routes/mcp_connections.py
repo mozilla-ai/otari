@@ -118,13 +118,18 @@ async def list_mcp_server_connections(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     server_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> McpServerConnectionsPublic:
     """List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
 
     Each entry names the user the connection belongs to and, when that user
-    is a dashboard account, its email and name. Tokens are never included.
+    is a dashboard account, its email and name, oldest connection first.
+    `count` is the total. Tokens are never included.
     """
-    return await service.server_connections(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+    return await service.server_connections(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, skip=skip, limit=limit
+    )
 
 
 @router.delete("/mcp-servers/{server_id}/connections/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

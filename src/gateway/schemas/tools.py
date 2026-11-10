@@ -879,3 +879,4 @@ class McpServerConnectionPublic(pydantic.BaseModel):
 
 class McpServerConnectionsPublic(pydantic.BaseModel):
     data: list[McpServerConnectionPublic]
+    count: int = pydantic.Field(description="How many users are connected in all")

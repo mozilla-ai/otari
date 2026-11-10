@@ -215,7 +215,9 @@ async def test_discovery_falls_back_to_the_well_known_urls_and_the_published_sco
     wire.on(
         "GET",
         f"{ISSUER}/.well-known/openid-configuration/tenant",
-        httpx.Response(200, json=_as_document(registration_endpoint=None, revocation_endpoint=None)),
+        httpx.Response(
+            200, json=_as_document(issuer=f"{ISSUER}/tenant", registration_endpoint=None, revocation_endpoint=None)
+        ),
     )
 
     metadata = await _mcp_oauth.discover(SERVER_URL)
@@ -291,6 +293,29 @@ async def test_a_plain_http_endpoint_is_refused(wire: _Wire) -> None:
     _publish(wire, server=_as_document(token_endpoint="http://93.184.216.35/token"))
 
     with pytest.raises(McpOAuthDiscoveryError, match="safety check"):
+        await _mcp_oauth.discover(SERVER_URL)
+
+
+async def test_metadata_naming_another_issuer_is_refused(wire: _Wire) -> None:
+    _publish(wire, server=_as_document(issuer="https://93.184.216.99"))
+
+    with pytest.raises(McpOAuthDiscoveryError, match="another issuer"):
+        await _mcp_oauth.discover(SERVER_URL)
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [
+        {"resource": SERVER_URL, "authorization_servers": ["https://[bad"]},
+        {"resource": "https://[bad", "authorization_servers": [ISSUER]},
+    ],
+)
+async def test_a_url_no_parser_accepts_is_a_discovery_failure_and_not_a_crash(
+    wire: _Wire, resource: dict[str, Any]
+) -> None:
+    _publish(wire, resource=resource)
+
+    with pytest.raises(McpOAuthDiscoveryError):
         await _mcp_oauth.discover(SERVER_URL)
 
 
@@ -408,6 +433,45 @@ async def test_a_code_is_exchanged_with_its_verifier_and_resource(wire: _Wire) -
         "client_id": "c1",
         "client_secret": "s1",
     }
+
+
+@pytest.mark.parametrize(
+    ("stated", "kept"),
+    [
+        ("Infinity", None),
+        ("1e400", None),
+        ("99999999999999", 2**32),
+        ("-5", None),
+        ("0", None),
+        ('"120"', 120),
+        ("true", None),
+    ],
+)
+async def test_a_lifetime_no_clock_can_hold_does_not_crash(wire: _Wire, stated: str, kept: int | None) -> None:
+    body = f'{{"access_token": "at", "expires_in": {stated}}}'.encode()
+    wire.on("POST", f"{ISSUER}/token", httpx.Response(200, content=body))
+
+    tokens = await _mcp_oauth.refresh(
+        f"{ISSUER}/token", McpOAuthClient(client_id="c1"), refresh_token="rt", resource=None
+    )
+
+    assert tokens.expires_in == kept
+
+
+async def test_registration_keeps_when_the_client_secret_expires(wire: _Wire) -> None:
+    wire.on(
+        "POST",
+        f"{ISSUER}/register",
+        httpx.Response(201, json={"client_id": "c1", "client_secret": "s1", "client_secret_expires_at": 1900000000}),
+    )
+    assert (await _mcp_oauth.register_client(f"{ISSUER}/register", "https://o/cb")).secret_expires_at == 1900000000
+
+    wire.on(
+        "POST",
+        f"{ISSUER}/register",
+        httpx.Response(201, json={"client_id": "c1", "client_secret": "s1", "client_secret_expires_at": 0}),
+    )
+    assert (await _mcp_oauth.register_client(f"{ISSUER}/register", "https://o/cb")).secret_expires_at is None
 
 
 async def test_a_basic_client_sends_its_secret_in_the_header_and_a_public_one_sends_none(wire: _Wire) -> None:

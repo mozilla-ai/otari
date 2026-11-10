@@ -7695,7 +7695,8 @@ export interface paths {
          * @description List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
          *
          *     Each entry names the user the connection belongs to and, when that user
-         *     is a dashboard account, its email and name. Tokens are never included.
+         *     is a dashboard account, its email and name, oldest connection first.
+         *     `count` is the total. Tokens are never included.
          */
         get: operations["mcp-connections-list_mcp_server_connections"];
         put?: never;
@@ -14307,6 +14308,11 @@ export interface components {
         };
         /** McpServerConnectionsPublic */
         McpServerConnectionsPublic: {
+            /**
+             * Count
+             * @description How many users are connected in all
+             */
+            count: number;
             /** Data */
             data: components["schemas"]["McpServerConnectionPublic"][];
         };
@@ -34731,7 +34737,12 @@ export interface operations {
     };
     "mcp-connections-list_mcp_server_connections": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;

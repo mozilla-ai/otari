@@ -573,24 +573,39 @@ def _connect(url: str, token: str | None, *, server_id: uuid.UUID | None = None)
     )
 
 
-async def _check(server: WorkspaceMcpServer, tokens: McpUserTokens, user_id: str) -> ServerCheck:
-    """Run the connection check on a stored row, settling its URL and token first.
+class _NoCredential:
+    """Stands for a server's token that could not be read, where a token or ``None`` would go."""
 
-    The same order the request path takes: a token that will not decrypt and a
-    URL that is no longer safe each stop the check before anything is sent.
-    A per-user server has no token of its own, so it is checked with the
-    connection of ``user_id``, the person asking.
+
+_UNREADABLE = _NoCredential()
+
+
+async def _check_credential(
+    server: WorkspaceMcpServer, tokens: McpUserTokens, user_id: str
+) -> str | None | _NoCredential:
+    """The token a connection check sends: the workspace's, or on a per-user server the asker's own.
 
     Raises:
-        McpCapacityUnavailable: no check slot was free, so nothing was checked.
         McpSignInRequiredError: the server is per-user and the person asking has not signed in to it.
     """
     try:
         if server.credential_mode == McpCredentialMode.PER_USER:
-            token: str | None = await tokens.token_for(server, user_id)
-        else:
-            token = _stored_token(server)
+            return await tokens.token_for(server, user_id)
+        return _stored_token(server)
     except (SecretDecryptionError, SecretBoxUnavailableError, McpConnectionUnavailableError):
+        return _UNREADABLE
+
+
+async def _check(server: WorkspaceMcpServer, token: str | None | _NoCredential) -> ServerCheck:
+    """Run the connection check on a stored row with the token settled for it, checking its URL first.
+
+    The same order the request path takes: a token that will not decrypt and a
+    URL that is no longer safe each stop the check before anything is sent.
+
+    Raises:
+        McpCapacityUnavailable: no check slot was free, so nothing was checked.
+    """
+    if isinstance(token, _NoCredential):
         return ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
     try:
         await validate_mcp_url(server.url, has_authorization_token=token is not None)
@@ -966,17 +981,21 @@ class WorkspaceMcpServerService:
         longer holds is dropped: that edit cleared health and runs its own.
         """
         checked = (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode)
-        await self.db.commit()
+        # Read before the transaction ends, so nothing reopens it across the remote check.
         try:
-            check = await _check(server, self._tokens, str(user.id))
-        except McpCapacityUnavailable:
-            logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
-            return False
+            token = await _check_credential(server, self._tokens, str(user.id))
         except McpSignInRequiredError:
+            await self.db.commit()
             if required:
                 raise
             await self.db.refresh(server)
             return True
+        await self.db.commit()
+        try:
+            check = await _check(server, token)
+        except McpCapacityUnavailable:
+            logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
+            return False
         await self.db.refresh(server, with_for_update=True)
         if (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode) != checked:
             await self.db.commit()
@@ -1161,10 +1180,6 @@ class WorkspaceMcpServerService:
             )
             if store_client:
                 server.oauth_client = client
-        # The users' tokens were issued for the server and the client as they were.
-        if was_per_user and (mode_changed or url_changed or another_client):
-            await self._end_connections(server)
-
         for field, value in fields.items():
             setattr(server, field, value)
         if connection_changed:
@@ -1180,6 +1195,11 @@ class WorkspaceMcpServerService:
         except IntegrityError:
             await self.db.rollback()
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, attempted_name) from None
+
+        # The users' tokens were issued for the server and the client as they were. After the flush,
+        # which holds the row: a sign-in in flight then either sees this edit or is removed here.
+        if was_per_user and (mode_changed or url_changed or another_client):
+            await self._end_connections(server)
 
         await self.db.commit()
         if connection_changed:
@@ -1566,15 +1586,17 @@ class WorkspaceMcpServerService:
         await self._connection_service().disconnect(server_id=server.id, user_id=str(user.id))
 
     async def server_connections(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, skip: int = 0, limit: int = 100
     ) -> McpServerConnectionsPublic:
-        """Who is connected to a server, oldest first. Workspace managers only.
+        """A page of who is connected to a server, oldest first, plus the total. Workspace managers only.
 
         A connection's user is named by the dashboard account it belongs to, when it is one's.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
-        rows = await McpUserConnectionRepository(self.db).for_server(server.id)
+        connections = McpUserConnectionRepository(self.db)
+        count = await connections.count_for_server(server.id)
+        rows = await connections.for_server(server.id, skip=skip, limit=min(limit, _MAX_LIST_LIMIT))
         identity_ids: dict[str, uuid.UUID] = {}
         for row in rows:
             try:
@@ -1596,7 +1618,7 @@ class WorkspaceMcpServerService:
                     updated_at=row.updated_at,
                 )
             )
-        return McpServerConnectionsPublic(data=data)
+        return McpServerConnectionsPublic(data=data, count=count)
 
     async def remove_connection(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, user_id: str

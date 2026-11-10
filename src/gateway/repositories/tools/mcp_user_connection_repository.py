@@ -9,7 +9,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,14 +61,21 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return list(rows.scalars().all())
 
-    async def for_server(self, server_id: uuid.UUID) -> list[McpUserConnection]:
-        """A server's connections, oldest first."""
+    async def for_server(self, server_id: uuid.UUID, *, skip: int, limit: int) -> list[McpUserConnection]:
+        """A page of a server's connections, oldest first."""
         rows = await self.db.execute(
             select(McpUserConnection)
             .where(McpUserConnection.server_id == server_id)
             .order_by(McpUserConnection.created_at, McpUserConnection.id)
+            .offset(skip)
+            .limit(limit)
         )
         return list(rows.scalars().all())
+
+    async def count_for_server(self, server_id: uuid.UUID) -> int:
+        """How many users are connected to a server."""
+        counted = select(func.count()).select_from(McpUserConnection).where(McpUserConnection.server_id == server_id)
+        return (await self.db.execute(counted)).scalar_one()
 
     async def put(
         self,

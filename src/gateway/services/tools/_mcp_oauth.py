@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import math
 import re
 import secrets
 from dataclasses import dataclass
@@ -34,6 +35,8 @@ _DISCOVERY_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _TOKEN_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _CLIENT_NAME = "Otari"
+# Above any real lifetime and any real epoch second this century, below what a datetime overflows on.
+_MAX_SECONDS = 2**32
 
 AUTH_METHOD_NONE = "none"
 AUTH_METHOD_POST = "client_secret_post"
@@ -99,6 +102,8 @@ class McpOAuthClient:
     client_id: str
     client_secret: str | None = None
     auth_method: str = AUTH_METHOD_NONE
+    # When a registered client's secret stops working, as an epoch second; None when it does not expire.
+    secret_expires_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +292,19 @@ def _strings(document: dict[str, Any], field: str) -> list[str]:
 
 
 async def discover(server_url: str) -> McpOAuthMetadata:
+    """Find where users of an MCP server sign in. See :func:`_discover`.
+
+    Raises:
+        McpOAuthDiscoveryError: nothing usable was found, or a URL in it failed its safety check.
+    """
+    try:
+        return await _discover(server_url)
+    except ValueError:
+        # A URL in the server's metadata that no parser accepts, such as a broken IPv6 host.
+        raise McpOAuthDiscoveryError("The server's OAuth metadata holds a URL that is not valid") from None
+
+
+async def _discover(server_url: str) -> McpOAuthMetadata:
     """Find where users of an MCP server sign in.
 
     The server's own 401 challenge is asked for first, then its protected-resource metadata at the
@@ -333,6 +351,10 @@ async def discover(server_url: str) -> McpOAuthMetadata:
             break
     if document is None:
         raise McpOAuthDiscoveryError("The authorization server's metadata could not be read")
+    issuer = _string(document, "issuer")
+    if issuer is not None and issuer.rstrip("/") != servers[0].rstrip("/"):
+        # RFC 8414 section 3.3: metadata that names another issuer describes another server.
+        raise McpOAuthDiscoveryError("The authorization server's metadata names another issuer")
     scope = challenge_scope or " ".join(_strings(resource_document, "scopes_supported")) or None
     return await _metadata(document, scope=scope, resource=resource or server_url)
 
@@ -414,7 +436,14 @@ async def register_client(registration_endpoint: str, redirect_uri: str) -> McpO
                 method = AUTH_METHOD_NONE
             elif method not in (AUTH_METHOD_POST, AUTH_METHOD_BASIC):
                 method = AUTH_METHOD_POST
-            return McpOAuthClient(client_id=client_id, client_secret=secret, auth_method=method)
+            expires = (payload or {}).get("client_secret_expires_at")
+            return McpOAuthClient(
+                client_id=client_id,
+                client_secret=secret,
+                auth_method=method,
+                # RFC 7591 section 3.2.1: an epoch second, where zero means the secret does not expire.
+                secret_expires_at=_lifetime(expires) if secret is not None else None,
+            )
         logger.info("MCP OAuth client registration refused status=%s method=%s", response.status_code, auth_method)
         if response.status_code != 400 or _error_code(payload) == "invalid_redirect_uri":
             break
@@ -468,12 +497,13 @@ def _error_code(payload: dict[str, Any] | None) -> str | None:
 
 
 def _lifetime(value: object) -> int | None:
-    """A usable ``expires_in``; None when the server stated none, which RFC 6749 section 5.1 allows."""
+    """A usable count of seconds, as ``expires_in`` is; None when the server stated none or nothing usable."""
     if isinstance(value, str) and value.strip().isdigit():
         value = int(value)
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
         return None
-    return int(value)
+    # A number no clock can hold is read as the largest one that is kept.
+    return int(min(value, _MAX_SECONDS))
 
 
 async def _token_request(
