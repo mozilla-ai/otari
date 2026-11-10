@@ -31,6 +31,7 @@ from any_llm.types.completion import (
     ChunkChoice,
     CompletionTokensDetails,
     PromptTokensDetails,
+    ServerToolUsage,
 )
 
 from gateway.core.env import otari_env
@@ -38,6 +39,7 @@ from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.log_config import logger
@@ -359,6 +361,7 @@ class _ChatTotals:
     cache_write_5m: int = 0
     cache_write_1h: int = 0
     reasoning: int = 0
+    web_searches: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -374,6 +377,7 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
     acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
     acc.cache_write_1h += cache_write_1h_tokens_of(usage)
     acc.reasoning += reasoning_tokens_of(usage)
+    acc.web_searches += provider_web_searches_of(usage)
 
 
 def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatTotals) -> None:
@@ -403,6 +407,8 @@ def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatT
         reasoning = usage.completion_tokens_details = CompletionTokensDetails()
     if reasoning is not None:
         reasoning.reasoning_tokens = totals.reasoning
+    if totals.web_searches:
+        usage.server_tool_use = ServerToolUsage(web_search_requests=totals.web_searches)
 
 
 # The field a tool activity chunk carries. The Chat wire has no vocabulary for a
