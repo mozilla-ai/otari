@@ -161,6 +161,8 @@ def _fake_mcp_pool(backends: _Backends) -> Callable[..., Any]:
     class _Pool:
         """The MCP pool's surface, recording on the request's tally as the real one does."""
 
+        signed_out: tuple[()] = ()
+
         def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
             self._tally = tally
 
