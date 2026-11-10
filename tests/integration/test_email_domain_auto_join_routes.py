@@ -1,6 +1,6 @@
 """Auto-join over the sign-in routes themselves, not the service beneath them.
 
-`test_organization_domains.py` calls ``auto_join_for_user`` directly, which
+`test_organization_domains.py` calls ``DomainAutoJoinListener.join`` directly, which
 proves the rule and nothing about the wiring: delete any one of the three call
 sites and that suite stays green while the feature dies on that route. These
 tests sign in over HTTP instead, once per credential, so a missing call is a
@@ -30,6 +30,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
 from gateway.repositories.identity import DashboardSessionRepository
 from gateway.services.tenancy import organization_domain_service as domain_service
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
 
@@ -161,12 +162,18 @@ def _memberships(client: TestClient) -> list[dict[str, Any]]:
 
 
 def _assert_joined(client: TestClient, signed_in: Any, *, beta: str, home: str) -> None:
-    """Assert the sign-in is what produced the membership in ``beta``.
+    """Assert the sign-in is what produced the membership in ``beta``, and a workspace to work in.
 
     ``home`` is asserted to be a different organization, so a regression that
     put Ada into the claiming organization by some other route (the fixture
     leaving the operator switched into it, say) fails here rather than passing
     vacuously.
+
+    The workspace is read last, because reaching it means switching Ada into the
+    claiming organization: ``GET /workspaces`` answers for the caller's active
+    organization, and for a plain member it lists only the workspaces they belong
+    to, which is what makes it an assertion about membership. Switching after the
+    pointer assertion leaves that assertion reading the sign-in's own answer.
     """
     assert beta != home
     assert signed_in.status_code == 200, signed_in.text
@@ -175,6 +182,13 @@ def _assert_joined(client: TestClient, signed_in: Any, *, beta: str, home: str) 
     # The pointer is untouched: auto-join adds a membership, it does not decide
     # where the caller lands.
     assert signed_in.json()["active_organization_id"] == home
+
+    switched = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": beta})
+    assert switched.status_code == 200, switched.text
+    workspaces = client.get(f"{API_ROOT}/workspaces")
+    assert workspaces.status_code == 200, workspaces.text
+    granted = [row["name"] for row in workspaces.json()["data"]]
+    assert granted == [DEFAULT_WORKSPACE_NAME], f"the admission granted no workspace; saw {granted}"
 
 
 def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
