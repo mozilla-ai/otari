@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.services.mcp_catalog._registry import RegistryClient
@@ -38,5 +39,8 @@ async def run_mcp_catalog_sync_worker(
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.warning("MCP catalog sync failed; retrying in %ss", interval, exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning("MCP catalog sync could not reach the database (%s); retrying", describe_database_error(exc))
+        except Exception as exc:
+            # The type alone: a traceback through a database call would carry the statement's parameters.
+            logger.warning("MCP catalog sync failed (%s); retrying in %ss", type(exc).__name__, interval)

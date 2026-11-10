@@ -25962,6 +25962,13 @@ export interface operations {
                     "application/json": components["schemas"]["McpCatalogSyncStatus"];
                 };
             };
+            /** @description The sync is switched off on this deployment; nothing was started. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     "mcp-execute_mcp_tool": {
@@ -27817,6 +27824,20 @@ export interface operations {
                     "application/json": components["schemas"]["McpCatalogFeaturedPublic"];
                 };
             };
+            /** @description The catalog holds no server with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The organization already features 50 servers; remove one first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -27841,6 +27862,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The organization features no entry with this id. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -77,7 +77,13 @@ async def list_featured_mcp_servers(
     return await service.list_featured(user=current_identity)
 
 
-@featured_router.post("")
+@featured_router.post(
+    "",
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "The catalog holds no server with this id."},
+        status.HTTP_409_CONFLICT: {"description": "The organization already features 50 servers; remove one first."},
+    },
+)
 async def feature_mcp_server(
     service: McpCatalogServiceDep, current_identity: CurrentIdentity, body: McpCatalogFeatureRequest
 ) -> McpCatalogFeaturedPublic:
@@ -91,7 +97,11 @@ async def feature_mcp_server(
     return await service.feature(user=current_identity, request=body)
 
 
-@featured_router.delete("/{featured_id}", status_code=status.HTTP_204_NO_CONTENT)
+@featured_router.delete(
+    "/{featured_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "The organization features no entry with this id."}},
+)
 async def unfeature_mcp_server(
     service: McpCatalogServiceDep, current_identity: CurrentIdentity, featured_id: uuid.UUID
 ) -> None:
@@ -108,7 +118,13 @@ async def get_mcp_catalog_sync(service: McpCatalogServiceDep) -> McpCatalogSyncS
     return await service.sync_status()
 
 
-@sync_router.post("", status_code=status.HTTP_202_ACCEPTED)
+@sync_router.post(
+    "",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_409_CONFLICT: {"description": "The sync is switched off on this deployment; nothing was started."}
+    },
+)
 async def request_mcp_catalog_sync(service: McpCatalogServiceDep) -> McpCatalogSyncStatus:
     """Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.
 
