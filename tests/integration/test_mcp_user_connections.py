@@ -225,7 +225,9 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
         McpUserConnectionRepository(uow),
         McpOAuthFlowRepository(uow),
         config,
-        eligibility=WorkspaceMcpConnectionEligibility(db),
+        eligibility=WorkspaceMcpConnectionEligibility(
+            uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+        ),
     )
 
 

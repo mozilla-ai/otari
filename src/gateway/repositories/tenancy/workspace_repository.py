@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.database import database_refusal
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
     WORKSPACE_MEMBER_WORKSPACE_FK,
@@ -181,8 +181,13 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
 class WorkspaceMemberRepository:
     """Repository for workspace membership rows."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: AsyncSession | UnitOfWork):
+        self._db = db
+
+    @property
+    def db(self) -> AsyncSession:
+        """The session this repository's operations run on, resolved per call when built on a Unit of Work."""
+        return session_for(self._db) if isinstance(self._db, UnitOfWork) else self._db
 
     async def get_by_workspace(
         self,
