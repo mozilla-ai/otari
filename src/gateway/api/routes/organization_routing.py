@@ -98,7 +98,7 @@ from gateway.models.tenancy import Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.routing import AutomaticFallbackPublic, AutomaticFallbacksResponse
 from gateway.services.alias_service import all_alias_names
-from gateway.services.model_access import is_model_allowed
+from gateway.services.model_access import intersect_allowlists, is_model_allowed
 from gateway.services.policy_store import all_policy_names
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.routing import FALLBACK_WINDOW
@@ -379,8 +379,11 @@ async def explain_organization_routing_policy(
     The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
     who may see the workspace, which is who may already read its policies here.
     ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
-    A draft ``spec`` must only target models the organization reaches, as saving
-    it would, so a draft cannot probe what an unsaved policy would resolve to.
+    Every candidate, from a draft or a stored policy, is held to what the
+    organization reaches, narrowed further by ``allowed_models`` when sent: one
+    outside it is listed as dropped, so a draft cannot show where a model the
+    organization lacks would resolve, and a stored policy whose target the
+    organization lost still explains.
     """
     _reject_user_scope(request.user_id)
     if request.workspace_id is None:
@@ -394,15 +397,9 @@ async def explain_organization_routing_policy(
         workspace_id=request.workspace_id,
         organizations=OrganizationService(db, membership_listener=None),
     )
-    if request.spec is not None:
-        await _require_reachable_targets(
-            db,
-            config,
-            user=current_identity,
-            targets=validated_spec(request.name or "(draft)", request.spec).static_selectors(),
-            model_provider=model_provider,
-        )
-    return explain_in_workspace(request, config, workspace_id=workspace.id)
+    reach = await resolve_session_model_allowlist(db, config, user=current_identity, model_provider=model_provider)
+    narrowed = request.model_copy(update={"allowed_models": intersect_allowlists(reach, request.allowed_models)})
+    return explain_in_workspace(narrowed, config, workspace_id=workspace.id)
 
 
 @aliases_router.get("")
