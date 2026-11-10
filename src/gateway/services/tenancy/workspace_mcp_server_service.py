@@ -768,26 +768,32 @@ async def resolve_workspace_mcp_servers(
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
 
-    resolved: list[McpServerConfig] = []
+    # Every row is read before any token is: reading a per-user token may release the session, and a
+    # release that rolls back expires every row it loaded.
+    planned: list[tuple[McpServerConfig, McpServerRef | None]] = []
     for server_id in ordered_ids:
         row = by_id[server_id]
         if not row.enabled:
             continue
         granted = patterns[server_id]
-        resolved.append(
-            McpServerConfig(
-                name=row.name,
-                url=row.url,
-                authorization_token=await _caller_token(row, access, tokens),
-                renew_token=_renewer(row, access, tokens),
-                purpose_hint=row.purpose_hint,
-                allowed_tools=row.allowed_tools,
-                caller_tool_patterns=None if "*" in granted else granted,
-                caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
-                stored_server_id=str(row.id),
-            )
+        per_user = row.credential_mode == McpCredentialMode.PER_USER
+        config = McpServerConfig(
+            name=row.name,
+            url=row.url,
+            authorization_token=None if per_user else _stored_token(row),
+            renew_token=_renewer(row, access, tokens),
+            purpose_hint=row.purpose_hint,
+            allowed_tools=row.allowed_tools,
+            caller_tool_patterns=None if "*" in granted else granted,
+            caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
+            stored_server_id=str(row.id),
         )
-    return resolved
+        planned.append((config, McpServerRef.of(row) if per_user else None))
+    for config, ref in planned:
+        if ref is not None:
+            assert access.user_id is not None, "a per-user server is refused above for a caller with no user"
+            config.authorization_token = await tokens.token_for(ref, access.user_id)
+    return [config for config, _ in planned]
 
 
 def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
@@ -805,19 +811,18 @@ def _renewer(
     return partial(tokens.renew_rejected, McpServerRef.of(row), access.user_id)
 
 
-async def _caller_token(row: WorkspaceMcpServer, access: McpAccess | None, tokens: McpUserTokens) -> str | None:
-    """The token a caller's calls to a server carry: the workspace's, or on a per-user server their own.
+async def _caller_token(ref: McpServerRef, access: McpAccess | None, tokens: McpUserTokens) -> str:
+    """A per-user server's token for the caller's own user, read from a copy of the row.
 
     Raises:
-        McpSignInRequiredError: the server is per-user and the caller's user has not signed in to it.
+        WorkspaceMcpServerNotFoundError: the caller has no user, who could hold a connection.
+        McpSignInRequiredError: the caller's user has not signed in to it.
         McpConnectionUnavailableError: that user's token has expired and cannot be renewed right now.
         SecretDecryptionError: a stored token will not decrypt.
     """
-    if row.credential_mode != McpCredentialMode.PER_USER:
-        return _stored_token(row)
     if access is None or access.user_id is None:
-        raise WorkspaceMcpServerNotFoundError(row.id)
-    return await tokens.token_for(row, access.user_id)
+        raise WorkspaceMcpServerNotFoundError(ref.id)
+    return await tokens.token_for(ref, access.user_id)
 
 
 async def resolve_workspace_mcp_server(
@@ -876,11 +881,12 @@ async def resolve_workspace_mcp_server(
         return None
     per_user = row.credential_mode == McpCredentialMode.PER_USER
     tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
-    return ResolvedMcpServer(
+    # Read in full before the token is: reading a per-user one may release the session and expire the row.
+    resolved = ResolvedMcpServer(
         id=row.id,
         name=row.name,
         url=row.url,
-        authorization_token=await _caller_token(row, access, tokens),
+        authorization_token=None if per_user else _stored_token(row),
         renew_token=_renewer(row, access, tokens),
         # A user's token changes at every renewal, which is not a change to the server's configuration.
         credential_revision=McpCredentialMode.PER_USER if per_user else None,
@@ -890,6 +896,9 @@ async def resolve_workspace_mcp_server(
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
+    if per_user:
+        resolved.authorization_token = await _caller_token(McpServerRef.of(row), access, tokens)
+    return resolved
 
 
 async def list_reachable_mcp_servers(
