@@ -10,11 +10,13 @@ import { FiMaximize, FiMinus, FiPlus } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost, formatLatency } from "@/shared/helpers/format"
+import { formatCost, formatSpend } from "@/shared/helpers/format"
 
+import { formatDuration } from "./format"
 import { OBSERVATION_TYPES, type TypeKey, TypeMark } from "./observationTypes"
 import { moveRowFocus } from "./rowFocus"
 import { matchesSearch } from "./search"
+import { tickStep } from "./timelineAxis"
 import { buildTree, flattenTreeOrder, rolledUpCosts } from "./tree"
 import type { Trace } from "./types"
 
@@ -42,14 +44,6 @@ const IDLE_MIN_PX = 14
 // Fira Code is monospace: 0.6em, so 11px text is 6.6px a glyph.
 const MICRO_GLYPH_PX = 6.6
 const LABEL_ITEM_GAP = 8
-
-function niceStep(totalMs: number, lanePx: number): number {
-  const targetCount = Math.max(1, Math.floor(lanePx / TICK_MIN_PX))
-  const raw = totalMs / targetCount
-  const pow = 10 ** Math.floor(Math.log10(raw))
-  for (const m of [1, 2, 5, 10]) if (m * pow >= raw) return m * pow
-  return 10 * pow
-}
 
 // Stretches of the trace where no leaf observation is running.
 function idleGaps(
@@ -145,8 +139,13 @@ function TimelineRow({
   const duration = endMs - startMs
   const left = x(startMs)
   const width = Math.max(2, x(duration))
-  const durationText = formatLatency(duration)
-  const costText = cost ? formatCost(cost) : ""
+  const durationText = formatDuration(duration)
+  // The session's own total reads in cents, as its header says it.
+  const costText = !cost
+    ? ""
+    : id === null
+      ? formatSpend(cost)
+      : formatCost(cost)
   const labelPx =
     (durationText.length + costText.length) * MICRO_GLYPH_PX +
     (costText ? LABEL_ITEM_GAP : 0)
@@ -336,7 +335,7 @@ export function TraceTimelineView({
     () => idleGaps(trace.observations, totalMs),
     [trace, totalMs],
   )
-  const step = niceStep(totalMs, lanePx)
+  const step = tickStep(totalMs, lanePx, TICK_MIN_PX)
   const ticks: number[] = []
   for (let t = 0; t <= totalMs; t += step) ticks.push(t)
   const x = (ms: number) => (ms / totalMs) * lanePx
@@ -361,6 +360,13 @@ export function TraceTimelineView({
     centerRatio.current = null
   }, [lanePx, gutter])
 
+  // The idle stretches wide enough to say how long they lasted. They take a
+  // line of their own under the ticks, which would otherwise run through them.
+  const labeledGaps = gaps.filter(
+    (gap) => x(gap.end) - x(gap.start) >= IDLE_LABEL_MIN_PX,
+  )
+  const hasIdleLine = labeledGaps.length > 0
+
   const fitted = zoom === MIN_ZOOM
   const hasQuery = query.trim().length > 0
   // The open row takes Tab; one hidden under a collapsed parent hands it to the
@@ -377,14 +383,14 @@ export function TraceTimelineView({
           isDisabled={fitted}
           onPress={() => zoomBy(1 / ZOOM_STEP)}
         >
-          <FiMinus aria-hidden="true" className="size-3" />
+          <FiMinus aria-hidden="true" className="size-3.5" />
         </ZoomButton>
         <ZoomButton
           label="Zoom in"
           isDisabled={zoom >= MAX_ZOOM}
           onPress={() => zoomBy(ZOOM_STEP)}
         >
-          <FiPlus aria-hidden="true" className="size-3" />
+          <FiPlus aria-hidden="true" className="size-3.5" />
         </ZoomButton>
         <ZoomButton
           label={fitted ? "Whole trace already fits" : "Fit whole trace"}
@@ -394,13 +400,15 @@ export function TraceTimelineView({
             if (scrollRef.current) scrollRef.current.scrollLeft = 0
           }}
         >
-          <FiMaximize aria-hidden="true" className="size-3" />
+          <FiMaximize aria-hidden="true" className="size-3.5" />
         </ZoomButton>
       </div>
 
       <div ref={measure} className="min-h-0 flex-1 overflow-auto">
         <div style={{ width: gutter + lanePx }} className="relative min-h-full">
-          <div className="sticky top-0 z-20 flex h-[1.125rem] border-b border-border bg-surface">
+          <div
+            className={`sticky top-0 z-20 flex border-b border-border bg-surface ${hasIdleLine ? "h-9" : "h-[1.125rem]"}`}
+          >
             <div
               style={{ width: gutter }}
               className="sticky left-0 z-10 shrink-0 bg-surface"
@@ -412,32 +420,30 @@ export function TraceTimelineView({
                   style={{ left: x(t) }}
                   className="absolute inset-y-0 border-l border-border-strong"
                 >
-                  <span className="absolute left-1 text-mono-micro leading-[1.125rem] whitespace-nowrap text-subtle">
-                    {formatLatency(t)}
+                  <span className="absolute top-0 left-1 text-mono-micro leading-[1.125rem] whitespace-nowrap text-subtle">
+                    {formatDuration(t)}
                   </span>
                 </span>
               ))}
-              {gaps.map((gap) =>
-                x(gap.end) - x(gap.start) >= IDLE_LABEL_MIN_PX ? (
-                  <span
-                    key={`g${gap.start}`}
-                    style={{
-                      left: x(gap.start),
-                      width: x(gap.end) - x(gap.start),
-                    }}
-                    className="absolute bottom-0 truncate text-center text-mono-micro text-subtle"
-                  >
-                    {formatLatency(gap.end - gap.start)} idle
-                  </span>
-                ) : null,
-              )}
+              {labeledGaps.map((gap) => (
+                <span
+                  key={`g${gap.start}`}
+                  style={{
+                    left: x(gap.start),
+                    width: x(gap.end) - x(gap.start),
+                  }}
+                  className="absolute bottom-0 truncate bg-surface text-center text-mono-micro leading-[1.125rem] text-subtle"
+                >
+                  {formatDuration(gap.end - gap.start)} idle
+                </span>
+              ))}
             </div>
           </div>
 
           <div
             aria-hidden="true"
             style={{ left: gutter, width: lanePx }}
-            className="pointer-events-none absolute top-[1.125rem] bottom-0"
+            className={`pointer-events-none absolute bottom-0 ${hasIdleLine ? "top-9" : "top-[1.125rem]"}`}
           >
             {ticks.map((t) => (
               <span
@@ -474,7 +480,7 @@ export function TraceTimelineView({
               isLast
               startMs={0}
               endMs={totalMs}
-              cost={totalCost}
+              cost={trace.gateway?.cost ?? totalCost}
               dimmed={false}
               selected={selectedId === null}
               isTabStop={tabStop === null}

@@ -123,4 +123,27 @@ describe("rolledUpCosts", () => {
       b1: 0.25,
     })
   })
+
+  it("counts a turn's cost once, not on top of the calls it sums", () => {
+    const costs = rolledUpCosts(
+      buildTree([
+        observation({ id: "turn", cost: 0.5, isRollup: true }),
+        observation({ id: "call-1", parentObservationId: "turn", cost: 0.2 }),
+        observation({ id: "call-2", parentObservationId: "turn", cost: 0.3 }),
+      ]),
+    )
+
+    expect(costs.get("turn")).toBe(0.5)
+  })
+
+  it("keeps a turn's own cost where no row under it carries one", () => {
+    const costs = rolledUpCosts(
+      buildTree([
+        observation({ id: "turn", cost: 0.5, isRollup: true }),
+        observation({ id: "call", parentObservationId: "turn" }),
+      ]),
+    )
+
+    expect(costs.get("turn")).toBe(0.5)
+  })
 })
