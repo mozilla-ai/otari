@@ -161,7 +161,7 @@ function Notes({ notes }: { notes: Array<string | null> }) {
   return (
     <div className="flex flex-col gap-1 pt-1">
       {said.map((note) => (
-        <p key={note} className="text-caption text-subtle">
+        <p key={note} className="text-caption text-pretty text-subtle">
           {note}
         </p>
       ))}
@@ -297,7 +297,7 @@ function ToolsCell({
               <span className="sr-only">, {plural(tools, "tool")}</span>
               <FiChevronRight
                 aria-hidden
-                className={`size-3.5 shrink-0 text-subtle transition-transform duration-150 ease-out motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
+                className={`size-3.5 shrink-0 text-subtle transition-transform duration-150 ease-smooth motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
               />
             </span>
           }
@@ -382,7 +382,8 @@ function Time({ stats, time }: { stats: SessionStats; time: TimeBreakdown }) {
         verb="Took"
         total={formatDuration(stats.lengthMs)}
         counts={[
-          plural(stats.turns, "turn"),
+          // An agent that exports its own spans reports no turns.
+          stats.turns > 0 ? plural(stats.turns, "turn") : null,
           stats.toolCalls > 0
             ? `${plural(stats.toolCalls, "tool call")}${subagents}`
             : null,
@@ -529,12 +530,12 @@ function CostNotes({
 // Judge gates call a model of their own, which the split leaves out, and the
 // usage ledger may not have priced every call yet.
 function judgeNote(judges: SessionStats["judges"], isSplit: boolean): string {
-  const called = `Judge gates made ${plural(judges.calls, "model call")}`
+  const called = `Judge gates made ${plural(judges.calls, "model request")}`
   if (judges.priced === 0) return `${called}.`
   const left = isSplit ? " the split above leaves out" : ""
   const some =
     judges.priced < judges.calls
-      ? `, from the ${plural(judges.priced, "call")} priced`
+      ? `, from the ${plural(judges.priced, "request")} priced`
       : ""
   return `${called}, for ${formatSpend(judges.cost)}${left}${some}.`
 }

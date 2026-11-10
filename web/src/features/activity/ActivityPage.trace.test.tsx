@@ -22,7 +22,7 @@ async function openRow() {
 }
 
 describe("ActivityPage trace link", () => {
-  it("links a traced request to its session, opened on this row's LLM call", async () => {
+  it("links a traced request to its session, opened on this row's model request", async () => {
     const { calls } = mockApi({
       rows: [entry({ id: "attempt-1", request_group_id: "req-1" })],
       requestTrace: traceSummary(),
