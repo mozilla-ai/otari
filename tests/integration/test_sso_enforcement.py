@@ -766,6 +766,100 @@ async def test_enforcement_is_permitted_with_an_explicit_waiver(async_db: AsyncS
     assert (await _reloaded(async_db, organization)).sso_required is True
 
 
+async def test_the_preflight_offers_an_owner_who_keeps_a_route_of_their_own(async_db: AsyncSession) -> None:
+    """The picker's whole purpose: an owner who could still sign in while the provider is down."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    report = await _connection_service(async_db).preflight_sso_enforcement_for_user(user=owner)
+
+    assert [candidate.email for candidate in report.break_glass_candidates] == ["owner@acme.example"]
+
+
+async def test_the_preflight_offers_no_member_who_is_not_an_owner(async_db: AsyncSession) -> None:
+    """Only an owner may be named, because only an owner is accepted when the switch is set."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _member_with_email(
+        async_db, organization, role="member", password=True, email="mo@acme.example", full_name="Mo Member"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    report = await _connection_service(async_db).preflight_sso_enforcement_for_user(user=owner)
+
+    offered = [candidate.email for candidate in report.break_glass_candidates]
+    assert "mo@acme.example" not in offered
+    assert offered == ["owner@acme.example"]
+
+
+async def test_the_preflight_offers_no_owner_whose_only_way_in_is_the_connection(
+    async_db: AsyncSession,
+) -> None:
+    """Naming them would not let them sign in while the connection is unavailable."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
+    )
+    linked = await _member_with_email(
+        async_db, organization, role="owner", email="li@acme.example", full_name="Li Linked"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, linked, connection)
+    await async_db.commit()
+
+    report = await _connection_service(async_db).preflight_sso_enforcement_for_user(user=owner)
+
+    assert [candidate.email for candidate in report.break_glass_candidates] == ["owner@acme.example"]
+
+
+async def test_the_preflight_offers_no_deployment_operator(async_db: AsyncSession) -> None:
+    """Enforcement never refuses one, so naming it as the exception would achieve nothing."""
+    organization = await create_organization(async_db, slug="acme")
+    operator = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="ops@acme.example", full_name="The Operator"
+    )
+    operator.is_superuser = True
+    async_db.add(operator)
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    report = await _connection_service(async_db).preflight_sso_enforcement_for_user(user=operator)
+
+    assert report.break_glass_candidates == []
+
+
+async def test_the_preflight_offers_an_owner_of_an_organization_the_deployment_is_not_operated_by(
+    async_db: AsyncSession,
+) -> None:
+    """The hosted shape: a customer's own owner is offered, while the deployment's operator is not.
+
+    The exclusion is scoped to a deployment operator rather than to whoever owns the organization,
+    so an organization on a deployment somebody else runs keeps its own candidates.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    operator = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="ops@otari.example", full_name="The Operator"
+    )
+    operator.is_superuser = True
+    async_db.add(operator)
+    customer = await _member_with_email(
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    report = await _connection_service(async_db).preflight_sso_enforcement_for_user(user=customer)
+
+    assert [candidate.email for candidate in report.break_glass_candidates] == ["owner@acme.example"]
+
+
 async def test_enforcement_is_permitted_with_a_break_glass_owner_exception(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
