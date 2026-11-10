@@ -17,8 +17,8 @@ _HAS_GEMINI_KEY = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_chat_completion_with_provider_model_format(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
@@ -43,8 +43,8 @@ async def test_chat_completion_with_provider_model_format(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_chat_completion_streaming(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
@@ -110,8 +110,8 @@ async def test_chat_completion_with_reasoning(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_chat_completion_with_temperature(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
@@ -172,8 +172,8 @@ async def test_chat_completion_with_invalid_api_key_fails(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_chat_completion_multi_turn_conversation(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
