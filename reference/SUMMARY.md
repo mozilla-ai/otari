@@ -43,6 +43,7 @@
   * [Organizations](api-endpoints/organizations.md)
   * [OTel](api-endpoints/otel.md)
   * [Overview](api-endpoints/overview.md)
+  * [Platform connect](api-endpoints/platform-connect.md)
   * [Playground](api-endpoints/playground.md)
   * [Pricing](api-endpoints/pricing.md)
   * [Provider endpoints](api-endpoints/provider-endpoints.md)
@@ -87,3 +88,4 @@
 ## Protocols
 
 * [Code-execution protocol](code-execution-protocol.md)
+* [Platform connect protocol](platform-connect-protocol.md)
