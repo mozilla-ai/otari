@@ -338,6 +338,50 @@ def register(container):
         build_container("stale_bootstrap:register")
 
 
+def test_a_growth_signal_adapter_written_before_record_action_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the check, every create would commit and then fail as a 500 on the report."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_growth_bootstrap",
+        """
+from gateway.ports.growth_signal_port import GrowthSignalPort
+
+
+class StaleGrowthSignal:
+    def __init__(self, session):
+        del session
+
+    async def record_signup(self, **kwargs):
+        return None
+
+    async def record_sign_in(self, **kwargs):
+        return None
+
+    async def record_activation(self, **kwargs):
+        return None
+
+    async def record_onboarding_completed(self, **kwargs):
+        return None
+
+    async def record_profile_updated(self, **kwargs):
+        return None
+
+    async def record_account_deleted(self, **kwargs):
+        return None
+
+
+def register(container):
+    container.bind(GrowthSignalPort, StaleGrowthSignal)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="StaleGrowthSignal, bound to GrowthSignalPort, lacks record_action"):
+        build_container("stale_growth_bootstrap:register")
+
+
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
