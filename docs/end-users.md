@@ -56,7 +56,7 @@ Through the API, a service key is created with `is_service_key`,
 
 Send the end user's id in the request's `user` field (`metadata.user_id` on
 Messages). A new end user starts on the key's **Default end-user budget**, or
-uncapped when the key has none. To start it on another budget on the key's
+with no budget of its own when the key has none. To start it on another budget on the key's
 list, name that budget in the `Otari-End-User-Budget` header:
 
 ```http
