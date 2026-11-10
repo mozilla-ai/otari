@@ -299,7 +299,7 @@ async def test_a_plain_http_endpoint_is_refused(wire: _Wire) -> None:
 async def test_metadata_naming_another_issuer_is_refused(wire: _Wire) -> None:
     _publish(wire, server=_as_document(issuer="https://93.184.216.99"))
 
-    with pytest.raises(McpOAuthDiscoveryError, match="another issuer"):
+    with pytest.raises(McpOAuthDiscoveryError, match="own issuer"):
         await _mcp_oauth.discover(SERVER_URL)
 
 
@@ -316,6 +316,15 @@ async def test_a_url_no_parser_accepts_is_a_discovery_failure_and_not_a_crash(
     _publish(wire, resource=resource)
 
     with pytest.raises(McpOAuthDiscoveryError):
+        await _mcp_oauth.discover(SERVER_URL)
+
+
+async def test_metadata_with_no_issuer_is_refused_as_the_fallback_path_refuses_it(wire: _Wire) -> None:
+    document = _as_document()
+    del document["issuer"]
+    _publish(wire, server=document)
+
+    with pytest.raises(McpOAuthDiscoveryError, match="own issuer"):
         await _mcp_oauth.discover(SERVER_URL)
 
 
@@ -445,6 +454,10 @@ async def test_a_code_is_exchanged_with_its_verifier_and_resource(wire: _Wire) -
         ("0", None),
         ('"120"', 120),
         ("true", None),
+        ('"\u00b2"', None),
+        ('"' + "9" * 5000 + '"', None),
+        ('"' + "0" * 70 + '120"', None),
+        ('"' + "0" * 60 + '120"', 120),
     ],
 )
 async def test_a_lifetime_no_clock_can_hold_does_not_crash(wire: _Wire, stated: str, kept: int | None) -> None:

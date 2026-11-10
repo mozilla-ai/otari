@@ -579,6 +579,26 @@ async def test_a_sign_in_is_not_stored_against_a_server_edited_while_it_was_in_f
     assert (await async_db.execute(select(McpUserConnection))).first() is None
 
 
+async def test_a_sign_in_whose_verifier_can_no_longer_be_read_is_refused_cleanly(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OTARI_SECRET_KEY changed between starting and finishing: a refusal, with nothing sent to the server."""
+    world = await _world(async_db, config)
+    started = await _service(async_db, config).start_connection(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+    )
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    with pytest.raises(McpConnectionFlowError, match="no longer be finished"):
+        await _connections(async_db, config).complete(
+            state=_state(started.authorization_url), code="c", identity_id=world.owner.id
+        )
+
+    assert wire.exchanges == []
+    outcome = await _connections(async_db, config).receive_callback(state="never", code="c", error=None)
+    assert outcome.error == "unknown_state"
+
+
 async def test_a_state_finishes_one_sign_in_only(async_db: AsyncSession, config: GatewayConfig, wire: _Wire) -> None:
     world = await _world(async_db, config)
     service = _service(async_db, config)
