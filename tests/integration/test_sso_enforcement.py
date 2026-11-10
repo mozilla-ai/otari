@@ -40,7 +40,7 @@ from gateway.models.tenancy import (
     User,
     WebAuthnCredential,
 )
-from gateway.repositories.identity import IdentityRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
@@ -89,6 +89,7 @@ def _connection_service(
         IdentityRepositories.on(uow),
         organizations=OrganizationService(db, membership_listener=None),
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
         offered_providers=offered_providers,

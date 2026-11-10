@@ -27,7 +27,7 @@ from gateway.models.identity import (
     oidc_identity_provider,
 )
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, OWNER_ROLE, Organization, OrganizationMember, User
-from gateway.repositories.identity import IdentityRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.schemas.identity import (
     OIDCConnectionDomain,
     OIDCConnectionPublic,
@@ -99,6 +99,7 @@ class OIDCConnectionService:
         *,
         organizations: OrganizationService,
         domains: ClaimedDomains,
+        sign_in_states: OAuthPendingStateRepository,
         allow_private_hosts: bool,
         passkey_rp_id: str | None,
         offered_providers: frozenset[str],
@@ -109,6 +110,10 @@ class OIDCConnectionService:
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._pending_states = repositories.pending_states
+        # NOTE: On the request's session rather than this service's Unit of Work. The library claims
+        # the pending state during an exchange this service does not wrap, by which time a block
+        # opened here has closed, and a repository on a closed block refuses the read.
+        self._sign_in_states = sign_in_states
         self._sessions = repositories.sessions
         self._users = repositories.users
         self._organizations = organizations
@@ -346,7 +351,7 @@ class OIDCConnectionService:
             client = client_for(
                 connection,
                 metadata,
-                pending=self._pending_states,
+                pending=self._sign_in_states,
                 redirect_uri=redirect_uri,
                 allow_private_hosts=allow_private_hosts,
             )
@@ -365,7 +370,7 @@ class OIDCConnectionService:
             return client_for(
                 connection,
                 metadata,
-                pending=self._pending_states,
+                pending=self._sign_in_states,
                 redirect_uri=redirect_uri,
                 allow_private_hosts=allow_private_hosts,
             )

@@ -30,7 +30,7 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc_identity_provider
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, DashboardSession, Organization, User
-from gateway.repositories.identity import IdentityRepositories, OIDCConnectionRepository
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
 from gateway.services.dashboard_session_service import hash_session_token
@@ -130,6 +130,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         IdentityRepositories.on(uow),
         organizations=OrganizationService(db, membership_listener=None),
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
         # The providers a configured deployment offers, because a link at one nobody configured is
@@ -791,6 +792,38 @@ async def test_enforcement_turned_on_while_discovery_is_out_still_revokes(
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
 
     assert await _live_sessions(async_db, member.id) == 0
+
+
+async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The library claims the pending state during an exchange this service does not wrap.
+
+    The client is built inside a block and used after it, so a state store reading through that
+    block refuses the claim and sign-in fails before the token endpoint is reached. The callback
+    tests stub the exchange, so nothing else here would notice.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    service = _connection_service(async_db)
+    public = await service.save_for_user(user=admin, request=_request())
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    metadata = DiscoveredProvider(
+        resolved_issuer=public.resolved_issuer,
+        # A signing key set as well, which the library requires to build an OpenID client at all.
+        document={**_document(public.resolved_issuer), "jwks_url": f"{public.resolved_issuer}/jwks"},
+        discovered_at=datetime.now(UTC),
+    )
+
+    client = await service.client_for_sign_in(
+        stored, metadata, redirect_uri="https://otari.example.com/auth/sso/callback", allow_private_hosts=False
+    )
+
+    # Reached the way apron-auth reaches it during the exchange, outside every block this service
+    # opened. None is the answer for a state nothing minted; the point is that it answers.
+    assert await client._state_store.consume("a-state-nothing-minted") is None
 
 
 # =============================================================================
