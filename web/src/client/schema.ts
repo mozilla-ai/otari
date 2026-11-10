@@ -4342,6 +4342,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/routing-policies/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explain Organization Routing Policy
+         * @description Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.
+         *
+         *     The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
+         *     who may see the workspace, which is who may already read its policies here.
+         *     ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
+         *     Every candidate, from a draft or a stored policy, is held to what the
+         *     organization reaches, narrowed further by ``allowed_models`` when sent: one
+         *     outside it is listed as dropped, so a draft cannot show where a model the
+         *     organization lacks would resolve, and a stored policy whose target the
+         *     organization lost still explains.
+         */
+        post: operations["routing-explain_organization_routing_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/routing-policies/{name}": {
         parameters: {
             query?: never;
@@ -23455,7 +23484,7 @@ export interface operations {
             query?: {
                 /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
                 at_context?: number | null;
-                /** @description Case-insensitive text in a model's name, vendor, id, selectors, or provider instances. */
+                /** @description Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; a pasted selector, or part of one with a colon or slash, matches too. Provider instances are the `provider` filter's. */
                 search?: string | null;
                 /** @description For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace. */
                 workspace_id?: string | null;
@@ -29066,6 +29095,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-explain_organization_routing_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExplainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplainResponse"];
                 };
             };
             /** @description Validation Error */

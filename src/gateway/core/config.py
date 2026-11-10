@@ -1320,8 +1320,7 @@ class GatewayConfig(
     guardrails_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Default URL of the input-guardrails service used when a request does not pass its "
-            "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
+            "Default URL of the input-guardrails service used when a request does not pass its own guardrail `url`."
         ),
     )
     guardrail_thread_pool_size: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(

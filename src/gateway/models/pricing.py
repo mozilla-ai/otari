@@ -74,6 +74,11 @@ OPERATOR_ORIGIN = "operator"
 # the same rung.
 PriceSource = Literal["organization", "deployment", "defaults"]
 
+# What a usage row and a response's ``pricing_source`` name instead when no rate
+# settled the call, because the provider stated what it charged.
+SettledSource = PriceSource | Literal["reported"]
+REPORTED_SOURCE: SettledSource = "reported"
+
 # The same rungs as a hosted provider's model panel names them, with one more:
 # ``provider`` for a rate the provider's own listing named.
 HostedPriceSource = Literal["organization", "deployment", "defaults", "provider"]

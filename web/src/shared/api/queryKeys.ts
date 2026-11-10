@@ -46,6 +46,9 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
+// Not under ROUTING_POLICIES: `useRoutingSyncing` holds every Save while that
+// head is fetching, and a plan being compiled is no reason to.
+export const ROUTING_EXPLAIN = "routing-explain"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.

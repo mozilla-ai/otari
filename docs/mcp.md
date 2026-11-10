@@ -273,6 +273,7 @@ one per key.
 
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request. [Combining tools](tools.md#combining-tools) describes how, including when a server tool named like a built-in is refused
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
+- The model reads at most 100,000 characters of each tool result. A longer result is cut there and ends with a note giving the full length, so the model knows it saw only part. The Messages `mcp_tool_result` activity block carries the same cut text. A text resource the tool embeds counts toward the limit as text; a binary one reaches the model only as its URI, type and size
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name:
   - two `mcp_servers` entries sharing a name: `400` naming it;

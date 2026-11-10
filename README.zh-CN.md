@@ -111,10 +111,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Compose 会搭配 PostgreSQL 运行 Otari。可选的 profile 会额外启动代码沙箱、网页搜索和护栏服务：
+Compose 会搭配 PostgreSQL 运行 Otari。可选的 profile 会额外启动代码沙箱和网页搜索服务：
 
 ```bash
-docker compose --profile code-exec --profile web-search --profile guardrails up -d
+docker compose --profile code-exec --profile web-search up -d
 ```
 
 控制台地址为 `http://localhost:8000/`。如需在 PostgreSQL 上通过控制台保存提供商密钥，请将 `OTARI_SECRET_KEY` 设置为由
