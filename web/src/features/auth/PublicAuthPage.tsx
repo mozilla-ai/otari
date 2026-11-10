@@ -12,11 +12,12 @@ import {
 import { RecoverPasswordPage } from "./RecoverPasswordPage"
 import { ResendVerificationPage } from "./ResendVerificationPage"
 import { ResetPasswordPage } from "./ResetPasswordPage"
+import { SetupPage } from "./SetupPage"
 import { SignupPage } from "./SignupPage"
 import { VerifyEmailPage } from "./VerifyEmailPage"
 
 /**
- * One of the eight pages in front of a session, chosen by hash path.
+ * One of the pages in front of a session, chosen by hash path.
  *
  * `App.tsx` mounts this ahead of its auth gate and keys it on the whole hash,
  * so following a second emailed link in an open tab remounts rather than
@@ -67,6 +68,8 @@ export function PublicAuthPage({
       return <VerifyEmailPage hash={hash} />
     case "/reset-password":
       return <ResetPasswordPage hash={hash} />
+    case "/setup":
+      return <SetupPage hash={hash} />
     case "/auth/google/callback":
     case "/auth/github/callback":
       // `provider` is non-null on these two arms by construction: it is parsed

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  DeploymentBootstrap,
   DeploymentProviderMigrationRow,
   HostedCatalogPriceUpdate,
   HostedCatalogRefresh,
@@ -262,6 +263,9 @@ function mockApi(
           : { ...EMPTY_SWEEP, providers: sweep.providers },
       })
     }
+    if (url.includes(`${API_ROOT}/platform/connect`)) {
+      return jsonResponse({ status: "idle" })
+    }
     if (url.includes("/models")) {
       if (method === "PATCH") return jsonResponse({ ...models[0], ...body })
       const typeCounts: Record<string, number> = {}
@@ -298,12 +302,12 @@ function mockApi(
   return requests
 }
 
-function renderPage() {
+function renderPage(deployment: Partial<DeploymentBootstrap> = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap(deployment)}>
       <QueryClientProvider client={client}>
         <HostedProvidersPage />
       </QueryClientProvider>
@@ -1792,5 +1796,96 @@ describe("HostedProvidersPage, named providers and the move", () => {
     expect(moves.map((request) => request.body)).toEqual([
       { rows: [{ instance: "openai-eu", updated_at: null }] },
     ])
+  })
+
+  describe("connecting otari.ai", () => {
+    const connectRequests = (requests: Request[]) =>
+      requests.filter((request) => request.url.includes("/platform/connect"))
+    const platform = () =>
+      hostedProvider({ name: "otari-ai", provider: "otari" })
+
+    it("offers it beside Add provider once providers exist, opening the card in place", async () => {
+      mockApi()
+      const user = userEvent.setup()
+      await renderPage({ platform_connect: true })
+
+      await user.click(
+        await screen.findByRole("button", { name: "Connect otari.ai" }),
+      )
+
+      const card = await screen.findByRole("region", {
+        name: "Connect otari.ai",
+      })
+      expect(
+        within(card).getByText(/paid service, and requests sent to it leave/),
+      ).toBeInTheDocument()
+    })
+
+    it("offers it on the first-provider panel", async () => {
+      mockApi({ providers: [] })
+      await renderPage({ platform_connect: true })
+
+      expect(
+        await screen.findByRole("button", { name: "Add your first provider" }),
+      ).toBeInTheDocument()
+      expect(
+        await screen.findByRole("button", { name: "Connect otari.ai" }),
+      ).toBeInTheDocument()
+    })
+
+    it("neither offers it nor reads its status where the deployment does not", async () => {
+      const requests = mockApi()
+      await renderPage({ platform_connect: false })
+
+      expect(
+        await screen.findByRole("button", { name: "Add provider" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Connect otari.ai" }),
+      ).not.toBeInTheDocument()
+      expect(connectRequests(requests)).toEqual([])
+    })
+
+    it("points at otari.ai's keys page when the connected provider is removed", async () => {
+      mockApi({ providers: [platform()] })
+      const user = userEvent.setup()
+      await renderPage({ platform_connect: true })
+
+      await user.click(
+        await screen.findByRole("button", { name: "Remove otari-ai" }),
+      )
+
+      const dialog = await screen.findByRole("alertdialog")
+      expect(
+        within(dialog).getByRole("link", { name: "API keys page" }),
+      ).toHaveAttribute("href", "https://otari.ai/dashboard/#/keys")
+    })
+
+    it("names a default rate on an otari provider an estimate, and a listed one listed", async () => {
+      mockApi({
+        providers: [platform()],
+        models: [
+          hostedModel({ id: "m1", model: "openai/gpt-4o" }),
+          hostedModel({
+            id: "m2",
+            model: "openai/gpt-4o-mini",
+            price_source: "provider",
+          }),
+        ],
+      })
+      const user = userEvent.setup()
+      await renderPage()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Models on otari-ai" }),
+      )
+
+      const panel = await screen.findByRole("region", {
+        name: "Models on otari-ai",
+      })
+      expect(await within(panel).findByText("Estimate")).toBeInTheDocument()
+      expect(within(panel).getByText("Listed")).toBeInTheDocument()
+      expect(within(panel).queryByText("Default")).not.toBeInTheDocument()
+    })
   })
 })

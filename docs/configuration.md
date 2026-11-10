@@ -74,7 +74,7 @@ the corresponding startup value after the database is available.
 
 | Setting | Purpose |
 | --- | --- |
-| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. |
+| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. Unset, it is `sqlite:///./otari.db`, and in the container image `sqlite:////data/otari.db`, on the image's `/data` volume. |
 | `master_key` | Deployment-wide management credential. |
 | `host`, `port` | Server bind address. |
 | `auto_migrate` | Apply Alembic migrations at startup. |
@@ -82,6 +82,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
+| `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -394,7 +395,11 @@ declaration that cannot be applied, such as a key naming a budget that does not
 exist, stops the start and nothing is written.
 
 Declarations are applied before the first-run bootstrap key, so a fresh
-deployment that declares a key does not mint and print one.
+deployment that declares a key does not mint and print one. Neither does a
+deployment that generated its own master key: it starts from the setup link,
+and its operator creates the first key in the dashboard. Set
+`bootstrap_api_key: true` (`OTARI_BOOTSTRAP_API_KEY=true`) to have that
+deployment mint and print one anyway.
 
 ### Mismatched `user` fields
 
@@ -653,8 +658,25 @@ Operators add provider credentials at runtime as
 `/api/v1/hosted-providers`. Config-file entries remain read-only in the
 dashboard.
 
-Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
-`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+Stored credentials are encrypted with a Fernet key, and where that key comes
+from depends on the database:
+
+- **PostgreSQL**: set `OTARI_SECRET_KEY` to a key generated with
+  `otari gen-secret-key`. Nothing is stored until it is set.
+- **SQLite**: when `OTARI_SECRET_KEY` is unset, Otari generates a key on first
+  start and keeps it in a file beside the database file, named after it with
+  `.secret-key` added (`/data/otari.db.secret-key` in the container image),
+  readable only by its owner. Later starts load it from there. A set
+  `OTARI_SECRET_KEY` always wins, and the file is then neither read nor written.
+
+A key beside the database protects against a leaked database file or dump. It
+does not protect against a stolen disk or volume, which holds both; set
+`OTARI_SECRET_KEY` from a secret store where that matters. Back the key file up
+with the database. If the database holds encrypted credentials and neither
+`OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
+than generate a key that could not decrypt them.
+
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent

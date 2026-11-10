@@ -7182,6 +7182,12 @@
             "title": "Passkeys Ready",
             "type": "boolean"
           },
+          "platform_connect": {
+            "default": false,
+            "description": "Whether this deployment offers connecting to otari.ai from the dashboard (the platform_url setting is not empty). False, the dashboard shows no such option and the routes are not mounted.",
+            "title": "Platform Connect",
+            "type": "boolean"
+          },
           "privacy_url": {
             "anyOf": [
               {
@@ -9381,7 +9387,7 @@
             "type": "boolean"
           },
           "secret_key_configured": {
-            "description": "Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, so a deployment without it can store none. The dashboard reads the same fact from the membership context's provider_key_encryption_available, because this endpoint is operator-only and the provider-key pages are read by tenants.",
+            "description": "Whether the server has a key to encrypt stored credentials with: OTARI_SECRET_KEY, or the key file a SQLite deployment generates beside its database. Provider credentials are encrypted at rest with it, so a deployment without one can store none. The dashboard reads the same fact from the membership context's provider_key_encryption_available, because this endpoint is operator-only and the provider-key pages are read by tenants.",
             "title": "Secret Key Configured",
             "type": "boolean"
           },
@@ -10561,7 +10567,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -10647,7 +10653,8 @@
                 "enum": [
                   "organization",
                   "deployment",
-                  "defaults"
+                  "defaults",
+                  "provider"
                 ],
                 "type": "string"
               },
@@ -17892,6 +17899,91 @@
           "reference"
         ],
         "title": "PlatformBreakGlassCreate",
+        "type": "object"
+      },
+      "PlatformConnectStartPublic": {
+        "description": "What an operator needs to approve a connection on otari.ai.\n\n``user_code`` is what the approval page shows back, ``verification_uri_complete``\nthe page to open, and ``expires_in`` the seconds left to approve.",
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "user_code": {
+            "title": "User Code",
+            "type": "string"
+          },
+          "verification_uri_complete": {
+            "title": "Verification Uri Complete",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code",
+          "verification_uri_complete",
+          "expires_in"
+        ],
+        "title": "PlatformConnectStartPublic",
+        "type": "object"
+      },
+      "PlatformConnectStatusPublic": {
+        "description": "Where the deployment's connection to otari.ai stands.\n\n``idle`` means no attempt. The code, the link and the seconds left are set\nwhile ``pending`` and null otherwise. ``connected`` means the ``otari-ai``\nhosted provider holds the key otari.ai issued.",
+        "properties": {
+          "expires_in": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "const": "idle",
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "pending",
+                  "connected",
+                  "expired",
+                  "denied"
+                ],
+                "type": "string"
+              }
+            ],
+            "title": "Status"
+          },
+          "user_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Code"
+          },
+          "verification_uri_complete": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Uri Complete"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PlatformConnectStatusPublic",
         "type": "object"
       },
       "PlaygroundAttachment": {
@@ -47209,6 +47301,91 @@
         "summary": "Get Overview",
         "tags": [
           "overview"
+        ]
+      }
+    },
+    "/api/v1/platform/connect": {
+      "delete": {
+        "description": "Forget the current attempt. A stored ``otari-ai`` provider is left as it is.",
+        "operationId": "platform-connect-cancel_platform_connect",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Cancel Platform Connect",
+        "tags": [
+          "platform-connect"
+        ]
+      },
+      "get": {
+        "description": "Where the connection stands: idle, pending, connected, expired or denied.\n\nWhile pending, a read asks otari.ai whether the code was approved, at most\nonce per the interval otari.ai gave. On approval the ``otari-ai`` hosted\nprovider is stored with the issued key, its models are listed, and the\nstatus reads connected.",
+        "operationId": "platform-connect-get_platform_connect",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformConnectStatusPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Platform Connect",
+        "tags": [
+          "platform-connect"
+        ]
+      },
+      "post": {
+        "description": "Ask otari.ai for a code to approve, and return the code and the page that approves it.\n\nThis is the first request this deployment sends to otari.ai. While an\nattempt is pending it is returned as it stands, and otari.ai is not asked\nagain. The provider a connection stores is kept to the caller's\norganization.",
+        "operationId": "platform-connect-start_platform_connect",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformConnectStartPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "429": {
+            "description": "Too many attempts. Retry-After gives the wait in seconds."
+          },
+          "503": {
+            "description": "otari.ai could not be reached."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Platform Connect",
+        "tags": [
+          "platform-connect"
         ]
       }
     },

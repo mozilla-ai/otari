@@ -60,12 +60,41 @@ def _mask_args(record: logging.LogRecord) -> bool:
     return True
 
 
-def uvicorn_log_config() -> dict[str, Any]:
+class ProbeAccessFilter(logging.Filter):
+    """Drop uvicorn's access line for a successful request to a health probe path.
+
+    A container's health check asks every 30 seconds, and its lines push
+    everything else, the first start's setup link included, off the screen. A
+    probe that fails is still logged.
+    """
+
+    def __init__(self, paths: tuple[str, ...]) -> None:
+        super().__init__()
+        self._paths = frozenset(paths)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # uvicorn's access record: (client, method, path with query, HTTP version, status).
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        path, status = args[2], args[4]
+        if not isinstance(path, str) or not isinstance(status, int):
+            return True
+        return status >= 400 or path.partition("?")[0] not in self._paths
+
+
+def uvicorn_log_config(level: int = logging.INFO, probe_paths: tuple[str, ...] = ()) -> dict[str, Any]:
     """uvicorn's own logging config, with its handlers masking credentials as the gateway's does.
 
     uvicorn's loggers print through handlers of their own, so the gateway
     handler's filter never sees them, and an access log line carries the query
     string.
+
+    uvicorn's lifecycle lines ("Started server process", "Application startup
+    complete") repeat what the gateway says itself at startup, so they print
+    only when ``level`` is DEBUG, and so do the access lines of successful
+    requests to ``probe_paths``. Its warnings, errors and every other access
+    line are unchanged.
     """
     from uvicorn.config import LOGGING_CONFIG
 
@@ -73,6 +102,12 @@ def uvicorn_log_config() -> dict[str, Any]:
     config.setdefault("filters", {})["mask_credentials"] = {"()": CredentialMaskingFilter}
     for handler in config["handlers"].values():
         handler.setdefault("filters", []).append("mask_credentials")
+    if level > logging.DEBUG:
+        for name in ("uvicorn", "uvicorn.error"):
+            config["loggers"][name]["level"] = "WARNING"
+        if probe_paths:
+            config["filters"]["probes"] = {"()": ProbeAccessFilter, "paths": probe_paths}
+            config["handlers"]["access"]["filters"].append("probes")
     return config
 
 
@@ -99,6 +134,20 @@ def log_secret(message: str, secret: str, *, level: int = logging.WARNING) -> No
     _log_console().print(secret, soft_wrap=True, crop=False, highlight=False, markup=False)
 
 
+def log_plain(*lines: str, level: int = logging.INFO) -> None:
+    """Print lines as they are, with no timestamp, level or source columns, when ``level`` is enabled.
+
+    For the few lines a person reads at startup, such as where the gateway is
+    running. They bypass the credential filter, as :func:`log_secret` does, so
+    the setup link survives; pass nothing here that should have been masked.
+    """
+    if not logger.isEnabledFor(level):
+        return
+    console = _log_console()
+    for line in lines:
+        console.print(line, soft_wrap=True, crop=False, highlight=False, markup=False)
+
+
 def setup_logger(
     level: int = logging.WARNING,
     rich_tracebacks: bool = True,
@@ -122,6 +171,9 @@ def setup_logger(
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
 
+    # The source column takes a third of an 80-column container log and wraps
+    # every message beside it, so it is kept for debugging.
+    kwargs.setdefault("show_path", level <= logging.DEBUG)
     handler = RichHandler(rich_tracebacks=rich_tracebacks, markup=True, **kwargs)
     handler.addFilter(CredentialMaskingFilter())
 

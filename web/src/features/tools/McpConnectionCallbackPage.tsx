@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 import { useCompleteMcpConnection } from "@/shared/api/tools"
 
 export interface McpConnectionCallbackSearch {
@@ -84,13 +85,17 @@ export function McpConnectionCallbackPage({
     return <PageLoading label="Connecting your account…" />
   }
   return (
-    <div className="flex max-w-xl flex-col gap-4">
-      <h1 className="text-heading">Connect your account</h1>
+    <>
+      <PageIntro title="Connect your account">
+        <Link
+          to="/tools/mcp-servers"
+          className="text-link hover:text-link-hover"
+        >
+          ← MCP servers
+        </Link>
+      </PageIntro>
       {refusal ? <InfoBanner tone="warning">{refusal}</InfoBanner> : null}
       <ErrorBanner error={complete.error} />
-      <Link to="/tools/mcp-servers" className="text-link hover:text-link-hover">
-        ← MCP servers
-      </Link>
-    </div>
+    </>
   )
 }

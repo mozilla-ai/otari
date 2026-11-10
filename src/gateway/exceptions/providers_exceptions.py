@@ -458,3 +458,12 @@ __all__ = [
     "WorkspaceHostedProviderNotFoundError",
     "WorkspaceProviderKeyOverrideConflictError",
 ]
+
+
+class PlatformUnreachableError(TenancyError):
+    """otari.ai did not give a usable answer when asked to start a connection."""
+
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__("otari.ai gave no usable answer to a connect request")
