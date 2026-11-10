@@ -28,6 +28,7 @@ from gateway.models.identity import (
     oidc_identity_provider,
 )
 from gateway.models.tenancy import Organization, OrganizationDomain, OrganizationDomainRole, User, Workspace
+from gateway.models.users import User as BillingUser
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository, OIDCConnectionRepository
 from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
@@ -171,6 +172,19 @@ async def test_a_first_sso_sign_in_creates_an_account_with_no_email(async_db: As
     assert signed_in.account.email is None
     assert signed_in.account.full_name == "Ada Lovelace"
     assert signed_in.active_organization_id == organization.id
+
+
+async def test_a_first_sso_sign_in_mints_the_account_that_can_own_a_key(async_db: AsyncSession) -> None:
+    """Keys, budgets and usage hang off a request-plane row that nothing joins to the membership."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    owner = await async_db.get(BillingUser, str(signed_in.account.id))
+    assert owner is not None
+    assert owner.alias == "Ada Lovelace"
 
 
 async def test_the_claimed_address_is_recorded_on_the_link_only(async_db: AsyncSession) -> None:

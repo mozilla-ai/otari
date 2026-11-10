@@ -819,6 +819,10 @@ class OrganizationService:
                 user_id=identity.id,
                 role=default_role,
             )
+            # The request-plane owner every other membership path mints beside the membership,
+            # without which this account carries no attribution id and could never be offered as
+            # the owner of a key.
+            await get_or_create_attribution_user(self.db, user_id=str(identity.id), alias=full_name)
             return identity
 
     async def provision_tenancy_for_claim(
