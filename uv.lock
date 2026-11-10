@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'linux'",
@@ -383,7 +383,7 @@ wheels = [
 
 [[package]]
 name = "apron-auth"
-version = "0.23.0"
+version = "0.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib" },
@@ -391,9 +391,9 @@ dependencies = [
     { name = "joserfc" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/85/13674e8ef153f906c7db182cdd2149fb3fc9ff2a9d4976e2c0b5b2590442/apron_auth-0.23.0.tar.gz", hash = "sha256:33b74357117d76d07f6de036f949e64924e5b9a76ee3299d58ab7792cc5da36d", size = 449818, upload-time = "2026-11-06T16:47:07.05Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/a9/9fedfda52b7df1a72fc28dcc743343c6454f7980c7ece7963550a04988f7/apron_auth-0.24.0.tar.gz", hash = "sha256:d234322e3fafba291ac2a50acf656b6b7e1ebde40c0dca9856d123dff050a6cc", size = 466263, upload-time = "2026-11-09T14:41:55.774Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/16/5ddb1f5e11bd7db2411cbd3d04abfcc0a7a77eaca849732d05d9b36f022c/apron_auth-0.23.0-py3-none-any.whl", hash = "sha256:643a8b5c5962628b7ee4ad0687347d04f249d6b6f9ead2e245bcd9219bf6bab7", size = 201696, upload-time = "2026-11-06T16:47:05.271Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/0b/8f099e3f1182cfb6d236a0792337271aec8b85fa4d556498308d409fd3e0/apron_auth-0.24.0-py3-none-any.whl", hash = "sha256:d2ccaef8dfa4e7ab8bde83e63bd7eaf5ebd69ece6fb5a1108b188fc24770c261", size = 208565, upload-time = "2026-11-09T14:41:54.223Z" },
 ]
 
 [[package]]
@@ -1436,7 +1436,7 @@ requires-dist = [
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.49.0" },
     { name = "any-search", editable = "any-search" },
-    { name = "apron-auth", specifier = ">=0.23.0,<0.24.0" },
+    { name = "apron-auth", specifier = ">=0.24.0,<0.25.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 'kms'", specifier = ">=1.42.0" },

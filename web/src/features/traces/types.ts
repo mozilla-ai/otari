@@ -125,7 +125,6 @@ export interface TraceTotals {
   totalTokens: number
   totalCost: number
   models: string[]
-  level: ObservationLevel
 }
 
 export function summarizeTrace(trace: Trace): TraceTotals {
@@ -135,7 +134,6 @@ export function summarizeTrace(trace: Trace): TraceTotals {
   let cachedTokens = 0
   let cacheWriteTokens = 0
   let totalCost = 0
-  let level: ObservationLevel = "DEFAULT"
   const models = new Set<string>()
   for (const o of trace.observations) {
     latencyMs = Math.max(latencyMs, o.endMs)
@@ -145,11 +143,10 @@ export function summarizeTrace(trace: Trace): TraceTotals {
       completionTokens += o.completionTokens ?? 0
       cachedTokens += o.cachedTokens ?? 0
       cacheWriteTokens += o.cacheWriteTokens ?? 0
+      // Only a request's model: a judge gate names the model it called too.
+      if (o.model) models.add(o.model)
     }
     if (!o.isRollup) totalCost += o.cost ?? 0
-    if (o.model) models.add(o.model)
-    if (o.level === "ERROR") level = "ERROR"
-    else if (o.level === "WARNING" && level !== "ERROR") level = "WARNING"
   }
   return {
     latencyMs,
@@ -160,6 +157,5 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     totalTokens: promptTokens + completionTokens,
     totalCost,
     models: [...models],
-    level,
   }
 }

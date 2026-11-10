@@ -58,12 +58,13 @@ export function flattenTreeOrder(
 }
 
 // Own cost plus every descendant's, bottom-up, so a parent's bar label says
-// what everything under it cost.
+// what everything under it cost. A turn's own cost is that same sum, so it is
+// not added to it again.
 export function rolledUpCosts(roots: TreeNode[]): Map<string, number> {
   const totals = new Map<string, number>()
   const walk = (node: TreeNode): number => {
-    const own = node.obs.cost ?? 0
-    const total = node.children.reduce((sum, child) => sum + walk(child), own)
+    const under = node.children.reduce((sum, child) => sum + walk(child), 0)
+    const total = node.obs.isRollup ? under : (node.obs.cost ?? 0) + under
     totals.set(node.obs.id, total)
     return total
   }
