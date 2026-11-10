@@ -169,8 +169,9 @@ class OAuthCallbackRequest(BaseModel):
 class OAuthSessionResponse(BaseModel):
     """A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
 
-    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
-    dashboard's sign-in path does not care which credential got it here.
+    The three fields ``POST /api/v1/auth/session`` answers, deliberately, so the
+    dashboard's sign-in path does not care which credential got it here, and two
+    only a provider sign-in can produce: ``password_removed`` and ``new_account``.
     """
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
@@ -187,6 +188,13 @@ class OAuthSessionResponse(BaseModel):
             "Whether this sign-in removed a password the account held: the first provider sign-in on an "
             "address nobody had proven removes the password set before then. The person can set a new one "
             "from Account settings."
+        ),
+    )
+    new_account: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in created the account, or is the first way in to one nobody had claimed. "
+            "False for a sign-in to an account that was already usable."
         ),
     )
 
@@ -335,6 +343,7 @@ async def callback(
         user_id=identity.id,
         active_organization_id=signed_in.active_organization_id,
         password_removed=signed_in.password_removed,
+        new_account=signed_in.new_account,
     )
 
 
