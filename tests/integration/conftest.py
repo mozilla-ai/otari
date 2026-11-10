@@ -450,7 +450,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig, *, base_url: str = "http://testserver") -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -459,6 +459,9 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
+
+    ``base_url`` is the address requests are sent to, which sets the scheme the
+    server sees.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
@@ -474,7 +477,7 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     app.dependency_overrides = {get_db: override_get_db}
 
     try:
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url=base_url) as test_client:
             yield test_client
     finally:
         dispose_async_engine(async_engine)

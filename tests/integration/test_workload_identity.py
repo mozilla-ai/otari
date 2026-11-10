@@ -71,7 +71,11 @@ def _bearer(token: str) -> dict[str, str]:
 @pytest.fixture
 def federation_config(test_config: GatewayConfig) -> GatewayConfig:
     return test_config.model_copy(
-        update={"federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)]}, deep=True
+        update={
+            "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)],
+            "federation_audiences": [AUDIENCE],
+        },
+        deep=True,
     )
 
 
@@ -83,7 +87,9 @@ def client(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-            federation_config.federation_issuers, transport_factory=_issuer
+            federation_config.federation_issuers,
+            audiences=federation_config.federation_audiences,
+            transport_factory=_issuer,
         )
         yield test_client
 
@@ -262,7 +268,7 @@ def test_a_token_is_never_the_master_key(client: TestClient, master_key_header: 
 
 _REFUSALS: dict[str, tuple[dict[str, Any], str]] = {
     "unlisted-issuer": ({"iss": UNLISTED_ISSUER}, "federation_unknown_issuer"),
-    "wrong-audience": ({"aud": "https://elsewhere.example.com"}, "federation_no_rule"),
+    "wrong-audience": ({"aud": "https://elsewhere.example.com"}, "federation_wrong_audience"),
     "other-email": ({"email": "someone@project.iam.gserviceaccount.com"}, "federation_no_rule"),
     "unverified-email": ({"email_verified": False}, "federation_no_rule"),
     "expired": ({"iat": int(time.time()) - 7200, "exp": int(time.time()) - 600}, "federation_expired"),
@@ -379,7 +385,7 @@ def test_an_unreachable_issuer_fails_closed(client: TestClient, master_key_heade
         return httpx.MockTransport(lambda _request: httpx.Response(503))
 
     client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], transport_factory=unreachable
+        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], audiences=[AUDIENCE], transport_factory=unreachable
     )
 
     refused = _chat(client, _bearer(_token()))

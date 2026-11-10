@@ -4,6 +4,28 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.43.0](https://github.com/mozilla-ai/otari/releases/tag/v0.43.0) - 2026-11-10
+
+
+
+### Bug Fixes
+
+- Bill OpenAI Responses web searches by [@daavoo](https://github.com/daavoo) ([`8ee7221`](https://github.com/mozilla-ai/otari/commit/8ee72211fd130bba1391b7b7aff9393daf798b18))
+- **auth:** Link the privacy policy beside the terms at signup in [#3095](https://github.com/mozilla-ai/otari/pull/3095) by [@jigjigjig](https://github.com/jigjigjig) ([`28e27a4`](https://github.com/mozilla-ai/otari/commit/28e27a436ac39208342285ae1c9ce41a9425dcd4))
+- **pricing:** Keep per-unit prices in a stored models.dev snapshot by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`fa30c88`](https://github.com/mozilla-ai/otari/commit/fa30c8847b42fe3abb43f2d8fdfe959dec4f3563))
+- **providers:** Move a seeded rate's unit with its numbers in [#3087](https://github.com/mozilla-ai/otari/pull/3087) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e555a17`](https://github.com/mozilla-ai/otari/commit/e555a1772ce8d7905f265670f4f63e415ef5d135))
+- Bill Gemini Google Search grounding in [#3104](https://github.com/mozilla-ai/otari/pull/3104) by [@daavoo](https://github.com/daavoo) ([`d205180`](https://github.com/mozilla-ai/otari/commit/d20518082f5e7b856cb053cfe4ad50406902d012))
+
+
+### Features
+
+- Share each member's avatar pick with their organization in [#3092](https://github.com/mozilla-ai/otari/pull/3092) by [@jigjigjig](https://github.com/jigjigjig) ([`98a752e`](https://github.com/mozilla-ai/otari/commit/98a752e9873a7496db84cb9801755a3bc5c63004))
+- **models:** Read the models.dev catalog from a configurable base url by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`5ef1be6`](https://github.com/mozilla-ai/otari/commit/5ef1be64222b827204e2fb774104c9e954973cbf))
+- **pricing:** Store the catalog of facts a price update downloads by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4bb6381`](https://github.com/mozilla-ai/otari/commit/4bb6381b8da6b76e42ac4c5035bd2d31ec0ea6ba))
+- **catalog:** Use the context length vLLM and SGLang servers report in [#3101](https://github.com/mozilla-ai/otari/pull/3101) by [@daavoo](https://github.com/daavoo) ([`9c31dce`](https://github.com/mozilla-ai/otari/commit/9c31dce214f3c3084c07e775ebec736b6ee94540))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.42.0...v0.43.0
 ## [0.42.0](https://github.com/mozilla-ai/otari/releases/tag/v0.42.0) - 2026-11-10
 
 
