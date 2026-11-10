@@ -434,6 +434,15 @@ function EnforcementSection({
     (owner) => owner.user_id === breakGlassUserId,
   )
 
+  // The adoption above runs only while nothing is half-filled. This is the same adoption, asked
+  // for deliberately by somebody who would rather start again than overwrite.
+  const takeServedPolicy = () => {
+    setSeen(enforcement)
+    setRequired(enforcement.required)
+    setBreakGlassUserId(enforcement.break_glass_user_id ?? "")
+    setBreakGlassWaived(enforcement.break_glass_waived)
+  }
+
   const submit = () => {
     set.mutate(
       {
@@ -520,14 +529,28 @@ function EnforcementSection({
         </div>
       ) : null}
       <ErrorBanner error={set.error} />
-      <div className="flex justify-end border-t border-border pt-4">
+      {servedMoved && !untouched ? (
+        <p className="text-caption">
+          Another administrator changed this while you were editing. Saving
+          replaces their change with yours. Take theirs instead to start again
+          from what they left.
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        {servedMoved && !untouched ? (
+          <Button variant="ghost" onPress={takeServedPolicy}>
+            Take their change
+          </Button>
+        ) : null}
         <Button
           variant="primary"
           onPress={submit}
           isPending={set.isPending}
           isDisabled={required && report === null}
         >
-          Save enforcement
+          {servedMoved && !untouched
+            ? "Save over their change"
+            : "Save enforcement"}
         </Button>
       </div>
     </Section>

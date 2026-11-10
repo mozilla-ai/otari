@@ -635,6 +635,60 @@ describe("OrganizationSsoPage", () => {
     })
   })
 
+  it("says a save would overwrite a change made while the draft was open", async () => {
+    let moved = false
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      ssoResponse: () =>
+        jsonResponse(
+          organizationSso({
+            connection: oidcConnection(),
+            enforcement: organizationSsoEnforcement({
+              break_glass_waived: moved,
+            }),
+          }),
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    const box = await screen.findByRole("checkbox", {
+      name: "Require sign-in through this connection",
+    })
+    await user.click(box)
+
+    moved = true
+    await user.click(
+      screen.getByRole("button", { name: "Refresh from provider" }),
+    )
+
+    expect(
+      await screen.findByText(
+        /Another administrator changed this while you were editing/,
+      ),
+    ).toBeInTheDocument()
+    // The save still goes through, deliberately and under its own name, rather than silently.
+    expect(
+      screen.getByRole("button", { name: "Save over their change" }),
+    ).toBeInTheDocument()
+
+    // Taking theirs restores what they left and the warning goes with it.
+    await user.click(screen.getByRole("button", { name: "Take their change" }))
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          /Another administrator changed this while you were editing/,
+        ),
+      ).not.toBeInTheDocument()
+    })
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "PUT" && request.url.includes("/sso/enforcement"),
+      ),
+    ).toBe(false)
+  })
+
   it("says what a save did, because the form looks unchanged otherwise", async () => {
     mockApi({
       sso: organizationSso({ connection: oidcConnection() }),
