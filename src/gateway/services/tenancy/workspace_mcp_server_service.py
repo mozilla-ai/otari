@@ -865,6 +865,9 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
         await self.db.commit()
+        # After the commit, so a server that fails its check is still stored:
+        # it may be registered before it is up, and `health` says what failed.
+        await self._record_check(server)
         if growth is not None and background_tasks is not None and organization_id is not None:
             await growth.record_action(
                 background_tasks=background_tasks,
@@ -873,9 +876,6 @@ class WorkspaceMcpServerService:
                 email=user.email,
                 organization_id=organization_id,
             )
-        # After the commit, so a server that fails its check is still stored:
-        # it may be registered before it is up, and `health` says what failed.
-        await self._record_check(server)
         return WorkspaceMcpServerPublic.from_model(server)
 
     async def update_server(

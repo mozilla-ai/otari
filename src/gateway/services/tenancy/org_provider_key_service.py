@@ -42,7 +42,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from any_llm import LLMProvider
-from fastapi import BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,7 +73,6 @@ from gateway.models.provider_keys import (
 )
 from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
-from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
     Candidate,
@@ -530,13 +528,8 @@ class OrgProviderKeyService:
         *,
         user: User,
         request: OrgProviderKeyCreateRequest,
-        growth: GrowthSignalPort | None = None,
-        background_tasks: BackgroundTasks | None = None,
     ) -> OrgProviderKeyPublic:
-        """Create a key in the caller's organization. Organization owners and admins only.
-
-        With ``growth``, the key is reported as ``PROVIDER_KEY_ADDED`` once it commits.
-        """
+        """Create a key in the caller's organization. Organization owners and admins only."""
         organization = await self.organizations.get_active_organization_for_user(user)
         await self.organizations.require_active_organization_management_access(user=user, organization=organization)
 
@@ -577,15 +570,6 @@ class OrgProviderKeyService:
                 raise OrgProviderKeySlugTakenError(slug) from None
             raise OrgProviderKeyAlreadyExistsError(provider, name) from None
 
-        if growth is not None and background_tasks is not None:
-            await growth.record_action(
-                background_tasks=background_tasks,
-                action=GrowthAction.PROVIDER_KEY_ADDED,
-                user_id=user.id,
-                email=user.email,
-                organization_id=key.organization_id,
-                details={"provider": provider},
-            )
         await refresh_org_provider_cache(self.db)
         return await self._public_row(key)
 

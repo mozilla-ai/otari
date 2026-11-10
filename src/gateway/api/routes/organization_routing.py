@@ -66,7 +66,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     CurrentIdentity,
-    GrowthSignalPortDep,
+    PersonGrowthSignalPortDep,
     RequestSessionModelProviderPortDep,
     RoutingServiceDep,
     VisibleWorkspacesDep,
@@ -141,7 +141,7 @@ fallbacks_router = APIRouter(
 _MAX_ROWS = 1000
 
 
-async def _writable_workspace_id(
+async def _writable_workspace(
     db: AsyncSession,
     config: GatewayConfig,
     *,
@@ -149,7 +149,7 @@ async def _writable_workspace_id(
     workspace_id: uuid.UUID | None,
     targets: list[str],
     model_provider: ModelProviderPort | None,
-) -> uuid.UUID:
+) -> Workspace:
     """Resolve the workspace a tenant write lands in, refusing what it may not do.
 
     Three refusals, in the order that keeps each one from leaking what the next
@@ -174,6 +174,22 @@ async def _writable_workspace_id(
         organizations=organizations,
     )
     await _require_reachable_targets(db, config, user=user, targets=targets, model_provider=model_provider)
+    return workspace
+
+
+async def _writable_workspace_id(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    user: TenancyUser,
+    workspace_id: uuid.UUID | None,
+    targets: list[str],
+    model_provider: ModelProviderPort | None,
+) -> uuid.UUID:
+    """The id of :func:`_writable_workspace`, for a write that needs nothing else of it."""
+    workspace = await _writable_workspace(
+        db, config, user=user, workspace_id=workspace_id, targets=targets, model_provider=model_provider
+    )
     return workspace.id
 
 
@@ -326,8 +342,9 @@ async def set_organization_routing_policy(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     model_provider: RequestSessionModelProviderPortDep,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
+    routing: RoutingServiceDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -336,7 +353,7 @@ async def set_organization_routing_policy(
     accepted here.
     """
     _reject_user_scope(request.user_id)
-    workspace_id = await _writable_workspace_id(
+    workspace = await _writable_workspace(
         db,
         config,
         user=current_identity,
@@ -344,51 +361,27 @@ async def set_organization_routing_policy(
         targets=validated_spec(request.name, request.spec).static_selectors(),
         model_provider=model_provider,
     )
-    # Read before the write, which settles both: whether it stores a new policy
-    # rather than editing one, and whether it is the organization's first.
-    organization_id = (
-        await db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
-    ).scalar_one()
-    creates = request.rename_from is None and not await _workspace_holds_policy(db, workspace_id, request.name)
-    first = not await _organization_holds_a_policy(db, organization_id)
-    policy = await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id)
-    if creates:
+    policy, created = await upsert_policy_in_workspace(request, db, config, workspace_id=workspace.id)
+    if created and growth is not None:
         await growth.record_action(
             background_tasks=background_tasks,
             action=GrowthAction.ROUTING_POLICY_CREATED,
             user_id=current_identity.id,
             email=current_identity.email,
-            organization_id=organization_id,
+            organization_id=workspace.organization_id,
         )
-    if first and current_identity.email is not None:
-        await growth.record_activation(
-            background_tasks=background_tasks,
-            event=GrowthActivationEvent.FIRST_ROUTE_CONFIGURED,
-            user_id=current_identity.id,
-            email=current_identity.email,
-        )
+        # The organization's first stored policy is its first route.
+        organization_workspaces = await OrganizationService(
+            db, membership_listener=None
+        ).get_workspace_ids_in_organization(workspace.organization_id)
+        if current_identity.email is not None and await routing.stored_policy_count(organization_workspaces) == 1:
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.FIRST_ROUTE_CONFIGURED,
+                user_id=current_identity.id,
+                email=current_identity.email,
+            )
     return policy
-
-
-async def _workspace_holds_policy(db: AsyncSession, workspace_id: uuid.UUID, name: str) -> bool:
-    """Whether the workspace already stores a workspace-wide policy under this name, which a write would edit."""
-    found = await db.execute(
-        select(col(RoutingPolicy.id)).where(
-            col(RoutingPolicy.workspace_id) == workspace_id,
-            col(RoutingPolicy.name) == name,
-            col(RoutingPolicy.user_id).is_(None),
-        )
-    )
-    return found.first() is not None
-
-
-async def _organization_holds_a_policy(db: AsyncSession, organization_id: uuid.UUID) -> bool:
-    """Whether any workspace of the organization holds a stored policy."""
-    workspaces = select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
-    found = await db.execute(
-        select(col(RoutingPolicy.id)).where(col(RoutingPolicy.workspace_id).in_(workspaces)).limit(1)
-    )
-    return found.first() is not None
 
 
 @policies_router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)

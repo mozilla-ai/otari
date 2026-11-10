@@ -60,8 +60,8 @@ from gateway.api.deps import (
     BudgetServiceDep,
     CurrentIdentity,
     DeploymentUserServiceDep,
-    GrowthSignalPortDep,
     OrganizationServiceDep,
+    PersonGrowthSignalPortDep,
     get_config,
     get_db,
     verify_master_key,
@@ -270,7 +270,7 @@ async def create_own_key(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     key_format: ApiKeyFormatPortDep,
     organizations: OrganizationServiceDep,
     budgets: BudgetServiceDep,
@@ -414,14 +414,15 @@ async def create_own_key(
         raise database_error("create own key", exc) from None
     await db.refresh(db_key)
 
-    await growth.record_action(
-        background_tasks=background_tasks,
-        action=GrowthAction.API_KEY_CREATED,
-        user_id=identity.id,
-        email=identity.email,
-        organization_id=organization.id,
-    )
-    if first_key and identity.email is not None:
+    if growth is not None:
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.API_KEY_CREATED,
+            user_id=identity.id,
+            email=identity.email,
+            organization_id=organization.id,
+        )
+    if first_key and growth is not None and identity.email is not None:
         # Skipped for an identity with no address, which is the bootstrap
         # operator's normal state (`services/tenancy/provisioning_service`): the
         # port's ``email`` is what a vendor keys a person on, and there is

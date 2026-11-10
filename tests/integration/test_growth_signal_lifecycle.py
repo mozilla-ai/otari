@@ -42,6 +42,7 @@ from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.password_service import hash_password
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tenancy.organization_service import OrganizationService
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
 
@@ -424,7 +425,7 @@ def test_a_members_first_key_notifies_the_activation_and_the_second_does_not(
     assert len(growth.of("activation")) == 1, growth.calls
 
 
-def test_an_operator_with_no_address_reaches_no_milestone_and_its_key_is_an_action_without_one(
+def test_an_operator_with_no_address_notifies_nothing(
     client: TestClient,
     master_key_header: dict[str, str],
     growth: RecordingGrowthAdapter,
@@ -433,15 +434,13 @@ def test_an_operator_with_no_address_reaches_no_milestone_and_its_key_is_an_acti
 
     ``record_activation`` takes an ``email`` because that is what a vendor keys
     a person on, and the operator identity deliberately has none
-    (``services/tenancy/provisioning_service``), so no milestone fires rather
-    than inventing a stand-in. The key was still made in the organization, so
-    the action is reported with no address and the adapter decides.
+    (``services/tenancy/provisioning_service``), so this fires nothing rather
+    than inventing a stand-in. Nor is the key an action: the header master key
+    is the deployment's credential, not a person's.
     """
     response = client.post(_KEYS, json={"key_name": "operator"}, headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert growth.of("activation") == []
-    [action] = growth.of("action")
-    assert (action["action"], action["email"], action["details"]) == (GrowthAction.API_KEY_CREATED, None, None)
+    assert growth.calls == []
 
 
 # -- sign-in ----------------------------------------------------------------
@@ -634,10 +633,7 @@ def test_a_guardrail_mandated_with_the_master_key_notifies_nothing(
     )
 
     assert response.status_code == status.HTTP_201_CREATED, response.text
-    assert growth.of("activation") == []
-    assert [(action["action"], action["email"]) for action in growth.of("action")] == [
-        (GrowthAction.GUARDRAIL_CREATED, None)
-    ]
+    assert growth.calls == []
 
 
 # Every action.
@@ -827,6 +823,17 @@ def test_every_new_routing_policy_is_an_action_and_the_first_a_milestone(
     write("fast", "openai:gpt-4o")
     write("quick", "openai:gpt-4o", rename_from="fast")
     write("careful", "anthropic:claude-3-5-haiku-latest")
+    # Renaming a policy that is not stored is refused, and creates nothing.
+    missing = client.post(
+        _ROUTING_POLICIES,
+        json={
+            "name": "other",
+            "rename_from": "nothing-by-this-name",
+            "spec": {"select": [{"default": "openai:gpt-4o"}]},
+            "workspace_id": workspace_id,
+        },
+    )
+    assert missing.status_code == status.HTTP_404_NOT_FOUND, missing.text
 
     assert _actions(client, growth, admin) == [(GrowthAction.ROUTING_POLICY_CREATED, None)] * 2
     assert growth.of("activation") == [
@@ -857,6 +864,8 @@ def test_every_budget_is_an_action_and_the_first_a_milestone(
     assert second.status_code == status.HTTP_201_CREATED, second.text
     raised = client.patch(f"{_BUDGETS}/{created.json()['budget_id']}", json={"max_budget": 500.0})
     assert raised.status_code == status.HTTP_200_OK, raised.text
+    malformed = client.post(_BUDGETS, json={**body, "name": "Broken", "max_budget": "a lot"})
+    assert malformed.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, malformed.text
 
     assert _actions(client, growth, admin) == [(GrowthAction.BUDGET_CREATED, None)] * 2
     assert growth.of("activation") == [
@@ -871,3 +880,125 @@ def test_a_deployment_wide_budget_reports_nothing(
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert growth.calls == []
+
+
+def test_the_setup_guides_first_key_is_an_action_and_its_rotation_is_not(
+    client: TestClient, growth: RecordingGrowthAdapter, admin: uuid.UUID
+) -> None:
+    issue = f"{API_ROOT}/workspaces/{_workspace_of(client)}/activation/key"
+
+    first = client.post(issue)
+    assert first.status_code == status.HTTP_201_CREATED, first.text
+    rotated = client.post(issue)
+    assert rotated.status_code == status.HTTP_201_CREATED, rotated.text
+    assert rotated.json()["key_id"] == first.json()["key_id"]
+
+    assert _actions(client, growth, admin) == [(GrowthAction.API_KEY_CREATED, None)]
+
+
+def test_the_header_master_key_reports_no_action_on_any_tenant_route(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    growth: RecordingGrowthAdapter,
+    secret_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deployment's credential, not a person's, even on the routes a person uses."""
+
+    async def listed(impl_name: str, **_: object) -> ProviderDiscovery:
+        model = Model(id="a-model", object="model", created=0, owned_by=impl_name)
+        return ProviderDiscovery(provider=impl_name, models=[model], error=None)
+
+    async def reachable(_server: object) -> ServerCheck:
+        return ServerCheck(tool_names=[])
+
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", listed)
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", reachable)
+    listed_workspaces = client.get(f"{API_ROOT}/workspaces", headers=master_key_header)
+    assert listed_workspaces.status_code == status.HTTP_200_OK, listed_workspaces.text
+    workspace_id = listed_workspaces.json()["data"][0]["id"]
+
+    writes = [
+        (_INVITATIONS, {"email": "ada@example.com", "role": "member"}),
+        (f"{_INVITATIONS}/bulk", {"emails": ["grace@example.com"], "role": "member"}),
+        (_PROVIDER_KEYS, {"provider": "openai", "name": "primary", "api_key": "sk-test-1"}),
+        (_WEB_SEARCH_KEYS, {"provider": "tavily", "name": "ours", "api_key": "tvly-1"}),
+        (f"{API_ROOT}/workspaces/{workspace_id}/mcp-servers", {"name": "github", "url": "https://93.184.216.34/mcp"}),
+        (
+            _ROUTING_POLICIES,
+            {"name": "fast", "spec": {"select": [{"default": "openai:gpt-4o-mini"}]}, "workspace_id": workspace_id},
+        ),
+        (_BUDGETS, {"name": "Engineering monthly", "max_budget": 250.0, "reset_alignment": "calendar_month"}),
+        (f"{API_ROOT}/workspaces/{workspace_id}/activation/key", None),
+    ]
+    for path, body in writes:
+        response = client.post(path, json=body, headers=master_key_header)
+        assert response.status_code < status.HTTP_300_MULTIPLE_CHOICES, (path, response.text)
+
+    assert growth.calls == []
+
+
+def test_a_report_comes_after_what_the_write_does_next(
+    client: TestClient,
+    admin: uuid.UUID,
+    secret_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An adapter that raises cannot cost a write its models, its health check or its emails.
+
+    The port promises never to raise, so this is defense in depth: each report
+    is the last thing its write does.
+    """
+    done: list[str] = []
+
+    class RaisingGrowthAdapter(RecordingGrowthAdapter):
+        async def record_action(self, **kwargs: Any) -> None:
+            done.append(f"reported {kwargs['action']}")
+            raise RuntimeError("the vendor is down")
+
+    container: Any = client.app.state.container  # type: ignore[attr-defined]
+    container.bind(GrowthSignalPort, lambda session: RaisingGrowthAdapter())
+
+    async def listed(impl_name: str, **_: object) -> ProviderDiscovery:
+        done.append("models listed")
+        model = Model(id="a-model", object="model", created=0, owned_by=impl_name)
+        return ProviderDiscovery(provider=impl_name, models=[model], error=None)
+
+    async def checked(_server: object) -> ServerCheck:
+        done.append("server checked")
+        return ServerCheck(tool_names=[])
+
+    mail_invitation = OrganizationService._mail_invitation
+
+    async def mailed(self: OrganizationService, **kwargs: Any) -> Any:
+        done.append("invitation mailed")
+        return await mail_invitation(self, **kwargs)
+
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", listed)
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", checked)
+    monkeypatch.setattr(OrganizationService, "_mail_invitation", mailed)
+
+    writes = [
+        (_PROVIDER_KEYS, {"provider": "openai", "name": "primary", "api_key": "sk-test-1"}),
+        (
+            f"{API_ROOT}/workspaces/{_workspace_of(client)}/mcp-servers",
+            {"name": "github", "url": "https://93.184.216.34/mcp"},
+        ),
+        (_INVITATIONS, {"email": "ada@example.com", "role": "member"}),
+        (f"{_INVITATIONS}/bulk", {"emails": ["grace@example.com", "ida@example.com"], "role": "member"}),
+    ]
+    for path, body in writes:
+        with pytest.raises(RuntimeError, match="the vendor is down"):
+            client.post(path, json=body)
+
+    assert done == [
+        "models listed",
+        "reported provider_key_added",
+        "server checked",
+        "reported mcp_server_created",
+        "invitation mailed",
+        "reported member_invited",
+        "invitation mailed",
+        "invitation mailed",
+        "reported member_invited",
+    ]

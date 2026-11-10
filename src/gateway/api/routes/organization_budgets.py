@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import BudgetServiceDep, CurrentIdentity, GrowthSignalPortDep, verify_master_key
+from gateway.api.deps import BudgetServiceDep, CurrentIdentity, PersonGrowthSignalPortDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
@@ -56,7 +56,7 @@ async def create_organization_budget(
     service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationBudgetCreate,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> OrganizationBudgetPublic:
     """Define a budget owned by this organization. Owners and admins only."""

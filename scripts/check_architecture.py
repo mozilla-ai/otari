@@ -1586,7 +1586,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.routing.RoutingPolicy": {
-        "repository": None,
+        "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (
             "gateway/api/routes/organization_routing.py",
             "gateway/api/routes/routing.py",

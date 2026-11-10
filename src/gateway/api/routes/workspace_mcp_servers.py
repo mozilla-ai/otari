@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, GrowthSignalPortDep, WorkspaceMcpServerServiceDep, verify_master_key
+from gateway.api.deps import CurrentIdentity, PersonGrowthSignalPortDep, WorkspaceMcpServerServiceDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerAccess,
@@ -64,7 +64,7 @@ async def create_workspace_mcp_server(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceMcpServerCreate,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> WorkspaceMcpServerPublic:
     """Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.

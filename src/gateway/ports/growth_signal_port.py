@@ -126,33 +126,29 @@ class GrowthSignalPort(Protocol):
         decide whether to call this at all; an adapter may additionally
         de-duplicate on its own end, so a redundant call is safe.
 
-        Four are emitted, each from a tenant-scoped route and reported for
-        whoever made the write, once it has committed:
+        Four are emitted, each when a person in an organization does the thing
+        and reported for them once the write has committed:
 
-        - ``API_KEY_CREATED`` from ``POST /v1/organizations/me/keys``, where
-          first occurrence is the owner holding no key yet.
-        - ``FIRST_GUARDRAIL_CONFIGURED`` from
-          ``POST /v1/organizations/me/guardrails``, the organization mandating
-          none yet.
-        - ``FIRST_ROUTE_CONFIGURED`` from
-          ``POST /v1/organizations/me/routing-policies``, no workspace of the
-          organization holding a stored policy before the write.
-        - ``BUDGET_RULE_SET`` from ``POST /v1/organizations/me/budgets``, the
-          organization owning no budget before the write.
+        - ``API_KEY_CREATED`` when a member creates an API key of their own and
+          holds no key yet.
+        - ``FIRST_GUARDRAIL_CONFIGURED`` when an organization admin mandates a
+          guardrail and the organization mandated none yet.
+        - ``FIRST_ROUTE_CONFIGURED`` when an organization admin stores a routing
+          policy and none of the organization's workspaces held one yet.
+        - ``BUDGET_RULE_SET`` when an organization admin defines a budget and
+          the organization owned none yet.
 
         Each derivation is a read of current state, not a once-per-person
         guarantee: deleting every row re-arms it, and two concurrent creates can
         both read none, so an adapter that must fire once per person
         de-duplicates on its own end rather than relying on this.
 
-        Their deployment-wide twins stay silent. ``POST /v1/keys``,
-        ``POST /v1/routing/policies`` and ``POST /v1/budgets`` are gated on
-        ``require_deployment_operator``, so the milestone would name whoever
-        holds deployment-wide authority: on a multi-tenant deployment the
-        operator running it rather than any of the tenants whose activation a
-        vendor is watching, and under a header master key nobody at all, since
-        that credential resolves to the bootstrap operator, which deliberately
-        holds no address (``services/tenancy/provisioning_service``).
+        The deployment operator doing the same things deployment-wide reports
+        nothing. The milestone would name whoever holds deployment-wide
+        authority: on a multi-tenant deployment the operator running it rather
+        than any of the tenants whose activation a vendor is watching. Nor does
+        a write made with the header master key, which is the deployment's
+        credential rather than a person's.
 
         One stays uncalled, and an overlay should not expect it:
 
@@ -178,39 +174,36 @@ class GrowthSignalPort(Protocol):
     ) -> None:
         """Notify that a tenant did something in the product.
 
-        Called every time, once per thing created and after its write commits,
-        so a write that fails or is refused reports nothing, and neither does
-        an edit. Each action comes from one tenant-scoped route:
+        Called every time, once per thing created and last, after its write
+        and the side effects that follow it have happened, so a write that
+        fails or is refused reports nothing, and neither does an edit:
 
-        - ``API_KEY_CREATED`` from ``POST /v1/organizations/me/keys``.
-        - ``GUARDRAIL_CREATED`` from ``POST /v1/organizations/me/guardrails``.
-        - ``MEMBER_INVITED`` from
-          ``POST /v1/organizations/me/member-invitations`` and its ``/bulk``
-          twin, which reports one per address it invited. ``details`` carries
+        - ``API_KEY_CREATED`` when a member creates an API key, of their own or
+          from the first-request setup guide. Rotating the guide's key creates
+          none.
+        - ``GUARDRAIL_CREATED`` when an organization admin mandates a guardrail.
+        - ``MEMBER_INVITED`` when an organization admin invites someone, once
+          per address when several are invited together. ``details`` carries
           the ``role`` invited to.
-        - ``PROVIDER_KEY_ADDED`` from
-          ``POST /v1/organizations/me/provider-keys``. ``details`` carries the
-          ``provider``.
-        - ``MCP_SERVER_CREATED`` from
-          ``POST /v1/workspaces/{workspace_id}/mcp-servers``.
-        - ``WEB_SEARCH_KEY_ADDED`` from
-          ``POST /v1/organizations/me/web-search-keys``, for a search key and a
-          fetch key alike. ``details`` carries the ``provider`` and the
-          ``kind``, ``web_search`` or ``web_fetch``.
-        - ``ROUTING_POLICY_CREATED`` from
-          ``POST /v1/organizations/me/routing-policies``, when the write stores
-          a new policy rather than editing one.
-        - ``BUDGET_CREATED`` from ``POST /v1/organizations/me/budgets``.
+        - ``PROVIDER_KEY_ADDED`` when an organization admin adds a provider key.
+          ``details`` carries the ``provider``.
+        - ``MCP_SERVER_CREATED`` when a workspace or organization admin
+          registers an MCP server.
+        - ``WEB_SEARCH_KEY_ADDED`` when an organization admin adds a web search
+          or fetch key. ``details`` carries the ``provider`` and the ``kind``,
+          ``web_search`` or ``web_fetch``.
+        - ``ROUTING_POLICY_CREATED`` when an organization admin stores a new
+          routing policy, not when one is edited or renamed.
+        - ``BUDGET_CREATED`` when an organization admin defines a budget.
 
         ``details`` is categorical and nothing more: never a name, an address,
         a URL or key material, so an adapter may forward it as it stands.
-        ``email`` is ``None`` for an identity with no address, as the bootstrap
-        operator behind a header master key is. The action still happened in
-        ``organization_id``, so it is reported, and an adapter that keys on a
-        person skips it.
+        ``email`` is ``None`` for an identity with no address. The action still
+        happened in ``organization_id``, so it is reported, and an adapter that
+        keys on a person skips it.
 
-        The deployment-wide twins of these routes, gated on
-        ``require_deployment_operator``, report nothing, for the reason
+        The deployment operator acting deployment-wide, and any write made with
+        the header master key, report nothing, for the reasons
         :meth:`record_activation` gives.
         """
         ...

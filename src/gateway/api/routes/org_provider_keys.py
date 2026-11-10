@@ -19,9 +19,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from gateway.api.deps import (
     CurrentIdentity,
-    GrowthSignalPortDep,
     OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
+    PersonGrowthSignalPortDep,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -90,7 +90,7 @@ async def create_org_provider_key(
     models: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     body: OrgProviderKeyCreateRequest,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> OrgProviderKeyPublic:
     """Create a provider key in the caller's organization. Organization owners and admins only.

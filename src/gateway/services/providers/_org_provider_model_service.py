@@ -64,7 +64,7 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import User
-from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.schemas.providers import (
@@ -513,10 +513,11 @@ class OrgProviderModelService:
         endpoint, unreachable, credential refused) is already answered rather
         than raised, and a database failure is logged against the key and leaves
         an empty list the Refresh models button fills.
+
+        With ``growth``, the key is reported as ``PROVIDER_KEY_ADDED`` once both
+        steps are done.
         """
-        key = await self.provider_keys.create_key_for_user(
-            user=user, request=request, growth=growth, background_tasks=background_tasks
-        )
+        key = await self.provider_keys.create_key_for_user(user=user, request=request)
         try:
             await self.refresh_models(user=user, key_id=key.id)
         except DATABASE_ERRORS:
@@ -525,6 +526,16 @@ class OrgProviderModelService:
             # authorization or not-found error on a key this call just created
             # would be a bug worth surfacing rather than swallowing.
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
+        # Last, so nothing an adapter does can stand between the durable key and its models.
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.PROVIDER_KEY_ADDED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=key.organization_id,
+                details={"provider": key.provider},
+            )
         return key
 
     async def refresh_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:

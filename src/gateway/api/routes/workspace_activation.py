@@ -19,9 +19,14 @@ identify: the call issues a key and rotates the previous one.
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 
-from gateway.api.deps import CurrentIdentity, WorkspaceActivationServiceDep, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    PersonGrowthSignalPortDep,
+    WorkspaceActivationServiceDep,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_activation_service import (
     ActivationApiKeyPublic,
@@ -57,6 +62,8 @@ async def create_workspace_activation_key(
     service: WorkspaceActivationServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> ActivationApiKeyPublic:
     """Issue the workspace's setup API key, rotating the one the guide already issued.
 
@@ -65,7 +72,9 @@ async def create_workspace_activation_key(
     guide rotates the same key row rather than collecting a second one, and
     answers 409 once the workspace has activated or the guide was dismissed.
     """
-    return await service.issue_api_key(user=current_identity, workspace_id=workspace_id)
+    return await service.issue_api_key(
+        user=current_identity, workspace_id=workspace_id, growth=growth, background_tasks=background_tasks
+    )
 
 
 @router.post("/dismiss")

@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, GrowthSignalPortDep, WebSearchKeyServiceDep, verify_master_key
+from gateway.api.deps import CurrentIdentity, PersonGrowthSignalPortDep, WebSearchKeyServiceDep, verify_master_key
 from gateway.schemas.tools import (
     OrgWebSearchKeyCreateRequest,
     OrgWebSearchKeyPublic,
@@ -51,7 +51,7 @@ async def create_org_web_search_key(
     service: WebSearchKeyServiceDep,
     current_identity: CurrentIdentity,
     body: OrgWebSearchKeyCreateRequest,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> OrgWebSearchKeyPublic:
     """Add a search or fetch key to the caller's organization. Organization owners and admins only.

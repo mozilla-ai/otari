@@ -33,11 +33,11 @@ from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
     CurrentIdentity,
-    GrowthSignalPortDep,
     IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
     OrganizationDomainServiceDep,
+    PersonGrowthSignalPortDep,
     get_config,
     verify_master_key,
 )
@@ -396,7 +396,7 @@ async def invite_active_organization_member(
     mail_limit: InvitationMailLimitDep,
     body: InviteOrganizationMemberRequest,
     identities: IdentityServiceDep,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> InviteOrganizationMemberResultPublic:
     """Invite an address to the caller's active organization by email.
@@ -429,7 +429,7 @@ async def bulk_invite_active_organization_members(
     mail_limit: InvitationMailLimitDep,
     body: BulkInviteOrganizationMembersRequest,
     identities: IdentityServiceDep,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> BulkInviteOrganizationMembersResultPublic:
     """Invite several addresses to the caller's active organization at once.

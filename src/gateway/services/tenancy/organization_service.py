@@ -229,12 +229,13 @@ async def _report_invitations(
     *,
     user: User,
     organization: Organization,
-    roles: list[str],
+    role: str,
+    count: int,
 ) -> None:
-    """Report each committed invitation, one per address, when there is somewhere to report it."""
+    """Report ``count`` committed invitations to ``role``, one per address, when there is somewhere to report them."""
     if growth is None or background_tasks is None:
         return
-    for role in roles:
+    for _ in range(count):
         await growth.record_action(
             background_tasks=background_tasks,
             action=GrowthAction.MEMBER_INVITED,
@@ -1451,8 +1452,7 @@ class OrganizationService:
             # The Unit of Work rolled back on the way out.
             raise OrganizationMemberAlreadyExistsError(email) from None
 
-        await _report_invitations(growth, background_tasks, user=user, organization=organization, roles=[request.role])
-        return await self._mail_invitation(
+        result = await self._mail_invitation(
             mailer=Mailer(config),
             user=user,
             organization=organization,
@@ -1462,6 +1462,11 @@ class OrganizationService:
             config=config,
             mail_limit=mail_limit,
         )
+        # Last, so nothing an adapter does can stand between a committed invitation and its email.
+        await _report_invitations(
+            growth, background_tasks, user=user, organization=organization, role=request.role, count=1
+        )
+        return result
 
     async def invite_active_organization_members_for_user(
         self,
@@ -1534,13 +1539,6 @@ class OrganizationService:
                 except (TenancyConflictError, TenancyValidationError) as exc:
                     failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
 
-        await _report_invitations(
-            growth,
-            background_tasks,
-            user=user,
-            organization=organization,
-            roles=[request.role] * len(staged),
-        )
         mailer = Mailer(config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.
         limit = asyncio.Semaphore(_BULK_INVITE_MAIL_CONCURRENCY)
@@ -1561,6 +1559,9 @@ class OrganizationService:
                 )
 
         invited = await asyncio.gather(*(mail(*one) for one in staged))
+        await _report_invitations(
+            growth, background_tasks, user=user, organization=organization, role=request.role, count=len(staged)
+        )
         return BulkInviteOrganizationMembersResultPublic(invited=list(invited), failed=failed)
 
     async def _stage_invitation(
