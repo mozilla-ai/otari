@@ -4,8 +4,20 @@ Every model not ruled closed here counts as open-weight: the closed labs are few
 and change slowly, where a list of open models would trail every release.
 """
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+
+# A Bedrock-style id names its vendor, and sometimes a region, before the model:
+# ``anthropic.claude-sonnet-4``, ``us.anthropic.claude-sonnet-4``. A dot followed
+# by a digit is a version (``glm-4.6``, ``gpt-4.1``), not a vendor prefix.
+_VENDOR_PREFIX = re.compile(r"^(?:[a-z]{2,4}\.)?[a-z][a-z0-9-]*\.(?=[a-z])")
+
+
+def _model_name(model: str) -> str:
+    """The model's own name: after any path (``openrouter``'s ``anthropic/``) and any vendor prefix."""
+    name = model.rsplit("/", 1)[-1].lower()
+    return _VENDOR_PREFIX.sub("", name)
 
 
 def _is_family(name: str, family: str) -> bool:
@@ -43,7 +55,7 @@ class ClosedModels:
         serves it (``openrouter``'s ``anthropic/claude-sonnet-4``): an open family
         is open even on a closed provider, and a closed family closed anywhere.
         """
-        name = model.rsplit("/", 1)[-1].lower()
+        name = _model_name(model)
         if any(_is_family(name, family) for family in self.open_families):
             return False
         return provider.lower() in self.providers or any(_is_family(name, family) for family in self.closed_families)

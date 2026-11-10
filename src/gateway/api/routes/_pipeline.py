@@ -2059,6 +2059,10 @@ def _hosted_candidate(
             await _hold_organization_slot(ctx, charge)
         except HTTPException as exc:
             raise CandidateCannotServe(exc) from exc
+        except asyncio.CancelledError:
+            # A client that disconnects while waiting for a slot; nothing was dispatched.
+            await release_reservation(ctx)
+            raise
         ctx.deployment_charge = charge
         return hosted
 

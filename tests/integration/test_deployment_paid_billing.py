@@ -407,6 +407,29 @@ def test_a_completion_canceled_while_waiting_for_a_slot_gives_its_reservation_ba
     assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
+def test_a_failover_canceled_while_waiting_for_a_slot_gives_its_reservation_back(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+
+    waits: list[Any] = []
+
+    async def canceled(ctx: Any, charge: Any) -> None:
+        waits.append(charge)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pipeline, "_hold_organization_slot", canceled)
+
+    with pytest.raises(BaseException):  # noqa: B017, PT011 - however the test client surfaces the cancellation
+        _routed(client, key, "fleet_second", failing="anthropic:claude-opus-4")
+
+    assert len(waits) == 1
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
 def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:

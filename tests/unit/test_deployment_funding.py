@@ -285,6 +285,10 @@ async def test_a_gateway_tools_admission_bills_no_model_and_names_its_tools() ->
         ("openrouter", "anthropic/claude-sonnet-4", False),
         ("openrouter", "x-ai/grok-4", False),
         ("deepinfra", "google/gemini-2.5-flash", False),
+        ("bedrock", "anthropic.claude-sonnet-4-v1:0", False),
+        ("bedrock", "us.anthropic.claude-sonnet-4-v1:0", False),
+        ("bedrock", "meta.llama3-70b-instruct-v1:0", True),
+        ("zai", "glm-4.6", True),
     ],
 )
 def test_a_model_is_open_weight_unless_it_is_closed(
