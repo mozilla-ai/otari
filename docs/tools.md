@@ -801,10 +801,11 @@ its own side:
   and may not be `localhost` or a non-public IP address in any of its forms.
 - Other hostnames are the provider's to resolve; Otari does not check where
   they lead, as the built-in fetcher does.
-- DeepSeek, Exa and Tabstack answer with the URL as asked even after a redirect
-  (`reports_final_url` is false in the provider catalog), so a redirect they
-  follow escapes the domain policy. Where a workspace's domain lists must hold
-  on every hop, keep the fetch tool, and enrichment, on `builtin_fetch`.
+- DeepSeek, Exa, Tabstack and You.com answer with the URL as asked even after
+  a redirect (`reports_final_url` is false in the provider catalog), so a
+  redirect they follow escapes the domain policy. Where a workspace's domain
+  lists must hold on every hop, keep the fetch tool, and enrichment, on
+  `builtin_fetch`.
 - When enriching a search's results, the same checks apply under the search's
   own domain rules.
 - A provider's failure reaches the model as
@@ -838,6 +839,23 @@ Each provider's limits are in the
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
   Tabstack documents up to 15 seconds a page at its default `effort` and up to
   60 at `effort: max`, so give the instance a `timeout` to match.
+- **You.com** (`youdotcom`) needs an API key, read from the instance's
+  `api_key`, such as `${YDC_API_KEY}`, the key a You.com search tool takes too.
+  Name the instance apart from a You.com search tool, such as `youdotcom-fetch`,
+  since names are unique across `search_tools` and `fetch_tools`. It reports no
+  cost, so a fetch is billed at the instance's own rate (its `price_per_call`, or
+  a `fetch` price set on the dashboard's Web search page or through the API).
+  You.com's [pricing](https://ydc-preview-extract-official-launch-docs.docs.buildwithfern.com/docs/administration/billing#extract-api), read
+  2026-11-10, is $0.90 per 1,000 URLs. Its `parse_effort` is the cost tier:
+  `lite`, which Otari sends unless the instance's `options` say otherwise, adds
+  nothing, while `standard` adds $0.50 per 1,000 PDF pages, so a 350-page PDF
+  costs $0.0009 under `lite` and $0.1759 under `standard`. Only the instance's
+  configuration sets it, since You.com reports no cost; price an instance set to
+  `standard` for the PDFs it will read. You.com may spend up to 30 seconds on a
+  page unless the instance's `options` set its `timeout` (2 to 100), so give the
+  instance a `timeout` above that. A page You.com cannot extract, such as a
+  zero-byte file or a private address, fails the fetch, and a site's error page
+  comes back as its text.
 
 ### Web search
 

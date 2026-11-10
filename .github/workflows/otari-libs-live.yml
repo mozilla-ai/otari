@@ -101,12 +101,12 @@ jobs:
 
     - name: Say so when the You.com key is absent
       if: env.HAS_YDC_KEY != 'true' && github.event_name == 'pull_request'
-      run: echo "::notice::The YDC_API_KEY secret is not available to this run; the You.com live tests skip."
+      run: echo "::notice::The YDC_API_KEY secret is not available to this run; the You.com live searches and fetches skip."
 
     - name: Fail a scheduled or manual run without the You.com key
       if: env.HAS_YDC_KEY != 'true' && github.event_name != 'pull_request'
       run: |
-        echo "::error::The YDC_API_KEY secret is not set, so the You.com live tests cannot run."
+        echo "::error::The YDC_API_KEY secret is not set, so the You.com live searches and fetches cannot run."
         exit 1
 
     - name: Say so when the Tabstack key is absent
@@ -178,4 +178,5 @@ jobs:
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         TABSTACK_API_KEY: ${{ secrets.TABSTACK_API_KEY }}
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        YDC_API_KEY: ${{ secrets.YDC_API_KEY }}
       run: uv run pytest -v -rs any-fetch/tests/test_live.py

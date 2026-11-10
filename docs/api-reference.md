@@ -859,7 +859,7 @@ for the tool's name or `*`, as a search does
 **Which URLs.** The workspace's web-access policy applies in full: its switch, and
 its allowed and blocked domain lists, which bind the URL asked for and, on the
 built-in fetcher, every redirect. A provider tool is held to the URL it reports
-finding the page at; DeepSeek, Exa and Tabstack report none, so a redirect they
+finding the page at; DeepSeek, Exa, Tabstack and You.com report none, so a redirect they
 follow escapes the lists (see [Fetch providers](tools.md#fetch-providers)).
 Whatever the lists say, a URL that names a private, loopback or link-local
 address is refused. The built-in fetcher also refuses a host that resolves to
