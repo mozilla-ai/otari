@@ -8,11 +8,11 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.services.mcp_catalog import (
+from gateway.services.mcp_catalog import _registry
+from gateway.services.mcp_catalog._registry import (
     REGISTRY_URL,
     RegistryClient,
     RegistryError,
-    _registry,
     entry_from_registry_item,
     fallback_title,
 )
