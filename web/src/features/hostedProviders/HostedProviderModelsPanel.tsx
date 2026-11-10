@@ -38,8 +38,9 @@ import { refreshOutcome } from "./refreshOutcome"
 // marks a model the gateway switched off because its provider refused to serve it.
 
 /**
- * Where a model's rate comes from. A default on an `otari` provider is the
- * vendor's own public rate, which the Otari behind it may not charge, so it is
+ * Where a model's rate comes from. `provider` is the price the provider's own
+ * listing named, as another Otari's does. A default on an `otari` provider is
+ * the vendor's public rate, which the Otari behind it may not charge, so it is
  * named an estimate.
  */
 function PriceSourceBadge({
@@ -50,6 +51,7 @@ function PriceSourceBadge({
   isEstimate: boolean
 }) {
   if (source === "deployment") return <Badge tone="muted">Custom</Badge>
+  if (source === "provider") return <Badge tone="muted">Listed</Badge>
   if (source === "defaults") {
     return <Badge tone="muted">{isEstimate ? "Estimate" : "Default"}</Badge>
   }

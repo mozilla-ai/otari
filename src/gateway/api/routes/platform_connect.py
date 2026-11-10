@@ -8,6 +8,7 @@ Gated as the hosted-providers surface is, on the router: the result is one of
 the deployment's own credentials. No route returns the device code or the key.
 """
 
+import socket
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -36,9 +37,22 @@ _FALLBACK_GATEWAY_NAME = "Otari gateway"
 
 
 def _gateway_name(request: Request, config: GatewayConfig) -> str:
-    """What otari.ai shows the operator this gateway as: the host it is reached at."""
-    host = urlsplit(config.public_base_url or "").hostname or request.url.hostname
-    return host or _FALLBACK_GATEWAY_NAME
+    """What otari.ai shows the operator this gateway as, on its approval page and on the key.
+
+    The host of ``public_base_url`` where the deployment has one, else the
+    machine's own name, which a person recognizes where ``127.0.0.1`` says
+    nothing, else the address the request came in on.
+    """
+    configured = urlsplit(config.public_base_url or "").hostname
+    if configured:
+        return configured
+    machine = socket.gethostname().strip()
+    if machine and machine != "localhost":
+        return machine
+    host, port = request.url.hostname, request.url.port
+    if not host:
+        return _FALLBACK_GATEWAY_NAME
+    return host if port in (None, 80, 443) else f"{host}:{port}"
 
 
 @router.post(

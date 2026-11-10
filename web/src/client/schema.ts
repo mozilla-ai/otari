@@ -13014,9 +13014,10 @@ export interface components {
          * @description One offered model, with the price the deployment currently serves it at.
          *
          *     ``price_source`` says which rung of the deployment's ladder answered:
-         *     ``deployment`` for a rate an operator set, ``defaults`` for the
-         *     community-maintained rate, whether this surface stored it or the fallback
-         *     supplies it, and None when nothing prices the model yet. ``unit`` says what
+         *     ``deployment`` for a rate an operator set, ``provider`` for the rate the
+         *     provider's own listing named, ``defaults`` for the community-maintained
+         *     rate, whether this surface stored it or the fallback supplies it, and None
+         *     when nothing prices the model yet. ``unit`` says what
          *     the rates are per, so a per-request rate is not read as a per-token one.
          *     ``enabled`` is the serving switch; a model offered without a discoverable
          *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
@@ -13050,7 +13051,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Price Source */
-            price_source?: ("organization" | "deployment" | "defaults") | null;
+            price_source?: ("organization" | "deployment" | "defaults" | "provider") | null;
             /** Provider */
             provider: string;
             /** Type */

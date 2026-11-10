@@ -1,7 +1,7 @@
 """An ``otari-ai`` hosted provider, as a connection stores it, served directly and as a fallback candidate.
 
-Its model ids carry the vendor (``openai:gpt-4o``), so the selector has two
-colons, and its models are priced from the vendor's models.dev entry.
+Its model ids carry the vendor (``openai/gpt-4o``), and a model its listing
+does not price is priced from the vendor's models.dev entry.
 """
 
 from collections.abc import Generator
@@ -24,7 +24,7 @@ from .conftest import build_test_client
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 PLATFORM_KEY = "tk-platform-1234"
 PLATFORM_BASE = "https://api.platform.test"
-SELECTOR = "otari-ai:openai:gpt-4o"
+SELECTOR = "otari-ai:openai/gpt-4o"
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def client(postgres_url: str, clean_database: None, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     async def _listing(impl_name: str, **_: object) -> ProviderDiscovery:
-        models = [Model(id=name, object="model", created=0, owned_by=impl_name) for name in ("openai:gpt-4o", "x:y")]
+        models = [Model(id=name, object="model", created=0, owned_by=impl_name) for name in ("openai/gpt-4o", "x/y")]
         return ProviderDiscovery(provider=impl_name, models=models)
 
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _listing)
@@ -83,13 +83,13 @@ def test_a_vendor_prefixed_model_is_priced_from_the_vendor_and_switched_on(clien
     models = client.get(f"{API_ROOT}/hosted-providers/otari-ai/models", headers=HEADERS).json()["data"]
     by_name = {model["model"]: model for model in models}
 
-    priced = by_name["openai:gpt-4o"]
+    priced = by_name["openai/gpt-4o"]
     assert priced["enabled"] is True
     assert priced["price_source"] == "defaults"
     assert priced["input_price_per_million"] == 2.5
     # A vendor models.dev does not know stays off until it is priced.
-    assert by_name["x:y"]["enabled"] is False
-    assert by_name["x:y"]["disabled_reason"] == "unpriced"
+    assert by_name["x/y"]["enabled"] is False
+    assert by_name["x/y"]["disabled_reason"] == "unpriced"
 
 
 def test_a_fallback_candidate_dispatches_as_the_direct_request_does(client: TestClient) -> None:
@@ -98,7 +98,7 @@ def test_a_fallback_candidate_dispatches_as_the_direct_request_does(client: Test
     assert direct.await_args is not None
     expected = direct.await_args.kwargs
     assert (expected["model"], expected["api_key"], expected["api_base"]) == (
-        "otari:openai:gpt-4o",
+        "otari:openai/gpt-4o",
         PLATFORM_KEY,
         PLATFORM_BASE,
     )

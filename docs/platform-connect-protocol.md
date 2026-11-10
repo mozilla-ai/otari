@@ -42,7 +42,7 @@ Request body:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `gateway_name` | string, at most 100 characters | What the approval page calls this gateway. The gateway sends the host it is reached at. |
+| `gateway_name` | string, at most 100 characters | What the approval page and the key call this gateway. The gateway sends the host of its `public_base_url`, or its machine's hostname where that is not set. |
 
 `200` response:
 
@@ -138,6 +138,20 @@ reads an `interval` below 1 as 1 and one above 60 as 60, and counts an
 - `api_base` with a trailing `/api/v1` or `/v1` removed, as that provider's
   endpoint: the client the gateway dispatches with takes the origin and appends
   the API root itself.
+
+## The model listing
+
+After the key is issued, the gateway reads the platform's model listing
+(`GET {api_base}/models`) with it, as it does for any provider:
+
+- Each `id` is offered as the platform spells it (`openai/gpt-4o-mini`), and a
+  request to the gateway names it `otari-ai:openai/gpt-4o-mini`.
+- A model's `pricing` block (`input_price_per_million`,
+  `output_price_per_million`, and the optional `cache_read_price_per_million`,
+  `cache_write_price_per_million`, `pricing_tiers` and `unit`) is stored as the
+  model's rate on the gateway. A model whose block is null, or lacks a numeric
+  input or output rate, is priced from its vendor's public rate as an estimate,
+  the vendor being the part of the `id` before the first `/`.
 
 ## What the platform may rely on
 

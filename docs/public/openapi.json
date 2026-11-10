@@ -10567,7 +10567,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -10653,7 +10653,8 @@
                 "enum": [
                   "organization",
                   "deployment",
-                  "defaults"
+                  "defaults",
+                  "provider"
                 ],
                 "type": "string"
               },
