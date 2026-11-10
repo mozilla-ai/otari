@@ -729,15 +729,14 @@ async def catalog_scope(
     # Only on a deployment that hosts something: one that hosts nothing keeps
     # listing its whole price list, as it always has.
     withhold_unserved = include_offered and bool(deployment_hosts)
+    default_workspace_id = await lookup_default_workspace_id(db) if is_master_key and include_offered else None
     if (hosted_models or withhold_unserved) and include_offered:
-        dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
+        dispatch_workspace_id = default_workspace_id if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
     deployment_key_models = _without(hosted_models, byo_providers)
-    if is_master_key and include_offered:
-        # Its offered keys are the default workspace's organization's.
-        default_workspace_id = await lookup_default_workspace_id(db)
-        if default_workspace_id is not None:
-            organization_id = await organization_for_workspace_id(db, default_workspace_id)
+    if default_workspace_id is not None:
+        # The master key's offered keys are the default workspace's organization's.
+        organization_id = await organization_for_workspace_id(db, default_workspace_id)
     return CatalogScope(
         organization_id=organization_id if include_offered else None,
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),

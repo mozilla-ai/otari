@@ -14,6 +14,8 @@ A write reaches its own worker at once and every other worker within
 
 import asyncio
 import dataclasses
+import itertools
+import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -33,6 +35,15 @@ SERVED_MODEL_REFRESH_SECONDS = 60.0
 # SGLang's own description of the server, newest path first.
 _MODEL_INFO_PATHS = ("/model_info", "/get_model_info")
 _MODEL_INFO_TIMEOUT_SECONDS = 5.0
+
+# Bounds on what a server may make Otari keep. An organization's key points at a
+# server its tenant runs, so its answer is untrusted: a few kilobytes describe a
+# real server, and an engine serves a handful of models.
+_MAX_MODEL_INFO_BYTES = 64 * 1024
+_MAX_MODELS_PER_LISTING = 1000
+# The ``served_models`` column widths.
+_MAX_MODEL_CHARS = 512
+_MAX_PARSER_CHARS = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,18 +100,21 @@ def _positive_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
+def _text(value: object, limit: int) -> str | None:
+    """A non-empty string that fits its column, else ``None``."""
+    return value if isinstance(value, str) and 0 < len(value) <= limit else None
 
 
 def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedFacts | None:
     """What a vLLM or SGLang listing entry says about its model, or ``None`` for any other listing."""
     engine = _engine(model)
-    if engine is None:
+    if engine is None or len(model.id) > _MAX_MODEL_CHARS:
         return None
     extra = model.model_extra or {}
     facts = ServedFacts(
-        engine=engine, context_window=_positive_int(extra.get("max_model_len")), root=_text(extra.get("root"))
+        engine=engine,
+        context_window=_positive_int(extra.get("max_model_len")),
+        root=_text(extra.get("root"), _MAX_MODEL_CHARS),
     )
     if engine != "sglang" or settings is None:
         return facts
@@ -122,10 +136,22 @@ def _settings_from(info: Mapping[str, Any]) -> EngineSettings:
         if info.get("has_audio_understanding") is True:
             modalities += ("audio",)
     return EngineSettings(
-        reasoning_parser=_text(info.get("reasoning_parser")),
-        tool_call_parser=_text(info.get("tool_call_parser")),
+        reasoning_parser=_text(info.get("reasoning_parser"), _MAX_PARSER_CHARS),
+        tool_call_parser=_text(info.get("tool_call_parser"), _MAX_PARSER_CHARS),
         input_modalities=modalities,
     )
+
+
+async def _bounded_body(response: httpx.Response) -> bytes | None:
+    """The response body, or ``None`` once it passes ``_MAX_MODEL_INFO_BYTES``."""
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in response.aiter_bytes():
+        size += len(chunk)
+        if size > _MAX_MODEL_INFO_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _server_root(api_base: str) -> str:
@@ -140,7 +166,8 @@ async def read_engine_settings(
     """Ask the SGLang server behind ``models`` how it was started, or ``None`` when it is not one or will not say.
 
     Called only after the listing from the same ``api_base`` succeeded, so the
-    address has passed the same checks. Redirects are not followed.
+    address has passed the same checks. Redirects are not followed, and a body
+    over ``_MAX_MODEL_INFO_BYTES`` is not read.
     """
     if not api_base or not any(_engine(model) == "sglang" for model in models):
         return None
@@ -149,11 +176,12 @@ async def read_engine_settings(
     try:
         async with httpx.AsyncClient(timeout=_MODEL_INFO_TIMEOUT_SECONDS, follow_redirects=False) as client:
             for path in _MODEL_INFO_PATHS:
-                response = await client.get(root + path, headers=headers)
-                if response.status_code == httpx.codes.NOT_FOUND:
-                    continue
-                response.raise_for_status()
-                info = response.json()
+                async with client.stream("GET", root + path, headers=headers) as response:
+                    if response.status_code == httpx.codes.NOT_FOUND:
+                        continue
+                    response.raise_for_status()
+                    body = await _bounded_body(response)
+                info = json.loads(body) if body is not None else None
                 return _settings_from(info) if isinstance(info, dict) else None
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("Could not read the SGLang server's model info (%s)", type(exc).__name__)
@@ -201,7 +229,12 @@ async def record_served_models(
     logged: the worker keeps the answer, and the next listing that differs from
     the stored one tries again.
     """
-    facts = {model.id: found for model in models if (found := facts_from_listing(model, settings)) is not None}
+    facts = dict(
+        itertools.islice(
+            ((model.id, found) for model in models if (found := facts_from_listing(model, settings)) is not None),
+            _MAX_MODELS_PER_LISTING,
+        )
+    )
     held = (owner.organization_id if owner else None, provider)
     if _served.get(held, {}) == facts or (not facts and not any(model.model_extra for model in models)):
         return

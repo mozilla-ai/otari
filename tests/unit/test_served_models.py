@@ -178,6 +178,15 @@ async def test_a_server_that_will_not_say_reports_nothing(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
+async def test_an_oversized_model_info_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An organization's key points at a server its tenant runs, so its answer is bounded."""
+    padding = "x" * (_served._MAX_MODEL_INFO_BYTES + 1)
+    _route_http(monkeypatch, lambda _request: httpx.Response(200, json={"tool_call_parser": "qwen25", "pad": padding}))
+
+    assert await read_engine_settings([_sglang(root="r")], api_base="http://box/v1", api_key=None) is None
+
+
+@pytest.mark.asyncio
 async def test_only_an_sglang_server_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         raise AssertionError("asked a server that is not SGLang")
@@ -377,3 +386,18 @@ async def test_an_organization_key_listing_is_kept_apart_from_the_deployment(wri
     assert served_facts("byo", "cairn-qwen") == ServedFacts(engine="vllm", context_window=1, root="r")
     assert served_facts("byo", "cairn-qwen", ACME) == ServedFacts(engine="vllm", context_window=2, root="r")
     assert len(writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_listing_keeps_a_bounded_number_of_models(writes: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_served, "_MAX_MODELS_PER_LISTING", 2)
+
+    await record_served_models("cairn", [_vllm(f"m{index}", max_model_len=1) for index in range(5)], None)
+
+    assert [served_facts("cairn", f"m{index}") is not None for index in range(5)] == [True, True, False, False, False]
+
+
+def test_values_too_long_to_store_are_dropped() -> None:
+    assert facts_from_listing(_vllm("m" * 513, max_model_len=1), None) is None
+    facts = facts_from_listing(_vllm(max_model_len=1, root="r" * 513), None)
+    assert facts is not None and facts.root is None
