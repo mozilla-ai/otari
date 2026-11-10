@@ -1,9 +1,10 @@
 import type { TraceSpan } from "@/client"
 import { docsSourceHref } from "@/shared/helpers/docs"
+import { formatNumber } from "@/shared/helpers/format"
 
 import { CONTENT_PRIVATE } from "./exceptionalAccess"
 import { formatDuration } from "./format"
-import { type GuardrailVerdict, gateVerdict } from "./gateway"
+import { type GuardrailVerdict, gateVerdict, mcpServer } from "./gateway"
 import { clip, clipPath } from "./traceModel"
 
 // What a span means, in a sentence and a few facts, for the panel a picked span
@@ -81,7 +82,7 @@ export function noInput(span: TraceSpan): NoInput {
   if (sentence) return { sentence, docsHref: KEEPING_CONTENT }
   if (span.kind === "llm")
     return {
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     }
   if (span.kind === "step")
     return {
@@ -119,12 +120,20 @@ const STOPPED_BECAUSE: Record<string, string> = {
   refusal: "It refused",
 }
 
+// How long the span's row says it ran: between its two timestamps, which is
+// how the rows measure, so the sentence and the row never differ by the
+// millisecond that rounding its stated duration can add. A span missing a
+// timestamp has only the duration it states.
 function took(span: TraceSpan): string | null {
-  return span.duration_ms === null ? null : formatDuration(span.duration_ms)
+  const ms =
+    span.start_time && span.end_time
+      ? Math.max(0, Date.parse(span.end_time) - Date.parse(span.start_time))
+      : span.duration_ms
+  return ms === null ? null : formatDuration(ms)
 }
 
 function count(value: unknown): string | null {
-  return typeof value === "number" ? value.toLocaleString("en-US") : null
+  return typeof value === "number" ? formatNumber(value) : null
 }
 
 function facts(
@@ -168,11 +177,6 @@ function permission(span: TraceSpan, tool: TraceSpan | undefined): Explanation {
       [source === "user" ? "The user took" : "Took", after],
     ),
   }
-}
-
-function mcpServer(span: TraceSpan): string | null {
-  const server = span.attributes["otari.mcp.server"]
-  return typeof server === "string" ? server : null
 }
 
 // A returned error is a result the agent read, so the call still ran rather than failed.
