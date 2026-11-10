@@ -1,11 +1,13 @@
 """The MCP server catalog: searching it, an organization's featured shelf, and the sync that fills it."""
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.mcp_catalog_exceptions import (
     McpCatalogFeaturedLimitReachedError,
@@ -13,6 +15,7 @@ from gateway.exceptions.mcp_catalog_exceptions import (
     McpCatalogServerNotFoundError,
     McpCatalogSyncDisabledError,
 )
+from gateway.log_config import logger
 from gateway.models.mcp_catalog import (
     OUTCOME_COMPLETE,
     OUTCOME_FAILED,
@@ -66,6 +69,10 @@ class OrganizationAccess(Protocol):
 
 class _SyncStopped(Exception):
     """A sync reached one of its own bounds before the registry's last page."""
+
+
+class _SyncTakenOver(Exception):
+    """Another replica claimed the sync this run was carrying out, having taken it for dead."""
 
 
 def _server_public(row: McpCatalogServer) -> McpCatalogServerPublic:
@@ -169,7 +176,13 @@ class McpCatalogService:
             else:
                 if await self._featured.count_for_organization(organization_id) >= MAX_FEATURED_PER_ORGANIZATION:
                     raise McpCatalogFeaturedLimitReachedError(MAX_FEATURED_PER_ORGANIZATION)
+                # None when a concurrent request featured the same server first; that entry takes the copy.
                 row = await self._featured.add(organization_id, server.name, copy)
+                if row is None:
+                    existing = await self._featured.get_by_name(organization_id, server.name)
+                    if existing is None:
+                        raise McpCatalogServerNotFoundError(request.server_id)
+                    row = await self._featured.update(existing, copy)
             return _featured_public(row, (server.id, server.url))
 
     async def unfeature(self, *, user: User, featured_id: uuid.UUID) -> None:
@@ -207,7 +220,8 @@ class McpCatalogService:
         return McpCatalogSyncStatus(
             mode=mode,
             running=running,
-            requested=state.sync_requested,
+            # Nothing will start it while the sync is off, so it is not reported as on its way.
+            requested=state.sync_requested and mode != "off",
             outcome=state.outcome,  # type: ignore[arg-type]  # only _finish writes it, from the three constants
             error=state.error,
             started_at=state.crawl_started_at,
@@ -257,6 +271,7 @@ class McpCatalogService:
             state = await self._state.update(state, {"removed": 0, "error": None})
             crawl_started_at, cursor, pages = state.crawl_started_at or now, state.cursor, state.pages
 
+        beat = now
         stored_a_page = False
         try:
             while True:
@@ -273,7 +288,8 @@ class McpCatalogService:
                         entries[entry.name] = entry
                 cursor, pages = page.next_cursor, pages + 1
                 async with self._uow:
-                    await self._servers.upsert(list(entries.values()), seen_at=crawl_started_at)
+                    next_beat = await self._hold(beat)
+                    refused = await self._servers.upsert(list(entries.values()), seen_at=crawl_started_at)
                     state = await self._state.get_or_create()
                     await self._state.update(
                         state,
@@ -281,42 +297,90 @@ class McpCatalogService:
                             "cursor": cursor,
                             "pages": pages,
                             "fetched": state.fetched + len(page.items),
-                            "kept": state.kept + len(entries),
-                            "heartbeat_at": self._clock(),
+                            "kept": state.kept + len(entries) - refused,
                         },
                     )
+                beat = next_beat
                 stored_a_page = True
+                if refused:
+                    logger.warning("MCP catalog sync left out %s entries the database refused", refused)
                 if cursor is None:
                     break
+        except _SyncTakenOver:
+            return None
         except (RegistryError, _SyncStopped) as exc:
             # A resumed sync that stored nothing may be holding a cursor the registry no longer takes.
-            return await self._finish(error=str(exc), start_over=resumed and not stored_a_page)
-        return await self._finish(remove_unseen_before=crawl_started_at)
+            return await self._finish(beat, error=str(exc), start_over=resumed and not stored_a_page)
+        except DATABASE_ERRORS as exc:
+            logger.warning("MCP catalog sync could not store a page: %s", describe_database_error(exc))
+            return await self._finish(beat, error="a page could not be stored in the database")
+        except asyncio.CancelledError:
+            # Shutdown. Left as running, the row would hold the next sync back until its heartbeat went stale.
+            # The write is shielded from the cancellation, and a database already closing is not worth an error.
+            try:
+                await asyncio.shield(self._finish(beat, error="the gateway stopped before the sync finished"))
+            except DATABASE_ERRORS:
+                pass
+            raise
+        return await self._finish(beat, remove_unseen_before=crawl_started_at)
+
+    async def _hold(self, beat: datetime) -> datetime:
+        """Move the running sync's heartbeat on from ``beat``, proving this run still owns it.
+
+        Called inside the block that stores a page. A run another replica took over
+        finds its heartbeat gone and stops, without touching what the new run wrote.
+        """
+        now = self._clock()
+        if not await self._state.hold(beat, now):
+            raise _SyncTakenOver
+        return now
 
     async def _finish(
-        self, *, error: str | None = None, start_over: bool = False, remove_unseen_before: datetime | None = None
-    ) -> McpCatalogSyncStatus:
+        self,
+        beat: datetime,
+        *,
+        error: str | None = None,
+        start_over: bool = False,
+        remove_unseen_before: datetime | None = None,
+    ) -> McpCatalogSyncStatus | None:
+        """End the run that last beat at ``beat``. None when another replica has taken the sync over."""
         finished = self._clock()
-        async with self._uow:
-            state = await self._state.get_or_create()
-            changes: dict[str, object] = {"running": False, "finished_at": finished}
-            if error is None and remove_unseen_before is not None and state.kept:
-                changes |= {
-                    "outcome": OUTCOME_COMPLETE,
-                    "cursor": None,
-                    "last_completed_at": finished,
-                    "removed": await self._servers.delete_unseen(remove_unseen_before),
-                }
-            else:
-                # Every server leaving the registry at once is far less likely than a registry answering oddly,
-                # so a crawl that kept nothing removes nothing.
-                error = error or "the registry listed no server Otari can connect to; the catalog was left as it was"
-                changes |= {
-                    "outcome": OUTCOME_PARTIAL if state.pages and remove_unseen_before is None else OUTCOME_FAILED,
-                    "error": error[:_MAX_ERROR_LENGTH],
-                }
-                if start_over or remove_unseen_before is not None:
+        try:
+            async with self._uow:
+                await self._hold(beat)
+                state = await self._state.get_or_create()
+                changes: dict[str, object] = {"running": False, "finished_at": finished}
+                reached_the_end = error is None and remove_unseen_before is not None
+                if reached_the_end and not state.kept:
+                    # Every server leaving the registry at once is far less likely than a registry answering
+                    # oddly, so a crawl that kept nothing removes nothing.
+                    outcome = OUTCOME_FAILED
+                    error = "the registry listed no server Otari can connect to; the catalog was left as it was"
+                elif remove_unseen_before is not None and reached_the_end:
+                    total = await self._servers.count()
+                    unseen = await self._servers.count_unseen(remove_unseen_before)
+                    if unseen * 2 > total:
+                        # The same reasoning, one step down: a registry that lost most of its servers overnight
+                        # is more likely cut short than emptied.
+                        outcome = OUTCOME_PARTIAL
+                        error = (
+                            f"the registry listed {total - unseen} of the {total} servers in the catalog, "
+                            "too few to trust; nothing was removed"
+                        )
+                    else:
+                        outcome = OUTCOME_COMPLETE
+                        changes |= {
+                            "last_completed_at": finished,
+                            "removed": await self._servers.delete_unseen(remove_unseen_before),
+                        }
+                else:
+                    outcome = OUTCOME_PARTIAL if state.pages else OUTCOME_FAILED
+                changes["outcome"] = outcome
+                changes["error"] = error[:_MAX_ERROR_LENGTH] if error else None
+                if reached_the_end or start_over:
                     changes["cursor"] = None
-                if state.next_sync_at is not None:
+                if outcome != OUTCOME_COMPLETE and state.next_sync_at is not None:
                     changes["next_sync_at"] = min(state.next_sync_at, finished + RETRY_AFTER)
-            return await self._status(await self._state.update(state, changes))
+                return await self._status(await self._state.update(state, changes))
+        except _SyncTakenOver:
+            return None

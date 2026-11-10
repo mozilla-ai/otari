@@ -1,5 +1,6 @@
 """Reading the MCP Registry: which entries the catalog keeps, and how one page is fetched."""
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,10 @@ def test_the_recorded_pages_keep_only_what_otari_can_connect_to() -> None:
         {"remotes": [{"type": "streamable-http", "url": "https://localhost/mcp"}]},
         {"remotes": [{"type": "streamable-http", "url": "https://intranet/mcp"}]},
         {"remotes": [{"type": "streamable-http", "url": "https://user:secret@mcp.example.com/mcp"}]},
+        {"remotes": [{"type": "streamable-http", "url": "https://127.1/mcp"}]},
+        {"remotes": [{"type": "streamable-http", "url": "https://mcp.example.com/m cp"}]},
+        {"remotes": [{"type": "streamable-http", "url": "https://mcp.example.com/\x00mcp"}]},
+        {"remotes": [{"type": "streamable-http", "url": "https://mcp.example.com/\ud83d"}]},
         {"remotes": [{"type": "streamable-http", "url": "https://mcp.example.com/" + "a" * 2048}]},
         {
             "remotes": [
@@ -106,6 +111,10 @@ def test_the_recorded_pages_keep_only_what_otari_can_connect_to() -> None:
         "localhost",
         "single label host",
         "credentials in url",
+        "address in short form",
+        "space in url",
+        "nul in url",
+        "lone surrogate in url",
         "url too long",
         "a required header Otari cannot send",
     ],
@@ -119,7 +128,19 @@ def test_a_server_the_registry_retired_is_left_out(status: str) -> None:
     assert entry_from_registry_item(_item(status=status)) is None
 
 
-@pytest.mark.parametrize("item", [None, "text", {}, {"server": []}, {"server": {"name": ""}}, {"server": {"name": 7}}])
+@pytest.mark.parametrize(
+    "item",
+    [
+        None,
+        "text",
+        {},
+        {"server": []},
+        {"server": {"name": ""}},
+        {"server": {"name": 7}},
+        {"server": {"name": "com.example/\ud83d", "remotes": [{"type": "streamable-http", "url": "https://x.io/"}]}},
+        {"server": {"name": "com.example/a b", "remotes": [{"type": "streamable-http", "url": "https://x.io/"}]}},
+    ],
+)
 def test_a_malformed_item_is_left_out(item: object) -> None:
     assert entry_from_registry_item(item) is None
 
@@ -151,6 +172,15 @@ def test_text_from_the_registry_is_stored_as_one_bounded_line() -> None:
     assert entry.description == "line one line two"
     # A website that is not https is dropped, and the server is kept.
     assert entry.website_url is None
+
+
+def test_text_no_database_can_store_is_dropped_and_the_server_kept() -> None:
+    # json.loads accepts a lone surrogate, SQLite refuses to encode one, and PostgreSQL refuses a NUL.
+    entry = entry_from_registry_item(_item(title="Bad \ud83d", description="nul \x00 here", version="1\ud83d"))
+
+    assert entry is not None
+    assert (entry.title, entry.description, entry.version) == ("Example", None, None)
+    entry.model_dump_json().encode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -285,3 +315,22 @@ async def test_nothing_is_sent_when_the_registry_address_fails_the_safety_check(
 
     assert registry.queries == []
     assert "10.0.0.1" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_a_page_that_trickles_in_is_given_up_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_registry, "PAGE_DEADLINE_SECONDS", 0.05)
+
+    async def stalls(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return httpx.Response(200, json=_recorded("page_1"))
+
+    async with RegistryClient(transport=httpx.MockTransport(stalls)) as client:
+        with pytest.raises(RegistryError, match="took more than 0 seconds"):
+            await client.fetch_page(None)
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_fetches_nothing_opens_nothing() -> None:
+    async with RegistryClient() as client:
+        assert client._client is None

@@ -37,7 +37,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name"),
     )
-    op.create_index(op.f("ix_mcp_catalog_servers_title"), "mcp_catalog_servers", ["title"])
     op.create_index(op.f("ix_mcp_catalog_servers_last_seen_at"), "mcp_catalog_servers", ["last_seen_at"])
     op.create_table(
         "mcp_catalog_featured",
@@ -84,5 +83,4 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_mcp_catalog_featured_organization_id"), table_name="mcp_catalog_featured")
     op.drop_table("mcp_catalog_featured")
     op.drop_index(op.f("ix_mcp_catalog_servers_last_seen_at"), table_name="mcp_catalog_servers")
-    op.drop_index(op.f("ix_mcp_catalog_servers_title"), table_name="mcp_catalog_servers")
     op.drop_table("mcp_catalog_servers")

@@ -402,6 +402,9 @@ def validate_public_https_url_shape(url: str, *, label: str) -> None:
     except ValueError:
         if "." not in host or host.endswith((".localhost", ".local", ".internal")):
             raise UnsafeURLError(f"{label} host {host!r} is a local name") from None
+        # No top-level domain is a number, so this is an address in a short or non-decimal form (127.1, 0x7f.1).
+        if host.rpartition(".")[2].isdigit() or host.rpartition(".")[2].startswith("0x"):
+            raise UnsafeURLError(f"{label} host {host!r} is an address written as a name") from None
         return
     reason = _blocked_reason(literal)
     if reason is not None:

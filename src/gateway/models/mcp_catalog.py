@@ -32,7 +32,7 @@ class McpCatalogServer(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     # The source's own identifier, reverse-DNS in the MCP Registry (``com.example/mcp``).
     name: Mapped[str] = mapped_column(String, unique=True)
-    title: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     url: Mapped[str] = mapped_column(String)
     # The source says a call needs an Authorization header. False is "not declared", not "open".

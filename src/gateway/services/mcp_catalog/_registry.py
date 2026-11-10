@@ -19,6 +19,8 @@ MAX_PAGE_BYTES = 4 * 1024 * 1024
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _ATTEMPTS = 3
 _BACKOFF_SECONDS = 2.0
+# Well under the ten minutes after which another replica takes a silent sync for dead.
+PAGE_DEADLINE_SECONDS = 180.0
 
 _OFFICIAL_META = "io.modelcontextprotocol.registry/official"
 # The one transport a stored server is dialed over.
@@ -52,9 +54,18 @@ class RegistryPage(NamedTuple):
 FetchPage = Callable[[str | None], Awaitable[RegistryPage]]
 
 
+def _storable(value: str) -> bool:
+    """Whether every database the gateway runs on can store ``value``: a lone surrogate or a NUL is refused by one."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\x00" not in value
+
+
 def _text(value: object, limit: int) -> str | None:
-    """``value`` as one line of at most ``limit`` characters, or None when it is not text or is empty."""
-    if not isinstance(value, str):
+    """``value`` as one line of at most ``limit`` characters, or None when it is not storable text or is empty."""
+    if not isinstance(value, str) or not _storable(value):
         return None
     line = _CONTROL_OR_SPACE.sub(" ", value).strip()
     return line[:limit].rstrip() or None
@@ -90,6 +101,8 @@ def _connectable_remote(server: dict[str, Any]) -> tuple[str, bool] | None:
         if not isinstance(url, str) or len(url) > MAX_URL_LENGTH or "{" in url:
             continue
         url = url.strip()
+        if not _storable(url) or _CONTROL_OR_SPACE.search(url):
+            continue
         try:
             validate_public_https_url_shape(url, label="MCP catalog server")
         except UnsafeURLError:
@@ -119,7 +132,9 @@ def entry_from_registry_item(item: object) -> McpCatalogEntry | None:
     if not isinstance(server, dict):
         return None
     name = server.get("name")
-    if not isinstance(name, str) or not name.strip() or len(name) > MAX_NAME_LENGTH or _CONTROL_OR_SPACE.search(name):
+    if not isinstance(name, str) or not name or len(name) > MAX_NAME_LENGTH:
+        return None
+    if not _storable(name) or _CONTROL_OR_SPACE.search(name):
         return None
     meta = item.get("_meta")
     official = meta.get(_OFFICIAL_META) if isinstance(meta, dict) else None
@@ -157,13 +172,10 @@ class RegistryClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        self._client = httpx.AsyncClient(
-            transport=transport,
-            timeout=_TIMEOUT,
-            follow_redirects=False,
-            headers={"User-Agent": "otari-gateway", "Accept": "application/json"},
-        )
+        self._transport = transport
         self._sleep = sleep
+        # Opened by the first page fetched, so a poll that finds no sync due builds nothing.
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -171,14 +183,35 @@ class RegistryClient:
     async def __aexit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
     ) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+
+    def _open(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                transport=self._transport,
+                timeout=_TIMEOUT,
+                follow_redirects=False,
+                headers={"User-Agent": "otari-gateway", "Accept": "application/json"},
+            )
+        return self._client
 
     async def fetch_page(self, cursor: str | None) -> RegistryPage:
         """The page after ``cursor``, or the first. A 5xx or a network error is retried; anything else is not.
 
+        The whole page, retries included, gets ``PAGE_DEADLINE_SECONDS``: the timeouts above bound each
+        read, and a registry sending a byte at a time would never trip them.
+
         Raises:
             RegistryError: the page could not be read.
         """
+        try:
+            async with asyncio.timeout(PAGE_DEADLINE_SECONDS):
+                return await self._fetch_page(cursor)
+        except TimeoutError:
+            raise RegistryError(f"a registry page took more than {int(PAGE_DEADLINE_SECONDS)} seconds") from None
+
+    async def _fetch_page(self, cursor: str | None) -> RegistryPage:
         try:
             # The address is checked on every page, so a name re-pointed mid-crawl is refused too.
             await validate_mcp_url(REGISTRY_URL, has_authorization_token=False, label="MCP registry")
@@ -205,7 +238,7 @@ class RegistryClient:
         raise RegistryError(f"the registry did not answer after {_ATTEMPTS} attempts: {failure}")
 
     async def _get(self, params: dict[str, str | int]) -> tuple[int, bytes]:
-        async with self._client.stream("GET", REGISTRY_URL, params=params) as response:
+        async with self._open().stream("GET", REGISTRY_URL, params=params) as response:
             chunks: list[bytes] = []
             size = 0
             async for chunk in response.aiter_bytes():

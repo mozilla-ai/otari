@@ -1,5 +1,6 @@
 """The MCP server catalog: the sync that fills it from recorded registry pages, its search, and the featured shelf."""
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -28,7 +29,7 @@ from gateway.repositories.mcp_catalog import (
     McpCatalogSyncStateRepository,
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
-from gateway.schemas.mcp_catalog import McpCatalogFeatureRequest
+from gateway.schemas.mcp_catalog import McpCatalogEntry, McpCatalogFeatureRequest
 from gateway.services.mcp_catalog import McpCatalogService, RegistryError, RegistryPage
 from gateway.services.mcp_catalog import _service as catalog_service
 from gateway.services.tenancy import OrganizationService
@@ -386,6 +387,139 @@ async def test_a_running_sync_is_not_started_twice_and_a_dead_one_is_taken_over(
     assert status is not None and status.outcome == "complete"
     assert registry.asked == [_PAGE_2_CURSOR]
     assert await _names(async_db) == _KEPT
+
+
+@pytest.mark.asyncio
+async def test_a_last_page_that_lists_a_fraction_of_the_catalog_removes_nothing(async_db: AsyncSession) -> None:
+    await _synced(async_db)
+    clock = _Clock()
+    clock.advance(hours=1)
+    service = _service(async_db, _config(), clock)
+    # One server and no cursor: what a registry cut short, or changed under the gateway, would answer.
+    cut_short = _Registry({None: RegistryPage(items=_recorded("page_1").items[:1], next_cursor=None)})
+
+    await service.request_sync()
+    status = await service.sync_if_due(cut_short.fetch_page)
+
+    assert status is not None
+    assert (status.outcome, status.removed, status.server_count) == ("partial", 0, 7)
+    assert status.error is not None and "1 of the 7 servers" in status.error
+    assert await _names(async_db) == _KEPT
+    # It read to the end, so there is no page to resume at.
+    registry = _Registry()
+    clock.advance(minutes=5)
+    await service.request_sync()
+    await service.sync_if_due(registry.fetch_page)
+    assert registry.asked == [None, _PAGE_2_CURSOR]
+
+
+@pytest.mark.asyncio
+async def test_an_entry_the_database_refuses_is_left_out_and_the_page_stored(async_db: AsyncSession) -> None:
+    def entry(name: str, description: str) -> McpCatalogEntry:
+        return McpCatalogEntry(
+            name=name,
+            title=name,
+            description=description,
+            url="https://mcp.example.com/mcp",
+            requires_token=False,
+            website_url=None,
+            version=None,
+            source="registry",
+        )
+
+    servers = McpCatalogServerRepository(async_db)
+    # The filter drops a NUL before it gets here; this is the store's own answer to one that slips through.
+    refused = await servers.upsert(
+        [entry("com.example/good", "fine"), entry("com.example/bad", "nul \x00 here"), entry("com.example/also", "ok")],
+        seen_at=datetime(2026, 11, 10, 9, 0, tzinfo=UTC),
+    )
+    await async_db.commit()
+
+    assert refused == 1
+    assert await _names(async_db) == ["com.example/also", "com.example/good"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_taken_for_dead_stops_without_touching_the_run_that_replaced_it(async_db: AsyncSession) -> None:
+    clock = _Clock()
+    slow = _service(async_db, _config(), clock)
+    await slow.request_sync()
+    recorded = _Registry()
+
+    async def stalls_then_answers(cursor: str | None) -> RegistryPage:
+        if cursor is None:
+            # While this page hangs, the heartbeat goes stale and another replica runs the sync to the end.
+            clock.advance(minutes=11)
+            replacement = await slow.sync_if_due(_Registry().fetch_page)
+            assert replacement is not None and replacement.outcome == "complete"
+            clock.advance(minutes=1)
+        return await recorded.fetch_page(cursor)
+
+    assert await slow.sync_if_due(stalls_then_answers) is None
+
+    status = await slow.sync_status()
+    assert (status.outcome, status.running, status.pages, status.kept) == ("complete", False, 2, 7)
+    assert status.started_at == datetime(2026, 11, 10, 9, 11, tzinfo=UTC)
+    # The stale run asked for its first page and stored nothing of it.
+    assert recorded.asked == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_sync_cancelled_at_shutdown_gives_its_claim_back(async_db: AsyncSession) -> None:
+    clock = _Clock()
+    service = _service(async_db, _config(), clock)
+    registry = _Registry()
+    await service.request_sync()
+
+    async def cancelled_on_the_second_page(cursor: str | None) -> RegistryPage:
+        if cursor is not None:
+            raise asyncio.CancelledError
+        return await registry.fetch_page(cursor)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.sync_if_due(cancelled_on_the_second_page)
+
+    status = await service.sync_status()
+    assert (status.running, status.outcome, status.pages) == (False, "partial", 1)
+    assert status.error == "the gateway stopped before the sync finished"
+    # The next one picks it up at once, where it stopped.
+    registry.asked.clear()
+    await service.request_sync()
+    resumed = await service.sync_if_due(registry.fetch_page)
+    assert resumed is not None and resumed.outcome == "complete"
+    assert registry.asked == [_PAGE_2_CURSOR]
+
+
+@pytest.mark.asyncio
+async def test_a_request_made_before_the_sync_was_switched_off_is_not_reported_as_pending(
+    async_db: AsyncSession,
+) -> None:
+    await _service(async_db, _config(), _Clock()).request_sync()
+
+    status = await _service(async_db, _config(mcp_catalog_sync="off"), _Clock()).sync_status()
+
+    assert (status.mode, status.requested) == ("off", False)
+
+
+@pytest.mark.asyncio
+async def test_two_requests_featuring_one_server_at_once_leave_one_entry(async_db: AsyncSession) -> None:
+    service = await _synced(async_db)
+    organization = await _organization(async_db)
+    featured = McpCatalogFeaturedRepository(async_db)
+    copy = {"title": "Snag", "description": None, "url": "https://mcp.snag.ac/mcp"}
+
+    first = await featured.add(organization.id, "ac.snag/snag", copy)
+    # The second insert is what a request sees when it read the shelf before the first one committed.
+    second = await featured.add(organization.id, "ac.snag/snag", copy)
+    await async_db.commit()
+
+    assert first is not None and second is None
+    assert await featured.count_for_organization(organization.id) == 1
+    admin = await _member(async_db, organization, role="admin")
+    again = await service.feature(
+        user=admin, request=McpCatalogFeatureRequest(server_id=await _server_id(async_db, "ac.snag/snag"))
+    )
+    assert again.id == first.id
 
 
 @pytest.mark.asyncio

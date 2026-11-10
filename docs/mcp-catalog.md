@@ -37,7 +37,7 @@ A sync reads the registry a page at a time, 100 servers to a page, and stores
 each page before it asks for the next. It keeps a server only if Otari can
 connect to it:
 
-- the registry marks it active;
+- the registry does not mark it deprecated or deleted;
 - it has a streamable HTTP remote, at a fixed `https` URL with a public host
   name, with no credentials in the URL;
 - it needs no header other than `Authorization`, which is the one credential a
@@ -51,15 +51,26 @@ A sync that reaches the registry's last page is `complete`, and removes the
 servers the registry no longer lists. A sync that stops earlier is `partial`:
 it keeps the pages it read, removes nothing, and the next sync resumes at the
 page where it stopped, for up to six hours. After that the next sync starts
-over. A sync stops early when the registry fails three attempts at a page, after
-5,000 pages, or after 30 minutes. A sync that read no page at all is `failed`
-and leaves the catalog as it was.
+over. A sync that could not read even its first page is `failed` and leaves the
+catalog as it was.
+
+A sync stops early when the registry fails three attempts at a page, when a
+page takes more than three minutes, after 5,000 pages, or after 30 minutes. A
+gateway that shuts down mid-sync ends it as `partial` too.
+
+Two answers from the registry are not trusted, because a registry cut short is
+more likely than one that emptied overnight, and both remove nothing:
+
+- a last page reached with no server kept at all, reported as `failed`;
+- a last page reached with fewer than half the servers the catalog holds,
+  reported as `partial`.
 
 In `scheduled` mode, a sync that did not complete is tried again an hour later.
 
 On a deployment with several replicas, every replica polls once a minute and
-exactly one runs a due sync. If that replica stops mid-sync, another takes the
-sync over after ten minutes and resumes it.
+exactly one runs a due sync. If that replica dies mid-sync, another takes the
+sync over after ten minutes without a sign of life and resumes it. The first
+replica, should it come back, stops without storing anything more.
 
 ### Network
 

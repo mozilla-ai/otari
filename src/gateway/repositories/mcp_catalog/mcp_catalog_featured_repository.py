@@ -4,6 +4,7 @@ import uuid
 from typing import Any, Never
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -55,9 +56,16 @@ class McpCatalogFeaturedRepository(BaseRepository[McpCatalogFeatured, Never, Nev
         )
         return result.scalar_one()
 
-    async def add(self, organization_id: uuid.UUID, name: str, copy: dict[str, Any]) -> McpCatalogFeatured:
-        """Stage a new entry holding ``copy`` of the catalog server called ``name``, flushed so its id answers."""
+    async def add(self, organization_id: uuid.UUID, name: str, copy: dict[str, Any]) -> McpCatalogFeatured | None:
+        """Stage a new entry holding ``copy`` of the catalog server called ``name``, flushed so its id answers.
+
+        None when the organization already features that name, which two requests at once can both miss
+        before either inserts. The insert runs in a SAVEPOINT, so the loser's transaction goes on.
+        """
         row = McpCatalogFeatured(organization_id=organization_id, name=name, **copy)
-        self.db.add(row)
-        await self.db.flush()
+        try:
+            async with self.db.begin_nested():
+                self.db.add(row)
+        except IntegrityError:
+            return None
         return row

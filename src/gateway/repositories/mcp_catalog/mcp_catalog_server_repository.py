@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Never
 
 from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.sql import LIKE_ESCAPE, contains_pattern
@@ -13,6 +14,11 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.mcp_catalog import McpCatalogServer
 from gateway.repositories.base_repository import BaseRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
+
+
+def _is_outage(exc: Exception) -> bool:
+    """Whether ``exc`` is the database being unreachable, as opposed to it refusing a row."""
+    return isinstance(exc, OperationalError | InterfaceError | TimeoutError)
 
 
 class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntry, Never]):
@@ -58,10 +64,36 @@ class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntr
         )
         return {name: (server_id, url) for name, server_id, url in result.all()}
 
-    async def upsert(self, entries: Sequence[McpCatalogEntry], *, seen_at: datetime) -> None:
-        """Store ``entries`` by name, each marked as seen by the sync that began at ``seen_at``."""
+    async def upsert(self, entries: Sequence[McpCatalogEntry], *, seen_at: datetime) -> int:
+        """Store ``entries`` by name, each marked as seen by the sync that began at ``seen_at``.
+
+        Returns how many the database refused. The entries are read from a public
+        listing, so one the database will not take (a value its encoding cannot
+        hold) is left out and the rest are stored: the page is tried whole in a
+        SAVEPOINT, then entry by entry. A failure to reach the database is raised.
+        """
         if not entries:
-            return
+            return 0
+        try:
+            async with self.db.begin_nested():
+                await self._upsert(entries, seen_at)
+        except (SQLAlchemyError, ValueError) as exc:
+            if _is_outage(exc):
+                raise
+        else:
+            return 0
+        refused = 0
+        for entry in entries:
+            try:
+                async with self.db.begin_nested():
+                    await self._upsert([entry], seen_at)
+            except (SQLAlchemyError, ValueError) as exc:
+                if _is_outage(exc):
+                    raise
+                refused += 1
+        return refused
+
+    async def _upsert(self, entries: Sequence[McpCatalogEntry], seen_at: datetime) -> None:
         names = [entry.name for entry in entries]
         existing = {
             row.name: row
@@ -81,6 +113,13 @@ class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntr
                 setattr(row, field, value)
             row.last_seen_at = seen_at
         await self.db.flush()
+
+    async def count_unseen(self, before: datetime) -> int:
+        """How many servers no sync has listed since ``before``."""
+        result = await self.db.execute(
+            select(func.count()).select_from(McpCatalogServer).where(McpCatalogServer.last_seen_at < before)
+        )
+        return result.scalar_one()
 
     async def delete_unseen(self, before: datetime) -> int:
         """Delete the servers no sync has listed since ``before``. Returns how many."""

@@ -343,6 +343,9 @@ def test_the_shape_screen_accepts_a_public_https_url(url: str) -> None:
         "https://[::1]/mcp",
         "https://[fe80::1]/mcp",
         "https://0.0.0.0/mcp",
+        "https://127.1/mcp",
+        "https://0x7f.0.0.1/mcp",
+        "https://example.0x7f000001/mcp",
         "https://mcp.example.com:99999/mcp",
     ],
 )

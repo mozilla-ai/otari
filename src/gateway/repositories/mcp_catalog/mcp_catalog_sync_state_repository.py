@@ -63,3 +63,21 @@ class McpCatalogSyncStateRepository(BaseRepository[McpCatalogSyncState, Never, N
             .execution_options(synchronize_session=False)
         )
         return result.scalar_one_or_none() is not None
+
+    async def hold(self, beat: datetime, now: datetime) -> bool:
+        """Move a running sync's heartbeat from ``beat`` to ``now``, answering whether the caller still owns it.
+
+        False once another replica has claimed the sync, which replaces the heartbeat the caller last wrote.
+        """
+        result = await self.db.execute(
+            update(McpCatalogSyncState)
+            .where(
+                McpCatalogSyncState.id == SYNC_STATE_ROW_ID,
+                McpCatalogSyncState.running.is_(True),
+                McpCatalogSyncState.heartbeat_at == beat,
+            )
+            .values(heartbeat_at=now)
+            .returning(McpCatalogSyncState.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None
