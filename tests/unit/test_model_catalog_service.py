@@ -11,13 +11,20 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry, build_metadata_map
-from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog, parse_catalog_v2
+from gateway.types.models_dev import (
+    MODELS_DEV_BASE_URL,
+    MODELS_DEV_SOURCES,
+    ModelsDevCatalog,
+    parse_catalog,
+    parse_catalog_v2,
+)
 
 # The real fetch and fallback, before the shared conftest turns both off.
 _REAL_FETCH = mcs._fetch
@@ -285,13 +292,14 @@ SERVED = {"openai": {"id": "openai", "models": {"gpt-4o": {"name": "GPT-4o"}}}}
 
 
 @contextmanager
-def _serving(v2: object = None, v1: object = None) -> Iterator[list[str]]:
+def _serving(v2: object = None, v1: object = None, base: str = MODELS_DEV_BASE_URL) -> Iterator[list[str]]:
     """models.dev answering each document with its body as JSON, or with an HTTP error where it has none.
 
     Yields the URLs requested, in order.
     """
     requested: list[str] = []
-    bodies = {V2_URL: v2, V1_URL: v1}
+    source_v2, source_v1 = MODELS_DEV_SOURCES
+    bodies = {source_v2.url_for(base): v2, source_v1.url_for(base): v1}
 
     class _Response:
         def __init__(self, body: object) -> None:
@@ -350,6 +358,16 @@ async def test_the_download_reads_v2_into_a_catalog(caplog: pytest.LogCaptureFix
     assert (read.name, read.api[0].protocol) == ("GPT-4o", "responses")
     assert requested == [V2_URL]
     assert caplog.records == []
+
+
+@pytest.mark.asyncio
+async def test_the_download_follows_the_configured_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mcs, "_base_url", mcs._base_url)
+    mcs.configure_models_dev_base_url("https://models.dev/")
+    with _serving(v2=SERVED, base="https://models.dev") as requested:
+        await mcs._download()
+
+    assert requested == ["https://models.dev/experimental/v2.0/api.json?type=all"]
 
 
 @pytest.mark.parametrize(
@@ -432,7 +450,7 @@ async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None
 @pytest.mark.asyncio
 async def test_a_stored_catalog_is_reused_by_when_it_was_downloaded() -> None:
     """A catalog another worker downloaded an hour ago is reused within a day, and not within ten minutes."""
-    mcs.serve_catalog(CATALOG, datetime.now(UTC) - timedelta(hours=1))
+    mcs.serve_catalog(CATALOG, datetime.now(UTC) - timedelta(hours=1), mcs.models_dev_base_url())
     with patch.object(mcs, "_download", new=AsyncMock(return_value=EMPTY)) as download:
         assert await mcs.fetch_models_dev_document(reuse_within=86400) is CATALOG
         download.assert_not_awaited()
@@ -452,4 +470,29 @@ async def test_the_shared_fetch_leaves_the_cache_alone_unless_asked_and_raises_o
         pytest.raises(mcs.ModelsDevFetchError),
     ):
         await mcs.fetch_models_dev_document()
+    mcs.clear_catalog_cache()
+
+
+@pytest.mark.parametrize("value", ["https://mirror.example/#", "https://user:password@mirror.example"])
+def test_the_config_refuses_a_base_url_the_documents_cannot_follow_without_echoing_it(value: str) -> None:
+    with pytest.raises(ValidationError, match="models_dev_base_url must") as refused:
+        GatewayConfig(models_dev_base_url=value)
+    assert "mirror.example" not in refused.value.errors()[0]["msg"]
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_from_another_base_url_is_served_but_never_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a restart that moved ``models_dev_base_url``, the old catalog is the fallback, not a fresh download."""
+    monkeypatch.setattr(mcs, "_base_url", mcs._base_url)
+    mcs.clear_catalog_cache()
+    mcs.serve_catalog(CATALOG, datetime.now(UTC), "https://models.dev")
+    mcs.configure_models_dev_base_url("https://mirror.example/")
+    assert mcs.catalog_source_changed()
+    assert mcs.cached_models_dev_catalog() is CATALOG
+
+    with patch.object(mcs, "_download", new=AsyncMock(return_value=EMPTY)) as download:
+        assert await mcs.fetch_models_dev_document(reuse_within=86400, fill_cache=True) is EMPTY
+        download.assert_awaited_once()
+    assert not mcs.catalog_source_changed()
+    assert mcs.cached_models_dev_catalog() is EMPTY
     mcs.clear_catalog_cache()

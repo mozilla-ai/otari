@@ -345,6 +345,12 @@ def test_v2_is_tried_before_v1() -> None:
         ("v1", parse_catalog),
     ]
     v2, v1 = (source.url for source in MODELS_DEV_SOURCES)
+    assert v2 == "https://mozilla-ai.github.io/models.dev/experimental/v2.0/api.json?type=all"
+    assert v1 == "https://mozilla-ai.github.io/models.dev/api.json"
+
+
+def test_the_documents_follow_the_configured_base() -> None:
+    v2, v1 = (source.url_for("https://models.dev/") for source in MODELS_DEV_SOURCES)
     assert v2 == "https://models.dev/experimental/v2.0/api.json?type=all"
     assert v1 == "https://models.dev/api.json"
 

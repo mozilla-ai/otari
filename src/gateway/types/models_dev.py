@@ -23,11 +23,13 @@ from dataclasses import MISSING, dataclass, fields, is_dataclass
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 __all__ = [
     "CATALOG_FORMAT",
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
+    "MODELS_DEV_BASE_URL",
     "MODELS_DEV_SOURCES",
     "MODELS_DEV_UNITS",
     "RATE_FIELDS",
@@ -50,6 +52,7 @@ __all__ = [
     "catalog_document",
     "models_dev_provider_id",
     "models_dev_provider_ids",
+    "normalize_models_dev_base_url",
     "parse_catalog",
     "parse_catalog_v2",
     "read_catalog_document",
@@ -1089,21 +1092,52 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
 
+# Where the documents are fetched from unless ``GatewayConfig.models_dev_base_url``
+# says otherwise: Mozilla.ai's fork of models.dev, which publishes models.dev's
+# catalog plus the models it does not list yet (github.com/mozilla-ai/models.dev).
+MODELS_DEV_BASE_URL = "https://mozilla-ai.github.io/models.dev"
+
+
+def normalize_models_dev_base_url(value: str) -> str:
+    """``value`` as a base the document paths append to, or ``ValueError`` saying what is wrong with it.
+
+    The message never repeats the value: the part that is wrong may be a
+    credential, and the config error and the snapshot script both print it.
+    A query or fragment is refused by its delimiter, as an empty one would
+    still put the document path after it.
+    """
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or "?" in normalized or "#" in normalized:
+        raise ValueError("must be an absolute http(s) URL without a query or fragment")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("must carry no username or password")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class ModelsDevSource:
-    """One document models.dev publishes, where it lives and the reader for it."""
+    """One document models.dev publishes, its path under the base URL and the reader for it."""
 
     name: str
-    url: str
+    path: str
     parse: Callable[[object], ModelsDevCatalog]
+
+    def url_for(self, base_url: str) -> str:
+        return base_url.rstrip("/") + self.path
+
+    @property
+    def url(self) -> str:
+        """The document's URL under the default base."""
+        return self.url_for(MODELS_DEV_BASE_URL)
 
 
 # The documents in the order the gateway tries them: v2, then v1 when v2 fails.
-# v2 still lives under ``/experimental/``; when it moves, its URL here is the one
+# v2 still lives under ``/experimental/``; when it moves, its path here is the one
 # change. Without ``?type=all``, models.dev leaves out the decision models.
 MODELS_DEV_SOURCES = (
-    ModelsDevSource("v2", "https://models.dev/experimental/v2.0/api.json?type=all", parse_catalog_v2),
-    ModelsDevSource("v1", "https://models.dev/api.json", parse_catalog),
+    ModelsDevSource("v2", "/experimental/v2.0/api.json?type=all", parse_catalog_v2),
+    ModelsDevSource("v1", "/api.json", parse_catalog),
 )
 
 

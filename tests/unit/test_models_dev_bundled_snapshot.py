@@ -158,7 +158,7 @@ def test_the_release_script_cuts_a_snapshot_from_v2_and_names_a_damaged_model(tm
     assert "models.dev v2 catalog read with" in result.stderr
     assert "p.models.bad.cost.text.input.price: expected a number" in result.stderr
     snapshot = _snapshot(tmp_path)
-    assert snapshot["_meta"]["source"] == "https://models.dev/experimental/v2.0/api.json?type=all"
+    assert snapshot["_meta"]["source"] == "https://mozilla-ai.github.io/models.dev/experimental/v2.0/api.json?type=all"
     assert set(snapshot["p"]["models"]) == {*models}
     assert snapshot["p"]["models"]["m0"]["cost"] == {"input": 1, "output": 2}
 
@@ -168,7 +168,7 @@ def test_the_release_script_reads_a_saved_v1_document(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     snapshot = _snapshot(tmp_path)
-    assert snapshot["_meta"]["source"] == "https://models.dev/api.json"
+    assert snapshot["_meta"]["source"] == "https://mozilla-ai.github.io/models.dev/api.json"
     assert snapshot["p"]["models"]["m"]["cost"] == {"input": 1, "output": 2}
 
 
