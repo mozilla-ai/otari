@@ -15,10 +15,10 @@ You need Hermes Agent 0.22.5 or later and an Otari API key.
    hermes plugins install otari
    ```
 
-2. Set your key and chat through Otari:
+2. Set your key, replacing `YOUR_OTARI_KEY`, and chat through Otari:
 
    ```bash
-   hermes config set OTARI_API_KEY <your-otari-key>
+   hermes config set OTARI_API_KEY YOUR_OTARI_KEY
    hermes chat --provider otari -m anthropic:claude-sonnet-4-6
    ```
 

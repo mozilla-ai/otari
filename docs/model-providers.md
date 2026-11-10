@@ -11,7 +11,7 @@ Otari calls LLM providers like OpenAI, Anthropic, or Mistral with the provider a
 
 ### Otari's hosted providers
 
-These are Otari's pre-provisioned keys you can use without bringing your own key material. Otari handles the upstream credential, and requests on them are paid from your organization's [balance](billing.md). There is nothing to add: create an API key, as in the [Quickstart](quickstart.md), and your requests can use them.
+These are Otari's pre-provisioned keys you can use without bringing your own key material. Otari handles the upstream credential, and requests on them are paid from your organization's [balance](billing.md). On otari.ai there is nothing to add: create an API key, as in the [Quickstart](quickstart.md), and your requests can use them. On a gateway you run, the operator sets them up first; see [Hosted providers and BYO credentials](hosted-providers.md).
 
 ### Your own keys
 
@@ -94,7 +94,7 @@ Once requests are flowing through the new key, revoke the old key in the upstrea
 1. Return to **Organization** → **Providers** → **Inference** in Otari.
 2. **Archive** the old provider key. An archived key can then be deleted.
 
-Update every workspace that pins the old key before revoking it. A workspace can continue using a pinned key even after you change the organization default.
+Update every workspace that pins the old key before revoking it, and every workspace that has the new key switched off: switch it on or pin it there. A workspace can continue using a pinned key even after you change the organization default.
 
 If you suspect compromise, create and assign the replacement immediately. Then revoke the exposed key with the provider.
 

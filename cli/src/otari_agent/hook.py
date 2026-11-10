@@ -2389,7 +2389,7 @@ def hook(
     status), and checks it in process against this repository's guardrail.
     The user's own guardrail in `~/.otari/` composes with it, unless
     `--repo-only` leaves it out.
-    No server and no credential are involved. See cli/docs/agent-guardrails.md.
+    No server and no credential are involved. See https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md.
 
     `--repo-only` is for a person whose own rules do not suit one repository.
     It means what it does on `otari guardrails validate`, so a dry run there
@@ -3099,8 +3099,9 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     serves either event. Offers to scaffold a starter .otari/guardrails.yml
     when this repo has no guardrail yet, and picks the PreToolUse matcher
     (whether it needs to cover the shell tool, the read tool, or both) from
-    whatever gates the guardrail turns out to have; Stop needs no matcher;
-    see cli/docs/agent-guardrails.md for why both are registered unconditionally.
+    whatever gates the guardrail turns out to have; Stop needs no matcher.
+    Why both are registered unconditionally is in
+    https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md.
 
     `--repo-only` writes that flag into the registered command, so the hook
     enforces this repo's guardrail alone here. The matcher is then picked from
@@ -3129,12 +3130,12 @@ def hook_setup(harness: str, repo_only: bool) -> None:
             click.echo(
                 f"Skipping. otari hook will still be registered below and will check your own gates in "
                 f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
-                f"{GUARDRAIL_DIR}/ exists; see cli/docs/agent-guardrails.md."
+                f"{GUARDRAIL_DIR}/ exists; see https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md."
             )
         else:
             click.echo(
                 f"Skipping. otari hook will still be registered below, but every gate check "
-                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see cli/docs/agent-guardrails.md."
+                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md."
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
@@ -4082,7 +4083,7 @@ def guardrails_validate(
     gate firing there is the answer, not a failure, so it does not change the
     exit status.
 
-    See cli/docs/agent-guardrails.md.
+    See https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -4472,7 +4473,7 @@ def guardrails_check(
     It reads the repo's own guardrail only.
     The files in `~/.otari/` belong to one person, and a check reads the same on every machine.
 
-    See cli/docs/agent-guardrails.md.
+    See https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:

@@ -212,7 +212,8 @@ Two guardrails the catalog lists cannot be defined this way:
 ## How Otari builds a definition
 
 Otari builds every enabled definition when it starts and keeps it ready in
-memory, so a request never waits for a vendor connection.
+memory, so a request never waits for its client to be built. A hosted-API
+guardrail still waits for the vendor's verdict on every check.
 
 - **A write rebuilds the definition** on the worker that served it, and the
   response reports the outcome. Other workers pick up changes within about

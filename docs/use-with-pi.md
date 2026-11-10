@@ -47,10 +47,13 @@ containers, set `OTARI_API_KEY` instead of logging in.
   `OTARI_WEB_FETCH=off` turn them off.
 - **Subagent routing.** With [pi-subagents](https://github.com/nicobailon/pi-subagents)
   installed, Otari can pick the model each new subagent runs on; see
-  [Subagent routers](routing.md#subagent-routers). It is off until you turn it
+  [Subagent routers](routing.md#subagent-routers). It needs pi 0.99.0 or newer
+  and a gateway with a subagent router configured, and is off until you turn it
   on in pi's settings.
 - **Guardrails.** With the `otari` CLI on `PATH`, pi checks the rules in your
-  repository's `.otari/guardrails.yml` before each tool call; see
+  repository's `.otari/guardrails.yml` before each `bash`, `read`, `edit` and
+  `write` call, and when the agent is about to stop. If `otari` cannot run or
+  times out, the call is allowed with a warning; see
   [Guardrails](https://github.com/mozilla-ai/pi-otari#guardrails) in the
   extension's README.
 

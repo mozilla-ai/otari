@@ -12,7 +12,8 @@ range and one set of filters:
 - **Sessions**: agent sessions; see [Sessions](sessions.md).
 
 The time range and the model, user, API key and status filters stay in place when
-you switch tabs, and are kept in the URL. Clicking a chart bar narrows the range
+you switch tabs, and are kept in the URL. **Status** narrows Requests, and
+Sessions for errors and successes; Usage ignores it. Clicking a chart bar narrows the range
 to that bar. **Today** starts at local midnight. Every tab shows everyone's
 requests in the workspace; pick yourself under **User** to see only yours.
 

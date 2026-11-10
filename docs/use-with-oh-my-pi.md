@@ -1,6 +1,6 @@
 # Use with oh-my-pi
 
-[oh-my-pi](https://github.com/oh-my-pi/omp) (`omp`) is a coding agent built on
+[oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) is a coding agent built on
 pi. The same [pi-otari](https://github.com/mozilla-ai/pi-otari) package that
 serves [pi](use-with-pi.md) is also an omp plugin.
 

@@ -181,7 +181,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
 - [Agent Guardrails](cli/docs/agent-guardrails.md)
-- [SDK and agent integrations](docs/index.md#integrations)
+- [SDK and agent integrations](docs/framework-integrations.md)
 - [Architecture](ARCHITECTURE.md)
 
 ## License

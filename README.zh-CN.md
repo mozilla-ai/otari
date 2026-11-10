@@ -168,7 +168,7 @@ make typecheck
 - [访问控制](docs/access-control.md)
 - [内置工具](docs/tools.md)
 - [Agent Guardrails](cli/docs/agent-guardrails.md)
-- [SDK 与智能体集成](docs/index.md#integrations)
+- [SDK 与智能体集成](docs/framework-integrations.md)
 - [架构](ARCHITECTURE.md)
 
 ## 许可证
