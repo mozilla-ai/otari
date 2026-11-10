@@ -18,6 +18,7 @@ from gateway.container import Container
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    OAUTH_PROVIDERS,
     TRACE_CONTENT_HEADER,
     TRACE_CONTENT_KEEP,
     X_API_KEY_HEADER,
@@ -63,7 +64,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -141,7 +142,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, reso
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
-from gateway.services.identity import IdentityService
+from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -153,11 +154,12 @@ from gateway.services.inference import (
 )
 from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import InvitationMailLimit, UserAccess
+from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
@@ -198,6 +200,7 @@ from gateway.services.tenancy import (
     MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
+    VerifiedDomainLookup,
     organization_guardrail_runner,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
@@ -1111,6 +1114,14 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
+async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> bool:
+    """Return whether new dashboard sign-ins are frozen right now."""
+    return await is_maintenance_mode(db)
+
+
+MaintenanceModeDep = Annotated[bool, Depends(get_maintenance_mode)]
+
+
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
     """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP access in step.
 
@@ -1722,17 +1733,22 @@ OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depend
 
 
 def get_identity_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     identity_provider: IdentityProviderPortDep,
-    organizations: OrganizationServiceDep,
 ) -> IdentityService:
-    """Build the identity service on the request's Unit of Work."""
+    """Build the identity service on the request's Unit of Work.
+
+    Its own organization service is built on the same Unit of Work, not the deployment's shared
+    read-only one, because provisioning an SSO sign-in's account writes through it.
+    """
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=identity_provider,
-        organizations=organizations,
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
+        organizations=OrganizationService(db, membership_listener=None, uow=uow),
         sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
         session_ttl_hours=config.dashboard_session_ttl_hours,
         terms_url=config.terms_url,
@@ -1743,6 +1759,34 @@ def get_identity_service(
 
 
 IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
+
+
+def get_oidc_connection_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    organizations: OrganizationServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OIDCConnectionService:
+    """Build the organization OIDC connection service on the request's Unit of Work.
+
+    ``sign_in_states`` is the one repository built on the session instead, for the reason the
+    service's own attribute gives: the sign-in client is used after the block that built it.
+    """
+    return OIDCConnectionService(
+        uow,
+        IdentityRepositories.on(uow),
+        organizations=organizations,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
+        allow_private_hosts=config.oidc_allow_private_hosts,
+        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
+        offered_providers=frozenset(
+            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
+        ),
+    )
+
+
+OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
 
 
 def get_org_provider_model_service(
@@ -2975,6 +3019,8 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "MaintenanceModeDep",
+    "OIDCConnectionServiceDep",
     "ModelProviderPortDep",
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",

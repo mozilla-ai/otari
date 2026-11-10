@@ -15,6 +15,7 @@ import re
 import secrets
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -53,7 +54,9 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
+    ACTIVE_MEMBERSHIP_STATUS,
     MANAGEMENT_ROLES,
+    OWNER_ROLE,
     AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -77,6 +80,7 @@ from gateway.models.tenancy import (
     MemberWorkspacePlacementPublic,
     Organization,
     OrganizationCreateRequest,
+    OrganizationDomainRole,
     OrganizationMember,
     OrganizationMemberRole,
     OrganizationMembershipContextPublic,
@@ -105,7 +109,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import BlockedAddresses, InvitationMailLimit
+from gateway.services.organizations import BlockedAddresses, InvitationMailLimit, SsoEnforcement
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -356,6 +360,27 @@ _CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
+def _blocks_for(user: User, enforcement: SsoEnforcement) -> Callable[[Organization], Awaitable[bool]]:
+    """Bind the enforcement question to one person, for a resolver that walks their organizations."""
+
+    async def blocks(organization: Organization) -> bool:
+        return await enforcement.blocks_membership(user=user, organization=organization)
+
+    return blocks
+
+
+@dataclass(frozen=True)
+class SignInDestination:
+    """The organization a fresh session acts in, and why it may act in none.
+
+    ``refused_everywhere`` is true only where the account holds a live membership and every one of
+    them refused it, which is a refusal to report rather than a dashboard to open.
+    """
+
+    organization_id: uuid.UUID | None
+    refused_everywhere: bool
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -390,47 +415,97 @@ class OrganizationService:
         bootstrap = await load_bootstrap_identity(self.db)
         return None if bootstrap is None else bootstrap.id
 
-    async def get_active_organization_for_user(self, user: User) -> Organization:
-        """Return the organization the caller acts in, falling back to a live membership if the pointer is stale.
+    async def is_deployment_operator(self, user: User) -> bool:
+        """Whether the deployment's own administration admits this caller across every organization.
 
-        Reads only: it neither creates an organization nor writes the fallback
-        back, so a page that reads the active organization changes nothing. The
-        pointer itself is repaired where a session is minted
-        (``active_organization_id_for_sign_in``) and by ``get_active_or_bootstrap``.
+        Delegated rather than re-derived, so this and the gate on the deployment-wide routers cannot
+        come to disagree about who holds that authority.
         """
-        organization = await self._live_active_organization(user)
-        if organization is None:
-            raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
-        return organization
+        return await DeploymentUserService(self.db).has_administration_access(user)
 
-    async def _live_active_organization(self, user: User, *, repair: bool = False) -> Organization | None:
+    async def deployment_operator_ids(self, users: Iterable[User]) -> set[uuid.UUID]:
+        """Which of ``users`` the deployment admits across every organization, in one lookup.
+
+        The plural form, for deciding over several accounts without a lookup each.
+        """
+        return await DeploymentUserService(self.db).administration_access_ids(users)
+
+    async def get_active_organization_for_user(self, user: User) -> Organization:
+        """Return the organization the caller acts in, or a live membership where the pointer is stale.
+
+        The pointer is taken as it stands, because whatever wrote it named an organization that
+        admits the caller or named none.
+
+        NOTE: A stale pointer falls back only to an organization that requires nothing of its own,
+        because whether an organization requiring its own connection admits this caller is a
+        question only the identity domain answers and this read cannot ask one. Somebody whose
+        every membership requires one is refused here and resolves a destination at their next
+        sign-in, which can ask.
+
+        Reads only, so a page that reads the active organization changes nothing.
+        """
+        pointed_at = (
+            await self.organizations.get(user.active_organization_id)
+            if user.active_organization_id is not None
+            else None
+        )
+        if pointed_at is not None and await self._has_active_membership(user, pointed_at):
+            return pointed_at
+        for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id):
+            if candidate.sso_required:
+                continue
+            return candidate
+        raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
+
+    async def _has_active_membership(self, user: User, organization: Organization) -> bool:
+        """Whether the caller's membership of this organization is live."""
+        return await self.members.get_active_by_organization_and_user(organization.id, user.id) is not None
+
+    async def _live_active_organization(
+        self,
+        user: User,
+        *,
+        blocked: Callable[[Organization], Awaitable[bool]],
+        repair: bool = False,
+    ) -> Organization | None:
         """The organization the caller can act in, or ``None`` if there is none.
 
-        The pointer while its membership is live, and otherwise the caller's
-        oldest live membership. ``repair`` stages the pointer onto that fallback.
+        The pointer while its membership is live and ``blocked`` admits it, and otherwise the
+        caller's oldest live membership that ``blocked`` admits. ``repair`` stages the pointer
+        onto whichever organization is returned.
         """
         organization = await self.organizations.get(user.active_organization_id)
         if organization is not None:
             membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
-            if membership is not None:
+            if membership is not None and not await blocked(organization):
                 return organization
-        fallback = await self.members.get_first_active_for_user(user.id)
-        if fallback is None:
-            return None
-        recovered = await self.organizations.get(fallback.organization_id)
-        if recovered is None:
-            return None
+        for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id):
+            if await blocked(candidate):
+                continue
+            if repair:
+                await self.users.set_active_organization(user, candidate.id)
+            return candidate
         if repair:
-            await self.users.set_active_organization(user, recovered.id)
-        return recovered
+            await self.users.set_active_organization(user, None)
+        return None
 
-    async def active_organization_id_for_sign_in(self, user: User) -> uuid.UUID | None:
-        """The organization a fresh session acts in, or ``None`` for an identity with no live membership.
+    async def sign_in_destination(
+        self, user: User, *, blocked: Callable[[Organization], Awaitable[bool]]
+    ) -> SignInDestination:
+        """Where a fresh session acts, and whether every membership refused it.
 
         Stages the repaired pointer for the caller to commit with the session.
+
+        NOTE: An absent organization has two causes a caller has to tell apart, which is why this
+        does not answer with an id alone. An account that belongs to nowhere is refused nothing and
+        signs in; an account every one of whose organizations refused it has nowhere to act and is
+        better told so than signed in to an empty dashboard.
         """
-        organization = await self._live_active_organization(user, repair=True)
-        return organization.id if organization is not None else None
+        memberships = await self.members.get_active_by_user_with_organizations(user.id)
+        organization = await self._live_active_organization(user, repair=True, blocked=blocked)
+        if organization is not None:
+            return SignInDestination(organization_id=organization.id, refused_everywhere=False)
+        return SignInDestination(organization_id=None, refused_everywhere=bool(memberships))
 
     async def _require_active_membership(self, user: User, organization: Organization) -> OrganizationMember:
         membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
@@ -677,15 +752,16 @@ class OrganizationService:
             if membership.workspace_id in names
         ]
 
-    async def _resolve_active_organization(self, user: User) -> Organization:
+    async def _resolve_active_organization(self, user: User, *, sso_enforcement: SsoEnforcement) -> Organization:
         """Resolve the caller's organization, repairing a stale pointer if it can.
 
         The reachable stale case is a membership that was suspended after the
-        pointer was set: falling back to the caller's oldest live membership
-        keeps the dashboard usable instead of refusing every page. A pointer at a
-        *deleted* organization is not reachable, since a deletion moves every
-        pointer first and the foreign key would refuse otherwise; the check
-        survives for a database that arrived by another route.
+        pointer was set: falling back to the caller's oldest live membership that
+        admits them keeps the dashboard usable instead of refusing every page. A
+        pointer at a *deleted* organization is not reachable, since a deletion
+        clears every pointer into it first and the foreign key would refuse
+        otherwise; the check survives for a database that arrived by another
+        route.
 
         Unlike the platform this never provisions an organization as a fallback:
         first boot owns that (see `provisioning_service`), and every later
@@ -694,16 +770,24 @@ class OrganizationService:
         naming the one the pointer still holds.
         """
         stale_id = user.active_organization_id
-        organization = await self._live_active_organization(user, repair=True)
+        organization = await self._live_active_organization(
+            user, repair=True, blocked=_blocks_for(user, sso_enforcement)
+        )
         if organization is None:
             raise NoActiveOrganizationError
         if organization.id != stale_id:
             await self.db.commit()
         return organization
 
-    async def get_active_membership_context_for_user(self, user: User) -> OrganizationMembershipContextPublic:
-        """Return the caller's organization and their standing in it."""
-        organization = await self._resolve_active_organization(user)
+    async def get_active_membership_context_for_user(
+        self, user: User, *, sso_enforcement: SsoEnforcement
+    ) -> OrganizationMembershipContextPublic:
+        """Return the caller's organization and their standing in it.
+
+        NOTE: This repairs a stale pointer, so it never points the caller at an organization whose
+        own enforcement refuses them.
+        """
+        organization = await self._resolve_active_organization(user, sso_enforcement=sso_enforcement)
         membership = await self._require_active_membership(user, organization)
         return await self._to_context(
             user=user,
@@ -820,6 +904,36 @@ class OrganizationService:
             await self._found_own_tenancy(identity, organization, address=address)
             return SignupRegistration(identity=identity, created=True)
 
+    async def provision_sso_tenancy(
+        self, *, organization_id: uuid.UUID, full_name: str | None, default_role: OrganizationDomainRole
+    ) -> User:
+        """Create an address-less account as a member of one existing organization.
+
+        Unlike ``provision_signup_tenancy``, there is no address to match an existing account against,
+        so this always creates a new identity, and it creates no personal organization or workspace of
+        its own.
+
+        The writes run in a block of this service's Unit of Work, so they join a block the caller
+        already holds.
+        """
+        async with self._require_unit_of_work():
+            identity = await self.users.try_create(
+                email=None,
+                full_name=full_name,
+                active_organization_id=organization_id,
+            )
+            assert identity is not None  # NOTE: a NULL address never conflicts, so this always succeeds.
+            await self.members.create_membership(
+                organization_id=organization_id,
+                user_id=identity.id,
+                role=default_role,
+            )
+            # The request-plane owner every other membership path mints beside the membership,
+            # without which this account carries no attribution id and could never be offered as
+            # the owner of a key.
+            await get_or_create_attribution_user(self.db, user_id=str(identity.id), alias=full_name)
+            return identity
+
     async def provision_tenancy_for_claim(
         self,
         identity: User,
@@ -906,6 +1020,7 @@ class OrganizationService:
         self,
         *,
         user: User,
+        blocked: Callable[[Organization], Awaitable[bool]],
         skip: int = 0,
         limit: int = 100,
     ) -> CallerOrganizationMembershipsPublic:
@@ -914,14 +1029,20 @@ class OrganizationService:
         Active memberships only. An ``invited`` one is not somewhere the caller
         may act yet (``switch_active_organization_for_user`` would refuse it),
         and a ``suspended`` one is somewhere they no longer may, so offering
-        either as a destination would be offering a refusal.
+        either as a destination would be offering a refusal. ``blocked`` hides
+        an organization whose own SSO enforcement refuses the caller.
+
+        NOTE: ``blocked`` is applied before the page is cut, so ``count`` is the number of
+        destinations the caller actually has and a page is short only at the end of the list. That
+        is why the caller's own memberships are read in full rather than a page of them: the
+        refusal is not a condition the database can express, and counting what it leaves means
+        asking it of every membership. The set is the organizations one person belongs to, and
+        ``blocked`` answers off the row in hand for any that require nothing of their own.
         """
-        rows, count = await self.members.get_by_user_with_organizations(
-            user.id,
-            status="active",
-            skip=skip,
-            limit=limit,
-        )
+        rows = await self.members.get_active_by_user_with_organizations(user.id)
+        admitted = [row for row in rows if not await blocked(row[1])]
+        count = len(admitted)
+        rows = admitted[skip : skip + limit]
         return CallerOrganizationMembershipsPublic(
             data=[
                 CallerOrganizationMembershipPublic(
@@ -941,6 +1062,7 @@ class OrganizationService:
         *,
         user: User,
         organization_id: uuid.UUID,
+        blocked: Callable[[Organization], Awaitable[bool]],
     ) -> OrganizationMembershipContextPublic:
         """Point the caller's identity at another organization they belong to.
 
@@ -955,6 +1077,8 @@ class OrganizationService:
         indistinguishable from an id that was never issued. That is the same
         rule ``resolve_visible_workspace`` follows, and it is the whole of the
         tenant boundary on the one endpoint that names an organization.
+        ``blocked`` refuses switching into an organization whose own SSO
+        enforcement refuses the caller, with the same not-found answer.
 
         Switching to the organization already active is allowed and is a no-op
         write: a switcher that re-sent the current row should not have to be
@@ -968,6 +1092,8 @@ class OrganizationService:
             # Only reachable if the organization was deleted between the two
             # reads. Reported as the same not-found the membership check gives,
             # since from the caller's side it is the same answer.
+            raise OrganizationNotFoundError(organization_id)
+        if await blocked(organization):
             raise OrganizationNotFoundError(organization_id)
 
         await self.users.set_active_organization(user, organization.id)
@@ -1003,7 +1129,9 @@ class OrganizationService:
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=updated),
         )
 
-    async def delete_active_organization_for_user(self, *, user: User) -> OrganizationMembershipContextPublic:
+    async def delete_active_organization_for_user(
+        self, *, user: User, sso_enforcement: SsoEnforcement
+    ) -> OrganizationMembershipContextPublic:
         """Delete the caller's organization, if nothing has been recorded against it, and move them out.
 
         Owners and admins only. Three refusals: the deployment's default
@@ -1014,10 +1142,12 @@ class OrganizationService:
         write below back with it.
 
         ``user.active_organization_id`` has no ON DELETE action, so every identity
-        pointed here is moved first: onto its oldest other live membership, else
-        onto the default organization, where it holds no membership and so
-        resolves to none, as it did here. The caller moves into their oldest
-        other organization, whose context is returned.
+        pointed here is cleared first rather than moved: whether another
+        organization admits each of them is a question this cannot ask, and
+        resolving their context answers it under the rule that applies then.
+
+        The caller moves into their oldest other membership that admits them,
+        which is not always their oldest, and its context is returned.
         """
         organization = await self.get_active_organization_for_user(user)
         await self.require_active_organization_management_access(user=user, organization=organization)
@@ -1036,33 +1166,27 @@ class OrganizationService:
                     await self.workspace_rows.lock(workspace_id)
 
                 pointed = await self.users.get_ids_by_active_organization(organization.id)
-                elsewhere = await self.members.first_active_organization_ids(
-                    {user.id, *pointed}, excluding=organization.id
-                )
-                destination_id = elsewhere.get(user.id)
-                if destination_id is None:
+                blocks = _blocks_for(user, sso_enforcement)
+                admits_the_caller = [
+                    candidate
+                    for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id)
+                    if candidate.id != organization.id and not await blocks(candidate)
+                ]
+                if not admits_the_caller:
                     raise LastOrganizationError
-                default = await self.organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
-                fallback_id = default.id if default is not None else destination_id
-                moves: dict[uuid.UUID, list[uuid.UUID]] = {}
-                for pointed_id in pointed:
-                    if pointed_id != user.id:
-                        moves.setdefault(elsewhere.get(pointed_id, fallback_id), []).append(pointed_id)
-                for target_id, user_ids in moves.items():
-                    await self.users.move_active_organization(user_ids, target_id)
-                await self.users.set_active_organization(user, destination_id)
+                # Cleared rather than moved to a chosen organization: nothing here can ask whether
+                # one admits each identity, and resolving their context chooses under the rule.
+                await self.users.move_active_organization(pointed, None)
 
                 for workspace_id in workspace_ids:
                     member_ids = await self.workspaces.ids_for_workspace(workspace_id)
                     await listener.workspace_deleted(workspace_id, member_ids)
                 await self.organizations.delete(organization)
 
-                destination = await self.organizations.get(destination_id)
-                membership = await self.members.get_active_by_organization_and_user(destination_id, user.id)
-                if destination is None or membership is None:
-                    # The membership was read active a few statements ago, so
-                    # only a concurrent removal reaches this.
+                destination = await self._live_active_organization(user, repair=True, blocked=blocks)
+                if destination is None:  # pragma: no cover - the check above found one
                     raise LastOrganizationError
+                membership = await self._require_active_membership(user, destination)
         except IntegrityError:
             raise OrganizationInUseError from None
 
@@ -1857,6 +1981,13 @@ class OrganizationService:
         if password is not None:
             if not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
+            if sso_blocks_membership(
+                organization=organization,
+                membership=membership,
+                is_linked=False,
+                is_deployment_operator=await self.is_deployment_operator(invitee),
+            ):
+                raise InvitationPasswordNotAcceptedError("sign in through this organization's own connection")
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
@@ -2361,17 +2492,15 @@ class OrganizationService:
                 await self._membership_listener.member_lost_workspaces(membership.user_id, workspace_ids)
 
     async def _move_off_ended_membership(self, membership: OrganizationMember) -> None:
-        """Stage the identity's active organization onto its oldest live membership, if it named the one that ended.
+        """Clear the identity's active organization where it named the membership that ended.
 
-        With no live membership left the pointer stays, because the column cannot be empty; every read
-        resolves it against a live membership and finds none.
+        NOTE: Cleared rather than moved to another membership, because this cannot ask whether one
+        admits the identity. Resolving their context chooses the next one, under the rule it holds.
         """
         identity = await self.users.get(membership.user_id)
         if identity is None or identity.active_organization_id != membership.organization_id:
             return
-        fallback = await self.members.get_first_active_for_user(identity.id)
-        if fallback is not None:
-            await self.users.set_active_organization(identity, fallback.organization_id)
+        await self.users.set_active_organization(identity, None)
 
     async def _identity_for_address(self, email: str, organization: Organization) -> User:
         """The identity holding an address, created claimable if none does, refusing a deactivated one.
@@ -2397,8 +2526,14 @@ class OrganizationService:
         user: User,
         organization_member_id: uuid.UUID,
         request: ActiveOrganizationMemberUpdateRequest,
+        sso_enforcement: SsoEnforcement,
     ) -> ActiveOrganizationMemberPublic:
-        """Change a member's role or status."""
+        """Change a member's role or status.
+
+        NOTE: A role or status this organization's own enforcement refuses also ends the member's
+        live session, because no later request re-asks and the session was minted while it admitted
+        them.
+        """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
             user=user,
@@ -2428,6 +2563,10 @@ class OrganizationService:
             if target_user is None:
                 raise OrganizationMemberNotFoundError(organization_member_id)
             await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
+            # Inside the block, so the change and the revocation it calls for commit together. Left
+            # outside, a revocation that failed would leave the membership changed and the session
+            # it no longer admits still acting.
+            await sso_enforcement.revoke_refused_sessions(organization=organization)
 
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
@@ -2556,4 +2695,62 @@ class OrganizationService:
         )
 
 
-__all__ = ["InvitationAcceptance", "InvitationClaimSettings", "OrganizationService", "SignupRegistration"]
+def sso_blocks_membership(
+    *,
+    organization: Organization,
+    membership: OrganizationMember,
+    is_linked: bool,
+    is_deployment_operator: bool,
+) -> bool:
+    """Whether this organization's SSO enforcement refuses this membership's holder from acting in it.
+
+    ``is_linked`` is whether the person holds a sign-in link to this organization's own connection.
+    ``is_deployment_operator`` is who may act across the deployment.
+
+    NOTE: Callers must resolve both facts rather than infer them.
+    An operator who has set a password holds an address like anybody else, so the absence of one
+    identifies nobody.
+
+    NOTE: The break-glass exception holds only while its account is still an active owner, because
+    the stored id outlives the role.
+    """
+    return organization.sso_required and sso_would_block_membership(
+        organization=organization,
+        membership=membership,
+        is_linked=is_linked,
+        is_deployment_operator=is_deployment_operator,
+    )
+
+
+def sso_would_block_membership(
+    *,
+    organization: Organization,
+    membership: OrganizationMember,
+    is_linked: bool,
+    is_deployment_operator: bool,
+) -> bool:
+    """Whether this organization's SSO enforcement would refuse this membership's holder, were it required.
+
+    The rule without the switch, which is what a preflight reports: it has to say who would lose
+    access before enforcement is on, and the same rule then decides who does.
+    """
+    if is_deployment_operator:
+        return False
+    if (
+        organization.sso_break_glass_user_id == membership.user_id
+        and membership.role == OWNER_ROLE
+        and membership.status == ACTIVE_MEMBERSHIP_STATUS
+    ):
+        return False
+    return not is_linked
+
+
+__all__ = [
+    "InvitationAcceptance",
+    "InvitationClaimSettings",
+    "OrganizationService",
+    "SignupRegistration",
+    "SignInDestination",
+    "sso_blocks_membership",
+    "sso_would_block_membership",
+]

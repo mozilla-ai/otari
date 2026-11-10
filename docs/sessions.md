@@ -4,7 +4,7 @@ icon: list-tree
 
 # Sessions
 
-A session is one run of an agent: its turns, the model calls and the tools it
+A session is one run of an agent: its turns, the model requests and the tools it
 ran, with how long each took and what it cost. Otari records one for the requests
 it serves, so you can see what an agent did, not only what one call did.
 

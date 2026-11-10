@@ -41,6 +41,7 @@ something an operator can still do here.
 """
 
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +93,21 @@ class DeploymentUserService:
             return True
         bootstrap = await load_bootstrap_identity(self.db)
         return bootstrap is not None and bootstrap.id == actor.id
+
+    async def administration_access_ids(self, actors: Iterable[User]) -> set[uuid.UUID]:
+        """Which of ``actors`` may reach the surface, in one lookup rather than one each.
+
+        The plural form of ``has_administration_access``, for a caller deciding over a set of
+        accounts at once. Both read the same marker, so neither can answer differently.
+        """
+        candidates = list(actors)
+        superusers = {actor.id for actor in candidates if actor.is_superuser}
+        if len(superusers) == len(candidates):
+            return superusers
+        bootstrap = await load_bootstrap_identity(self.db)
+        if bootstrap is None:
+            return superusers
+        return superusers | {actor.id for actor in candidates if actor.id == bootstrap.id}
 
     async def list_users(
         self,
