@@ -244,18 +244,23 @@ class WorkspaceMemberRepository:
         return result.scalars().first()
 
     async def get_active_pairs(
-        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID], *, lock: bool = False
     ) -> set[tuple[uuid.UUID, uuid.UUID]]:
-        """Return each (workspace, user) of these that an *active* membership joins, in one query."""
+        """Return each (workspace, user) of these that an *active* membership joins, in one query.
+
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal
+        that changes one waits for it (PostgreSQL only).
+        """
         if not workspace_ids or not user_ids:
             return set()
-        result = await self.db.execute(
-            select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
-                col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
-                col(WorkspaceMember.user_id).in_(list(user_ids)),
-                col(WorkspaceMember.status) == "active",
-            )
+        statement = select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
+            col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
+            col(WorkspaceMember.user_id).in_(list(user_ids)),
+            col(WorkspaceMember.status) == "active",
         )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         return set(result.tuples().all())
 
     async def get_by_workspaces_and_user(

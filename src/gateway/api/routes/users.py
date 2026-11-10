@@ -454,7 +454,7 @@ async def delete_user(
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
-    revocations = await revoke_user_mcp_grants(db, user_id)
+    revocations, unread = await revoke_user_mcp_grants(db, user_id)
     user.deleted_at = datetime.now(UTC)
 
     try:
@@ -463,7 +463,7 @@ async def delete_user(
         await db.rollback()
         raise database_error("delete user", exc) from None
     # Only once the deletion has committed: a rolled-back one keeps the connections it would have ended.
-    revoke_in_background(revocations)
+    revoke_in_background(revocations, unread=unread)
 
 
 @router.get("/{user_id}/usage")

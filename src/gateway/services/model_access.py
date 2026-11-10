@@ -410,23 +410,18 @@ async def resolve_request_mcp_access(
     )
 
 
-async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "list[McpRevocation]":
+async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "tuple[list[McpRevocation], int]":
     """Stage the removal of a deleted user's MCP grants, connections and pending sign-ins.
 
     A soft delete leaves all three behind otherwise. Returns what to ask the authorization servers
-    to end once the caller has committed, read while the servers still hold the clients.
+    to end once the caller has committed, read while the servers still hold the clients, and how
+    many connections it ends past the page it reads.
     """
     # Imported here: the tools package reaches back into this module while it loads.
-    from gateway.services.tools import revocations_for
+    from gateway.services.tools import collect_revocations
 
     connections = McpUserConnectionRepository(db)
-    revocable = await connections.revocable_for_user(user_id)
-    servers = await WorkspaceMcpServerRepository(db).find_many({row.server_id for row in revocable})
-    revocations = [
-        revocation
-        for server in servers
-        for revocation in revocations_for(server, [row for row in revocable if row.server_id == server.id])
-    ]
+    revocations = await collect_revocations(connections, WorkspaceMcpServerRepository(db), user_id=user_id)
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
     await connections.remove_for_user(user_id)
     await McpOAuthFlowRepository(db).remove_for_user(user_id)

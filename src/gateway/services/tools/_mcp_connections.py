@@ -202,7 +202,28 @@ def _client_for(server: WorkspaceMcpServer, *, client_id: str, auth_method: str)
         SecretDecryptionError: the stored client secret will not decrypt.
         SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
     """
-    stored = stored_oauth_client(server)
+    return _client_from(stored_oauth_client(server), client_id=client_id, auth_method=auth_method)
+
+
+@dataclass(frozen=True, slots=True)
+class McpServerRef:
+    """What reading a user's token needs of their server, copied while the row is still loaded.
+
+    A request's session may be released while a token is renewed, and a release whose commit fails
+    rolls back, which expires every row it loaded; a copy is still readable after that.
+    """
+
+    @classmethod
+    def of(cls, row: WorkspaceMcpServer) -> McpServerRef:
+        return cls(row.id, row.name, stored_oauth_client(row))
+
+    id: uuid.UUID
+    name: str
+    client: StoredMcpOAuthClient | None
+
+
+def _client_from(stored: StoredMcpOAuthClient | None, *, client_id: str, auth_method: str) -> McpOAuthClient | None:
+    """See :func:`_client_for`, from a client already read off its server."""
     if stored is None or stored.client_id != client_id:
         return None
     secret = decrypt_secret(stored.encrypted_secret) if stored.encrypted_secret else None
@@ -284,8 +305,12 @@ class McpConnectionEligibility(Protocol):
     Work, taking the locks a removal takes, so a sign-in and a removal that race serialize.
     """
 
+    async def hold(self, workspace_id: uuid.UUID) -> None:
+        """Lock the workspace as a member's removal and a workspace's deletion do, before anything else is locked."""
+        ...
+
     async def may_connect(self, workspace_id: uuid.UUID, user_id: str) -> bool:
-        """Whether ``user_id`` may hold a connection to a server of ``workspace_id`` now."""
+        """Whether ``user_id`` may hold a connection to a server of ``workspace_id`` now, under ``hold``."""
         ...
 
 
@@ -319,6 +344,27 @@ def revocations_for(server: WorkspaceMcpServer, connections: Collection[McpUserC
     return revocations
 
 
+async def collect_revocations(
+    connections: McpUserConnectionRepository,
+    servers: WorkspaceMcpServerRepository,
+    *,
+    server_ids: Collection[uuid.UUID] | None = None,
+    user_id: str | None = None,
+) -> tuple[list[McpRevocation], int]:
+    """What revoking the connections a removal is about to delete sends, and how many it leaves unread.
+
+    Read before the rows go, while their servers still hold the clients the tokens were issued to.
+    """
+    rows, total = await connections.revocable(server_ids=server_ids, user_id=user_id)
+    held = await servers.find_many({row.server_id for row in rows})
+    revocations = [
+        revocation
+        for server in held
+        for revocation in revocations_for(server, [row for row in rows if row.server_id == server.id])
+    ]
+    return revocations, total - len(rows)
+
+
 # Bounds on revocations sent after a bulk removal, which nothing waits on.
 _MAX_BACKGROUND_REVOCATIONS = 500
 _BACKGROUND_REVOCATION_CONCURRENCY = 8
@@ -327,16 +373,19 @@ _REVOCATION_DEADLINE_SECONDS = 10.0
 _revocation_tasks: set[asyncio.Task[None]] = set()
 
 
-def revoke_in_background(revocations: Collection[McpRevocation]) -> None:
+def revoke_in_background(revocations: Collection[McpRevocation], *, unread: int = 0) -> None:
     """Ask authorization servers to end these tokens, without waiting and without failing anything.
 
     For a removal that has already committed. Each call has a deadline, a few run at once, and
-    only counts are logged. Past ``_MAX_BACKGROUND_REVOCATIONS`` the rest are dropped and counted.
+    only counts are logged. Past ``_MAX_BACKGROUND_REVOCATIONS`` the rest are dropped, and they are
+    counted as skipped together with ``unread``, the connections the removal ended without reading.
     """
+    if unread:
+        logger.info("MCP connections ended without revocation count=%d reason=over_page", unread)
     if not revocations:
         return
     batch = list(revocations)[:_MAX_BACKGROUND_REVOCATIONS]
-    skipped = len(revocations) - len(batch)
+    skipped = len(revocations) - len(batch) + unread
     task = asyncio.get_running_loop().create_task(_revoke_all(batch, skipped), name="mcp-revocations")
     _revocation_tasks.add(task)
     task.add_done_callback(_revocation_tasks.discard)
@@ -633,7 +682,7 @@ class McpConnectionService:
         if server is None or client is None:
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
         # Copied now: the row is read again below into this same object.
-        url_before = server.url
+        url_before, workspace_id = server.url, server.workspace_id
         try:
             tokens = await _mcp_oauth.exchange_code(
                 pending.token_endpoint,
@@ -647,7 +696,13 @@ class McpConnectionService:
             if exc.refuses_client:
                 await self._forget_registered_client(pending.server_id, pending.client_id)
             raise McpConnectionUpstreamError(f"Could not finish the sign-in: {exc}") from None
+        refusal: str | None = None
         async with self._uow:
+            # Locks in the order the removals take them: the workspace (a member's removal, the
+            # workspace's deletion), then the server row (its edit or deletion), then the user
+            # (their deletion, inside ``may_connect``). Whichever of the two commits second sees
+            # the other.
+            await self._eligibility.hold(workspace_id)
             # The exchange took seconds. Tokens issued for the server as it was are not stored
             # against the server as a manager has since made it.
             current = await self._servers.find(pending.server_id, lock=True)
@@ -659,23 +714,38 @@ class McpConnectionService:
                 or client_now is None
                 or client_now.client_id != pending.client_id
             ):
-                raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
-            if not await self._eligibility.may_connect(current.workspace_id, pending.user_id):
+                refusal = "The server changed while you were signing in. Start it again."
+            elif not await self._eligibility.may_connect(current.workspace_id, pending.user_id):
                 logger.info("MCP sign-in refused reason=no_longer_eligible server_id=%s", pending.server_id)
-                raise McpConnectionFlowError("You no longer have access to this server's workspace.")
-            await self._connections.put(
-                pending.server_id,
-                pending.user_id,
-                encrypted_access_token=_encrypted(tokens.access_token),
-                encrypted_refresh_token=_encrypted(tokens.refresh_token) if tokens.refresh_token else None,
-                expires_at=_expiry(tokens, datetime.now(UTC)),
-                scope=tokens.scope,
-                client_id=pending.client_id,
-                client_auth_method=pending.client_auth_method,
-                token_endpoint=pending.token_endpoint,
-                revocation_endpoint=pending.revocation_endpoint,
-                resource=pending.resource,
-            )
+                refusal = "You no longer have access to this server's workspace."
+            else:
+                # Under the locks above, so a removal waiting on them sees this connection and ends it.
+                await self._connections.put(
+                    pending.server_id,
+                    pending.user_id,
+                    encrypted_access_token=_encrypted(tokens.access_token),
+                    encrypted_refresh_token=_encrypted(tokens.refresh_token) if tokens.refresh_token else None,
+                    expires_at=_expiry(tokens, datetime.now(UTC)),
+                    scope=tokens.scope,
+                    client_id=pending.client_id,
+                    client_auth_method=pending.client_auth_method,
+                    token_endpoint=pending.token_endpoint,
+                    revocation_endpoint=pending.revocation_endpoint,
+                    resource=pending.resource,
+                )
+        if refusal is not None:
+            # The authorization server issued these tokens and nothing will hold them: ask it to end them.
+            if pending.revocation_endpoint is not None:
+                revoke_in_background(
+                    [
+                        McpRevocation(
+                            endpoint=pending.revocation_endpoint,
+                            client=client,
+                            token=tokens.refresh_token or tokens.access_token,
+                        )
+                    ]
+                )
+            raise McpConnectionFlowError(refusal)
         logger.info("MCP sign-in finished server_id=%s user_id=%s", pending.server_id, pending.user_id)
         return CompletedConnection(
             server_id=server.id, workspace_id=server.workspace_id, server_name=server.name, return_to=pending.return_to
@@ -765,7 +835,7 @@ class McpUserTokens:
             return set()
         return await self._connections.connected_server_ids(user_id, server_ids)
 
-    async def token_for(self, server: WorkspaceMcpServer, user_id: str) -> str:
+    async def token_for(self, row: WorkspaceMcpServer | McpServerRef, user_id: str) -> str:
         """The access token to send to a per-user server for one user.
 
         Raises:
@@ -774,6 +844,8 @@ class McpUserTokens:
             SecretDecryptionError: a stored token or client secret will not decrypt.
             SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
         """
+        # Copied before anything may release the session and expire the row.
+        server = row if isinstance(row, McpServerRef) else McpServerRef.of(row)
         connection = await self._connections.find(server.id, user_id)
         if connection is None:
             raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
@@ -791,7 +863,7 @@ class McpUserTokens:
         # The renewal failed for now and the token is still inside its lifetime, so it is used.
         return stale
 
-    async def renew_rejected(self, server: WorkspaceMcpServer, user_id: str, rejected: str) -> str:
+    async def renew_rejected(self, row: WorkspaceMcpServer | McpServerRef, user_id: str, rejected: str) -> str:
         """A new token after the MCP server refused ``rejected`` with a 401, for one retry.
 
         A token can be revoked before its recorded expiry, or carry no expiry at all, so a refusal
@@ -802,6 +874,7 @@ class McpUserTokens:
             McpSignInRequiredError: the connection is gone, or was removed now.
             McpConnectionUnavailableError: the renewal failed for now.
         """
+        server = row if isinstance(row, McpServerRef) else McpServerRef.of(row)
         outcome = await self._shielded_renew(server, user_id, stale=rejected, rejected=True)
         if outcome.sign_in_required:
             raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
@@ -809,9 +882,7 @@ class McpUserTokens:
             raise McpConnectionUnavailableError(server.id)
         return outcome.token
 
-    async def _shielded_renew(
-        self, server: WorkspaceMcpServer, user_id: str, *, stale: str, rejected: bool
-    ) -> _Refreshed:
+    async def _shielded_renew(self, server: McpServerRef, user_id: str, *, stale: str, rejected: bool) -> _Refreshed:
         """``_renew``, carried through to its own commit even if the request waiting on it is cancelled.
 
         A renewal the authorization server answered has rotated the refresh token, and only storing
@@ -825,7 +896,7 @@ class McpUserTokens:
             )
             return _Refreshed()
 
-    async def _renew(self, server: WorkspaceMcpServer, user_id: str, *, stale: str, rejected: bool) -> _Refreshed:
+    async def _renew(self, server: McpServerRef, user_id: str, *, stale: str, rejected: bool) -> _Refreshed:
         """Renew a connection's tokens unless another caller already has.
 
         An authorization server may rotate refresh tokens and end the whole grant when a spent one
@@ -850,7 +921,9 @@ class McpUserTokens:
             current = decrypt_secret(connection.encrypted_access_token)
             if current != stale and (rejected or not _needs_refresh(connection, now)):
                 return _Refreshed(token=current)
-            client = _client_for(server, client_id=connection.client_id, auth_method=connection.client_auth_method)
+            client = _client_from(
+                server.client, client_id=connection.client_id, auth_method=connection.client_auth_method
+            )
             if connection.encrypted_refresh_token is None or client is None:
                 # Nothing to renew with. Once the token is refused or past its expiry only a new sign-in helps.
                 if not rejected and not _is_expired(connection.expires_at, now):
@@ -872,7 +945,7 @@ class McpUserTokens:
                 # A refused client is a setting to fix, which then renews every connection again.
                 # Only a client Otari registered itself has nobody to fix it: it is replaced at the
                 # next sign-in, so its grants end here.
-                registered = stored_oauth_client(server)
+                registered = server.client
                 gone = exc.is_permanent or (exc.refuses_client and registered is not None and registered.dynamic)
                 if not gone:
                     logger.warning(
@@ -913,7 +986,9 @@ __all__ = [
     "CALLBACK_PATH",
     "McpConnectionEligibility",
     "McpRevocation",
+    "McpServerRef",
     "revocations_for",
+    "collect_revocations",
     "revoke_in_background",
     "sign_in_problem",
     "CallbackOutcome",
