@@ -47,12 +47,13 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from apron_auth import AuthorizationCallback, ProviderConfig, StoredStateClient
 from apron_auth.errors import (
     INVALID_GRANT,
     AuthorizationResponseError,
+    ConfigurationError,
     NonceValidationError,
     StateError,
     TokenExchangeError,
@@ -512,10 +513,34 @@ def require_configured(config: GatewayConfig, provider: str) -> None:
 
     Raises:
         OAuthNotConfiguredError: If ``provider`` is unknown here, either half of
-            its client credentials is missing, or ``public_base_url`` is.
+            its client credentials is missing, ``public_base_url`` is, or the
+            redirect URI it builds is neither https nor a loopback address.
 
     """
-    _credentials(config, provider)
+    client_id, client_secret = _credentials(config, provider)
+    try:
+        _provider_config(config, provider, client_id, client_secret)
+    except ConfigurationError:
+        # Two settings of public_base_url reach the library's one refusal, and an operator told to
+        # set https on an address that is already https has nowhere to go. The credential case is
+        # asked here rather than read back off the library's message.
+        if _address_carries_credentials(config):
+            raise OAuthNotConfiguredError.address_carries_credentials(provider) from None
+        raise OAuthNotConfiguredError.insecure_address(provider) from None
+
+
+def _address_carries_credentials(config: GatewayConfig) -> bool:
+    """Whether this deployment's own address embeds a user or a password.
+
+    An address this cannot parse carries nothing to report, and the refusal it is deciding between
+    is the right answer for it either way: this only runs once the library has already refused the
+    redirect URI the address built.
+    """
+    try:
+        parsed = urlsplit(config.public_base_url or "")
+    except ValueError:
+        return False
+    return parsed.username is not None or parsed.password is not None
 
 
 def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
@@ -533,21 +558,32 @@ def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
     return credentials
 
 
-def _client(config: GatewayConfig, provider: str, db: AsyncSession) -> StoredStateClient:
-    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
-    client_id, client_secret = _credentials(config, provider)
+def _provider_config(config: GatewayConfig, provider: str, client_id: str, client_secret: str) -> ProviderConfig:
+    """Build ``provider``'s configuration from this deployment's own settings.
+
+    Raises:
+        ConfigurationError: If the redirect URI this builds is neither https nor
+            a loopback address.
+
+    """
     preset = apron_google.preset if provider == "google" else apron_github.preset
-    identity_handler = (
-        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
-    )
     provider_config = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
         redirect_uri=redirect_uri(config, provider),
     )
+    return _as_configured_here(provider_config, provider)
+
+
+def _client(config: GatewayConfig, provider: str, db: AsyncSession) -> StoredStateClient:
+    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
+    client_id, client_secret = _credentials(config, provider)
+    identity_handler = (
+        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
+    )
     return StoredStateClient(
-        _as_configured_here(provider_config, provider),
+        _provider_config(config, provider, client_id, client_secret),
         _DatabaseStateStore(db, provider),
         identity_handler=identity_handler,
     )
