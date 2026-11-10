@@ -16,6 +16,7 @@ dependency footprint stays as it is.
 
 import smtplib
 import ssl
+from email.charset import Charset
 from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -53,6 +54,18 @@ def redact_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def _from_header(name: str, address: str) -> str:
+    """The From header, with the name always read back as the text it is.
+
+    formataddr encodes a name only outside ASCII, so a name holding "=?" would
+    go out as an encoded word that a mail client decodes into other text.
+    """
+    if "=?" in name:
+        address.encode("ascii")
+        return f"{Charset('utf-8').header_encode(name)} <{address}>"
+    return formataddr((name, address))
+
+
 def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     """Assemble the multipart/alternative message a transport puts on the wire.
 
@@ -68,8 +81,8 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     # with one warning line that never points at the From name as the cause.
     # formataddr quotes a name holding "@" or ".", which unquoted turns the name
     # into the address a mail client reads, and encodes one outside ASCII.
-    message["From"] = formataddr(
-        (sanitize_header_value(envelope.sender_name), sanitize_header_value(envelope.sender_email))
+    message["From"] = _from_header(
+        sanitize_header_value(envelope.sender_name), sanitize_header_value(envelope.sender_email)
     )
     message["To"] = sanitize_header_value(envelope.to)
     if envelope.reply_to:

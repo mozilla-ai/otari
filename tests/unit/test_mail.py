@@ -361,9 +361,17 @@ def test_reply_to_is_a_header_only_when_given() -> None:
     assert build_mime(replace(envelope, reply_to="grace@example.com"))["Reply-To"] == "grace@example.com"
 
 
-@pytest.mark.parametrize("name", ["grace@example.com via Otari", "Zoë via Otari", 'Otari "Support"'])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "grace@example.com via Otari",
+        "Zoë via Otari",
+        'Otari "Support"',
+        "=?utf-8?q?Otari_Security?=@evil.example via Otari",
+    ],
+)
 def test_a_mail_client_reads_the_sender_name_as_a_name(name: str) -> None:
-    """Unquoted, a name holding an address is parsed as the From address itself."""
+    """Unquoted, a name holding an address is read as the From address; unencoded, "=?" as other text."""
     envelope = MailEnvelope(
         to="support@example.com", sender_email="otari@example.com", sender_name=name, message=MESSAGE
     )
