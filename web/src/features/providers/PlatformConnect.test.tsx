@@ -38,6 +38,7 @@ function mockConnect(
   vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input, init) => {
     const method = (init?.method ?? "GET").toUpperCase()
     requests.push(`${method} ${String(input)}`)
+    if (String(input) === "/catalog/selectors/refresh") return {}
     if (method === "POST") return start()
     if (method === "DELETE") return undefined
     return queue.length > 1 ? queue.shift() : queue[0]
@@ -172,6 +173,8 @@ it("polls while pending and reports the approval once", async () => {
 
   expect(await screen.findByText(/^Connected\./)).toBeInTheDocument()
   expect(onConnected).toHaveBeenCalledTimes(1)
+  // So the catalog id the setup guide hands out next resolves at once.
+  expect(requests).toContain("POST /catalog/selectors/refresh")
   const reads = requests.filter((request) => request.startsWith("GET")).length
 
   // Connected does not change on its own, so the polling stops.

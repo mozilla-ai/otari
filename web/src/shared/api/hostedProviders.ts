@@ -162,6 +162,14 @@ export function usePlatformConnectStatus(enabled: boolean) {
       // Also on a first read: the gateway may have stored the provider while
       // answering it, beside a provider list fetched at the same moment.
       if (before?.status !== "connected" && status.status === "connected") {
+        if (before?.status === "pending") {
+          // The catalog's short model ids are re-indexed once a minute, and
+          // the setup guide hands one out right after this. Best effort: a
+          // failure only means the id resolves at the next tick.
+          await apiFetch("/catalog/selectors/refresh", {
+            method: "POST",
+          }).catch(() => undefined)
+        }
         invalidate()
       }
       return status
