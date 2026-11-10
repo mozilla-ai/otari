@@ -91,3 +91,51 @@ test.describe("a phone-width page does not pan sideways", () => {
     })
   }
 })
+
+test("a tap on a wrapped terms link opens it rather than ticking the box", async ({
+  page,
+  context,
+}) => {
+  // At this width the sentence wraps and puts the privacy link under the box's
+  // 44px bleed, which took the tap until the links sat above it. jsdom cannot
+  // hit-test, so this is the only place that can see it.
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        mail_ready: true,
+        open_signup: true,
+        terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
+      },
+    })
+  })
+  await context.route("https://example.com/**", (route) =>
+    route.fulfill({ body: "" }),
+  )
+  await page.goto("/#/signup")
+  const box = page.getByRole("checkbox", {
+    name: "I accept the Terms of Service and the Privacy Policy",
+  })
+  await expect(box).toBeVisible()
+
+  for (const [name, url] of [
+    ["Terms of Service", "https://example.com/terms"],
+    ["Privacy Policy", "https://example.com/privacy"],
+  ] as const) {
+    const link = await page.getByRole("link", { name }).boundingBox()
+    if (!link) throw new Error(`${name} has no box`)
+    const opened = context.waitForEvent("page")
+    // The upper third of the line, where the bleed reaches.
+    await page.touchscreen.tap(
+      link.x + link.width / 2,
+      link.y + link.height * 0.3,
+    )
+    const tab = await opened
+    expect(tab.url()).toBe(url)
+    await tab.close()
+  }
+  await expect(box).not.toBeChecked()
+})

@@ -2,8 +2,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
- * The box that accepts a deployment's published terms, with the links to read
- * them: the terms, and the privacy policy where the deployment publishes one.
+ * The box that accepts the published terms, linking them and any privacy policy.
  *
  * Rendered only where the bootstrap carries a `terms_url`, and required where
  * it is: an acceptance a page would have sent either way records nothing.
@@ -28,14 +27,11 @@ export function TermsAcceptanceField({
 }) {
   const { privacy_url } = useDeployment()
   return (
-    // One run of text with a hanging indent of the box and its gap, so a
-    // sentence that wraps on a phone continues under its own first word rather
-    // than under the box. The box sits inline at the start of the first line.
     <p className="pl-6 -indent-6 text-caption">
-      {/* 44px target from a pseudo-element bleed of 13 above and 12 below the
-          first 20px line, so the box is easy to hit on a phone without
-          `hasTouchTarget`, which would add 24px of height to the card. The
-          bleed stays inside the 12px gaps every caller spaces it with. */}
+      {/* `pl-6 -indent-6` hangs a wrapped line under "I", past the box and its
+          gap. The 13px and 12px bleed makes the box a 44px target inside the
+          12px gaps callers leave, without `hasTouchTarget`'s extra 24px; the
+          links are `relative` so one wrapped under the bleed takes its taps. */}
       <span className="inline-block indent-0 align-top">
         <Checkbox
           isSelected={isAccepted}
@@ -68,7 +64,7 @@ function TermsLink({ href, children }: { href: string; children: string }) {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="font-medium text-link hover:text-link-hover"
+      className="relative font-medium text-link hover:text-link-hover"
     >
       {children}
     </a>
