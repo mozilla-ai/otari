@@ -144,6 +144,7 @@ from gateway.core.error_codes import (
     PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
     REQUEST_TOO_LARGE,
+    STRUCTURED_OUTPUT_FAILED,
     UNSUPPORTED_CONTENT,
     UNSUPPORTED_PARAMETER,
     UPSTREAM_RATE_LIMITED,
@@ -278,6 +279,7 @@ from gateway.services.inference import (
     provider_failure,
     upstream_body_messages,
     upstream_error_message,
+    upstream_error_tag,
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
@@ -897,6 +899,8 @@ def classify_provider_error(
     # An account quota is the operator's limit, like billing, even where the provider answers 400.
     if _is_account_quota_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_ACCOUNT_QUOTA_DETAIL)
+    if status_code == 400 and _is_structured_output_failure(exc):
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _structured_output_failed_detail(exc))
     # OpenAI answers some request faults with a 403 (logprobs on a model without
     # them), which is the caller's to fix and not the gateway's key.
     if status_code in (400, 422) or is_upstream_request_fault(exc):
@@ -946,6 +950,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
     if status_code == status.HTTP_400_BAD_REQUEST and _is_image_input_rejection(exc):
         return error_headers(UNSUPPORTED_CONTENT)
+    if status_code == status.HTTP_400_BAD_REQUEST and _is_structured_output_failure(exc):
+        return error_headers(STRUCTURED_OUTPUT_FAILED)
     if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
         return error_headers(UNSUPPORTED_PARAMETER)
     if status_code == status.HTTP_413_CONTENT_TOO_LARGE and upstream_exception_shape(exc)[1] == 413:
@@ -982,6 +988,23 @@ def with_provider_failure(error: HTTPException, exc: BaseException, provider: st
 def _is_context_length_error(exc: BaseException) -> bool:
     """Whether any-llm classified the failure as a prompt too long for the model."""
     return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
+
+
+# Groq's code for a generation that did not match the requested schema.
+_STRUCTURED_OUTPUT_FAILURE_TAGS = frozenset({"json_validate_failed"})
+# Groq's message points at ``failed_generation``, a body field Otari does not relay.
+_FAILED_GENERATION_POINTER = re.compile(r"\s*See 'failed_generation'[^.]*\.?")
+
+
+def _is_structured_output_failure(exc: BaseException) -> bool:
+    """Whether the provider's own code says the model's output did not match the requested schema."""
+    return upstream_error_tag(exc) in _STRUCTURED_OUTPUT_FAILURE_TAGS
+
+
+def _structured_output_failed_detail(exc: BaseException) -> str:
+    """The provider's sentence, without its pointer to a field the caller never receives."""
+    detail = _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+    return _FAILED_GENERATION_POINTER.sub("", detail).strip() or PROVIDER_BAD_REQUEST_DETAIL
 
 
 def refusal_code(exc: BaseException) -> str | None:

@@ -46,6 +46,8 @@ REQUEST_TOO_LARGE = "request_too_large"
 UNSUPPORTED_CONTENT = "unsupported_content"
 # The provider cannot express a request parameter for the model, such as ``response_format`` on one with no JSON mode.
 UNSUPPORTED_PARAMETER = "unsupported_parameter"
+# The model failed to produce output matching the requested JSON schema; resending the request may succeed.
+STRUCTURED_OUTPUT_FAILED = "structured_output_failed"
 # The model is a kind the endpoint cannot serve, such as an embedding model sent a chat completion.
 WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
