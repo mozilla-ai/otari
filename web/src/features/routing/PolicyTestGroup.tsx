@@ -32,7 +32,8 @@ export function PolicyTestGroup({
   workspaceId: string | null
 }) {
   const [budgetUsed, setBudgetUsed] = useState("")
-  const settledBudget = useDebounced(budgetUsed)
+  // Trimmed, since `Number(" ")` is 0 and would read as a real 0%.
+  const settledBudget = useDebounced(budgetUsed.trim())
   const hasTierDowns = findBudgetConditions(row.spec).length > 0
   const budgetPct = Number(settledBudget)
   const isBudgetValid = settledBudget === "" || Number.isFinite(budgetPct)
@@ -58,7 +59,7 @@ export function PolicyTestGroup({
           value={budgetUsed}
           onChange={setBudgetUsed}
           inputMode="decimal"
-          isInvalid={!Number.isFinite(Number(budgetUsed))}
+          isInvalid={!Number.isFinite(Number(budgetUsed.trim()))}
           errorMessage="Enter a number."
         />
       ) : null}
