@@ -787,6 +787,9 @@ export function useTestWorkspaceMcpServerConnection() {
   })
 }
 
+// One page of who is connected. The section says so when there are more.
+const MCP_CONNECTIONS_PAGE_SIZE = 200
+
 function mcpConnectionsKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "mcp-connections"] as const
 }
@@ -890,7 +893,7 @@ export function useMcpServerConnections(
     enabled,
     queryFn: ({ signal }) =>
       apiFetch<McpServerConnections>(
-        `${mcpServerPath(workspaceId, serverId)}/connections`,
+        `${mcpServerPath(workspaceId, serverId)}/connections?limit=${MCP_CONNECTIONS_PAGE_SIZE}`,
         { signal },
       ),
   })

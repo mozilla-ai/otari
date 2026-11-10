@@ -55,7 +55,9 @@ function mockApi({
         authorization_url: "https://auth.example.com/authorize?state=s",
       })
     }
-    if (url.endsWith("/connections")) return Response.json({ data: others })
+    if (url.includes("/connections?")) {
+      return Response.json({ data: others, count: others.length })
+    }
     return Response.json({ data: mine })
   })
   return calls
@@ -109,7 +111,7 @@ describe("McpServerSignIn", () => {
     })
     // A member is not shown, and does not ask for, who else is connected.
     expect(screen.queryByText("Connected users")).not.toBeInTheDocument()
-    expect(calls.some((call) => call.url.endsWith("/connections"))).toBe(false)
+    expect(calls.some((call) => call.url.includes("/connections?"))).toBe(false)
   })
 
   it("shows a connection and ends it after a confirmation", async () => {

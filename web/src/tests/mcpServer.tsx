@@ -89,8 +89,8 @@ export function mockMcpServerApi({
       return Response.json(method === "GET" ? access : (written ?? access))
     }
     // The caller's own sign-ins, and who is signed in to the server: none.
-    if (url.includes("/mcp-connections") || url.endsWith("/connections")) {
-      return Response.json({ data: [] })
+    if (url.includes("/mcp-connections") || url.includes("/connections?")) {
+      return Response.json({ data: [], count: 0 })
     }
     if (url.includes("/mcp-servers/")) {
       // Read from any other workspace, the server is not there.

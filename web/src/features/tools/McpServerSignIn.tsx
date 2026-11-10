@@ -92,7 +92,7 @@ export function McpServerSignIn({
                 variant="primary"
                 onPress={connect}
                 isPending={start.isPending}
-                isDisabled={mine.isPending}
+                isDisabled={mine.isPending && !mine.data}
                 className="min-h-11 md:min-h-0"
               >
                 Connect your account
@@ -183,7 +183,9 @@ function ConnectedUsers({
       <ErrorBanner error={connections.error} />
       {rows.length === 0 ? (
         <p className="text-caption">
-          {connections.isPending ? "Loading…" : "Nobody has connected yet."}
+          {connections.isPending && !connections.data
+            ? "Loading…"
+            : "Nobody has connected yet."}
         </p>
       ) : (
         <DataTable
@@ -193,6 +195,11 @@ function ConnectedUsers({
           getRowKey={(row) => row.user_id}
         />
       )}
+      {connections.data && connections.data.count > rows.length ? (
+        <p className="text-caption">
+          Showing the first {rows.length} of {connections.data.count}.
+        </p>
+      ) : null}
       <ConfirmDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => {

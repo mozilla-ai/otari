@@ -50,7 +50,11 @@ export function McpConnectionCallbackPage({
 
   useEffect(() => {
     if (connected) {
-      void navigate({ to: returnTo ?? `/tools/mcp-servers/${connected}` })
+      // Replaced, here and below: Back must not return to a spent code.
+      void navigate({
+        to: returnTo ?? `/tools/mcp-servers/${connected}`,
+        replace: true,
+      })
       return
     }
     if (error || !state || !code || sent.current) return
@@ -63,6 +67,7 @@ export function McpConnectionCallbackPage({
             to:
               insideDashboard(done.return_to) ??
               `/tools/mcp-servers/${done.server_id}`,
+            replace: true,
           }),
       },
     )
