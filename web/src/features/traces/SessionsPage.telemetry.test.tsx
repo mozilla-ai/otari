@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -100,6 +101,62 @@ describe("SessionsPage telemetry", () => {
 
     expect(opened()).toEqual([
       [TELEMETRY_EVENTS.SESSION_OPENED, { source: "timeline" }],
+    ])
+  })
+
+  it("credits a link, not the timeline, for a session a bar found already open", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    mockApi({ traces: [summary], traceDetail: traceDetail() })
+
+    function LinkBack() {
+      const navigate = useNavigate()
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            void navigate({
+              to: "/sessions",
+              search: {
+                peek: summary.trace_id,
+                peek_workspace: summary.workspace_id,
+              },
+            })
+          }
+        >
+          Follow a link to it
+        </button>
+      )
+    }
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <LinkBack />
+      </>,
+      "/sessions",
+    )
+    const sessions = await screen.findByRole("grid", { name: "Sessions" })
+    await user.click(
+      await within(sessions).findByRole("row", { name: /claude-code/ }),
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+    // The bar holds the one session already open, so nothing new opens.
+    await user.click(screen.getByText("Select a bucket"))
+    await user.click(within(peek).getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Trace claude-code" }),
+      ).not.toBeInTheDocument(),
+    )
+    await user.click(screen.getByText("Follow a link to it"))
+    await screen.findByRole("complementary", { name: "Trace claude-code" })
+
+    expect(opened()).toEqual([
+      [TELEMETRY_EVENTS.SESSION_OPENED, { source: "list" }],
+      [TELEMETRY_EVENTS.SESSION_OPENED, { source: "link" }],
     ])
   })
 

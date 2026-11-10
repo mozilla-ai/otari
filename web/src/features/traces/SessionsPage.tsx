@@ -252,9 +252,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   // The window a timeline selection asked for, until its list lands.
   const pendingSelection = useRef("")
   const { recordEvent } = useTelemetry()
-  // How the next session is being opened. A session already named by the
-  // address when it changes, with nothing on this page asking, came by a link.
-  const openedVia = useRef<"list" | "timeline" | "link">("link")
+  // The session this page is asking to open, and how. Kept with the session it
+  // names, so a navigation that lands somewhere else (Back overtaking a press,
+  // say) is not credited to the press. Anything else that opens one came by a
+  // link.
+  const opening = useRef<{ id: string; source: "list" | "timeline" } | null>(
+    null,
+  )
 
   const query = url.get("q")
   const page = Math.max(0, url.getNumber("page"))
@@ -359,8 +363,10 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const detail = useTrace(peekId, url.get("peek_workspace"))
   useEffect(() => {
     if (!peekId) return
-    recordEvent(TELEMETRY_EVENTS.SESSION_OPENED, { source: openedVia.current })
-    openedVia.current = "link"
+    const source =
+      opening.current?.id === peekId ? opening.current.source : "link"
+    opening.current = null
+    recordEvent(TELEMETRY_EVENTS.SESSION_OPENED, { source })
   }, [peekId, recordEvent])
   // An owner of the organization may open a private session by break-glass. What
   // it opened is held here for the session it opened, never polled over, and
@@ -419,7 +425,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   // A trace is keyed by its workspace and its id, so the URL keeps both.
   const openPeek = (id: string) => {
     // The open one pressed again changes nothing, so nothing is recorded.
-    if (id !== peekId) openedVia.current = "list"
+    if (id !== peekId) opening.current = { id, source: "list" }
     url.patch({
       peek: id,
       peek_workspace:
@@ -452,13 +458,25 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     }
     pendingSelection.current = ""
     if (listed.length !== 1) return
-    openedVia.current = "timeline"
+    // A bar whose one session is already open opens nothing new.
+    if (listed[0].trace_id !== peekId) {
+      opening.current = { id: listed[0].trace_id, source: "timeline" }
+    }
     patch({
       peek: listed[0].trace_id,
       peek_workspace: listed[0].workspace_id,
       span: "",
     })
-  }, [listed, settled, isListError, filterKey, startParam, endParam, patch])
+  }, [
+    listed,
+    settled,
+    isListError,
+    filterKey,
+    startParam,
+    endParam,
+    patch,
+    peekId,
+  ])
 
   // A minute later is a new window; inside the same minute the key holds, so
   // the reads are refetched as well.
