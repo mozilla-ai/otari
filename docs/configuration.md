@@ -106,9 +106,9 @@ the corresponding startup value after the database is available.
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
-| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](sessions.md#keep-what-a-session-was-about). |
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
-| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -1041,6 +1041,17 @@ model a hosted provider serves, and `migration` for one an upgrade wrote. It is
 null on a rate stored before origins were recorded. A catalog update moves only
 a `seed` rate.
 
+A `seed` rate and a models.dev default are one headline price per model, so a
+completion whose provider states what it charged is settled at that charge
+instead, and its usage row and inline `pricing_source` read `reported`. Only
+OpenRouter states one: its `usage.cost`, plus `cost_details.upstream_inference_cost`
+on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
+depends on the upstream it routes a request to, which no single rate matches.
+A rate set in this file, through the pricing API or on the dashboard still
+prices the completion. The hold placed before the request is still estimated
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
+
 ### A public catalog
 
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
@@ -1680,7 +1691,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](guardrails.md) for behavior and security boundaries.
+[Guardrails](guardrails-reference.md) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1718,9 +1729,12 @@ privacy_url: "https://example.com/privacy"
 ```
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
-Privacy row stays disabled. `GET /api/v1/bootstrap` publishes both addresses
-unauthenticated, so a URL carrying a credential is refused at startup; the same
-check covers `docs_url` and `site_url`.
+Privacy row stays disabled. Wherever a page asks for the terms (signup, an
+invitation, a first password, a provider sign-in), the box links the privacy
+policy beside them when `privacy_url` is set too.
+`GET /api/v1/bootstrap` publishes both addresses unauthenticated, so a URL
+carrying a credential is refused at startup; the same check covers `docs_url`
+and `site_url`.
 
 ## The public site
 

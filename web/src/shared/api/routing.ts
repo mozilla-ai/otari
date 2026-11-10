@@ -9,6 +9,8 @@ import type {
   AliasResponse,
   AutomaticFallbacksResponse,
   CreateAliasRequest,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
 } from "@/client"
@@ -19,6 +21,7 @@ import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
+  ROUTING_EXPLAIN,
   ROUTING_POLICIES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
@@ -94,6 +97,25 @@ export function useRoutingPolicies(workspaceId?: string) {
       ),
     staleTime: 60_000,
     enabled: scope.isReady,
+  })
+}
+
+// What a policy compiles to, without dispatching anything. A read, though it is
+// a POST, so it is a query: the body is the whole key, and a changed spec or
+// simulated budget compiles again.
+export function useExplainPolicy(body: ExplainPolicyRequest, enabled: boolean) {
+  const scope = useRoutingScope()
+  const path = `${scope.policies}/explain`
+  return useQuery({
+    queryKey: [ROUTING_EXPLAIN, path, body],
+    meta: workspaceMeta(body.workspace_id),
+    queryFn: () =>
+      apiFetch<ExplainPolicyResponse>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    placeholderData: (previous) => previous,
+    enabled: enabled && scope.isReady,
   })
 }
 

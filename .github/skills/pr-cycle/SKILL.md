@@ -136,12 +136,11 @@ them has covered nothing.
 
 A small set is not always one of the two faults above, though. Every one of these workflows also
 carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
-nothing: a PR editing only `.github/skills/`, or a `docs/` file other than `dashboard.md` and
+nothing: a PR editing only `.github/skills/`, or a `docs/` file other than
 `public/openapi.json`, gets the title and template checks and no more, and that is the right
-answer rather than a symptom. Those two `docs/` paths are the exception:
-`otari-dashboard.yml` watches the spec, because the dashboard generates its client from it, and
-`otari-dashboard-serving.yml` and `otari-docker-build.yml` still watch `dashboard.md`, so a
-one-line edit to either runs more than the title and template checks. The
+answer rather than a symptom. The spec is the exception: `otari-dashboard.yml` watches it,
+because the dashboard generates its client from it, so a one-line edit to it runs more than
+the title and template checks. The
 question to ask is whether the set matches the change, not whether the set is large.
 
 ## Generated artifacts a PR can owe

@@ -35,7 +35,7 @@ export function OrganizationRosterCard({
       isRowHeader: true,
       cell: (member) => (
         <div className="flex items-center gap-3">
-          <MemberAvatar userId={member.user_id} />
+          <MemberAvatar userId={member.user_id} face={member.avatar_face} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-body">{memberLabel(member)}</span>
             {member.email && member.full_name ? (

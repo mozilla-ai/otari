@@ -131,6 +131,11 @@ def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
 # matching.
 MAX_FULL_NAME_LENGTH = 255
 
+# How many preset avatar faces the dashboard draws (`FACE_COUNT` in
+# `web/src/features/account/avatar/faces.ts`, whose test pins the same number).
+# A face is its index, so this is the bound on a stored pick.
+AVATAR_FACE_COUNT = 203_896
+
 
 class UserBase(SQLModel):
     """Fields an identity carries on the wire."""
@@ -257,6 +262,10 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ago" to "never signed in" with nothing to distinguish the two. NULL here
     # means never, and keeps meaning it.
     last_sign_in_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # The preset face this identity picked on the Account page, by index. NULL
+    # until they pick one, and the dashboard then draws the face their id hashes
+    # to, so nobody needs a row written to have an avatar.
+    avatar_face: int | None = Field(default=None)
 
 
 class DeploymentUserOrganizationPublic(SQLModel):
@@ -437,6 +446,10 @@ class CallerIdentityPublic(SQLModel):
     user_id: uuid.UUID
     email: str | None = None
     full_name: str | None = None
+    avatar_face: int | None = Field(
+        default=None,
+        description="The preset avatar face this identity picked, or null when it has picked none.",
+    )
     # Whether a password exists, never anything derived from its value. It is
     # here rather than left to the deployment-wide ``sign_in_methods``, which
     # answers what this gateway accepts and not what the caller holds: somebody
@@ -688,6 +701,10 @@ class ActiveOrganizationMemberPublic(SQLModel):
     )
     email: str | None = None
     full_name: str | None = None
+    avatar_face: int | None = Field(
+        default=None,
+        description="The preset avatar face this member picked, or null when they have picked none.",
+    )
     role: str
     status: str
     created_at: datetime

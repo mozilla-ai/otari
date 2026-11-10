@@ -71,7 +71,7 @@ ROUTER_HEADER = "Otari-Router"
 CONVERSATION_HEADER = "Otari-Conversation-Id"
 # Request header a client sends as ``keep`` to have the content of a request it
 # routes kept on its session's trace, where the deployment and the workspace keep
-# content. The client answers for its users' consent. See docs/traces.md.
+# content. The client answers for its users' consent. See docs/sessions.md.
 TRACE_CONTENT_HEADER = "Otari-Trace-Content"
 TRACE_CONTENT_KEEP = "keep"
 # Response header naming one inference request, minted by the gateway. Clients use
@@ -1318,8 +1318,7 @@ class GatewayConfig(
     guardrails_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Default URL of the input-guardrails service used when a request does not pass its "
-            "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
+            "Default URL of the input-guardrails service used when a request does not pass its own guardrail `url`."
         ),
     )
     guardrail_thread_pool_size: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(

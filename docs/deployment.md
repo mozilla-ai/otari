@@ -112,7 +112,6 @@ Compose profiles start the bundled service backends:
 ```bash
 docker compose --profile code-exec up -d
 docker compose --profile web-search up -d
-docker compose --profile guardrails up -d
 docker compose --profile object-storage up -d
 ```
 
@@ -123,7 +122,7 @@ docker compose --profile object-storage up -d
 
 A request that needs a backend you have not configured fails; ordinary
 inference is unaffected. See [Built-in tools](tools.md) and
-[Guardrails](guardrails.md).
+[Guardrails](guardrails-reference.md).
 
 ## Upgrading from hosted or hybrid mode
 

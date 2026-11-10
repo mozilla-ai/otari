@@ -5,70 +5,56 @@
 * [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
 
-## Learn
+## What you can do
 
-* [Organizations and workspaces](workspaces.md)
-* [Provider keys](provider-keys.md)
-* [Budgets](budgets.md)
-* [Billing](billing.md)
-
-## How-to Guides
-
-* [Manage workspaces](manage-workspaces.md)
-* [Invite and manage organization members](invite-and-manage-organization-members.md)
-* [Manage provider keys](manage-provider-keys.md)
-* [Rotate a provider key](rotate-a-provider-key.md)
-* [Set a budget and ceiling](set-a-budget-and-ceiling.md)
-* [Create a multi-provider routing](create-a-multi-provider-routing.md)
-* [Manage guardrails](manage-guardrails.md)
-
-## Tools
-
-* [Configure web search](configure-web-search.md)
-* [Configure code execution](configure-code-execution.md)
-* [Add an MCP server](add-an-mcp-server.md)
-* [Control access to an MCP server](control-access-to-an-mcp-server.md)
-
-## Integrations
-
-* [Framework integrations](framework-integrations.md)
-
-## Playground
-
-* [Playground](playground.md)
+* [Build](build.md)
+* [Observe](observe.md)
+* [Control](control.md)
+* [Organize](organize.md)
 
 # Guides
 
-## Organizations and access
+## Build
 
-* [Access control](access-control.md)
-* [Members and invitations](members.md)
-* [API keys](api-keys.md)
-* [Track spend per end user](end-users.md)
-
-## Dashboard
-
-* [Admin dashboard](dashboard.md)
-
-## Agents and frameworks
-
+* [Playground](playground.md)
+* [Configure web search](configure-web-search.md)
+* [Configure code execution](configure-code-execution.md)
+* [Configure an MCP server](configure-an-mcp-server.md)
+* [Framework integrations](framework-integrations.md)
 * [Use with Claude Code](use-with-claude-code.md)
 * [Use with Codex](use-with-codex.md)
 * [Use with Junie](use-with-junie.md)
 * [Use with opencode](use-with-opencode.md)
+* [Use with pi](use-with-pi.md)
+* [Use with oh-my-pi](use-with-oh-my-pi.md)
+* [Use with Hermes Agent](use-with-hermes.md)
 * [Use with Pydantic AI](use-with-pydantic-ai.md)
 * [Use with LangChain](use-with-langchain.md)
 * [Use with LangGraph](use-with-langgraph.md)
 
-## Guardrails
+## Observe
 
-* [Inference Guardrails](guardrails.md)
-* [Agent Guardrails](agent-guardrails.md)
+* [Review usage and requests](review-usage-and-requests.md)
+* [Sessions](sessions.md)
+* [Import usage from outside Otari](external-usage.md)
 
-## Observability
+## Control
 
-* [Agent traces](traces.md)
-* [Importing external usage](external-usage.md)
+* [Budgets](budgets.md)
+* [Access control](access-control.md)
+* [API keys](api-keys.md)
+* [Set a budget and ceiling](set-a-budget-and-ceiling.md)
+* [Create a multi-provider routing](create-a-multi-provider-routing.md)
+* [Configure guardrails](configure-guardrails.md)
+* [Track spend per end user](end-users.md)
+
+## Organize
+
+* [Organizations and workspaces](workspaces.md)
+* [Model providers](model-providers.md)
+* [Billing](billing.md)
+* [Manage workspaces](manage-workspaces.md)
+* [Members and invitations](members.md)
 
 # Self-Hosting
 
@@ -91,7 +77,6 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
-* [Run the guardrails service](guardrails-service.md)
 * [Store agent traces](trace-storage.md)
 * [Service keys on a deployment you run](operator-service-keys.md)
 
@@ -103,15 +88,13 @@
 
 * [Models](models.md)
 * [Routing policies](routing.md)
+* [Sessions reference](sessions-reference.md)
+* [External usage reference](external-usage-reference.md)
 * [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-* [Inference Guardrails reference](guardrails-reference.md)
-
-## Agent Guardrails
-
-* [Agent Guardrails reference](agent-guardrails-reference.md)
+* [Guardrails reference](guardrails-reference.md)
 
 ## Protocols
 

@@ -144,6 +144,10 @@ rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
+Where that rate is a models.dev one nobody set, a completion whose provider
+states what it charged is billed at that charge instead, which OpenRouter's
+does; see [Keeping the defaults current](configuration.md#keeping-the-defaults-current).
+
 An unknown price is reported differently per surface:
 
 | Surface | Unknown rate (including an unset cache rate in `pricing`) | Source field |
@@ -455,9 +459,27 @@ gives the wrong protocol shows the wrong route until models.dev is corrected.
 
 The dashboard's "Use this model" drawer reads this list. It shows the request
 for the route of the offering that answers, and offers a choice where the list
-has more than one ([Models and Routing](dashboard.md#models-and-routing)).
+has more than one ([Browsing the grouped catalog](#browsing-the-grouped-catalog)).
 
 ### Browsing the grouped catalog
+
+**Models** shows one card per model, with filters beside the list. A model's page
+compares every offering in a table, with each offering's limits and the price
+your organization pays.
+
+- Prices are shown in the unit they bill, such as "$0.50 / 1M" for tokens or
+  "$0.04 per image". A card shows the cheapest price when all offerings bill in
+  one unit, and "priced in several units" otherwise.
+- **Price rules** under the table lists each offering's overrides and multipliers
+  in words, such as "×0.5 on every price when service tier is flex". They are
+  read-only here; see [Overrides and multipliers](configuration.md#overrides-and-multipliers).
+- Each row shows the provider's own model ID, which tells apart offerings on one
+  provider, such as Bedrock's regional inference profiles.
+- **Use this model** opens a drawer with a request to copy, for the route the
+  offering is served on.
+
+The page is read-only. An organization sets its own rate on **Providers >
+Inference**, which an offering on one of its keys links to.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -645,7 +667,7 @@ Configure endpoint regions, relative capacity and the trusted location header in
 to restore baseline selection.
 
 The dashboard's Models page and the Routing page's Automatic fallback section
-show this catalog and this order; see [Models and Routing](dashboard.md#models-and-routing).
+show this catalog and this order; see [Automatic fallback](create-a-multi-provider-routing.md#automatic-fallback).
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
