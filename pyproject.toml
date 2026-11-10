@@ -147,6 +147,12 @@ e2b = [
     "e2b>=2.57.0",
     "e2b-code-interpreter>=2.11.1",
 ]
+# Code execution with no sandbox to run: Monty runs a subset of Python in this
+# process's own worker processes. Installed with no sandbox_url, it is the
+# sandbox; the adapter imports it only then.
+monty = [
+    "pydantic-monty>=1.4.0",
+]
 # A rate-limit store every gateway process shares (`rate_limit_store: redis`),
 # so a limit holds across replicas rather than per process. The adapter imports
 # the client only when that store is selected.
@@ -179,6 +185,9 @@ dev = [
     # The geoip extra, for the same reason: the country lookup tests read a
     # real MaxMind-format file.
     "maxminddb>=3.0",
+    # The monty extra, so the adapter's tests run the real interpreter. With it
+    # installed Monty is the default sandbox, which tests/conftest.py switches off.
+    "pydantic-monty>=1.4.0",
     # Validating payloads against the published code-execution contract
     # (docs/public/code-execution-openapi.yaml), in its conformance script and
     # the test that keeps the spec and the doc in agreement. Nothing at runtime

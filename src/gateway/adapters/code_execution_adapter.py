@@ -291,16 +291,24 @@ def build_code_execution_port(
 ) -> CodeExecutionPort:
     """The adapter this deployment's ``sandbox_provider`` names.
 
-    ``protocol`` (the default) reaches the backend at ``sandbox_url``, which is
-    every deployment that existed before the port. Anything else is a hosted
-    provider driven in this process and needs no URL; ``hosted_api_key`` is
-    asked for its key on every lease, and without one its SDK reads the
-    environment.
+    ``protocol`` reaches the backend at ``sandbox_url``, which is every
+    deployment that existed before the port. ``monty`` runs the code in this
+    process's own workers. Anything else is a hosted provider driven in this
+    process and needs no URL; ``hosted_api_key`` is asked for its key on every
+    lease, and without one its SDK reads the environment.
     """
-    if config.effective_sandbox_provider() is SandboxProvider.E2B:
+    provider = config.effective_sandbox_provider()
+    if provider is SandboxProvider.E2B:
         from gateway.adapters.e2b_code_execution_adapter import E2BCodeExecutionAdapter
 
         return E2BCodeExecutionAdapter(hosted_api_key)
+    if provider is SandboxProvider.MONTY:
+        from gateway.adapters.monty_code_execution_adapter import MontyCodeExecutionAdapter
+
+        return MontyCodeExecutionAdapter(
+            max_memory_bytes=config.sandbox_monty_max_memory_mb * 1024 * 1024,
+            write_bytes_limit=config.files_output_max_bytes,
+        )
     sandbox_url = config.sandbox_url or otari_env("SANDBOX_URL") or None
     if sandbox_url is None:
         msg = "sandbox_url is required when sandbox_provider is 'protocol'"
@@ -323,10 +331,15 @@ def verify_code_execution_ready(config: GatewayConfig) -> None:
         return
     try:
         build_code_execution_port(config)
-        if config.effective_sandbox_provider() is SandboxProvider.E2B:
+        provider = config.effective_sandbox_provider()
+        if provider is SandboxProvider.E2B:
             from gateway.adapters.e2b_code_execution_adapter import verify_ready
 
             verify_ready()
+        elif provider is SandboxProvider.MONTY:
+            from gateway.adapters.monty_code_execution_adapter import verify_ready as verify_monty_ready
+
+            verify_monty_ready()
     except SandboxNotReachableError as exc:
         # A transport error class for what is a configuration mistake: restate
         # it as one, since nothing is being reached yet.

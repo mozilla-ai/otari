@@ -269,6 +269,7 @@ class SandboxBackend:
         containers: SandboxContainers | None = None,
         on_lease: Callable[[ContainerLease], None] | None = None,
     ) -> None:
+        """Run one request's code on ``port``, resuming ``container`` when given and keeping it in ``containers``."""
         self._port = port
         # The lease this request resumes, or None for a fresh sandbox, and the
         # registry that holds the session past this request. Both None where
@@ -516,6 +517,7 @@ class SandboxBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
+        """The code execution tool, described with the bound sandbox's runtime, or none when it is not served."""
         return [code_execution_tool_definition(self._port.runtime)] if self._serves_code_execution else []
 
     def owns_tool(self, name: str) -> bool:

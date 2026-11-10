@@ -6,8 +6,9 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 - `otari_web_search`, a search backend
 - `otari_web_fetch`, a bounded public-web fetcher
 
-Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
-provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
+Code execution needs a sandbox: a `sandbox_url` for the `protocol` provider, the
+`monty` extra, which runs code in the gateway itself, or a hosted
+`sandbox_provider` such as `e2b`. The last two need no URL. Search
 needs a search tool (see [Search tools](configuration.md#search-tools)), a
 workspace's [organization search key](#organization-search-keys), or a legacy
 setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
@@ -437,6 +438,36 @@ one sets `sandbox_provider: e2b` instead and Otari runs the code on
 everything below is the same either way. A runnable example lives under
 `demo/code-exec/`.
 
+### Code execution without Docker
+
+Install the `monty` extra (`uv sync --extra monty`, or `pip install
+gateway[monty]`) and leave `sandbox_url` unset, and Otari runs the code itself
+on [Monty](https://github.com/pydantic/monty), a Python interpreter built for
+model-written code. It runs in worker processes of the gateway, with no
+filesystem, environment or network beyond a temporary working directory, so
+it needs no container and no account. `sandbox_provider: monty` selects it
+explicitly, and `sandbox_provider: protocol` keeps code execution off while the
+extra is installed.
+
+Monty runs a subset of Python: part of the standard library (no `statistics`,
+`io` or `enum`, for example), no third-party packages, no `open()` (files are read and written with `pathlib.Path`), no class
+inheritance and no generators. The model is told so in the tool's description
+and in the default purpose hint. Code that uses something unsupported fails with
+the reason in `stderr`. An unknown name or module, or a class that inherits, is
+refused before anything runs; an unsupported file mode such as `Path.open('w+')`
+fails where it is called, after any output before it. A file the code writes is
+returned as data; nothing can draw a chart.
+
+The execution timeout bounds each run, and `sandbox_monty_max_memory_mb`
+(default 256) bounds its heap. A session is never held across requests, so a
+`container` request gets a new one each time. Monty runs no images, so a
+workspace cannot pin one: saving a policy with an image is a `400`, and a request
+under a policy that pinned one before Monty was the sandbox is a `403`.
+Each gateway process caps its concurrent sessions at the host's CPU count,
+so several processes on one host share the CPUs between more sessions. A
+request past the cap waits up to ten seconds, then gets a `503` with
+`Retry-After`.
+
 E2B needs an API key. Store it on the Tools page under Code execution, or with
 `PUT /api/v1/tool-settings/sandbox/credential`, and it is used for the next
 sandbox on every replica within 30 seconds, so rotating or replacing a revoked
@@ -620,10 +651,10 @@ others; the header wins over the deployment default:
    request where the workspace has not pinned. A value outside that vocabulary
    is a 400.
 
-With no sandbox (no `sandbox_url` for the `protocol` provider, and no hosted
-`sandbox_provider` such as `e2b`) there is nothing to bring the code to, so a
-provider
-declaration is always forwarded and no policy is read for it. Asking for `otari`
+With no sandbox (no `sandbox_url` for the `protocol` provider, no hosted
+`sandbox_provider` such as `e2b`, and no Monty, because the `monty` extra is
+missing or `sandbox_provider` is `protocol`) there is nothing to bring the code
+to, so a provider declaration is always forwarded and no policy is read for it. Asking for `otari`
 without a sandbox is a 400. The explicit `otari_code_execution` type is always
 run by Otari, whatever the executor says. When a claimed declaration runs on the
 sandbox, an `otari_code_execution` entry beside it is folded in rather than

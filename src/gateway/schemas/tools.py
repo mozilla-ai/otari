@@ -691,7 +691,8 @@ class CodeExecuteRequest(pydantic.BaseModel):
         description=(
             "'auto' to hold the sandbox after the run, or a container id an earlier response named in "
             "Otari-Container-Id to run in that sandbox again, with its files and interpreter state. "
-            "Omitted, the sandbox is released when the run ends."
+            "A sandbox that cannot hold a session, such as Monty, runs 'auto' as a single run and names "
+            "no id. Omitted, the sandbox is released when the run ends."
         ),
     )
     timeout_seconds: int | None = pydantic.Field(

@@ -1736,6 +1736,7 @@ configuration. On the dashboard, the Tools pages show the sandbox and guardrail
 settings, and the deployment's Web search page shows the web-search ones. Common startup settings are:
 
 - `sandbox_provider` and `sandbox_url`
+- `sandbox_monty_max_memory_mb`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))

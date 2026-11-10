@@ -156,6 +156,7 @@ def _reason(configured: bool, workspace_allows: bool, *, funded: bool = True) ->
 def _managed_tools(
     config: GatewayConfig, switches: _WorkspaceSwitches, code_runtime: str | None = None
 ) -> list[ManagedTool]:
+    """Each gateway tool, whether this caller can use it and why not; ``code_runtime`` describes code execution."""
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
     code_execution = code_execution_tool_definition(code_runtime)["function"]

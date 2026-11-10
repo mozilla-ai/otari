@@ -1,11 +1,13 @@
 import base64
 import binascii
+import functools
 import json
 import os
 import re
 import types
 import typing
 from collections.abc import Callable, Container
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
@@ -284,6 +286,12 @@ KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"cascadia", "llamacpp", "lmstudio", "
 def _is_keyless(provider_type: str) -> bool:
     """Whether a provider is served without a key: a keyless local or self-hosted backend."""
     return provider_type in KEYLESS_SELF_HOSTED_PROVIDERS or provider_credential_env_names(provider_type) == ()
+
+
+@functools.cache
+def monty_installed() -> bool:
+    """Whether this process has the ``monty`` extra, which makes it the sandbox when nothing else is set."""
+    return find_spec("pydantic_monty") is not None
 
 
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
@@ -1358,7 +1366,8 @@ class GatewayConfig(
         default=None,
         description=(
             "Base URL of the code-execution sandbox backend for otari_code_execution tools. "
-            "When unset, otari_code_execution requests are rejected with 400."
+            "When unset, otari_code_execution requests are rejected with 400, unless sandbox_provider is "
+            "also unset and the monty extra is installed, which then runs the code."
         ),
     )
     guardrails_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1422,14 +1431,21 @@ class GatewayConfig(
             "provider names its workspaces its own way and ignores this."
         ),
     )
-    sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(
-        default=SandboxProvider.PROTOCOL,
+    sandbox_provider: Annotated[SandboxProvider | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
         description=(
-            "What runs the code a code-execution tool call asks for: 'protocol' (the default) speaks the "
-            "published code-execution protocol to the backend at sandbox_url, which is a container the "
-            "operator runs; 'e2b' drives E2B's hosted sandboxes from this process and needs no sandbox_url, "
-            "only the e2b extra and E2B_API_KEY."
+            "What runs the code a code-execution tool call asks for: 'protocol' speaks the published "
+            "code-execution protocol to the backend at sandbox_url, which is a container the operator runs; "
+            "'e2b' drives E2B's hosted sandboxes from this process and needs no sandbox_url, only the e2b "
+            "extra and E2B_API_KEY; 'monty' runs a subset of Python in worker processes of this gateway and "
+            "needs only the monty extra. When unset, 'protocol' if sandbox_url is set, else 'monty' if the "
+            "monty extra is installed, else 'protocol' with no sandbox."
         ),
+    )
+    sandbox_monty_max_memory_mb: Annotated[int, Shown(SettingsGroup.TOOLS)] = Field(
+        default=256,
+        ge=1,
+        description="The most heap one code-execution session may use on the 'monty' sandbox provider.",
     )
     sandbox_container_idle_ttl_sec: Annotated[int, Shown(SettingsGroup.TOOLS)] = Field(
         default=600,
@@ -2142,8 +2158,16 @@ class GatewayConfig(
         return CodeExecutor.parse(configured) or CodeExecutor.AUTO
 
     def effective_sandbox_provider(self) -> SandboxProvider:
-        """The deployment's ``sandbox_provider``: ``protocol`` when unset."""
-        return SandboxProvider.parse(self.sandbox_provider) or SandboxProvider.PROTOCOL
+        """The deployment's ``sandbox_provider``, or the best one available when it is unset.
+
+        A ``sandbox_url`` names a backend, so it wins. Without one, the ``monty``
+        extra runs code in this process rather than nowhere.
+        """
+        if self.sandbox_provider is not None:
+            return self.sandbox_provider
+        if not (self.sandbox_url or otari_env("SANDBOX_URL")) and monty_installed():
+            return SandboxProvider.MONTY
+        return SandboxProvider.PROTOCOL
 
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
@@ -2181,7 +2205,10 @@ class GatewayConfig(
         not vetted anything for a workspace to pin, and a workspace-settable
         image is a supply-chain surface rather than a string, so the answer to
         "which images may they choose from" is *none* until one is named.
+        Monty runs no images, so on it there is never one to pin.
         """
+        if self.effective_sandbox_provider() is SandboxProvider.MONTY:
+            return ()
         curated = self.sandbox_allowed_session_images or otari_env("SANDBOX_ALLOWED_SESSION_IMAGES") or ""
         images: list[str] = []
         for candidate in (self.effective_sandbox_image(), *curated.split(",")):
@@ -2336,7 +2363,10 @@ class GatewayConfig(
 
     @field_validator("sandbox_provider", mode="before")
     @classmethod
-    def _validate_sandbox_provider(cls, value: object) -> SandboxProvider:
+    def _validate_sandbox_provider(cls, value: object) -> SandboxProvider | None:
+        """A known provider, or None when unset or blank, which leaves the choice to ``effective_sandbox_provider``."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         provider = SandboxProvider.parse(value)
         if provider is None:
             allowed = sorted(member.value for member in SandboxProvider)
