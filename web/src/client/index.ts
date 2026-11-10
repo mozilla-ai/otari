@@ -367,6 +367,24 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// An organization's own bring-your-own OIDC sign-in connection. `connection`
+// is null until the organization saves one, while `redirect_uri` is always
+// present: an admin needs it to register at their provider before that.
+// `OidcConnection.domains` carries the same email-domain claims the Email
+// domains page manages, each with the DNS proof expiry that gates sign-in
+// through this connection.
+export type OrganizationSso = Schemas["OrganizationSsoPublic"]
+export type OidcConnection = Schemas["OIDCConnectionPublic"]
+export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
+export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+export type OrganizationSsoEnforcement =
+  Schemas["OrganizationSsoEnforcementPublic"]
+export type OrganizationSsoEnforcementRequest =
+  Schemas["OrganizationSsoEnforcementRequest"]
+export type OrganizationSsoPreflight = Schemas["OrganizationSsoPreflightPublic"]
+export type OrganizationSsoPreflightMember =
+  Schemas["OrganizationSsoPreflightMemberPublic"]
+
 // The providers this deployment serves on its own keys, for a request that
 // brings no credential of its own. Deployment-wide and operator-only, and keyed
 // on the provider (one row each), so every path names the provider rather than
@@ -780,12 +798,20 @@ export type PlaygroundComparisonPreference =
 
 export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
 
-// The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
-// here rather than hand-written at the call site so the authorization response
-// and the callback body cannot drift from the spec without a type error.
+// The OAuth sign-in pair. Named here rather than hand-written at the call site
+// so the authorization response and the callback body cannot drift from the
+// spec without a type error.
 export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
 export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
 export type OAuthSessionResponse = Schemas["OAuthSessionResponse"]
+
+// Signing in through an organization's own connection: a lookup by address,
+// an authorization redirect, and the callback that exchanges the code.
+export type SsoLookupRequest = Schemas["SsoLookupRequest"]
+export type SsoLookupResponse = Schemas["SsoLookupResponse"]
+export type SsoAuthorizeResponse = Schemas["SsoAuthorizeResponse"]
+export type SsoCallbackRequest = Schemas["SsoCallbackRequest"]
+export type SsoSessionPublic = Schemas["SsoSessionPublic"]
 
 export type * from "./local"
 

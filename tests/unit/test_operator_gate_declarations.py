@@ -154,6 +154,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "auth_password_reset.router": _PUBLIC_AUTH,
     "auth_session.router": _PUBLIC_AUTH,
     "auth_signup.router": _PUBLIC_AUTH,
+    "auth_sso.router": _PUBLIC_AUTH,
     "auth_webauthn.router": _PUBLIC_AUTH,
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",

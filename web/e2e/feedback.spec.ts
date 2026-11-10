@@ -73,6 +73,47 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   expect(payloads).toEqual([{ message: MESSAGE }, { message: MESSAGE }])
 })
 
+test("desktop: Close sits in the frame's corner clear of the field, and Cancel closes", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/feedback", (route) =>
+    route.fulfill({ status: 204 }),
+  )
+  await login(page)
+  const trigger = page
+    .locator("header")
+    .getByRole("button", { name: "Contact", exact: true })
+  await trigger.click()
+  const dialog = page.getByRole("dialog", { name: "Contact", exact: true })
+  const close = dialog.getByRole("button", { name: "Close" })
+  await expect(close).toBeVisible()
+  // Measured once the entrance settles, the backdrop's and container's too,
+  // and in one read: their transforms move and scale every box, and the
+  // page's scrollbar going away re-centers the frame between two reads.
+  await page.evaluate(() =>
+    Promise.allSettled(
+      document.getAnimations().map((motion) => motion.finished),
+    ),
+  )
+  const { frame, corner, field } = await dialog.evaluate((element) => {
+    const box = (target: Element | null) => {
+      if (!target) throw new Error("The frame did not render")
+      return target.getBoundingClientRect().toJSON() as DOMRect
+    }
+    return {
+      frame: box(element),
+      corner: box(element.querySelector('button[aria-label="Close"]')),
+      field: box(element.querySelector("textarea")),
+    }
+  })
+  expect(frame.right - corner.right).toBeLessThan(16)
+  expect(corner.top - frame.top).toBeLessThan(16)
+  expect(field.right).toBeLessThanOrEqual(corner.left)
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toBeHidden()
+  await expect(trigger).toBeFocused()
+})
+
 test("an account with an email is told where replies go, and the shortcut sends it", async ({
   page,
 }) => {
@@ -101,7 +142,7 @@ test("an account with an email is told where replies go, and the shortcut sends 
   const dialog = page.getByRole("dialog", { name: "Contact", exact: true })
   await expect(
     dialog.getByText(
-      "By sending, you agree we can reply to ada.lovelace@example.com about this message only.",
+      "By sending, you agree we can email ada.lovelace@example.com about this message only.",
     ),
   ).toBeVisible()
   await dialog.getByRole("textbox", { name: "Contact" }).fill(MESSAGE)
@@ -112,7 +153,7 @@ test("an account with an email is told where replies go, and the shortcut sends 
   await page.keyboard.press("ControlOrMeta+Enter")
   const thanks = page.getByRole("dialog", { name: "Thank you!" })
   await expect(thanks).toContainText(
-    "Our team will reply to ada.lovelace@example.com.",
+    "We’ll email you at ada.lovelace@example.com.",
   )
   // The consent line wraps, so the thanks hold the compose's height rather
   // than a fixed one, and the frame does not shrink as they swap in.

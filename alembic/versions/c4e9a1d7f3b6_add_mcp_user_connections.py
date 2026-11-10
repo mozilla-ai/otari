@@ -6,7 +6,7 @@ holds each user's own tokens for a per-user server, and ``mcp_oauth_flows`` the
 sign-ins that have started and not yet come back; both start empty.
 
 Revision ID: c4e9a1d7f3b6
-Revises: b7c3e9d1a4f8
+Revises: a7f2c91d4e60
 Create Date: 2026-11-10
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4e9a1d7f3b6"
-down_revision: str | Sequence[str] | None = "b7c3e9d1a4f8"
+down_revision: str | Sequence[str] | None = "a7f2c91d4e60"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
