@@ -21,11 +21,10 @@
 
 import { Avatar } from "@/design-system/indicators/Avatar"
 import { AvatarFace } from "@/features/account/avatar/AvatarFace"
-import { useAvatar } from "@/features/account/avatar/avatarChoice"
-import { useSessionCaller } from "@/shared/api/auth"
+import { useOwnAvatar } from "@/features/account/avatar/avatarChoice"
 
 export function AccountBadge() {
-  const avatar = useAvatar(useSessionCaller()?.user_id)
+  const avatar = useOwnAvatar()
   if (avatar === null) return <Avatar initials="··" />
   // The monogram's own 26px box, so the control does not move when it swaps.
   return <AvatarFace id={avatar} className="h-[1.625rem] w-[1.625rem]" />
