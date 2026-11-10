@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 from typing import Never
 
 from sqlalchemy import select
@@ -20,6 +21,19 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
         """Return the link for one provider identity, or None."""
         return await self.get((provider, subject))
 
+    async def get_other_providers_for_user(self, *, provider: str, user_id: uuid.UUID) -> set[str]:
+        """Every provider this identity holds a sign-in link at, other than ``provider``.
+
+        The providers rather than whether any exists, because whether one is a way in depends on
+        which it is, and that is the caller's rule to apply.
+        """
+        result = await self.db.execute(
+            select(OAuthIdentityLink.provider).where(
+                OAuthIdentityLink.user_id == user_id, OAuthIdentityLink.provider != provider
+            )
+        )
+        return set(result.scalars().all())
+
     async def get_for_user(self, *, provider: str, user_id: uuid.UUID) -> OAuthIdentityLink | None:
         """Return an account's link at one provider, or None."""
         result = await self.db.execute(
@@ -28,6 +42,17 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
             )
         )
         return result.scalar_one_or_none()
+
+    async def linked_user_ids(self, *, provider: str, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return which of ``user_ids`` already hold a link at ``provider``."""
+        if not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(OAuthIdentityLink.user_id).where(
+                OAuthIdentityLink.user_id.in_(user_ids), OAuthIdentityLink.provider == provider
+            )
+        )
+        return set(result.scalars().all())
 
     async def add(self, external: ProviderIdentity, *, user_id: uuid.UUID) -> OAuthIdentityLink:
         """Stage a link from a provider identity to an account.

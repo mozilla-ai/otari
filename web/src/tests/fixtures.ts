@@ -26,6 +26,9 @@ import type {
   OrganizationPricingOverride,
   OrganizationSpendCeiling,
   OrganizationSso,
+  OrganizationSsoEnforcement,
+  OrganizationSsoPreflight,
+  OrganizationSsoPreflightMember,
   OrgProviderKey,
   OrgProviderModel,
   PendingOrganizationInvitation,
@@ -730,6 +733,18 @@ export function oidcConnection(
   }
 }
 
+/** The caller's organization's current sign-in enforcement. Off, with no exception recorded, by default. */
+export function organizationSsoEnforcement(
+  overrides: Partial<OrganizationSsoEnforcement> = {},
+): OrganizationSsoEnforcement {
+  return {
+    required: false,
+    break_glass_user_id: null,
+    break_glass_waived: false,
+    ...overrides,
+  }
+}
+
 /**
  * What `GET`/`PUT`/`POST /organizations/me/sso` answer with.
  *
@@ -743,6 +758,38 @@ export function organizationSso(
   return {
     connection: null,
     redirect_uri: "https://otari.example.com/auth/sso/callback",
+    enforcement: organizationSsoEnforcement(),
+    ...overrides,
+  }
+}
+
+/** One member the preflight report samples, for recognizing who they are. */
+export function organizationSsoPreflightMember(
+  overrides: Partial<OrganizationSsoPreflightMember> = {},
+): OrganizationSsoPreflightMember {
+  return {
+    user_id: "66666666-6666-6666-6666-666666666666",
+    email: "member@acme.example",
+    full_name: "Pat Member",
+    ...overrides,
+  }
+}
+
+/**
+ * What `GET /organizations/me/sso/preflight` answers with.
+ *
+ * Nobody affected by default, the common case the design describes for a
+ * young organization, so a test about the warning passes a sample explicitly.
+ */
+export function organizationSsoPreflight(
+  overrides: Partial<OrganizationSsoPreflight> = {},
+): OrganizationSsoPreflight {
+  return {
+    total_members: 1,
+    affected_count: 0,
+    affected_members: [],
+    affected_members_truncated: false,
+    break_glass_candidates: [],
     ...overrides,
   }
 }

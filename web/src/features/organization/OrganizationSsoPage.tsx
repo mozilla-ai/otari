@@ -4,6 +4,8 @@ import type {
   OidcConnection,
   OidcConnectionDomain,
   OidcConnectionRequest,
+  OrganizationSsoEnforcement,
+  OrganizationSsoPreflight,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { CopyField } from "@/design-system/actions/CopyField"
@@ -23,7 +25,9 @@ import {
   useDeleteOrganizationSso,
   useOrganizationContext,
   useOrganizationSso,
+  useOrganizationSsoPreflight,
   useSaveOrganizationSso,
+  useSetOrganizationSsoEnforcement,
   useTestOrganizationSso,
 } from "@/shared/api/organizations"
 import { formatDate, formatRelative } from "@/shared/helpers/format"
@@ -305,6 +309,266 @@ function ConnectionSummary({
   )
 }
 
+/** What a saved enforcement change now means, said back so a save is visibly a save. */
+function savedEnforcementSummary(
+  enforcement: OrganizationSsoEnforcement,
+): string {
+  if (!enforcement.required) {
+    return "Saved. Members can sign in by any method this deployment offers."
+  }
+  if (enforcement.break_glass_user_id !== null) {
+    return "Saved. Everyone signs in through your provider, except the owner you named."
+  }
+  return "Saved. Everyone signs in through your provider, with no exception."
+}
+
+function displayName(member: {
+  full_name?: string | null
+  email?: string | null
+}): string {
+  if (member.full_name && member.email) {
+    return `${member.full_name} (${member.email})`
+  }
+  return member.full_name ?? member.email ?? "Unnamed member"
+}
+
+/** The one wording of what an identity change strands on the old account. */
+function strandedKeysExplanation(): string {
+  return "Their API keys stay on the old account and cannot be moved, so they should issue new keys on the new account and revoke the old ones."
+}
+
+function affectedHeadline(preflight: OrganizationSsoPreflight): string {
+  const { affected_count: affected, total_members: total } = preflight
+  if (affected === 0) {
+    return `Nobody loses access. All ${total} members either sign in with your provider already or are exempt from this.`
+  }
+  return `${affected} of ${total} members lose access until they sign in with your provider.`
+}
+
+function PreflightPanel() {
+  const preflight = useOrganizationSsoPreflight()
+  const data = preflight.data
+  return (
+    <div className="flex flex-col gap-2">
+      <ErrorBanner error={preflight.error} />
+      {data ? (
+        <>
+          <p className="text-muted">{affectedHeadline(data)}</p>
+          {data.affected_count > 0 ? (
+            <ul className="flex flex-col gap-1">
+              <li className="text-caption text-subtle">
+                Affected members, who each get a new, empty account:
+              </li>
+              {data.affected_members.map((member) => (
+                <li key={member.user_id} className="text-caption">
+                  {displayName(member)}
+                </li>
+              ))}
+              {data.affected_members_truncated ? (
+                <li className="text-caption text-subtle">
+                  and {data.affected_count - data.affected_members.length}{" "}
+                  {data.affected_count - data.affected_members.length === 1
+                    ? "other"
+                    : "others"}
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+          {data.affected_count > 0 ? (
+            <p className="text-caption text-subtle">
+              {strandedKeysExplanation()}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function EnforcementSection({
+  enforcement,
+  onSaved,
+}: {
+  enforcement: OrganizationSsoEnforcement
+  onSaved: () => void
+}) {
+  const set = useSetOrganizationSsoEnforcement()
+  const preflight = useOrganizationSsoPreflight()
+  // An unread report and a report of nobody are different answers, and the controls below would
+  // otherwise state the second while holding the first: turning enforcement on is the one action
+  // here that costs somebody their access, so it waits for the report rather than assuming it.
+  const report = preflight.data ?? null
+  const candidates = report?.break_glass_candidates ?? []
+  const [required, setRequired] = useState(enforcement.required)
+  const [breakGlassUserId, setBreakGlassUserId] = useState(
+    enforcement.break_glass_user_id ?? "",
+  )
+  const [breakGlassWaived, setBreakGlassWaived] = useState(
+    enforcement.break_glass_waived,
+  )
+  // What the server said when these controls were last filled from it. A save sends what the
+  // controls hold, so a policy another administrator changed in the meantime would be overwritten
+  // by values that never saw it.
+  const [seen, setSeen] = useState(enforcement)
+  const untouched =
+    required === seen.required &&
+    breakGlassUserId === (seen.break_glass_user_id ?? "") &&
+    breakGlassWaived === seen.break_glass_waived
+  // Compared by value, not identity: a refetch hands back an equal policy as a new object, and
+  // comparing references would adopt it on every one of them.
+  const servedMoved =
+    enforcement.required !== seen.required ||
+    (enforcement.break_glass_user_id ?? "") !==
+      (seen.break_glass_user_id ?? "") ||
+    enforcement.break_glass_waived !== seen.break_glass_waived
+  if (servedMoved && untouched) {
+    // Adopted while nothing is half-filled, so a refreshed policy shows rather than waits, and an
+    // edit in progress is never discarded under the person making it.
+    setSeen(enforcement)
+    setRequired(enforcement.required)
+    setBreakGlassUserId(enforcement.break_glass_user_id ?? "")
+    setBreakGlassWaived(enforcement.break_glass_waived)
+  }
+
+  const chosenOwner = candidates.find(
+    (owner) => owner.user_id === breakGlassUserId,
+  )
+
+  // The adoption above runs only while nothing is half-filled. This is the same adoption, asked
+  // for deliberately by somebody who would rather start again than overwrite.
+  const takeServedPolicy = () => {
+    setSeen(enforcement)
+    setRequired(enforcement.required)
+    setBreakGlassUserId(enforcement.break_glass_user_id ?? "")
+    setBreakGlassWaived(enforcement.break_glass_waived)
+  }
+
+  const submit = () => {
+    set.mutate(
+      {
+        required,
+        break_glass_user_id: breakGlassWaived ? null : breakGlassUserId || null,
+        break_glass_waived: breakGlassWaived,
+      },
+      { onSuccess: onSaved },
+    )
+  }
+
+  return (
+    <Section
+      className="border-b border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">Require sign-in</h2>
+        <p className="text-caption">
+          Requires everyone to reach this organization through your provider.
+          Anyone who has not signed in that way is signed out now and refused
+          until they do.
+        </p>
+      </div>
+      <PreflightPanel />
+      <Checkbox isSelected={required} onChange={setRequired}>
+        Require sign-in through this connection
+      </Checkbox>
+      {required && report === null ? (
+        <p className="text-caption">
+          {preflight.error === null
+            ? "Reading who this would affect\u2026"
+            : "Who this would affect could not be read, so it cannot be turned on yet."}
+        </p>
+      ) : null}
+      {required && report === null && preflight.error !== null ? (
+        // The report is what admits the save, so without a control the only way back is a reload.
+        <div className="flex justify-start">
+          <Button
+            variant="ghost"
+            onPress={() => void preflight.refetch()}
+            isPending={preflight.isFetching}
+          >
+            Read it again
+          </Button>
+        </div>
+      ) : null}
+      {required && report !== null ? (
+        <div className="flex flex-col gap-3">
+          {candidates.length === 0 ? (
+            <p className="text-caption">
+              No owner here can sign in without your provider, so this
+              organization cannot keep a way back in. Waive it below to turn
+              enforcement on, knowing a provider outage needs an operator to
+              undo.
+            </p>
+          ) : (
+            <Select
+              label="Owner who can still sign in if your provider breaks"
+              value={breakGlassWaived ? "" : breakGlassUserId}
+              onChange={(value) => {
+                setBreakGlassUserId(value)
+                setBreakGlassWaived(false)
+              }}
+              options={candidates.map((owner) => ({
+                value: owner.user_id ?? "",
+                label: displayName(owner),
+              }))}
+              placeholder="Choose an owner"
+              isDisabled={breakGlassWaived}
+              shouldReserveMessage={false}
+            />
+          )}
+          {chosenOwner ? (
+            <p className="text-caption">
+              {displayName(chosenOwner)} can sign in without your provider, so
+              they stay exempt from this for as long as it is named. Review it
+              when people change.
+            </p>
+          ) : null}
+          <Checkbox
+            isSelected={breakGlassWaived}
+            onChange={(waived) => {
+              setBreakGlassWaived(waived)
+              if (waived) setBreakGlassUserId("")
+            }}
+          >
+            This organization keeps no non-SSO route
+          </Checkbox>
+          {breakGlassWaived ? (
+            <p className="text-caption">
+              If sign-in through your provider ever fails, nobody in this
+              organization can sign in until a deployment operator steps in.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <ErrorBanner error={set.error} />
+      {servedMoved && !untouched ? (
+        <p className="text-caption">
+          Another administrator changed this while you were editing. Saving
+          replaces their change with yours. Take theirs instead to start again
+          from what they left.
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        {servedMoved && !untouched ? (
+          <Button variant="ghost" onPress={takeServedPolicy}>
+            Take their change
+          </Button>
+        ) : null}
+        <Button
+          variant="primary"
+          onPress={submit}
+          isPending={set.isPending}
+          isDisabled={required && report === null}
+        >
+          {servedMoved && !untouched
+            ? "Save over their change"
+            : "Save enforcement"}
+        </Button>
+      </div>
+    </Section>
+  )
+}
+
 export function OrganizationSsoPage() {
   const context = useOrganizationContext()
   const canEdit = canManage(context.data)
@@ -313,6 +577,7 @@ export function OrganizationSsoPage() {
   const [isEditing, setIsEditing] = useState(false)
   const [formOpenCount, setFormOpenCount] = useState(0)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [enforcementSavedCount, setEnforcementSavedCount] = useState(0)
 
   const connection = sso.data?.connection ?? null
 
@@ -384,6 +649,23 @@ export function OrganizationSsoPage() {
               </Button>
             </Section>
           )}
+
+          {connection && sso.data ? (
+            <>
+              <EnforcementSection
+                key={enforcementSavedCount}
+                enforcement={sso.data.enforcement}
+                onSaved={() => setEnforcementSavedCount((count) => count + 1)}
+              />
+              {/* The confirmation sits outside the section because saving remounts it, which
+                  would clear a mutation's own success state before anyone read it. */}
+              {enforcementSavedCount > 0 ? (
+                <p className="text-caption text-success">
+                  {savedEnforcementSummary(sso.data.enforcement)}
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </>
       ) : null}
 

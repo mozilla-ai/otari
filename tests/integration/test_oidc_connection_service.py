@@ -11,25 +11,29 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
+from gateway.core.config import OAUTH_PROVIDERS
 from gateway.core.database import release_session
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
+    OIDCConnectionDisabledError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
     OIDCDiscoveryError,
 )
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
-from gateway.models.identity import OIDCConnection
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
-from gateway.repositories.identity import IdentityRepositories, OIDCConnectionRepository
+from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc_identity_provider
+from gateway.models.tenancy import DOMAIN_PROOF_TTL, DashboardSession, Organization, User
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
+from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity import OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.organizations import OrganizationClaimedDomains
@@ -88,10 +92,35 @@ def _stub_refused_discovery(monkeypatch: pytest.MonkeyPatch, *, calls: list[str]
 
 
 async def _stored(db: AsyncSession, organization_id: uuid.UUID) -> OIDCConnection | None:
-    """Read the organization's connection straight from the repository, bypassing the service."""
+    """Read the organization's connection straight from the repository, bypassing the service.
+
+    Refreshed outside the block, because committing it expires every column and a caller reading
+    one then would load it with no await of its own to do it in.
+    """
     uow = UnitOfWork(db)
     async with uow:
-        return await OIDCConnectionRepository(uow).get_for_organization(organization_id)
+        connection = await OIDCConnectionRepository(uow).get_for_organization(organization_id)
+    if connection is not None:
+        await db.refresh(connection)
+    return connection
+
+
+async def _move_the_issuer_in_another_session(db: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Point the organization's stored connection at another issuer, the way a concurrent save would."""
+    other_engine = create_async_engine(db.get_bind().engine.url)
+    try:
+        async with AsyncSession(other_engine, expire_on_commit=False) as other:
+            stored = (
+                await other.execute(select(OIDCConnection).where(OIDCConnection.organization_id == organization_id))
+            ).scalar_one()
+            stored.issuer = "https://the-issuer-that-won.example"
+            stored.resolved_issuer = "https://the-issuer-that-won.example"
+            stored.encrypted_client_secret = encrypt_secret("the-secret-that-won")
+            stored.client_secret_last4 = "swon"
+            other.add(stored)
+            await other.commit()
+    finally:
+        await other_engine.dispose()
 
 
 def _connection_service(db: AsyncSession) -> OIDCConnectionService:
@@ -101,7 +130,12 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         IdentityRepositories.on(uow),
         organizations=OrganizationService(db, membership_listener=None),
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
         allow_private_hosts=False,
+        passkey_rp_id="otari.test",
+        # The providers a configured deployment offers, because a link at one nobody configured is
+        # not a way in and an empty set here would hide that rule rather than exercise it.
+        offered_providers=frozenset(OAUTH_PROVIDERS),
     )
 
 
@@ -161,6 +195,38 @@ async def _insert_in_another_session(db: AsyncSession, organization_id: uuid.UUI
         await other_engine.dispose()
 
 
+async def _enforce_in_another_session(db: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Turn enforcement on the way a concurrent administrator would, committing it."""
+    other_engine = create_async_engine(db.get_bind().engine.url)
+    try:
+        async with AsyncSession(other_engine, expire_on_commit=False) as other:
+            await other.execute(
+                update(Organization)
+                .where(col(Organization.id) == organization_id)
+                .values(sso_required=True, sso_break_glass_waived=True)
+            )
+            await other.commit()
+    finally:
+        await other_engine.dispose()
+
+
+async def _with_a_live_session(db: AsyncSession, user: User) -> None:
+    db.add(
+        DashboardSession(
+            token_hash=hash_session_token(f"otari-sess-{user.id}"),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    await db.commit()
+
+
+async def _live_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
+    result = await db.execute(select(DashboardSession.token_hash).where(col(DashboardSession.user_id) == user_id))
+    return len(result.scalars().all())
+
+
 def _request(**overrides: Any) -> OIDCConnectionRequest:
     fields: dict[str, Any] = {
         "issuer": _ISSUER,
@@ -202,6 +268,30 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     assert stored.discovery_document == document
 
 
+async def test_save_refuses_disabling_a_connection_the_organization_requires(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the invariant: it must not be reachable by editing the connection instead."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization_id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    with pytest.raises(OIDCConnectionDisabledError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(enabled=False))
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
 async def test_save_encrypts_the_client_secret_and_returns_only_last4(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -221,6 +311,29 @@ async def test_save_encrypts_the_client_secret_and_returns_only_last4(
     assert stored is not None
     assert stored.encrypted_client_secret != "s3cr3t-client-value"
     assert decrypt_secret(stored.encrypted_client_secret) == "s3cr3t-client-value"
+
+
+def test_the_issuer_ceiling_is_exactly_what_a_provider_value_can_hold() -> None:
+    """The submitted ceiling and the stored provider width are one fact, so neither can drift alone."""
+    assert oidc_identity_provider("i" * MAX_OIDC_ISSUER_LENGTH)
+    with pytest.raises(ValueError, match="too long to store"):
+        oidc_identity_provider("i" * (MAX_OIDC_ISSUER_LENGTH + 1))
+    with pytest.raises(ValidationError):
+        _request(issuer="https://sso.example.test/" + "a" * MAX_OIDC_ISSUER_LENGTH)
+
+
+async def test_save_refuses_a_discovered_issuer_too_long_to_name_a_provider(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stored issuer whose provider value will not fit refuses every later sign-in, so refuse it here."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+
+    _stub_discovery(monkeypatch, resolved_issuer="https://sso.example.test/" + "a" * MAX_OIDC_ISSUER_LENGTH)
+    with pytest.raises(OIDCDiscoveryError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _stored(async_db, organization.id) is None
 
 
 async def test_save_stores_nothing_when_discovery_is_refused(
@@ -321,17 +434,45 @@ async def test_an_edit_that_leaves_the_secret_out_keeps_the_stored_one(
     assert decrypt_secret(stored.encrypted_client_secret) == "first-secret-value"
 
 
+async def test_a_concurrent_move_of_the_issuer_refuses_a_submission_keeping_the_secret(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The secret is kept against the row being written over, not against a read taken before discovery.
+
+    The move lands while discovery is in flight, which is the window the connection is released for.
+    """
+    organization = await create_organization(async_db, slug="raced-issuer")
+    admin = await _admin(async_db, organization)
+    organization_id = organization.id
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
+
+    async def _discover_then_move(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        await _move_the_issuer_in_another_session(async_db, organization_id)
+        return DiscoveredProvider(resolved_issuer=_ISSUER, document=_document(), discovered_at=datetime.now(UTC))
+
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.discover_connection_metadata", _discover_then_move)
+
+    with pytest.raises(OIDCConnectionSecretRequiredError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret=None))
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert decrypt_secret(stored.encrypted_client_secret) == "the-secret-that-won"
+
+
 async def test_a_first_save_that_leaves_the_secret_out_is_refused(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     organization = await create_organization(async_db, slug="nothing-to-keep")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
 
     with pytest.raises(OIDCConnectionSecretRequiredError):
         await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret=None))
 
-    assert await _stored(async_db, organization.id) is None
+    assert await _stored(async_db, organization_id) is None
 
 
 async def test_a_moved_issuer_cannot_carry_the_stored_secret(
@@ -340,6 +481,7 @@ async def test_a_moved_issuer_cannot_carry_the_stored_secret(
     """The secret proves this deployment is that client, so it must not follow the issuer somewhere new."""
     organization = await create_organization(async_db, slug="moved-issuer")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
@@ -349,7 +491,7 @@ async def test_a_moved_issuer_cannot_carry_the_stored_secret(
             user=admin, request=_request(issuer="https://elsewhere.example", client_secret=None)
         )
 
-    stored = await _stored(async_db, organization.id)
+    stored = await _stored(async_db, organization_id)
     assert stored is not None
     assert stored.resolved_issuer == _ISSUER
     assert decrypt_secret(stored.encrypted_client_secret) == "first-secret-value"
@@ -360,6 +502,7 @@ async def test_a_changed_client_id_cannot_carry_the_stored_secret(
 ) -> None:
     organization = await create_organization(async_db, slug="changed-client")
     admin = await _admin(async_db, organization)
+    organization_id = organization.id
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
@@ -368,7 +511,7 @@ async def test_a_changed_client_id_cannot_carry_the_stored_secret(
             user=admin, request=_request(client_id="another-client-id", client_secret=None)
         )
 
-    stored = await _stored(async_db, organization.id)
+    stored = await _stored(async_db, organization_id)
     assert stored is not None
     assert stored.client_id == "a-client-id"
 
@@ -604,6 +747,83 @@ async def test_test_for_user_refuses_a_connection_deleted_while_discovery_is_out
 
     with pytest.raises(OIDCConnectionNotFoundError):
         await _connection_service(async_db).test_for_user(user=admin)
+
+
+async def test_save_revokes_the_live_session_of_a_member_the_enforcement_refuses(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The NOTE on ``save_for_user``: storing a connection ends the sessions enforcement locks out."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    member = await create_member(async_db, organization, role="member", full_name="Ben Member")
+    await _with_a_live_session(async_db, member)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization.id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _live_sessions(async_db, member.id) == 0
+
+
+async def test_enforcement_turned_on_while_discovery_is_out_still_revokes(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The switch is read inside the transaction that writes, not before the issuer is dialed."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    member = await create_member(async_db, organization, role="member", full_name="Ben Member")
+    await _with_a_live_session(async_db, member)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+
+    async def _discover_then_enforce(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        await _enforce_in_another_session(async_db, organization_id)
+        return DiscoveredProvider(resolved_issuer=issuer, document=_document(issuer), discovered_at=datetime.now(UTC))
+
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.discover_connection_metadata", _discover_then_enforce)
+
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _live_sessions(async_db, member.id) == 0
+
+
+async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The library claims the pending state during an exchange this service does not wrap.
+
+    The client is built inside a block and used after it, so a state store reading through that
+    block refuses the claim and sign-in fails before the token endpoint is reached. The callback
+    tests stub the exchange, so nothing else here would notice.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    service = _connection_service(async_db)
+    public = await service.save_for_user(user=admin, request=_request())
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    metadata = DiscoveredProvider(
+        resolved_issuer=public.resolved_issuer,
+        # A signing key set as well, which the library requires to build an OpenID client at all.
+        document={**_document(public.resolved_issuer), "jwks_url": f"{public.resolved_issuer}/jwks"},
+        discovered_at=datetime.now(UTC),
+    )
+
+    client = await service.client_for_sign_in(
+        stored, metadata, redirect_uri="https://otari.example.com/auth/sso/callback", allow_private_hosts=False
+    )
+
+    # Reached the way apron-auth reaches it during the exchange, outside every block this service
+    # opened. None is the answer for a state nothing minted; the point is that it answers.
+    assert await client._state_store.consume("a-state-nothing-minted") is None
 
 
 # =============================================================================

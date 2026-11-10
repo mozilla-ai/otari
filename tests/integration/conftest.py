@@ -20,7 +20,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, MetaData, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -105,9 +105,16 @@ def _reset_engine(database_url: str) -> Engine:
 
 
 def _build_reset_plan(database_url: str) -> _ResetPlan:
-    """Record the schema's tables, and whatever the migrations seeded into them."""
+    """Record the schema's tables, in an order safe to reinsert, and whatever the migrations seeded."""
     with _reset_engine(database_url).connect() as conn:
-        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        metadata = MetaData()
+        metadata.reflect(conn)
+        # A seeded row in a child table can reference a seeded row in a parent table, so
+        # reinsertion needs that same order. Table-name order gives no such guarantee.
+        # NOTE: ``organization`` and ``user`` reference each other, so no foreign-key order exists
+        # for that pair and SQLAlchemy warns and orders them by name, which seeds them in the
+        # direction they need.
+        tables = [table.name for table in metadata.sorted_tables if table.name != "alembic_version"]
         seeds = tuple(
             (table, rows)
             for table in tables

@@ -258,13 +258,18 @@ def test_every_session_minting_route_checks_the_freeze() -> None:
         "The sign-in route no longer appears to mint a session; this scan has gone blind."
     )
 
+    # A route module may not import a database library directly (``scripts/check_architecture.py``),
+    # so a new one takes the freeze through ``MaintenanceModeDep`` instead of calling
+    # ``is_maintenance_mode`` inline; either name in the source counts as checking it.
     unguarded = sorted(
         name
         for name, source in minting.items()
-        if "is_maintenance_mode" not in source and name not in SESSION_MINTING_EXEMPT
+        if "is_maintenance_mode" not in source
+        and "MaintenanceModeDep" not in source
+        and name not in SESSION_MINTING_EXEMPT
     )
     assert not unguarded, (
         f"{unguarded} mint a dashboard session without checking maintenance mode. "
-        "Call is_maintenance_mode before minting, or add the module to "
+        "Call is_maintenance_mode, or depend on MaintenanceModeDep, before minting, or add the module to "
         "SESSION_MINTING_EXEMPT with the reason it closes no door."
     )
