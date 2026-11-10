@@ -37,6 +37,13 @@ function stubNavigation(hash = "") {
   return assign
 }
 
+/** A back/forward cache restore, which jsdom does not model itself. */
+function restoreFromCache() {
+  const event = new Event("pageshow")
+  Object.defineProperty(event, "persisted", { value: true })
+  window.dispatchEvent(event)
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   window.sessionStorage.clear()
@@ -188,5 +195,38 @@ describe("SsoEntry", () => {
     expect(
       window.localStorage.getItem("otari.dashboard.rememberedCompany"),
     ).toBeNull()
+  })
+
+  it("offers Continue again when the browser restores the page from its cache", async () => {
+    const found: SsoLookupResponse = {
+      found: true,
+      organization_name: "Acme Corp",
+      slug: "acme",
+    }
+    const authorized: SsoAuthorizeResponse = {
+      authorization_url: "https://idp.acme.example/authorize?x=1",
+      state: "the-state",
+    }
+    stubNavigation()
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(found))
+      .mockResolvedValueOnce(jsonResponse(authorized))
+    renderEntry()
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
+    )
+    await user.type(screen.getByLabelText("Work email"), "ana@acme.example")
+    await user.click(screen.getByRole("button", { name: "Continue" }))
+    expect(
+      await screen.findByRole("button", { name: "Looking up…" }),
+    ).toBeDisabled()
+
+    restoreFromCache()
+
+    expect(
+      await screen.findByRole("button", { name: "Continue" }),
+    ).toBeEnabled()
   })
 })

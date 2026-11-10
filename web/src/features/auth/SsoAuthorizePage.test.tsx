@@ -43,6 +43,13 @@ function stubNavigation() {
   return assign
 }
 
+/** A back/forward cache restore, which jsdom does not model itself. */
+function restoreFromCache() {
+  const event = new Event("pageshow")
+  Object.defineProperty(event, "persisted", { value: true })
+  window.dispatchEvent(event)
+}
+
 beforeEach(() => {
   resetTelemetrySpy()
   window.sessionStorage.clear()
@@ -128,5 +135,30 @@ describe("SsoAuthorizePage", () => {
         status: 404,
       }),
     )
+  })
+
+  it("offers the control again when the browser restores the page from its cache", async () => {
+    const authorized: SsoAuthorizeResponse = {
+      authorization_url: "https://idp.acme.example/authorize?x=1",
+      state: "the-state",
+    }
+    stubNavigation()
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(authorized))
+    renderPage("acme")
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", { name: "Continue to your provider" }),
+    )
+    expect(
+      await screen.findByRole("button", { name: "Continuing…" }),
+    ).toBeDisabled()
+
+    restoreFromCache()
+
+    const control = await screen.findByRole("button", {
+      name: "Continue to your provider",
+    })
+    expect(control).toBeEnabled()
   })
 })

@@ -3,6 +3,7 @@ import { useState } from "react"
 import { FiBriefcase } from "react-icons/fi"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { ApiError, lookupSso } from "@/shared/api/client"
+import { useBackForwardCacheRestore } from "@/shared/hooks/useBackForwardCacheRestore"
 import {
   analyticsErrorCode,
   analyticsStatusCode,
@@ -91,6 +92,10 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
       setError(caught)
     }
   }
+
+  // The round trip leaves while the control is mid-flight, and a restore brings
+  // that back, so it is cleared rather than left disabled for good.
+  useBackForwardCacheRestore(() => setIsPending(false))
 
   const submitAddress = async () => {
     const address = email.trim()

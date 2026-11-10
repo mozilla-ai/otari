@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 import { ApiError } from "@/shared/api/client"
+import { useBackForwardCacheRestore } from "@/shared/hooks/useBackForwardCacheRestore"
 import {
   analyticsErrorCode,
   analyticsStatusCode,
@@ -30,6 +31,10 @@ export function SsoAuthorizePage({ slug }: { slug: string }) {
   const { recordEvent } = useTelemetry()
   const [isPending, setIsPending] = useState(false)
   const [isRefused, setIsRefused] = useState(false)
+
+  // The round trip leaves while the control is mid-flight, and a restore brings
+  // that back, so it is cleared rather than left disabled for good.
+  useBackForwardCacheRestore(() => setIsPending(false))
 
   const start = async () => {
     setIsPending(true)
