@@ -13,6 +13,9 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { MCP_CATALOG, MCP_CATALOG_SYNC_POLL_MS } from "@/shared/api/queryKeys"
 
+// A scheduled sync can start while the page sits open, so idle status is rechecked slowly.
+const MCP_CATALOG_SYNC_IDLE_POLL_MS = 60_000
+
 // A sync changes the catalog at most a few times a day, so a page read a
 // minute ago is still the page.
 const CATALOG_STALE_MS = 60_000
@@ -102,7 +105,7 @@ export function useMcpCatalogSync(enabled: boolean) {
     refetchInterval: (query) =>
       query.state.data?.running || query.state.data?.requested
         ? MCP_CATALOG_SYNC_POLL_MS
-        : false,
+        : MCP_CATALOG_SYNC_IDLE_POLL_MS,
   })
 }
 
