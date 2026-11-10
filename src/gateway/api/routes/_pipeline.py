@@ -170,6 +170,7 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
     provider_latency_ms_of,
+    provider_reported_cost_of,
     provider_web_searches_of,
     reasoning_tokens_of,
     service_tier_of,
@@ -204,7 +205,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import REPORTED_SOURCE, ModelPricing, SettledSource
 from gateway.models.tools import (
     CodeExecutor,
     ResolvedCodeExecutionPolicy,
@@ -307,6 +308,7 @@ from gateway.services.pricing import (
     NO_FACTS,
     ModelSearchRate,
     PriceFacts,
+    charged_as_reported,
     estimate_settles,
     model_search_rate,
     price_completion,
@@ -317,6 +319,7 @@ from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
     gateway_tool_pricing_key,
+    is_estimated_rate,
     is_free_pricing,
     no_pricing_error_detail,
     price_tool_calls,
@@ -4941,7 +4944,7 @@ class LoggedUsage(NamedTuple):
     """
 
     cost: Decimal | None
-    pricing_source: PriceSource | None
+    pricing_source: SettledSource | None
     deployment_paid_cost: Decimal | None = None
 
 
@@ -5053,7 +5056,7 @@ async def record_usage(
         with the source of the model rate that priced it.
 
     """
-    pricing_source: PriceSource | None = None
+    pricing_source: SettledSource | None = None
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
         workspace_id=workspace_id if workspace_id is not None else await workspace_for_key_id(db, api_key_id),
@@ -5143,8 +5146,19 @@ async def record_usage(
                 organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
                 deployment_paid=deployment_paid,
             )
+        # A charge the provider stated settles the call where no rate anybody chose
+        # would: an aggregator's price moves with the upstream it routed to.
+        reported = (
+            charged_as_reported(provider_reported_cost_of(usage_data, provider_type or provider_key(provider)))
+            if usage_data and provider and (resolved is None or is_estimated_rate(resolved))
+            else None
+        )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
-        if resolved is not None:
+        if reported is not None:
+            pricing_source = REPORTED_SOURCE
+            usage_log.cost = reported.cost
+            usage_log.pricing_source = REPORTED_SOURCE
+        elif resolved is not None:
             priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded, facts=facts)
             if priced is None and usage_data and not priced_per_request(resolved.pricing):
                 _warn_unpriced_model(f"{provider}:{model}" if provider else model, unit=resolved.pricing.unit)

@@ -200,6 +200,28 @@ def reasoning_tokens_of(usage: CompletionUsage) -> int:
     return 0
 
 
+def provider_reported_cost_of(usage: CompletionUsage, provider: str | None) -> float | None:
+    """What ``provider`` says the call cost, in USD, or ``None`` where it says nothing usable.
+
+    Only OpenRouter states one, as ``usage.cost``. On a key in its BYOK mode
+    that is OpenRouter's fee alone, and the upstream's charge to the key is
+    ``cost_details.upstream_inference_cost``, so the two are summed. Any other
+    provider's ``cost`` extra is ignored: nothing says what unit it is in.
+    """
+    if provider != "openrouter":
+        return None
+    extras = usage.model_extra or {}
+    parts = [extras.get("cost")]
+    if extras.get("is_byok") is True:
+        details = extras.get("cost_details")
+        parts.append(details.get("upstream_inference_cost") if isinstance(details, dict) else None)
+    amounts = [part for part in parts if isinstance(part, int | float) and not isinstance(part, bool)]
+    if len(amounts) != len(parts):
+        return None
+    total = math.fsum(amounts)
+    return total if math.isfinite(total) else None
+
+
 # Provider-specific field(s) any-llm leaves in ``usage.model_extra`` that sum to
 # actual compute time, and the multiplier that converts the sum's unit to
 # milliseconds (otari#337). Absent here means "not reported": most providers
