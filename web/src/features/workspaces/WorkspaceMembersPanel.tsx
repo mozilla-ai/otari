@@ -169,6 +169,17 @@ export function WorkspaceMembersPanel({
       ),
     [orgMembers],
   )
+  // A workspace row carries no avatar of its own; the person's organization
+  // row does, as it does their name.
+  const faceByUserId = useMemo(
+    () =>
+      new Map(
+        orgMembers
+          .filter((member) => member.user_id)
+          .map((member) => [member.user_id as string, member.avatar_face]),
+      ),
+    [orgMembers],
+  )
   return (
     <div className="flex flex-col gap-4 p-4">
       <h2 className="text-title">Members of {workspaceName}</h2>
@@ -192,7 +203,10 @@ export function WorkspaceMembersPanel({
               className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3"
             >
               <span className="flex min-w-0 flex-1 items-center gap-3">
-                <MemberAvatar userId={member.user_id} />
+                <MemberAvatar
+                  userId={member.user_id}
+                  face={faceByUserId.get(member.user_id)}
+                />
                 <span className="min-w-0 truncate text-body">
                   {nameByUserId.get(member.user_id) ??
                     `Identity ${member.user_id.slice(0, 8)}`}

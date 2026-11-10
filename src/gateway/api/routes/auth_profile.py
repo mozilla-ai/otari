@@ -1,8 +1,9 @@
-"""Who the signed-in identity is, and the name it goes by, which is the one thing about itself it can change.
+"""Who the signed-in identity is, and the two things about itself it can change: its name and its avatar.
 
-``GET`` and ``PATCH /api/v1/auth/profile`` always act on the caller's own
-identity: they take no id, and an operator reading or changing somebody else's
-name belongs to the deployment administration surface rather than here.
+``GET`` and ``PATCH /api/v1/auth/profile``, and ``PUT /api/v1/auth/profile/avatar``,
+always act on the caller's own identity: they take no id, and an operator
+reading or changing somebody else's name belongs to the deployment
+administration surface rather than here.
 
 ``GET`` answers whether or not the caller belongs to an organization, which
 ``GET /api/v1/organizations/me`` cannot: it 404s for an identity with no active
@@ -30,8 +31,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
-from gateway.models.tenancy import MAX_FULL_NAME_LENGTH, CallerIdentityPublic
-from gateway.services.tenancy import describe_caller, update_full_name
+from gateway.models.tenancy import AVATAR_FACE_COUNT, MAX_FULL_NAME_LENGTH, CallerIdentityPublic
+from gateway.services.tenancy import describe_caller, update_avatar_face, update_full_name
 
 # Declared on the router rather than left to arrive through ``CurrentIdentity``,
 # matching `auth_password.py`: the credential check is then a property of the
@@ -67,6 +68,23 @@ class UpdateProfileRequest(BaseModel):
     )
 
 
+class UpdateAvatarRequest(BaseModel):
+    """The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them."""
+
+    model_config = {"json_schema_extra": {"example": {"face": 1234}}}
+
+    # Required for the reason ``full_name`` is: a face, or null for none.
+    face: int | None = Field(
+        strict=True,
+        ge=0,
+        lt=AVATAR_FACE_COUNT,
+        description=(
+            "The index of a preset face from the dashboard's avatar set, or null to go back to "
+            "the face this identity's id gives it."
+        ),
+    )
+
+
 @router.get("")
 async def get_own_profile(
     identity: CurrentIdentity,
@@ -95,6 +113,21 @@ async def update_own_profile(
     the whole membership context.
     """
     updated = await update_full_name(db, identity, full_name=body.full_name)
+    return await describe_caller(db, updated)
+
+
+@router.put("/avatar")
+async def update_own_avatar(
+    body: UpdateAvatarRequest,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CallerIdentityPublic:
+    """Change the avatar the caller is drawn with, everywhere their organization lists them.
+
+    Always the caller's own identity, and the same answer as ``PATCH``, for the
+    same reason.
+    """
+    updated = await update_avatar_face(db, identity, face=body.face)
     return await describe_caller(db, updated)
 
 

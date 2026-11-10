@@ -25,6 +25,7 @@ from gateway.services.tenancy.user_service import (
     report_new_account,
     report_sign_in,
     unverified_identity_is_claimable,
+    update_avatar_face,
     update_full_name,
 )
 from gateway.services.tenancy.workspace_service import WorkspaceService
@@ -49,5 +50,6 @@ __all__ = [
     "report_new_account",
     "report_sign_in",
     "unverified_identity_is_claimable",
+    "update_avatar_face",
     "update_full_name",
 ]
