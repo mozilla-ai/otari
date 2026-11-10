@@ -420,10 +420,9 @@ The first fetch provider with a cost tier.
 
 - Two efforts available under `parse_effort`: `lite` and `standard`.
   Note: these only have an effect when fetching PDFs. There is no effect when fetching standard web pages.
-- Defaults to `standard`, which bills each PDF page on top of the URL. Check the [docs](you.com/docs) for the latest.
-  The human author chose to send `lite` unless passed and to mark the option `cost_tier`, with
-  `lite` as its `default`, since that is what a call without it costs. `None` counts as not
-  passed.
+- Defaults to `standard`, which bills each PDF page on top of the URL.
+  Check the [docs](https://you.com/docs) for the latest on configurations and pricing. 
+  In any-fetch, `lite` is the default due to the cost implication of `standard`.
 - An empty response can be a cache miss rather than an empty page: under
   `extraction_source: cache`, You.com returns `{}` for a page it has no copy of, which its
   documentation calls "nothing extracted". It is a `FetchError` (`not_cached`), not an empty page

@@ -845,7 +845,7 @@ Each provider's limits are in the
   since names are unique across `search_tools` and `fetch_tools`. It reports no
   cost, so a fetch is billed at the instance's own rate (its `price_per_call`, or
   a `fetch` price set on the dashboard's Web search page or through the API).
-  You.com's [pricing](https://ydc-preview-extract-official-launch-docs.docs.buildwithfern.com/docs/administration/billing#extract-api), read
+  You.com's [pricing](https://you.com/docs/administration/billing#extract-api), read
   2026-11-10, is $0.90 per 1,000 URLs. Its `parse_effort` is the cost tier:
   `lite`, which Otari sends unless the instance's `options` say otherwise, adds
   nothing, while `standard` adds $0.50 per 1,000 PDF pages, so a 350-page PDF
