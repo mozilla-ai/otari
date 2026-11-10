@@ -49,7 +49,14 @@ export function PolicyTestGroup({
     },
     isBudgetValid,
   )
-  const plan = explain.data
+  const isFieldValid = Number.isFinite(Number(budgetUsed.trim()))
+  // An invalid budget compiles nothing, so the last plan would answer a value
+  // that is no longer in the field.
+  const plan = isFieldValid ? explain.data : undefined
+  // While a new value settles and compiles, the last plan stays in place so the
+  // section does not jump, dimmed so it does not read as the answer.
+  const isStale =
+    explain.isPlaceholderData || budgetUsed.trim() !== settledBudget
 
   return (
     <PolicyGroup title="Test" isReadOnly error={explain.error}>
@@ -59,12 +66,15 @@ export function PolicyTestGroup({
           value={budgetUsed}
           onChange={setBudgetUsed}
           inputMode="decimal"
-          isInvalid={!Number.isFinite(Number(budgetUsed.trim()))}
+          isInvalid={!isFieldValid}
           errorMessage="Enter a number."
         />
       ) : null}
       {plan === undefined ? null : (
-        <div className="flex flex-col gap-3">
+        <div
+          aria-busy={isStale}
+          className={`flex flex-col gap-3${isStale ? " opacity-50" : ""}`}
+        >
           {plan.candidates.length === 0 ? (
             <p className="text-sm text-danger">
               No model can serve this policy.
