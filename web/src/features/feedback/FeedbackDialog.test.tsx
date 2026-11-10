@@ -70,7 +70,7 @@ describe("FeedbackDialog", () => {
     const dialog = screen.getByRole("dialog", { name: "Thank you!" })
     await waitFor(() => expect(dialog).toHaveFocus())
     expect(dialog).toHaveAccessibleDescription("Our team has your message.")
-    // The phone sheet's close control is the frame's only button.
+    // The thanks have nothing to send or cancel: Close is their only button.
     expect(
       [...dialog.querySelectorAll("button")].map((b) =>
         b.getAttribute("aria-label"),
@@ -147,11 +147,32 @@ describe("FeedbackDialog", () => {
     expect(field()).toHaveValue("Idea")
   })
 
+  it("closes on Cancel or Close at once while the field is empty", async () => {
+    const { fetch, user } = setup()
+    for (const name of ["Cancel", "Close"]) {
+      await user.click(screen.getByRole("button", { name }))
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      )
+      await user.click(screen.getByRole("button", { name: "Open feedback" }))
+      await screen.findByRole("textbox", { name: "Contact" })
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("guards Cancel on a draft as it guards Escape", async () => {
+    const { fetch, user } = setup()
+    await user.type(field(), "Unsent idea")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Keep editing" }))
+    expect(field()).toHaveValue("Unsent idea")
+    expect(field()).toHaveFocus()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("guards Escape on a draft and clears it only on Discard", async () => {
     const { fetch, user } = setup()
-    expect(
-      screen.queryByRole("button", { name: "Cancel" }),
-    ).not.toBeInTheDocument()
     await user.type(field(), "Unsent idea")
     await user.keyboard("{Escape}")
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
@@ -187,7 +208,7 @@ describe("FeedbackDialog", () => {
     await screen.findByRole("heading", { name: "Thank you!" })
   })
   const consent = (email: string) =>
-    `By sending, you agree we can reply to ${email} about this message only.`
+    `By sending, you agree we can reply by email to ${email} about this message only.`
 
   it("names no address when the account has none, and sends the message alone", async () => {
     const { fetch, user } = setup()
@@ -230,7 +251,9 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
+    ).toHaveAccessibleDescription(
+      "Our team will reply by email to ada@example.com.",
+    )
   })
 
   it("names and sends the address showing when Send is pressed", async () => {
@@ -266,7 +289,9 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
+    ).toHaveAccessibleDescription(
+      "Our team will reply by email to ada@example.com.",
+    )
   })
 
   it("sends on Cmd+Enter from the field, as the button promises", async () => {
