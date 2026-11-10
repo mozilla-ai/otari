@@ -408,6 +408,10 @@ class SessionOwners(Protocol):
         """
         ...
 
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization ``workspace_id`` belongs to, whose own provider keys its sessions may have run on."""
+        ...
+
 
 @dataclass(frozen=True)
 class TraceScope:

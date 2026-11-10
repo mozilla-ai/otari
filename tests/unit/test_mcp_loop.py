@@ -22,13 +22,14 @@ from any_llm.types.completion import (
     CompletionUsage,
     Function,
     PromptTokensDetails,
+    ServerToolUsage,
 )
 from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
-from gateway.core.usage import cache_write_1h_tokens_of, reasoning_tokens_of
+from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.inference import EmptyCompletionError
@@ -501,6 +502,28 @@ async def test_loop_accumulates_cached_tokens_across_iterations(monkeypatch: pyt
     assert out.usage is not None
     assert out.usage.prompt_tokens_details is not None
     assert out.usage.prompt_tokens_details.cached_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A grounded round the loop hid still bills its searches, though the final round ran none."""
+    searched = _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=10, completion_tokens=2)
+    assert searched.usage is not None
+    searched.usage.server_tool_use = ServerToolUsage(web_search_requests=2)
+    responses = iter([searched, _completion(finish="stop", content="done", prompt=12, completion_tokens=3)])
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert provider_web_searches_of(out.usage) == 2
 
 
 @pytest.mark.asyncio
@@ -1061,8 +1084,14 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
             cache_creation_token_details=CacheCreationTokenDetails(ephemeral_1h_input_tokens=40),
         ),
         completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12),
+        server_tool_use=ServerToolUsage(web_search_requests=2),
     )
-    round_two = CompletionUsage(prompt_tokens=140, completion_tokens=5, total_tokens=145)
+    round_two = CompletionUsage(
+        prompt_tokens=140,
+        completion_tokens=5,
+        total_tokens=145,
+        server_tool_use=ServerToolUsage(web_search_requests=1),
+    )
     iter_streams = iter(
         [
             _async_iter(
@@ -1103,6 +1132,7 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
     assert usages[0].prompt_tokens_details.cache_write_tokens == 40
     assert cache_write_1h_tokens_of(usages[0]) == 40
     assert reasoning_tokens_of(usages[0]) == 12
+    assert provider_web_searches_of(usages[0]) == 3
 
 
 @pytest.mark.asyncio

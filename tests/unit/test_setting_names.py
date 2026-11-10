@@ -104,6 +104,7 @@ _SETTING_NAMES = frozenset(
         "model_discovery",
         "model_discovery_negative_ttl_seconds",
         "model_discovery_timeout_seconds",
+        "models_dev_base_url",
         "models_dev_cache_ttl_seconds",
         "models_dev_metadata",
         "oauth_github_client_id",

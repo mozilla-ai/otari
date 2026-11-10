@@ -408,6 +408,7 @@ async def _find_model(
             alias_target,
             normalized_pricing_lookup(config, pricing_map),
             models_dev=await load_catalog_metadata(config),
+            organization_id=scope.organization_id,
         )
 
     # Check the pricing table first.
@@ -451,7 +452,9 @@ async def _find_model(
         fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            apply_model_metadata(config, await load_catalog_metadata(config), fallback)
+            apply_model_metadata(
+                config, await load_catalog_metadata(config), fallback, organization_id=scope.organization_id
+            )
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
             )
@@ -472,11 +475,11 @@ async def _find_model(
             pricing_source="configured" if pricing else "none",
         )
         apply_default_pricing(obj)
-        apply_model_metadata(config, await load_catalog_metadata(config), obj)
+        apply_model_metadata(config, await load_catalog_metadata(config), obj, organization_id=scope.organization_id)
         return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
-    apply_model_metadata(config, await load_catalog_metadata(config), obj)
+    apply_model_metadata(config, await load_catalog_metadata(config), obj, organization_id=scope.organization_id)
     return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)

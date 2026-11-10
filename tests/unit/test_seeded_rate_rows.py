@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from gateway.models.pricing import ModelPricing, rates_of
-from gateway.services.providers._org_provider_model_service import _apply_default, _seeded_row
+from gateway.services.providers._org_provider_model_service import _apply_default, _same_rates, _seeded_row
 
 _AT = datetime(2026, 6, 1, tzinfo=UTC)
 _BLOCK = {
@@ -50,3 +50,24 @@ def test_a_refresh_moves_the_block_with_the_columns() -> None:
     _apply_default(row, moved)
 
     assert (row.input_price_per_million, row.rates) == (Decimal(3), _BLOCK)
+
+
+def test_a_refresh_moves_the_unit_with_the_rates() -> None:
+    """A default that moved from a token price to a per-image price changes what a request is billed on."""
+    row = _seeded_row(uuid.uuid4(), "deepinfra:flux-1-dev", _default(unit="token"), _AT)
+    moved = _default(unit="image")
+    moved.input_price_per_million = Decimal(9000)
+    moved.output_price_per_million = Decimal(0)
+    moved.cache_read_price_per_million = None
+
+    _apply_default(row, moved)
+
+    assert (row.unit, row.input_price_per_million) == ("image", Decimal(9000))
+    assert row.rates["image"]["output"] == {"price": Decimal("0.009"), "unit": "image"}
+
+
+def test_the_same_number_in_another_unit_is_another_price() -> None:
+    row = _seeded_row(uuid.uuid4(), "deepinfra:flux-1-dev", _default(unit="token"), _AT)
+
+    assert _same_rates(row, _default(unit="token"))
+    assert not _same_rates(row, _default(unit="image"))
