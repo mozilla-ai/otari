@@ -530,6 +530,11 @@ POST /api/v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 PUT /api/v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/code-execution-policy               # dashboard-only
+# A workspace's memory switches, and erasing what it holds, are its managers' to
+# set from the dashboard; agents reach memory itself through its MCP endpoint.
+GET /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
+PUT /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/memory                              # dashboard-only
 # Which hosted providers, and which of their models, a workspace keeps: the same
 # administrator-side surface. An SDK caller sees its effect as a 403 or a model
 # missing from `/models`, never the row.

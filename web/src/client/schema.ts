@@ -8266,6 +8266,38 @@ export interface paths {
         patch: operations["workspaces-update_workspace_member_role"];
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Memory
+         * @description A workspace's memory switches and how much it holds. An organization owner/admin, or this workspace's.
+         */
+        get: operations["memory-get_workspace_memory"];
+        /**
+         * Set Workspace Memory
+         * @description Set a workspace's memory switches. Turning memory off stops recall at once and deletes nothing.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may.
+         */
+        put: operations["memory-set_workspace_memory"];
+        post?: never;
+        /**
+         * Erase Workspace Memory
+         * @description Delete everything a workspace's memory holds, and the data keys it was sealed under.
+         *
+         *     With the keys gone, nothing deleted opens from a backup either. The switches stay as they were.
+         */
+        delete: operations["memory-erase_workspace_memory"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/provider-keys": {
         parameters: {
             query?: never;
@@ -22431,6 +22463,101 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceMemberPublic"][];
+        };
+        /** WorkspaceMemoryErased */
+        WorkspaceMemoryErased: {
+            /** Entries */
+            entries: number;
+            /** Keys */
+            keys: number;
+            /** Proposals */
+            proposals: number;
+            /** Reads */
+            reads: number;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceMemoryPublic
+         * @description A workspace's memory switches, what the deployment allows, and how much the workspace holds.
+         */
+        WorkspaceMemoryPublic: {
+            /**
+             * Deployment Enabled
+             * @description Whether this deployment offers memory at all.
+             */
+            deployment_enabled: boolean;
+            /** Deployment Retention Days */
+            deployment_retention_days: number;
+            /**
+             * Enabled
+             * @description Memory on for this workspace: each member's own entries.
+             */
+            enabled: boolean;
+            /**
+             * Entries
+             * @description Entry versions the workspace holds, by status.
+             */
+            entries: {
+                [key: string]: number;
+            };
+            /**
+             * Hide External
+             * @description Keep entries resting on outside content out of recall.
+             */
+            hide_external: boolean;
+            /**
+             * Proposals Waiting
+             * @description Proposals the consolidator has not decided yet.
+             */
+            proposals_waiting: number;
+            /**
+             * Retention Days
+             * @description Days an unused entry is kept; null keeps the deployment's.
+             */
+            retention_days: number | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Workspace Scope Enabled
+             * @description The memory every member's agents share.
+             */
+            workspace_scope_enabled: boolean;
+            /**
+             * Write Policy
+             * @description auto keeps what the consolidator decides; review holds every shared proposal for an admin.
+             * @enum {string}
+             */
+            write_policy: "auto" | "review";
+        };
+        /** WorkspaceMemoryUpdate */
+        WorkspaceMemoryUpdate: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Hide External
+             * @default false
+             */
+            hide_external: boolean;
+            /** Retention Days */
+            retention_days?: number | null;
+            /**
+             * Workspace Scope Enabled
+             * @default false
+             */
+            workspace_scope_enabled: boolean;
+            /**
+             * Write Policy
+             * @default review
+             * @enum {string}
+             */
+            write_policy: "auto" | "review";
         };
         /**
          * WorkspaceProviderKeyOverridePublic
@@ -36904,6 +37031,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMemberPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-get_workspace_memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemoryPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-set_workspace_memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMemoryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemoryPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-erase_workspace_memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemoryErased"];
                 };
             };
             /** @description Validation Error */

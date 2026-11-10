@@ -183,3 +183,42 @@ class EntryRepository(FencedRepository[MemoryEntry]):
             .returning(MemoryEntry.id)
         )
         return len(result.scalars().all())
+
+    async def delete_expired(self, workspace_id: uuid.UUID, *, used_before: datetime) -> int:
+        """Delete the workspace's retired entries, and every version nobody has used since ``used_before``."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryEntry)
+            .where(
+                MemoryEntry.workspace_id == workspace_id,
+                or_(MemoryEntry.status == "retired", MemoryEntry.last_used_at < used_before),
+            )
+            .returning(MemoryEntry.id)
+        )
+        return len(result.scalars().all())
+
+    async def key_ids_in_use(self, workspace_id: uuid.UUID) -> set[uuid.UUID]:
+        """The data keys some entry of the workspace is sealed under."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryEntry.key_id).where(MemoryEntry.workspace_id == workspace_id).distinct()
+        )
+        return set(result.scalars().all())
+
+    async def delete_all(self, workspace_id: uuid.UUID) -> int:
+        """Delete every entry version of the workspace, and with them every signal on them."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryEntry).where(MemoryEntry.workspace_id == workspace_id).returning(MemoryEntry.id)
+        )
+        return len(result.scalars().all())
+
+    async def count_by_status(self, workspace_id: uuid.UUID) -> dict[str, int]:
+        """How many entry versions the workspace holds, by status."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryEntry.status, func.count())
+            .where(MemoryEntry.workspace_id == workspace_id)
+            .group_by(MemoryEntry.status)
+        )
+        return {status: count for status, count in result.all()}

@@ -12,19 +12,23 @@ provenance and trust level, for the agent to weigh rather than obey.
 """
 
 import json
+import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from gateway.api.deps import (
+    CurrentIdentity,
     MemoryCallerDep,
     MemoryServiceDep,
     build_memory_service,
+    get_config,
     memory_keys_for,
     verify_api_key,
+    verify_master_key,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
@@ -40,8 +44,18 @@ from gateway.schemas.memory import (
     RecalledEntry,
     SearchArguments,
     SignalRecorded,
+    WorkspaceMemoryErased,
+    WorkspaceMemoryPublic,
+    WorkspaceMemoryUpdate,
 )
-from gateway.services.memory import MemoryCaller, MemoryService, OpenedEntry, run_consolidator
+from gateway.services.memory import (
+    MemoryCaller,
+    MemoryService,
+    OpenedEntry,
+    SwitchChange,
+    WorkspaceMemory,
+    run_consolidator,
+)
 from gateway.version import __version__
 
 # Agents reach memory with an API key, and its workspace and member are the ones that key names.
@@ -270,6 +284,78 @@ async def memory_mcp_stream() -> Response:
     return Response(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, headers={"Allow": "POST"})
 
 
+# The dashboard's and the operator's: a workspace's managers turn memory on and off, and erase it.
+workspace_router = APIRouter(
+    prefix="/workspaces/{workspace_id}/memory", tags=["memory"], dependencies=[Depends(verify_master_key)]
+)
+
+
+def _workspace_public(memory: WorkspaceMemory, config: GatewayConfig) -> WorkspaceMemoryPublic:
+    return WorkspaceMemoryPublic(
+        workspace_id=memory.workspace_id,
+        deployment_enabled=config.memory_enabled,
+        enabled=memory.enabled,
+        workspace_scope_enabled=memory.workspace_scope_enabled,
+        write_policy=memory.write_policy,
+        hide_external=memory.hide_external,
+        retention_days=memory.retention_days,
+        deployment_retention_days=config.memory_retention_days,
+        entries=memory.entries,
+        proposals_waiting=memory.proposals_waiting,
+    )
+
+
+@workspace_router.get("")
+async def get_workspace_memory(
+    service: MemoryServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_id: uuid.UUID,
+) -> WorkspaceMemoryPublic:
+    """A workspace's memory switches and how much it holds. An organization owner/admin, or this workspace's."""
+    return _workspace_public(await service.workspace_memory(current_identity, workspace_id), config)
+
+
+@workspace_router.put("")
+async def set_workspace_memory(
+    service: MemoryServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_id: uuid.UUID,
+    body: WorkspaceMemoryUpdate,
+) -> WorkspaceMemoryPublic:
+    """Set a workspace's memory switches. Turning memory off stops recall at once and deletes nothing.
+
+    An organization owner/admin, or an owner/admin of this workspace, may.
+    """
+    change = SwitchChange(
+        enabled=body.enabled,
+        workspace_scope_enabled=body.workspace_scope_enabled,
+        write_policy=body.write_policy,
+        hide_external=body.hide_external,
+        retention_days=body.retention_days,
+    )
+    return _workspace_public(await service.change_switches(current_identity, workspace_id, change), config)
+
+
+@workspace_router.delete("")
+async def erase_workspace_memory(
+    service: MemoryServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+) -> WorkspaceMemoryErased:
+    """Delete everything a workspace's memory holds, and the data keys it was sealed under.
+
+    With the keys gone, nothing deleted opens from a backup either. The switches stay as they were.
+    """
+    erased = await service.erase(current_identity, workspace_id)
+    return WorkspaceMemoryErased(
+        workspace_id=workspace_id,
+        entries=erased.entries,
+        proposals=erased.proposals,
+        reads=erased.reads,
+        keys=erased.keys,
+    )
+
+
 async def _consolidate(config: GatewayConfig) -> None:
     # A worker is handed the config alone, so it binds its own ports the way the app does,
     # overlay included: memory is sealed and opened under the same key source either way.
@@ -286,6 +372,6 @@ FEATURE = CoreFeature(
     name="memory",
     surface=None,
     enabled=lambda config: config.memory_enabled,
-    routers=lambda config: (router,),
+    routers=lambda config: (router, workspace_router),
     worker=_consolidate,
 )

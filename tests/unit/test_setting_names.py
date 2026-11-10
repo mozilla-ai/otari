@@ -110,6 +110,8 @@ _SETTING_NAMES = frozenset(
         "memory_entry_max_length",
         "memory_key_rotation_days",
         "memory_max_entries_per_workspace",
+        "memory_proposal_max_age_hours",
+        "memory_read_retention_days",
         "memory_retention_days",
         "model_cache_ttl_seconds",
         "model_capabilities",

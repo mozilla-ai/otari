@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.content_key_adapter import build_content_key_port
@@ -26,12 +26,12 @@ from gateway.exceptions.memory_exceptions import (
     NotYoursToForgetError,
     WorkspaceScopeOffError,
 )
-from gateway.models.memory import MemoryEntry, MemoryProposal, MemoryRead, MemoryWorkspaceSettings
+from gateway.models.memory import MemoryEntry, MemoryKey, MemoryProposal, MemoryRead, MemoryWorkspaceSettings
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.memory import MemoryRepositories
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.services.memory import MemoryCaller, MemoryService, WorkspaceKeys, consolidate_once
-from gateway.services.memory._models import Decision, MemoryModelError
+from gateway.services.memory._models import Decision, MemoryModelError, ModelUse
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
@@ -61,14 +61,30 @@ class _Models:
     def can_decide(self) -> bool:
         return bool(self.decisions)
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def embed(self, texts: Sequence[str]) -> tuple[list[list[float]], ModelUse]:
         if self.fail:
-            raise MemoryModelError("down")
+            raise MemoryModelError("down", _use("/v1/memory/embedding", succeeded=False))
         self.embedded += len(texts)
-        return [_vector(text) for text in texts]
+        return [_vector(text) for text in texts], _use("/v1/memory/embedding", prompt=len(texts))
 
-    async def decide(self, proposal: str, existing: Sequence[str]) -> Decision:
-        return self.decisions.pop(0)
+    async def decide(self, proposal: str, existing: Sequence[str]) -> tuple[Decision, ModelUse]:
+        return self.decisions.pop(0), _use("/v1/memory/consolidation", prompt=40, completion=8)
+
+
+def _use(
+    endpoint: str, *, prompt: int | None = None, completion: int | None = None, succeeded: bool = True
+) -> ModelUse:
+    return ModelUse(endpoint, "test:model", "test", succeeded, prompt, completion, 3)
+
+
+@dataclass
+class _Meter:
+    """Keeps what it is asked to record."""
+
+    calls: list[tuple[uuid.UUID, str | None, ModelUse]] = field(default_factory=list)
+
+    async def record(self, workspace_id: uuid.UUID, api_key_id: str | None, use: ModelUse) -> None:
+        self.calls.append((workspace_id, api_key_id, use))
 
 
 @dataclass(frozen=True)
@@ -113,6 +129,7 @@ class Memory:
 
     build: Callable[[], MemoryService]
     models: _Models
+    meter: _Meter
     configure: Callable[..., None]
 
     def __call__(self) -> MemoryService:
@@ -127,6 +144,7 @@ async def memory(
     init_db(test_config)
     keys = WorkspaceKeys(build_content_key_port(test_config), rotation=timedelta(days=30))
     models = _Models()
+    meter = _Meter()
     config = {"value": test_config}
 
     def configure(**changes: Any) -> None:
@@ -135,8 +153,9 @@ async def memory(
     try:
         async with create_unit_of_work() as uow:
             yield Memory(
-                lambda: MemoryService(uow, MemoryRepositories.on(uow), keys, models, config["value"]),  # type: ignore[arg-type]
+                lambda: MemoryService(uow, MemoryRepositories.on(uow), keys, models, meter, config["value"], None),  # type: ignore[arg-type]
                 models,
+                meter,
                 configure,
             )
     finally:
@@ -387,3 +406,112 @@ async def test_one_pass_consolidates_every_workspace_with_memory_on(memory: Memo
     await memory().propose(elsewhere, text=DEPLOY, kind="procedure", scope="workspace", external=False)
 
     assert await consolidate_once(lambda uow: memory()) == 2
+
+
+async def test_every_model_call_is_recorded_as_usage_of_its_workspace(memory: Memory, tenants: Tenants) -> None:
+    await _learn(memory, tenants.alice, DEPLOY)
+    memory.models.decisions = [Decision("update", 0)]
+    await memory().propose(tenants.bob, text=DEPLOY + " now", kind="procedure", scope="workspace", external=False)
+    await memory().consolidate(tenants.workspace, limit=20)
+
+    calls = [(workspace, key, use.endpoint) for workspace, key, use in memory.meter.calls]
+    assert calls == [
+        (tenants.workspace, tenants.alice.api_key_id, "/v1/memory/embedding"),
+        (tenants.workspace, tenants.alice.api_key_id, "/v1/memory/embedding"),
+        (tenants.workspace, tenants.bob.api_key_id, "/v1/memory/embedding"),
+        (tenants.workspace, tenants.bob.api_key_id, "/v1/memory/consolidation"),
+    ]
+
+
+async def test_a_failed_model_call_is_recorded_too(memory: Memory, tenants: Tenants) -> None:
+    memory.models.fail = True
+
+    with pytest.raises(MemoryModelUnavailableError):
+        await memory().search(tenants.alice, DEPLOY, limit=5)
+
+    [(_, _, use)] = memory.meter.calls
+    assert use.succeeded is False
+
+
+async def _age(async_db: AsyncSession, model: Any, column: str, days: float) -> None:
+    """Move every row's ``column`` back ``days``, as if that much time had passed."""
+    table = model.__tablename__
+    await async_db.execute(
+        text(f"UPDATE {table} SET {column} = {column} - make_interval(days => :days)"), {"days": days}
+    )
+    await async_db.commit()
+
+
+async def test_retention_deletes_what_nobody_used_and_keeps_the_rest(
+    memory: Memory, tenants: Tenants, async_db: AsyncSession
+) -> None:
+    unused = await _learn(memory, tenants.alice, DEPLOY)
+    await _learn(memory, tenants.alice, "Run make test before every push")
+    await async_db.execute(
+        text("UPDATE memory_entries SET last_used_at = last_used_at - interval '181 days' WHERE id = :id"),
+        {"id": unused},
+    )
+    await async_db.commit()
+
+    swept = await memory().sweep(tenants.workspace)
+
+    assert swept.entries == 1
+    assert [r.entry.text for r in await memory().search(tenants.alice, "make test push", limit=10)] == [
+        "Run make test before every push"
+    ]
+
+
+async def test_a_workspace_can_keep_memory_for_less_time(
+    memory: Memory, tenants: Tenants, async_db: AsyncSession
+) -> None:
+    await _learn(memory, tenants.alice, DEPLOY)
+    await _age(async_db, MemoryEntry, "last_used_at", 10)
+    await _switch(async_db, tenants.workspace, retention_days=7)
+
+    assert (await memory().sweep(tenants.workspace)).entries == 1
+    assert (await memory().sweep(tenants.other_workspace)).entries == 0
+
+
+async def test_retired_entries_are_deleted_at_once(memory: Memory, tenants: Tenants, async_db: AsyncSession) -> None:
+    entry = await _learn(memory, tenants.alice, DEPLOY)
+    await async_db.execute(update(MemoryEntry).where(MemoryEntry.id == entry).values(status="retired"))
+    await async_db.commit()
+
+    assert (await memory().sweep(tenants.workspace)).entries == 1
+
+
+async def test_proposals_and_read_records_are_kept_no_longer_than_their_bound(
+    memory: Memory, tenants: Tenants, async_db: AsyncSession
+) -> None:
+    await _learn(memory, tenants.alice, DEPLOY)
+    memory.models.decisions = [Decision("conflict", 0)]
+    await memory().propose(tenants.bob, text=DEPLOY + " never", kind="procedure", scope="workspace", external=False)
+    await memory().consolidate(tenants.workspace, limit=20)
+    await _age(async_db, MemoryProposal, "created_at", 2)
+    await _age(async_db, MemoryRead, "read_at", 366)
+
+    swept = await memory().sweep(tenants.workspace)
+
+    assert (swept.proposals, swept.entries) == (1, 0)
+    assert swept.reads >= 1
+    assert (await async_db.execute(select(MemoryRead))).first() is None
+
+
+async def test_a_data_key_that_seals_nothing_is_deleted_but_never_the_newest(
+    memory: Memory, tenants: Tenants, async_db: AsyncSession
+) -> None:
+    await _learn(memory, tenants.alice, DEPLOY)
+    await _age(async_db, MemoryKey, "created_at", 31)
+    entry = (await async_db.execute(select(MemoryEntry))).scalar_one()
+
+    assert (await memory().sweep(tenants.workspace)).keys == 0
+    await memory().forget(tenants.alice, entry.id)
+    assert (await memory().sweep(tenants.workspace)).keys == 0
+
+    memory.configure(memory_key_rotation_days=1)
+    await memory().propose(tenants.alice, text="Something new", kind="fact", scope="workspace", external=False)
+    await memory().consolidate(tenants.workspace, limit=20)
+    swept = await memory().sweep(tenants.workspace)
+
+    assert swept.keys == 1
+    assert len((await async_db.execute(select(MemoryKey))).scalars().all()) == 1

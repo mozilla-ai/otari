@@ -272,3 +272,41 @@ async def test_deleting_a_member_deletes_their_entries_and_keeps_what_they_share
 
     rows = (await async_db.execute(select(MemoryEntry))).scalars().all()
     assert [(row.id, row.author_user_id) for row in rows] == [(shared, None)]
+
+
+async def test_the_policy_binds_the_tables_owner_and_cascades_still_delete(
+    memory: Callable[[], _Store], tenants: Tenants, async_db: AsyncSession
+) -> None:
+    """As on RDS, where the app owns its tables: forced security holds it, and deletes still cascade."""
+    await memory().keep(_entry(tenants.first, scope="member", owner=tenants.alice))
+    await memory().keep(_entry(tenants.second))
+    await async_db.execute(
+        text(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'memory_owner_probe') "
+            "THEN CREATE ROLE memory_owner_probe NOLOGIN; END IF; END $$"
+        )
+    )
+    await async_db.commit()
+
+    # One transaction, rolled back at the end, so the ownership it hands out ends with the test.
+    async with async_db.begin():
+        for table in FENCED_TABLES:
+            await async_db.execute(text(f"ALTER TABLE {table} OWNER TO memory_owner_probe"))
+        await async_db.execute(text('GRANT SELECT, DELETE ON workspace, "user" TO memory_owner_probe'))
+        await async_db.execute(text("SET LOCAL ROLE memory_owner_probe"))
+
+        async def count(table: str) -> int:
+            return int((await async_db.execute(text(f"SELECT count(*) FROM {table}"))).scalar_one())
+
+        assert await count("memory_entries") == 0
+        await async_db.execute(text("SELECT set_config('otari.memory_workspace', :w, true)"), {"w": str(tenants.first)})
+        assert await count("memory_entries") == 1
+
+        await async_db.execute(text('DELETE FROM "user" WHERE id = :u'), {"u": tenants.alice})
+        await async_db.execute(text("DELETE FROM workspace WHERE id = :w"), {"w": tenants.second})
+        await async_db.execute(text("RESET ROLE"))
+        remaining = await count("memory_entries")
+        keys_left = await count("memory_keys")
+        # Alice's member entry went with her, and the second workspace's entry and key with it.
+        assert (remaining, keys_left) == (0, 1)
+        await async_db.rollback()

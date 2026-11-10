@@ -30357,6 +30357,168 @@
         "title": "WorkspaceMembersPublic",
         "type": "object"
       },
+      "WorkspaceMemoryErased": {
+        "properties": {
+          "entries": {
+            "title": "Entries",
+            "type": "integer"
+          },
+          "keys": {
+            "title": "Keys",
+            "type": "integer"
+          },
+          "proposals": {
+            "title": "Proposals",
+            "type": "integer"
+          },
+          "reads": {
+            "title": "Reads",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "entries",
+          "proposals",
+          "reads",
+          "keys"
+        ],
+        "title": "WorkspaceMemoryErased",
+        "type": "object"
+      },
+      "WorkspaceMemoryPublic": {
+        "description": "A workspace's memory switches, what the deployment allows, and how much the workspace holds.",
+        "properties": {
+          "deployment_enabled": {
+            "description": "Whether this deployment offers memory at all.",
+            "title": "Deployment Enabled",
+            "type": "boolean"
+          },
+          "deployment_retention_days": {
+            "title": "Deployment Retention Days",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Memory on for this workspace: each member's own entries.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "entries": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Entry versions the workspace holds, by status.",
+            "title": "Entries",
+            "type": "object"
+          },
+          "hide_external": {
+            "description": "Keep entries resting on outside content out of recall.",
+            "title": "Hide External",
+            "type": "boolean"
+          },
+          "proposals_waiting": {
+            "description": "Proposals the consolidator has not decided yet.",
+            "title": "Proposals Waiting",
+            "type": "integer"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Days an unused entry is kept; null keeps the deployment's.",
+            "title": "Retention Days"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_scope_enabled": {
+            "description": "The memory every member's agents share.",
+            "title": "Workspace Scope Enabled",
+            "type": "boolean"
+          },
+          "write_policy": {
+            "description": "auto keeps what the consolidator decides; review holds every shared proposal for an admin.",
+            "enum": [
+              "auto",
+              "review"
+            ],
+            "title": "Write Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "deployment_enabled",
+          "enabled",
+          "workspace_scope_enabled",
+          "write_policy",
+          "hide_external",
+          "retention_days",
+          "deployment_retention_days",
+          "entries",
+          "proposals_waiting"
+        ],
+        "title": "WorkspaceMemoryPublic",
+        "type": "object"
+      },
+      "WorkspaceMemoryUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "hide_external": {
+            "default": false,
+            "title": "Hide External",
+            "type": "boolean"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          },
+          "workspace_scope_enabled": {
+            "default": false,
+            "title": "Workspace Scope Enabled",
+            "type": "boolean"
+          },
+          "write_policy": {
+            "default": "review",
+            "enum": [
+              "auto",
+              "review"
+            ],
+            "title": "Write Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "WorkspaceMemoryUpdate",
+        "type": "object"
+      },
       "WorkspaceProviderKeyOverridePublic": {
         "description": "The effective view for one workspace+key: raw override flags plus the resolution.",
         "properties": {
@@ -60182,6 +60344,168 @@
         "summary": "Add Workspace Member",
         "tags": [
           "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/memory": {
+      "delete": {
+        "description": "Delete everything a workspace's memory holds, and the data keys it was sealed under.\n\nWith the keys gone, nothing deleted opens from a backup either. The switches stay as they were.",
+        "operationId": "memory-erase_workspace_memory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemoryErased"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Erase Workspace Memory",
+        "tags": [
+          "memory"
+        ]
+      },
+      "get": {
+        "description": "A workspace's memory switches and how much it holds. An organization owner/admin, or this workspace's.",
+        "operationId": "memory-get_workspace_memory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemoryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Memory",
+        "tags": [
+          "memory"
+        ]
+      },
+      "put": {
+        "description": "Set a workspace's memory switches. Turning memory off stops recall at once and deletes nothing.\n\nAn organization owner/admin, or an owner/admin of this workspace, may.",
+        "operationId": "memory-set_workspace_memory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemoryUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemoryPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Memory",
+        "tags": [
+          "memory"
         ]
       }
     },

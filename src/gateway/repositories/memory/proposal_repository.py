@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
 
@@ -118,3 +119,29 @@ class ProposalRepository(FencedRepository[MemoryProposal]):
             .execution_options(synchronize_session=False)
         )
         return result.scalar_one_or_none() or 0
+
+    async def delete_older(self, workspace_id: uuid.UUID, *, created_before: datetime) -> int:
+        """Delete the workspace's proposals made before ``created_before``, decided or not."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryProposal)
+            .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.created_at < created_before)
+            .returning(MemoryProposal.id)
+        )
+        return len(result.scalars().all())
+
+    async def key_ids_in_use(self, workspace_id: uuid.UUID) -> set[uuid.UUID]:
+        """The data keys some proposal of the workspace is sealed under."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryProposal.key_id).where(MemoryProposal.workspace_id == workspace_id).distinct()
+        )
+        return set(result.scalars().all())
+
+    async def delete_all(self, workspace_id: uuid.UUID) -> int:
+        """Delete every proposal of the workspace, decided or not."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryProposal).where(MemoryProposal.workspace_id == workspace_id).returning(MemoryProposal.id)
+        )
+        return len(result.scalars().all())

@@ -75,6 +75,11 @@ class WorkspaceKeys:
         """Drop every opened key, as the process stops."""
         self._opened.clear()
 
+    def forget(self, key_ids: Collection[uuid.UUID]) -> None:
+        """Drop these keys from the cache, once they are deleted, so none outlives its row in this process."""
+        for key_id in key_ids:
+            self._opened.pop(key_id, None)
+
     async def for_sealing(self, keys: KeyRepository, workspace_id: uuid.UUID) -> OpenKey:
         """The key new rows of the workspace are sealed under, made first when it has none young enough.
 

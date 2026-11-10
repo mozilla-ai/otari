@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gateway.models.memory import MemoryKind, MemoryScope, MemoryStatus, MemoryTrust
+from gateway.models.memory import MemoryKind, MemoryScope, MemoryStatus, MemoryTrust, MemoryWritePolicy
 
 QUERY_MAX_LENGTH = 2_000
 # The schema's own bound; the service holds a proposal to ``memory_entry_max_length``.
@@ -86,3 +86,38 @@ class SignalRecorded(BaseModel):
 class Forgotten(BaseModel):
     id: uuid.UUID
     versions_deleted: int
+
+
+class WorkspaceMemoryPublic(BaseModel):
+    """A workspace's memory switches, what the deployment allows, and how much the workspace holds."""
+
+    workspace_id: uuid.UUID
+    deployment_enabled: bool = Field(description="Whether this deployment offers memory at all.")
+    enabled: bool = Field(description="Memory on for this workspace: each member's own entries.")
+    workspace_scope_enabled: bool = Field(description="The memory every member's agents share.")
+    write_policy: MemoryWritePolicy = Field(
+        description="auto keeps what the consolidator decides; review holds every shared proposal for an admin."
+    )
+    hide_external: bool = Field(description="Keep entries resting on outside content out of recall.")
+    retention_days: int | None = Field(description="Days an unused entry is kept; null keeps the deployment's.")
+    deployment_retention_days: int
+    entries: dict[str, int] = Field(description="Entry versions the workspace holds, by status.")
+    proposals_waiting: int = Field(description="Proposals the consolidator has not decided yet.")
+
+
+class WorkspaceMemoryUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    workspace_scope_enabled: bool = False
+    write_policy: MemoryWritePolicy = "review"
+    hide_external: bool = False
+    retention_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class WorkspaceMemoryErased(BaseModel):
+    workspace_id: uuid.UUID
+    entries: int
+    proposals: int
+    reads: int
+    keys: int

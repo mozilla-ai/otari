@@ -2,6 +2,9 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
+
+from sqlalchemy import delete
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryRead
@@ -35,3 +38,21 @@ class ReadRepository(FencedRepository[MemoryRead]):
         self.db.add(row)
         await self.db.flush()
         return row
+
+    async def delete_older(self, workspace_id: uuid.UUID, *, read_before: datetime) -> int:
+        """Delete the workspace's read records made before ``read_before``."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryRead)
+            .where(MemoryRead.workspace_id == workspace_id, MemoryRead.read_at < read_before)
+            .returning(MemoryRead.id)
+        )
+        return len(result.scalars().all())
+
+    async def delete_all(self, workspace_id: uuid.UUID) -> int:
+        """Delete every read record of the workspace."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryRead).where(MemoryRead.workspace_id == workspace_id).returning(MemoryRead.id)
+        )
+        return len(result.scalars().all())

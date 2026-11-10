@@ -162,7 +162,7 @@ from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
-from gateway.services.memory import MemoryCaller, MemoryModels, MemoryService, WorkspaceKeys
+from gateway.services.memory import MemoryCaller, MemoryModels, MemoryService, ModelUse, WorkspaceKeys
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -2289,9 +2289,53 @@ def memory_keys_for(config: GatewayConfig, keys: ContentKeyPort | None) -> Works
     return WorkspaceKeys(keys, rotation=timedelta(days=config.memory_key_rotation_days))
 
 
-def build_memory_service(uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys) -> MemoryService:
-    """Build the memory service on a request's Unit of Work, or the consolidator's own."""
-    return MemoryService(uow, MemoryRepositories.on(uow), keys, MemoryModels(config), config)
+class _MemoryUsage:
+    """Memory's model calls as usage rows of their workspace, on the service's own Unit of Work."""
+
+    def __init__(self, usage: UsageLogRepository) -> None:
+        self._usage = usage
+
+    async def record(self, workspace_id: uuid.UUID, api_key_id: str | None, use: ModelUse) -> None:
+        await self._usage.record_side_call(
+            workspace_id=workspace_id,
+            api_key_id=api_key_id,
+            model=use.model,
+            provider=use.provider,
+            endpoint=use.endpoint,
+            succeeded=use.succeeded,
+            prompt_tokens=use.prompt_tokens,
+            completion_tokens=use.completion_tokens,
+            latency_ms=use.latency_ms,
+        )
+
+
+class _MemoryManagers:
+    """The workspace management check every workspace policy uses, for memory's switches."""
+
+    def __init__(self, access: WorkspaceAccess) -> None:
+        self._access = access
+
+    async def require_manager(self, user: TenancyUser, workspace_id: uuid.UUID) -> None:
+        workspace = await self._access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
+        await self._access.require_workspace_management_access(user=user, workspace=workspace)
+
+
+def build_memory_service(
+    uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys, access: WorkspaceAccess | None = None
+) -> MemoryService:
+    """Build the memory service on a request's Unit of Work, or the consolidator's own.
+
+    ``access`` is the request's workspace checks; the consolidator has no caller to check and passes none.
+    """
+    return MemoryService(
+        uow,
+        MemoryRepositories.on(uow),
+        keys,
+        MemoryModels(config),
+        _MemoryUsage(UsageLogRepository(uow)),
+        config,
+        _MemoryManagers(access) if access is not None else None,
+    )
 
 
 def get_memory_keys(request: Request) -> WorkspaceKeys:
@@ -2306,11 +2350,14 @@ def get_memory_keys(request: Request) -> WorkspaceKeys:
 
 def get_memory_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
 ) -> MemoryService:
     """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
-    return build_memory_service(uow, config, keys)
+    return build_memory_service(
+        uow, config, keys, WorkspaceAccess(db, OrganizationService(db, membership_listener=None))
+    )
 
 
 async def get_memory_caller(

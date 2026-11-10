@@ -437,6 +437,48 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         self.db.add(row)
         await self.db.flush()
 
+    async def record_side_call(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        api_key_id: str | None,
+        model: str,
+        provider: str | None,
+        endpoint: str,
+        succeeded: bool,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        latency_ms: int,
+    ) -> None:
+        """Stage one model call the gateway made on its own account, outside any request's budget.
+
+        Recorded so a workspace sees what the calls made on its behalf cost in tokens, with no
+        cost of its own: pricing it, and holding it against a budget, is the deployment's choice.
+        """
+        total = (
+            None
+            if prompt_tokens is None and completion_tokens is None
+            else (prompt_tokens or 0) + (completion_tokens or 0)
+        )
+        self.db.add(
+            UsageLog(
+                id=str(uuid.uuid4()),
+                workspace_id=workspace_id,
+                api_key_id=api_key_id,
+                timestamp=datetime.now(UTC),
+                model=model,
+                provider=provider,
+                endpoint=endpoint,
+                counts_toward_budget=False,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total,
+                status="success" if succeeded else "error",
+                latency_ms=latency_ms,
+            )
+        )
+        await self.db.flush()
+
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.
 

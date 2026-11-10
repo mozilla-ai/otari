@@ -8,10 +8,11 @@ writes in another.
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, datetime, timedelta
+from typing import Literal, Protocol
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.memory_exceptions import (
     MemoryEntryNotFoundError,
@@ -25,9 +26,10 @@ from gateway.exceptions.memory_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.memory import MemoryKind, MemoryScope, MemoryStatus, MemoryTrust, MemoryWritePolicy
+from gateway.models.tenancy import User
 from gateway.repositories.memory import MemoryRepositories
 from gateway.services.memory._keys import WorkspaceKeys
-from gateway.services.memory._models import Decision, MemoryModelError, MemoryModels
+from gateway.services.memory._models import Decision, MemoryModelError, MemoryModels, ModelUse
 from gateway.services.memory._scoring import INITIAL_CONFIDENCE, QUARANTINE_FLAGS, confidence, cosine, relevance
 from gateway.services.memory._screening import screen
 from gateway.services.memory._store import (
@@ -52,6 +54,25 @@ MAX_ATTEMPTS = 5
 _TRUST_RANK: dict[MemoryTrust, int] = {"external": 0, "agent": 1, "reviewed": 2}
 
 FlagReason = Literal["wrong", "stale", "duplicate", "unsafe"]
+
+
+class WorkspaceManagers(Protocol):
+    """Who may change a workspace's memory: its organization's owners and admins, and its own.
+
+    The builder in ``api/deps`` implements it with the tenancy checks every workspace policy uses.
+    """
+
+    async def require_manager(self, user: User, workspace_id: uuid.UUID) -> None:
+        """Raise unless ``user`` manages the workspace; a workspace they cannot see reads as missing."""
+        ...
+
+
+class MemoryMeter(Protocol):
+    """Where memory's model calls are recorded as its workspace's usage. The builder in ``api/deps`` implements it."""
+
+    async def record(self, workspace_id: uuid.UUID, api_key_id: str | None, use: ModelUse) -> None:
+        """Stage one call in the open block."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -89,6 +110,39 @@ class SignalReceipt:
 
 
 @dataclass(frozen=True)
+class Swept:
+    """What one retention pass deleted from a workspace."""
+
+    entries: int
+    proposals: int
+    reads: int
+    keys: int
+
+
+@dataclass(frozen=True)
+class WorkspaceMemory:
+    """A workspace's memory switches, and how much it holds."""
+
+    workspace_id: uuid.UUID
+    enabled: bool
+    workspace_scope_enabled: bool
+    write_policy: MemoryWritePolicy
+    hide_external: bool
+    retention_days: int | None
+    entries: dict[str, int]
+    proposals_waiting: int
+
+
+@dataclass(frozen=True)
+class SwitchChange:
+    enabled: bool
+    workspace_scope_enabled: bool
+    write_policy: MemoryWritePolicy
+    hide_external: bool
+    retention_days: int | None
+
+
+@dataclass(frozen=True)
 class _Switches:
     """A workspace's memory switches, read once and held past the block that read them."""
 
@@ -106,7 +160,9 @@ class MemoryService:
         repos: MemoryRepositories,
         keys: WorkspaceKeys,
         models: MemoryModels,
+        meter: MemoryMeter,
         config: GatewayConfig,
+        managers: WorkspaceManagers | None,
         *,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -114,7 +170,10 @@ class MemoryService:
         self._repos = repos
         self._store = EntryStore(repos, keys)
         self._models = models
+        self._meter = meter
         self._config = config
+        self._managers = managers
+        self._keys = keys
         self._now = now
 
     # -- What agents call ---------------------------------------------------
@@ -128,7 +187,7 @@ class MemoryService:
         """
         async with self._uow:
             switches = await self._switches(caller.workspace_id)
-        [vector] = await self._embed([query])
+        [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id)
         model = self._models.embedding_model
         async with self._uow:
             entries = await self._store.recallable(
@@ -247,6 +306,98 @@ class MemoryService:
                 caller.workspace_id, [entry.id, *(version.id for version in versions)]
             )
 
+    # -- What workspace managers call ----------------------------------------
+
+    async def workspace_memory(self, user: User, workspace_id: uuid.UUID) -> WorkspaceMemory:
+        """The workspace's switches and what it holds. Reading them takes the same role as changing them."""
+        await self._require_manager(user, workspace_id)
+        async with self._uow:
+            return await self._workspace_memory(workspace_id)
+
+    async def change_switches(self, user: User, workspace_id: uuid.UUID, change: SwitchChange) -> WorkspaceMemory:
+        """Set the workspace's switches. Turning memory off stops recall at once and deletes nothing."""
+        await self._require_manager(user, workspace_id)
+        async with self._uow:
+            await self._repos.settings.put(
+                workspace_id,
+                enabled=change.enabled,
+                workspace_scope_enabled=change.workspace_scope_enabled,
+                write_policy=change.write_policy,
+                hide_external=change.hide_external,
+                retention_days=change.retention_days,
+            )
+            return await self._workspace_memory(workspace_id)
+
+    async def erase(self, user: User, workspace_id: uuid.UUID) -> Swept:
+        """Delete everything the workspace's memory holds, its data keys last.
+
+        With the keys gone, no backup taken before opens what was deleted. The switches stay as they were.
+        """
+        await self._require_manager(user, workspace_id)
+        async with self._uow:
+            entries = await self._repos.entries.delete_all(workspace_id)
+            proposals = await self._repos.proposals.delete_all(workspace_id)
+            reads = await self._repos.reads.delete_all(workspace_id)
+            keys = await self._repos.keys.delete_all(workspace_id)
+        self._keys.forget(keys)
+        logger.info("Memory of workspace %s was erased by a manager", workspace_id)
+        return Swept(entries, proposals, reads, len(keys))
+
+    async def _require_manager(self, user: User, workspace_id: uuid.UUID) -> None:
+        if self._managers is None:
+            msg = "this memory service was built without workspace management checks"
+            raise RuntimeError(msg)
+        await self._managers.require_manager(user, workspace_id)
+
+    async def _workspace_memory(self, workspace_id: uuid.UUID) -> WorkspaceMemory:
+        settings = await self._repos.settings.of_workspace(workspace_id)
+        return WorkspaceMemory(
+            workspace_id=workspace_id,
+            enabled=settings is not None and settings.enabled,
+            workspace_scope_enabled=settings is not None and settings.workspace_scope_enabled,
+            write_policy=settings.write_policy if settings is not None else "review",
+            hide_external=settings is not None and settings.hide_external,
+            retention_days=settings.retention_days if settings is not None else None,
+            entries=await self._repos.entries.count_by_status(workspace_id),
+            proposals_waiting=await self._repos.proposals.count_pending(workspace_id),
+        )
+
+    # -- Retention ----------------------------------------------------------
+
+    async def workspaces_with_settings(self) -> list[uuid.UUID]:
+        """Every workspace that has set its memory switches, on or off: what it stored is kept to its retention."""
+        async with self._uow:
+            return [settings.workspace_id for settings in await self._repos.settings.all()]
+
+    async def sweep(self, workspace_id: uuid.UUID) -> Swept:
+        """Delete what the workspace keeps past its retention, and the data keys that seal nothing any more.
+
+        Entries and their versions go once nobody has used them for the workspace's retention days, retired
+        entries at once, proposals once older than ``memory_proposal_max_age_hours`` and read records after
+        ``memory_read_retention_days``.
+        """
+        now = self._now()
+        async with self._uow:
+            settings = await self._repos.settings.of_workspace(workspace_id)
+            days = settings.retention_days if settings is not None and settings.retention_days else None
+            entries = await self._repos.entries.delete_expired(
+                workspace_id, used_before=now - timedelta(days=days or self._config.memory_retention_days)
+            )
+            proposals = await self._repos.proposals.delete_older(
+                workspace_id, created_before=now - timedelta(hours=self._config.memory_proposal_max_age_hours)
+            )
+            reads = await self._repos.reads.delete_older(
+                workspace_id, read_before=now - timedelta(days=self._config.memory_read_retention_days)
+            )
+            in_use = await self._repos.entries.key_ids_in_use(workspace_id)
+            in_use |= await self._repos.proposals.key_ids_in_use(workspace_id)
+            keys = await self._repos.keys.delete_unused(
+                workspace_id,
+                in_use=in_use,
+                made_before=now - timedelta(days=self._config.memory_key_rotation_days),
+            )
+        return Swept(entries, proposals, reads, keys)
+
     # -- The consolidator ---------------------------------------------------
 
     async def workspaces_with_memory(self) -> list[uuid.UUID]:
@@ -281,7 +432,7 @@ class MemoryService:
             async with self._uow:
                 await self._repos.proposals.hold_for_review(workspace_id, proposal.id, "policy")
             return 1
-        [vector] = await self._embed([proposal.text])
+        [vector] = await self._embed([proposal.text], workspace_id, proposal.provenance.api_key_id)
         model = self._models.embedding_model or ""
         async with self._uow:
             candidates = await self._store.comparable(
@@ -342,7 +493,13 @@ class MemoryService:
             return Decision("add")
         if not self._models.can_decide:
             return Decision("no_change", 0) if nearest[0][0] >= SAME_FLOOR else Decision("add")
-        return await self._models.decide(proposal.text, [entry.text for _, entry in nearest])
+        try:
+            decision, use = await self._models.decide(proposal.text, [entry.text for _, entry in nearest])
+        except MemoryModelError as exc:
+            await self._meter_use(proposal.workspace_id, proposal.provenance.api_key_id, exc.use)
+            raise
+        await self._meter_use(proposal.workspace_id, proposal.provenance.api_key_id, use)
+        return decision
 
     async def _make_room(self, workspace_id: uuid.UUID) -> None:
         """Retire the least used entry while the workspace is at its cap."""
@@ -399,11 +556,24 @@ class MemoryService:
             entry_ids=entry_ids,
         )
 
-    async def _embed(self, texts: list[str]) -> list[list[float]]:
+    async def _embed(self, texts: list[str], workspace_id: uuid.UUID, api_key_id: str | None) -> list[list[float]]:
         try:
-            return await self._models.embed(texts)
-        except MemoryModelError:
+            vectors, use = await self._models.embed(texts)
+        except MemoryModelError as exc:
+            await self._meter_use(workspace_id, api_key_id, exc.use)
             raise MemoryModelUnavailableError from None
+        await self._meter_use(workspace_id, api_key_id, use)
+        return vectors
+
+    async def _meter_use(self, workspace_id: uuid.UUID, api_key_id: str | None, use: ModelUse | None) -> None:
+        """Record one model call as the workspace's usage, in a step of its own that cannot fail the caller's."""
+        if use is None:
+            return
+        try:
+            async with self._uow.savepoint():
+                await self._meter.record(workspace_id, api_key_id, use)
+        except DATABASE_ERRORS as exc:
+            logger.warning("A memory model call could not be recorded as usage: %s", describe_database_error(exc))
 
 
 def _require_write(caller: MemoryCaller) -> None:

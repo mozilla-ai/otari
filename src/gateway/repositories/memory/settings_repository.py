@@ -55,3 +55,8 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
             .order_by(MemoryWorkspaceSettings.workspace_id)
         )
         return result.scalars().all()
+
+    async def all(self) -> Sequence[MemoryWorkspaceSettings]:
+        """Every workspace that has set its switches, on or off: retention runs for both."""
+        result = await self.db.execute(select(MemoryWorkspaceSettings).order_by(MemoryWorkspaceSettings.workspace_id))
+        return result.scalars().all()

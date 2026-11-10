@@ -48,6 +48,19 @@ class MemorySettings(BaseModel):
         gt=0,
         description="Delete an entry, or a version it replaced, once nobody has used it for this many days.",
     )
+    memory_proposal_max_age_hours: Annotated[int, OMITTED] = Field(
+        default=24,
+        gt=0,
+        description=(
+            "Delete a proposal not decided within this many hours, including one waiting for an admin, so what an "
+            "agent offered is never held longer than its decision takes."
+        ),
+    )
+    memory_read_retention_days: Annotated[int, OMITTED] = Field(
+        default=365,
+        gt=0,
+        description="Keep the record of who recalled which entries for this many days. It holds no content.",
+    )
     memory_key_rotation_days: Annotated[int, OMITTED] = Field(
         default=30,
         gt=0,

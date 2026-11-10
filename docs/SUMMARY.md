@@ -99,6 +99,7 @@
 * [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
+* [Agent memory](memory.md)
 * [Files](files.md)
 * [Guardrails reference](guardrails-reference.md)
 

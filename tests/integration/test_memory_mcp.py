@@ -15,7 +15,8 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.memory import MemoryWorkspaceSettings
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
-from gateway.services.memory import MemoryModels, consolidate_once
+from gateway.models.usage import UsageLog
+from gateway.services.memory import MemoryModels, ModelUse, consolidate_once
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
@@ -24,10 +25,11 @@ MCP = f"{API_ROOT}/memory/mcp"
 DEPLOY = "Deploy the api service with make deploy-api from the main branch only"
 
 
-async def _embed(self: MemoryModels, texts: Sequence[str]) -> list[list[float]]:
+async def _embed(self: MemoryModels, texts: Sequence[str]) -> tuple[list[list[float]], ModelUse]:
     """Two words in common make two vectors alike; enough to tell what a search should find."""
     vocabulary = ("deploy", "api", "main", "branch", "test", "push")
-    return [[float(word in text.lower()) + 0.01 for word in vocabulary] for text in texts]
+    vectors = [[float(word in text.lower()) + 0.01 for word in vocabulary] for text in texts]
+    return vectors, ModelUse("/v1/memory/embedding", "openai:embed", "openai", True, 7 * len(texts), None, 4)
 
 
 @pytest.fixture
@@ -236,3 +238,73 @@ def test_a_viewer_searches_and_writes_nothing(
     assert _call(memory_client, viewer, "memory_search", query="deploy")["isError"] is False
     result = _call(memory_client, viewer, "memory_propose", text=DEPLOY, kind="procedure")
     assert result["isError"] is True and "viewers" in result["content"][0]["text"]
+
+
+def test_memorys_model_calls_show_as_usage_outside_any_budget(
+    memory_client: TestClient, headers: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    _call(memory_client, headers, "memory_propose", text=DEPLOY, kind="procedure")
+    _consolidate(memory_client)
+    _call(memory_client, headers, "memory_search", query="deploy")
+
+    with db_session_factory() as session:
+        rows = session.scalars(select(UsageLog).where(UsageLog.endpoint == "/v1/memory/embedding")).all()
+        assert len(rows) == 2
+        assert all(row.counts_toward_budget is False and row.status == "success" for row in rows)
+        assert all(row.prompt_tokens == 7 and row.api_key_id is not None for row in rows)
+
+
+def _workspace_id(db_session_factory: Callable[[], Session]) -> uuid.UUID:
+    with db_session_factory() as session:
+        workspace = session.scalars(select(Workspace)).first()
+        assert workspace is not None
+        return workspace.id
+
+
+def test_managers_turn_memory_on_see_what_it_holds_and_erase_it(
+    memory_client: TestClient,
+    headers: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    switches = f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory"
+    body = {"enabled": True, "workspace_scope_enabled": True, "write_policy": "auto", "retention_days": 30}
+    changed = memory_client.put(switches, json=body, headers=master_key_header)
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["retention_days"] == 30 and changed.json()["deployment_enabled"] is True
+
+    _call(memory_client, headers, "memory_propose", text=DEPLOY, kind="procedure")
+    assert memory_client.get(switches, headers=master_key_header).json()["proposals_waiting"] == 1
+    _consolidate(memory_client)
+    assert memory_client.get(switches, headers=master_key_header).json()["entries"] == {"active": 1}
+
+    erased = memory_client.delete(switches, headers=master_key_header)
+    assert erased.status_code == 200
+    assert (erased.json()["entries"], erased.json()["keys"]) == (1, 1)
+    assert _call(memory_client, headers, "memory_search", query="deploy")["structuredContent"]["results"] == []
+    assert memory_client.get(switches, headers=master_key_header).json()["enabled"] is True
+
+
+def test_turning_memory_off_stops_recall_and_deletes_nothing(
+    memory_client: TestClient,
+    headers: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    switches = f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory"
+    _call(memory_client, headers, "memory_propose", text=DEPLOY, kind="procedure")
+    _consolidate(memory_client)
+
+    memory_client.put(switches, json={"enabled": False}, headers=master_key_header)
+
+    assert _call(memory_client, headers, "memory_search", query="deploy")["isError"] is True
+    assert memory_client.get(switches, headers=master_key_header).json()["entries"] == {"active": 1}
+
+
+def test_an_agents_key_cannot_change_the_switches(
+    memory_client: TestClient, headers: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    switches = f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory"
+
+    assert memory_client.put(switches, json={"enabled": True}, headers=headers).status_code in (401, 403)
+    assert memory_client.delete(switches, headers=headers).status_code in (401, 403)
