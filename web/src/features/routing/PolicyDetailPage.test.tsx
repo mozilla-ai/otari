@@ -729,7 +729,16 @@ describe("PolicyDetailPage test section", () => {
       calls.filter((call) => call.url.endsWith("/routing/policies/explain"))
     expect(explains()[0].body).not.toHaveProperty("spec")
 
-    await user.type(test.getByRole("textbox", { name: /Budget used/ }), "85")
+    const budget = test.getByRole("textbox", { name: /Budget used/ })
+    // Blank after trimming is no budget at all, so past the debounce nothing
+    // compiles again, rather than once more at 0%.
+    const before = explains().length
+    await user.type(budget, "  ")
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(explains()).toHaveLength(before)
+
+    await user.clear(budget)
+    await user.type(budget, "85")
     await waitFor(() =>
       expect(explains().at(-1)?.body).toMatchObject({
         name: "auto",
