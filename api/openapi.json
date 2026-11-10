@@ -54650,7 +54650,7 @@
     },
     "/api/v1/videos/{video_id}": {
       "get": {
-        "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A key reads only the jobs its user started\nin its workspace; the master key reads any job.",
+        "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A job whose length neither the provider\nnor the request states is billed what the provider charged for it, else\nthe length its reservation assumed. A key reads only the jobs its user\nstarted in its workspace; the master key reads any job.",
         "operationId": "videos-retrieve_video",
         "parameters": [
           {
