@@ -296,7 +296,7 @@ def test_a_deployment_with_no_https_address_is_told_it_is_the_one_to_fix() -> No
         _connection_clients.client_for(
             _connection(),
             _metadata(),
-            db=cast("Any", None),
+            pending=cast("Any", None),
             redirect_uri="http://otari.example/auth/sso/callback",
             allow_private_hosts=False,
         )
