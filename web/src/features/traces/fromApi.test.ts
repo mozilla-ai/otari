@@ -44,8 +44,8 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
-  it("gives a span the length it states, not one off it from rounded timestamps", () => {
-    // 2.539 ms long: the timestamps cut to the millisecond are 2 ms apart.
+  it("says a span took what its row says, not a millisecond more", () => {
+    // 2.539 ms long, so it states 3 ms; its timestamps are 2 ms apart.
     const detail = traceDetail({
       spans: [
         traceSpan({
@@ -63,8 +63,8 @@ describe("toTrace", () => {
       (o) => o.id === "call-read",
     )
 
-    expect((read?.endMs ?? 0) - (read?.startMs ?? 0)).toBe(3)
-    expect(read?.explain?.facts).toContainEqual(["Took", "3 ms"])
+    expect((read?.endMs ?? 0) - (read?.startMs ?? 0)).toBe(2)
+    expect(read?.explain?.facts).toContainEqual(["Took", "2 ms"])
   })
 
   it("draws a request that made one model request and nothing else as that one", () => {
@@ -316,22 +316,36 @@ describe("toTrace", () => {
     expect(trace.gateway?.isAtApiPrices).toBe(true)
   })
 
-  it("gives a turn its cost without counting it twice in the session's total", () => {
+  it("gives a turn what everything under it cost, a subagent's requests included", () => {
     const detail = traceDetail()
     const [first] = detail.turns
+    const spans = [
+      ...detail.spans,
+      // A request the tool call's subagent made, which the API's own figure
+      // for the turn leaves out.
+      traceSpan({
+        span_id: "llm-sub",
+        parent_span_id: "call-toolu_1",
+        kind: "llm",
+        model: "gpt-5",
+        cost: 0.03,
+      }),
+    ]
     // Turns are drawn as rows once a session has more than one.
     const trace = toTrace(traceSummary(), {
       ...detail,
+      spans,
       turns: [
-        { ...first, cost: 0.04 },
+        { ...first, cost: 0.01 },
         { ...first, index: 1, step_ids: [], cost: 0 },
       ],
     })
+    const [turn, empty] = trace.observations.filter((o) => o.isRollup)
 
-    expect(trace.observations.find((o) => o.isRollup)?.cost).toBe(0.04)
-    expect(summarizeTrace(trace).totalCost).toBe(
-      detail.spans.reduce((sum, span) => sum + (span.cost ?? 0), 0),
-    )
+    expect(turn.cost).toBeCloseTo(0.04)
+    expect(empty.cost).toBeUndefined()
+    // Counted once in the session's total, not again on the turn's row.
+    expect(summarizeTrace(trace).totalCost).toBeCloseTo(0.04)
   })
 
   it("does not say a session the gateway served is at API prices", () => {
@@ -788,6 +802,7 @@ describe("toTrace", () => {
             parent_span_id: "tool-1",
             kind: "other",
             operation: "tool.blocked_on_user",
+            end_time: "2026-10-07T12:00:14Z",
             duration_ms: 14_000,
             attributes: {
               "otari.tool.decision": "accept",

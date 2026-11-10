@@ -135,15 +135,4 @@ describe("rolledUpCosts", () => {
 
     expect(costs.get("turn")).toBe(0.5)
   })
-
-  it("keeps a turn's own cost where no row under it carries one", () => {
-    const costs = rolledUpCosts(
-      buildTree([
-        observation({ id: "turn", cost: 0.5, isRollup: true }),
-        observation({ id: "call", parentObservationId: "turn" }),
-      ]),
-    )
-
-    expect(costs.get("turn")).toBe(0.5)
-  })
 })

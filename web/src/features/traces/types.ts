@@ -127,15 +127,6 @@ export interface TraceTotals {
   models: string[]
 }
 
-/**
- * What the session cost: the total it recorded, which At a glance heads its
- * Cost band with, rather than a sum of the spans on screen, which stands in
- * only until the session's spans have loaded.
- */
-export function sessionCost(trace: Trace, totals: TraceTotals): number {
-  return trace.gateway?.cost ?? totals.totalCost
-}
-
 export function summarizeTrace(trace: Trace): TraceTotals {
   let latencyMs = 0
   let promptTokens = 0
@@ -152,9 +143,10 @@ export function summarizeTrace(trace: Trace): TraceTotals {
       completionTokens += o.completionTokens ?? 0
       cachedTokens += o.cachedTokens ?? 0
       cacheWriteTokens += o.cacheWriteTokens ?? 0
+      // Only a request's model: a judge gate names the model it called too.
+      if (o.model) models.add(o.model)
     }
     if (!o.isRollup) totalCost += o.cost ?? 0
-    if (o.model) models.add(o.model)
   }
   return {
     latencyMs,

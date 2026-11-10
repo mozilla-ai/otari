@@ -28,7 +28,7 @@ import { GateCard, VERDICT } from "./GateCard"
 import { GatesView, stoppedBy } from "./GatesView"
 import { GatewayCall } from "./GatewayCall"
 import { GatewayPanel } from "./GatewayPanel"
-import { type Format, IOBlock } from "./IOBlock"
+import { type Format, hasFormattedForm, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
 import { NoInputNote } from "./NoInputNote"
@@ -36,12 +36,7 @@ import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
-import {
-  type Observation,
-  sessionCost,
-  summarizeTrace,
-  type Trace,
-} from "./types"
+import { type Observation, summarizeTrace, type Trace } from "./types"
 
 type PeekTab = "preview" | "attributes" | "log" | "gates"
 
@@ -450,7 +445,9 @@ export function TracePeek({
         type: "TRACE" as const,
         timestamp: trace.timestamp,
         latencyMs: summary.latencyMs,
-        totalCost: sessionCost(trace, summary),
+        // The total the session recorded, which At a glance heads its Cost
+        // band with, rather than a sum of the spans on screen.
+        totalCost: trace.gateway?.cost ?? 0,
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
         cachedTokens: summary.cachedTokens,
@@ -490,14 +487,22 @@ export function TracePeek({
     : observation.model && observation.model !== observation.name
       ? [observation.model]
       : []
-  // Formatted or Raw changes only stored input and output, so the switch shows
-  // where some is on screen.
-  const showsFormat =
-    activeTab === "log" ||
-    (activeTab === "preview" &&
-      observation !== null &&
-      !observation.gate &&
-      (observation.input != null || observation.output != null))
+  // Formatted or Raw changes only stored content that has a formatted form, so
+  // the switch shows where some is on screen: the picked span's, or any span's
+  // on the log, which opens them all.
+  const isFormatShown =
+    activeTab === "log"
+      ? trace.observations.some(
+          (o) =>
+            hasFormattedForm(o.input) ||
+            hasFormattedForm(o.output) ||
+            hasFormattedForm(o.gate?.evidence),
+        )
+      : activeTab === "preview" &&
+        observation !== null &&
+        !observation.gate &&
+        (hasFormattedForm(observation.input) ||
+          hasFormattedForm(observation.output))
   const navWidth = navCollapsed
     ? NAV_COLLAPSED
     : navView === "timeline"
@@ -625,14 +630,24 @@ export function TracePeek({
         </TabRow>
         <div className="flex shrink-0 items-center gap-2">
           {actions}
-          {showsFormat ? (
-            <Segmented
-              size="sm"
-              label="Format"
-              options={FORMAT_OPTIONS}
-              value={format}
-              onChange={(next) => setFormat(next as Format)}
-            />
+          {isFormatShown ? (
+            // Below md the tree takes the pane until a row is picked again,
+            // and the span the switch is about is not on screen.
+            <span
+              className={
+                activeTab === "preview" && !isDetailShown
+                  ? "max-md:hidden"
+                  : undefined
+              }
+            >
+              <Segmented
+                size="sm"
+                label="Format"
+                options={FORMAT_OPTIONS}
+                value={format}
+                onChange={(next) => setFormat(next as Format)}
+              />
+            </span>
           ) : null}
         </div>
       </div>

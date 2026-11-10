@@ -16,7 +16,7 @@ import { formatDuration } from "./format"
 import { OBSERVATION_TYPES, type TypeKey, TypeMark } from "./observationTypes"
 import { moveRowFocus } from "./rowFocus"
 import { matchesSearch } from "./search"
-import { tickStep } from "./timelineAxis"
+import { pickTickStep } from "./timelineAxis"
 import { buildTree, flattenTreeOrder, rolledUpCosts } from "./tree"
 import type { Trace } from "./types"
 
@@ -39,7 +39,6 @@ const MAX_ZOOM = 32
 const ZOOM_STEP = 1.6
 const TICK_MIN_PX = 56
 const IDLE_MIN_MS = 250
-const IDLE_LABEL_MIN_PX = 56
 const IDLE_MIN_PX = 14
 // Fira Code is monospace: 0.6em, so 11px text is 6.6px a glyph.
 const MICRO_GLYPH_PX = 6.6
@@ -314,10 +313,6 @@ export function TraceTimelineView({
   )
   const costs = useMemo(() => rolledUpCosts(roots), [roots])
   const totalMs = Math.max(1, ...trace.observations.map((o) => o.endMs))
-  const totalCost = roots.reduce(
-    (sum, root) => sum + (costs.get(root.obs.id) ?? 0),
-    0,
-  )
 
   // The gutter gives way to the icon rail when the lane would drop under its
   // minimum.
@@ -335,7 +330,7 @@ export function TraceTimelineView({
     () => idleGaps(trace.observations, totalMs),
     [trace, totalMs],
   )
-  const step = tickStep(totalMs, lanePx, TICK_MIN_PX)
+  const step = pickTickStep(totalMs, lanePx, TICK_MIN_PX)
   const ticks: number[] = []
   for (let t = 0; t <= totalMs; t += step) ticks.push(t)
   const x = (ms: number) => (ms / totalMs) * lanePx
@@ -360,12 +355,18 @@ export function TraceTimelineView({
     centerRatio.current = null
   }, [lanePx, gutter])
 
-  // The idle stretches wide enough to say how long they lasted. They take a
+  // The idle stretches wide enough to hold their own label. The labels take a
   // line of their own under the ticks, which would otherwise run through them.
-  const labeledGaps = gaps.filter(
-    (gap) => x(gap.end) - x(gap.start) >= IDLE_LABEL_MIN_PX,
-  )
-  const hasIdleLine = labeledGaps.length > 0
+  const idleLabels = gaps
+    .map((gap) => ({
+      gap,
+      text: `${formatDuration(gap.end - gap.start)} idle`,
+    }))
+    .filter(
+      ({ gap, text }) =>
+        x(gap.end) - x(gap.start) >= text.length * MICRO_GLYPH_PX + LABEL_GAP,
+    )
+  const hasIdleLine = idleLabels.length > 0
 
   const fitted = zoom === MIN_ZOOM
   const hasQuery = query.trim().length > 0
@@ -425,7 +426,7 @@ export function TraceTimelineView({
                   </span>
                 </span>
               ))}
-              {labeledGaps.map((gap) => (
+              {idleLabels.map(({ gap, text }) => (
                 <span
                   key={`g${gap.start}`}
                   style={{
@@ -434,7 +435,7 @@ export function TraceTimelineView({
                   }}
                   className="absolute bottom-0 truncate bg-surface text-center text-mono-micro leading-[1.125rem] text-subtle"
                 >
-                  {formatDuration(gap.end - gap.start)} idle
+                  {text}
                 </span>
               ))}
             </div>
@@ -480,7 +481,7 @@ export function TraceTimelineView({
               isLast
               startMs={0}
               endMs={totalMs}
-              cost={trace.gateway?.cost ?? totalCost}
+              cost={trace.gateway?.cost ?? 0}
               dimmed={false}
               selected={selectedId === null}
               isTabStop={tabStop === null}

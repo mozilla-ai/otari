@@ -36,7 +36,7 @@ const STEPS = [
 ]
 
 /** The smallest round step that keeps the axis ticks at least `minTickPx` apart. */
-export function tickStep(
+export function pickTickStep(
   totalMs: number,
   lanePx: number,
   minTickPx: number,

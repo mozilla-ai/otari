@@ -1000,9 +1000,17 @@ describe("SessionsPage", () => {
   })
 
   it("heads an open session with the total At a glance gives it", async () => {
-    // The spans on screen sum to $0.01; the session recorded $1.9711.
+    // The spans on screen sum to $0.0123; the session recorded $1.9711.
     const summary = traceSummary({ cost: 1.9711 })
-    mockApi({ traces: [summary], traceDetail: traceDetail({ summary }) })
+    mockApi({
+      traces: [summary],
+      traceDetail: traceDetail({
+        summary,
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "llm-1" ? { ...span, cost: 0.0123 } : span,
+        ),
+      }),
+    })
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
@@ -1016,7 +1024,7 @@ describe("SessionsPage", () => {
     const tree = within(peek).getByRole("list", { name: "Spans" })
     const [session] = within(tree).getAllByRole("button")
     expect(within(session).getByText("$1.97")).toBeInTheDocument()
-    expect(within(tree).getByText("$0.01")).toBeInTheDocument()
+    expect(within(tree).getByText("$0.0123")).toBeInTheDocument()
   })
 
   it("reads an open session's totals from its own read, not the list's snapshot", async () => {
@@ -1766,14 +1774,14 @@ describe("SessionsPage", () => {
     expect(zoomOut).toBeEnabled()
   })
 
-  it("offers Formatted and Raw only where stored content is on screen", async () => {
+  it("offers Formatted and Raw only where stored content reads differently in each", async () => {
     const user = userEvent.setup()
     mockApi({
       traces: [traceSummary()],
       traceDetail: traceDetail({
         spans: traceDetail().spans.map((span) =>
           span.span_id === "call-toolu_1"
-            ? { ...span, content: { command: "pytest -x" } }
+            ? { ...span, content: { "tool.output": '{"files": 3}' } }
             : span,
         ),
       }),
@@ -1791,6 +1799,7 @@ describe("SessionsPage", () => {
     await user.click(call)
     expect(format()).not.toBeInTheDocument()
 
+    // What the tool returned is JSON kept as a string.
     await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
     expect(format()).toBeInTheDocument()
 
@@ -1799,6 +1808,55 @@ describe("SessionsPage", () => {
 
     await user.click(within(peek).getByRole("button", { name: "Log view" }))
     expect(format()).toBeInTheDocument()
+  })
+
+  it("offers no switch for content that reads the same either way", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { command: "pytest -x" } }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+
+    await user.click(
+      await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
+    )
+    expect(within(peek).getByText('"pytest -x"')).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("radiogroup", { name: "Format" }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    expect(
+      within(peek).queryByRole("radiogroup", { name: "Format" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says when the log's search matches no span", async () => {
+    const user = userEvent.setup()
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    await user.click(
+      await within(peek).findByRole("button", { name: "Log view" }),
+    )
+    await user.type(
+      within(peek).getByRole("searchbox", { name: "Search spans" }),
+      "zzzz",
+    )
+
+    expect(
+      within(peek).getByText("No spans match this search."),
+    ).toBeInTheDocument()
   })
 
   it("names a model request's model once, and a session's models by count", async () => {

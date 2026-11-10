@@ -22,12 +22,7 @@ import {
   flattenTreeOrder,
   type TreeNode,
 } from "./tree"
-import {
-  type Observation,
-  sessionCost,
-  summarizeTrace,
-  type Trace,
-} from "./types"
+import { type Observation, summarizeTrace, type Trace } from "./types"
 
 function Metrics({
   durationMs,
@@ -389,7 +384,7 @@ export function TraceTreeView({
             <span className="truncate text-body">{trace.name}</span>
             <Metrics
               durationMs={summary.latencyMs}
-              cost={sessionCost(trace, summary)}
+              cost={trace.gateway?.cost ?? 0}
               tokens={summary.totalTokens}
               isSession
             />

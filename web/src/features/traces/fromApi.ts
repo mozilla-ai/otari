@@ -385,13 +385,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
             )
           : null
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
-      // A span's timestamps are finer than a millisecond, so their difference
-      // can be one off the duration it states. Where it states one, that is
-      // its length, here and in what its explanation says it took.
-      const endMs =
-        span.start_time !== null && span.duration_ms !== null
-          ? startMs + span.duration_ms
-          : (offset(span.end_time) ?? startMs)
+      const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
       const input = spanInput(span)
       const gate = gateCheck(span, gateSummaries, checkEvidence)
       const folded = foldedInto.get(span.span_id)
@@ -484,6 +478,26 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     }
     for (const { steps } of tree.turns) for (const step of steps) visit(step)
     for (const root of tree.roots) visit(root)
+
+    // A turn costs what everything under it cost. The API's own figure counts
+    // only the requests directly under the turn's steps, which leaves out a
+    // subagent's requests and a judge gate's, so the turn's row would say
+    // less than the rows under it add up to.
+    const rows = new Map(observations.map((o) => [o.id, o]))
+    const costUnder = new Map<string, number>()
+    for (const o of observations) {
+      if (o.isRollup || !o.cost) continue
+      let above = rows.get(o.parentObservationId ?? "")
+      while (above) {
+        if (above.isRollup) {
+          costUnder.set(above.id, (costUnder.get(above.id) ?? 0) + o.cost)
+        }
+        above = rows.get(above.parentObservationId ?? "")
+      }
+    }
+    for (const o of observations) {
+      if (o.isRollup) o.cost = costUnder.get(o.id)
+    }
   }
 
   return {

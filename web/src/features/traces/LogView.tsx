@@ -15,7 +15,7 @@ import { SearchField } from "@/design-system/forms/SearchField"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
-import { formatDuration, formatRelativeTime } from "./format"
+import { formatDuration, formatRelativeTime, plural } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LevelChip } from "./LevelChip"
 import { NoInputNote } from "./NoInputNote"
@@ -193,7 +193,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   />
                   {childCount > 0 ? (
                     <span className="shrink-0 text-caption text-subtle">
-                      {childCount} {childCount === 1 ? "item" : "items"}
+                      {plural(childCount, "span")}
                     </span>
                   ) : null}
                 </span>

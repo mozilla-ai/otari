@@ -120,8 +120,16 @@ const STOPPED_BECAUSE: Record<string, string> = {
   refusal: "It refused",
 }
 
+// How long the span's row says it ran: between its two timestamps, which is
+// how the rows measure, so the sentence and the row never differ by the
+// millisecond that rounding its stated duration can add. A span missing a
+// timestamp has only the duration it states.
 function took(span: TraceSpan): string | null {
-  return span.duration_ms === null ? null : formatDuration(span.duration_ms)
+  const ms =
+    span.start_time && span.end_time
+      ? Math.max(0, Date.parse(span.end_time) - Date.parse(span.start_time))
+      : span.duration_ms
+  return ms === null ? null : formatDuration(ms)
 }
 
 function count(value: unknown): string | null {
