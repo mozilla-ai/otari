@@ -38,6 +38,22 @@ Organization roles stop at their organization. On a self-hosted deployment,
 [operators](sign-in.md#deployment-wide-account-administration) act on the whole
 deployment.
 
+## What a page shows depends on who is signed in
+
+- **Spend & budgets.** An organization owner or admin manages their
+  organization's budgets and ceilings. A deployment operator also sees the
+  deployment's own budgets and the gateway users assigned to them.
+- **API keys.** An operator manages every key in the organization and picks each
+  key's owner. A member sees only their own keys, always billed to themselves and
+  never budget-exempt. An operator, or an organization owner or admin, can cap a
+  key's spend from its create and edit forms, and the Budget column shows each
+  key's spend against its limit. Where the deployment enables it, a key's actions
+  menu offers **Workload identity…**; see
+  [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key).
+- **Overview and Routing** show an operator their active organization only. What
+  the Overview flags for each role is in
+  [What needs attention](review-usage-and-requests.md#what-needs-attention).
+
 ## How a request is attributed
 
 The API key decides a request's workspace; no header can pick another. Usage is

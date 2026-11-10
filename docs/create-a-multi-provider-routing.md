@@ -163,6 +163,25 @@ The request still succeeds, but the response now comes from Anthropic. OpenAI re
 
 When you're done, remove the `fallback-test` key. If the workspace was pinned to another key before, pin it back.
 
+## Automatic fallback
+
+**Routing** lists each policy with its main model, its backups in order, and who
+it applies to. Below the policies, **Automatic fallback** lists every model your
+organization sent requests to in the last 30 days, most requested first, by
+catalog id (see [Catalog spellings](models.md#catalog-spellings)). Each row shows:
+
+- its request count;
+- the share of requests that sent the catalog id and so could fall back (a dash
+  when one provider serves the model, flagged when below half);
+- its providers in the order a request tries them, with the input price that
+  order ranks by.
+
+That order is a baseline: automatic routing can reorder it per request, and a
+key's allow-list or a missing credential can leave a provider out. A row whose
+requests named a provider or a policy opens on the API keys that sent them. An
+owner or admin sees every workspace in the organization; anyone else, the
+workspaces they belong to.
+
 ## A good first production pattern
 
 If you want a practical starting point, use this setup:

@@ -2,8 +2,7 @@
 
 A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
-the deployment view, and deployment-wide settings. What any signed-in person
-sees is in [Admin dashboard](dashboard.md).
+the deployment view, and deployment-wide settings.
 
 ## Sign-in and secrets
 
@@ -137,7 +136,7 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 Set `activation_guide: false` to turn off the Overview's
-[setup guide](dashboard.md#the-setup-guide) for the deployment.
+[setup guide](quickstart.md#the-setup-guide) for the deployment.
 
 ## Signup and terms
 

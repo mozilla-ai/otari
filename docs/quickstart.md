@@ -80,6 +80,16 @@ print(response.choices[0].message.content)
 
 **Success**: Once the request appears on the Overview as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
 
+## The setup guide
+
+Overview shows a short setup flow until the selected workspace serves its first
+successful request from your own code. Messages sent in the Playground do not
+count. The key the guide creates is an ordinary workspace API key.
+
+Skipping the guide hides it for that workspace and does not revoke a key it
+created. A self-hosted gateway can turn it off; see
+[The setup guide](run-the-dashboard.md#the-setup-guide).
+
 ## What's next?
 
 You've sent your first LLM request! Now you can:

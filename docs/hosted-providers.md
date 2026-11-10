@@ -184,6 +184,36 @@ Which price list meters a request depends on whose credential served it:
 On the Providers page, an unpriced model is offered but not served, each key's
 row counts its serving models, and a key serving none is marked.
 
+### Entering a rate
+
+The rate form asks for the unit first: tokens, requests, images, megapixels,
+characters, minutes of audio, seconds of video, or web searches. Enter each rate
+the way providers publish it:
+
+| Unit | Entered per |
+| --- | --- |
+| Tokens, characters | 1,000,000 |
+| Requests, images, searches | 1,000 |
+| Megapixels, minutes, seconds | 1 |
+
+A minute of audio has two rates, one for audio the model hears and one for audio
+it speaks. The model lists show each rate in its unit, for example "$0.002 per
+request" or "$0.06 per second". How each unit is stored and billed is in
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
+
+Some limits of the form:
+
+- An override that prices seconds of both audio and video shows its audio rates;
+  change its video price through the API.
+- An edit in the same unit keeps the override's context tiers and rules, which
+  the form does not show.
+- The hosted model form stores per-million fields only, so it does not offer
+  seconds of video and cannot reprice a per-second model.
+
+**Price this model** on a request in the Requests tab opens the same form, in the
+unit the request's endpoint bills. It is offered on a served request that carried
+no cost.
+
 ## Catalog and discovery
 
 A hosted provider contributes its roster to the catalog (`GET /api/v1/models`):
@@ -355,7 +385,7 @@ menu, and is listed only for a deployment operator.
   key's dialog on the organization's Providers page. See
   [Zero data retention](#zero-data-retention).
 - **Models** carry a serving switch and a price, set in any unit on
-  [Entering a rate](dashboard.md#entering-a-rate) (a per-second video price
+  [Entering a rate](#entering-a-rate) (a per-second video price
   goes through `POST /api/v1/pricing` instead); an unpriced model arrives
   switched off. Tabs show one kind of model at a time (the kind comes from
   models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as

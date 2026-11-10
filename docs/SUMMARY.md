@@ -19,7 +19,6 @@
 * [Organizations and workspaces](workspaces.md)
 * [Provider keys](provider-keys.md)
 * [Billing](billing.md)
-* [Admin dashboard](dashboard.md)
 * [Manage workspaces](manage-workspaces.md)
 * [Invite and manage organization members](invite-and-manage-organization-members.md)
 * [Members and invitations](members.md)
@@ -55,6 +54,7 @@
 
 ## Observe
 
+* [Review usage and requests](review-usage-and-requests.md)
 * [Track spend per end user](end-users.md)
 * [Agent traces](traces.md)
 * [Importing external usage](external-usage.md)

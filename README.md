@@ -142,7 +142,7 @@ running server publishes Swagger UI at `/api/v1/docs` and OpenAPI at
 
 The dashboard manages providers, models, routing, tools, keys, members, budgets,
 settings, activity, and usage. Its navigation adapts to the signed-in person's
-authority. See [Admin dashboard](docs/dashboard.md).
+authority. See [Run the dashboard](docs/run-the-dashboard.md).
 
 ## Development
 

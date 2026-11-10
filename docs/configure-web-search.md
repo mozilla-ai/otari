@@ -24,3 +24,21 @@ The domain lists apply to the search and fetch Otari runs, not to direct searche
 Workspace settings can make the deployment-level web search policy more restrictive, but they **cannot override it to allow access that has been blocked at the deployment level**.
 
 For the full policy, including the prompt hint, which is set through the API, see [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
+
+## The organization's search and fetch keys
+
+**Organization** → **Providers** → **Web search** lists the organization's
+search keys and fetch keys, one table each. Only owners and admins manage them.
+
+- **Add a key**: pick the provider, then enter a name and the API key. **More
+  settings** holds a custom endpoint and the provider's options.
+- **Star a key** to make it the default for every workspace that has not pinned
+  another. Click a filled star to unset it. A key that is neither starred nor
+  pinned is not used.
+- **Archive a key** to take it out of use; restore or delete it later.
+
+A workspace uses the key its owners or admins pinned, else the starred key, else
+the deployment's own search or fetch tool. Editing a key never shows its secret,
+and moving it to another endpoint asks for the API key again. A key the
+deployment cannot decrypt is marked unreadable. Prices for search and fetch calls
+are set by the deployment's operator, not here.

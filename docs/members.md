@@ -71,6 +71,15 @@ limits under [Mail](configuration.md#invitations).
 
 **Accepting.**
 
+- Invitations waiting for you are listed under **Invitations**, reached from the
+  organization switcher. Someone signed in who belongs to no organization is
+  taken there when an invitation is waiting; otherwise Overview says how to get
+  in. Creating an organization is offered only where signup is open.
+- Opening an invitation link while signed in as a different address says who the
+  invitation is for and offers to sign out, because accepting always adds the
+  invited address.
+- After you set a password from an invitation link, the sign-in screen opens
+  with your address filled in.
 - If the invited address has never signed in, the accept page asks for a first
   password, and they can sign in right away. No verification email is needed.
   Where the deployment publishes terms, they accept them here too.

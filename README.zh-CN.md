@@ -135,7 +135,7 @@ docker compose --profile code-exec --profile web-search --profile guardrails up 
 Otari 还提供更完整的 OpenAI 兼容 API 和管理 API。运行中的服务在 `/api/v1/docs` 发布 Swagger UI，在
 `/api/v1/openapi.json` 发布 OpenAPI 规范。参见 [API 参考](docs/api-reference.md)。
 
-控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [管理控制台](docs/dashboard.md)。
+控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [运行控制台](docs/run-the-dashboard.md)。
 
 ## 开发
 

@@ -26,6 +26,12 @@ is the default.
   and tool calls, as a timeline, or as a flat log.
 - From the **Requests** tab, **View trace** in a request's detail opens its
   session on that LLM call.
+- A model filter matches sessions with an LLM call on that model.
+- The Levels column counts each session's errors, tool errors included; a tool
+  error alone does not fail a session (see
+  [Sessions and failures](#sessions-and-failures)).
+- Click Last activity, Levels, Latency, Tokens or Total cost to sort; click again
+  to reverse.
 
 The same reads are on the API: see [Agent traces](api-reference.md#agent-traces)
 in the API reference.
