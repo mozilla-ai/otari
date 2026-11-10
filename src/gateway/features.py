@@ -13,8 +13,8 @@ from gateway.api.routes.identity_apps import FEATURE as OAUTH_APPS
 from gateway.api.routes.oauth import FEATURE as WORKLOAD_IDENTITY_EXCHANGE
 from gateway.api.routes.platform_connect import FEATURE as PLATFORM_CONNECT
 from gateway.api.routes.traces import FEATURE as TRACES
-from gateway.api.routes.update_check import FEATURE as UPDATE_CHECK
 from gateway.api.routes.traces import RETENTION_FEATURE as TRACE_RETENTION
+from gateway.api.routes.update_check import FEATURE as UPDATE_CHECK
 from gateway.core.feature import CoreFeature
 
 CORE_FEATURES: tuple[CoreFeature, ...] = (

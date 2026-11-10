@@ -57,9 +57,9 @@ import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
-import { useSessionCaller } from "@/shared/api/auth"
 import { UpdateCheckPrompt } from "@/features/updateCheck/UpdateCheckPrompt"
 import { UpdateNotice } from "@/features/updateCheck/UpdateNotice"
+import { useSessionCaller } from "@/shared/api/auth"
 import {
   isNoOrganizationError,
   useOrganizationContext,
