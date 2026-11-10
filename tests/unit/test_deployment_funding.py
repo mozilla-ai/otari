@@ -330,3 +330,25 @@ def test_a_deferred_job_whose_creator_names_no_identity_is_charged_to_no_one() -
 async def test_a_models_admission_carries_its_organizations_concurrency_limit(limit: int | None) -> None:
     charge = await _admit(_Billing(limit=limit))
     assert charge.concurrency_limit == limit
+
+
+def test_the_deployments_settings_decide_which_models_are_closed() -> None:
+    from gateway.core.settings.inference import (
+        DEFAULT_CLOSED_MODEL_FAMILIES,
+        DEFAULT_CLOSED_MODEL_PROVIDERS,
+        DEFAULT_OPEN_MODEL_FAMILIES,
+    )
+    from gateway.services.inference import configure_closed_models
+
+    configure_closed_models(providers=["mistral"], closed_families=["kimi"], open_families=["mistral-small"])
+    try:
+        assert billed_model("mistral", "mistral-large").open_weights is False
+        assert billed_model("mistral", "mistral-small-3").open_weights is True
+        assert billed_model("together", "moonshotai/Kimi-K2").open_weights is False
+        assert billed_model("anthropic", "claude-sonnet-4").open_weights is True
+    finally:
+        configure_closed_models(
+            providers=DEFAULT_CLOSED_MODEL_PROVIDERS,
+            closed_families=DEFAULT_CLOSED_MODEL_FAMILIES,
+            open_families=DEFAULT_OPEN_MODEL_FAMILIES,
+        )

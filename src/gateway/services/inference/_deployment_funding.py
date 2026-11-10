@@ -6,15 +6,19 @@ concurrent requests can pass on the same funds, the charge allows the overdraft
 that leaves, and the next request is refused.
 """
 
-import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
+from gateway.core.settings.inference import (
+    DEFAULT_CLOSED_MODEL_FAMILIES,
+    DEFAULT_CLOSED_MODEL_PROVIDERS,
+    DEFAULT_OPEN_MODEL_FAMILIES,
+)
 from gateway.log_config import logger
 from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
 from gateway.services.provider_kwargs import provider_key
@@ -37,25 +41,53 @@ def actor_user_id_for(user_id: str | None) -> uuid.UUID | None:
         return None
 
 
-# Providers whose own models are all closed. Anything not ruled closed here or
-# by name below is treated as open-weight: the closed labs are few and change
-# slowly, where a list of open models would trail every release.
-_CLOSED_PROVIDERS = frozenset(
-    {"anthropic", "azureanthropic", "vertexaianthropic", "gemini", "vertexai", "xai", "openai", "azureopenai"}
+# Which models no open-weight plan covers. Everything not ruled closed is treated
+# as open-weight: the closed labs are few and change slowly, where a list of open
+# models would trail every release. Set from the deployment's settings at startup
+# (``configure_closed_models``), since a model is billed deep in code that holds no config.
+@dataclass(frozen=True)
+class _ClosedModels:
+    providers: frozenset[str]
+    closed_families: tuple[str, ...]
+    open_families: tuple[str, ...]
+
+
+_closed = _ClosedModels(
+    frozenset(DEFAULT_CLOSED_MODEL_PROVIDERS), DEFAULT_CLOSED_MODEL_FAMILIES, DEFAULT_OPEN_MODEL_FAMILIES
 )
-# Closed model families, matched on the model's own name, whichever provider or
-# aggregator serves it (``openrouter``'s ``anthropic/claude-sonnet-4``).
-_CLOSED_MODEL = re.compile(r"^(claude|gemini|grok|gpt-(?!oss)|chatgpt|o[1-9]\b)", re.IGNORECASE)
-# The open-weight releases a closed provider serves.
-_OPEN_ON_CLOSED_PROVIDER = re.compile(r"^(gpt-oss|gemma)", re.IGNORECASE)
+
+
+def configure_closed_models(
+    *, providers: Iterable[str], closed_families: Iterable[str], open_families: Iterable[str]
+) -> None:
+    """Set which models count as closed, from the deployment's settings."""
+    global _closed
+    _closed = _ClosedModels(
+        providers=frozenset(provider.lower() for provider in providers),
+        closed_families=tuple(family.lower() for family in closed_families),
+        open_families=tuple(family.lower() for family in open_families),
+    )
+
+
+def _is_family(name: str, family: str) -> bool:
+    """Whether ``name`` belongs to ``family``: it starts with it, as a whole word unless the family ends in ``-``."""
+    if not name.startswith(family):
+        return False
+    rest = name[len(family) :]
+    return family.endswith("-") or not rest or not rest[0].isalnum()
 
 
 def is_closed_model(provider: str, model: str) -> bool:
-    """Whether ``model`` on ``provider`` (a wire name) is a closed model, which no open-weight plan covers."""
-    name = model.rsplit("/", 1)[-1]
-    if _OPEN_ON_CLOSED_PROVIDER.match(name):
+    """Whether ``model`` on ``provider`` (a wire name) is a closed model, which no open-weight plan covers.
+
+    The model's own name decides first, whichever provider or aggregator serves
+    it (``openrouter``'s ``anthropic/claude-sonnet-4``): an open family is open
+    even on a closed provider, and a closed family closed anywhere.
+    """
+    name = model.rsplit("/", 1)[-1].lower()
+    if any(_is_family(name, family) for family in _closed.open_families):
         return False
-    return provider in _CLOSED_PROVIDERS or bool(_CLOSED_MODEL.match(name))
+    return provider.lower() in _closed.providers or any(_is_family(name, family) for family in _closed.closed_families)
 
 
 def billed_model(provider: "str | LLMProvider", model: str) -> BilledModel:
