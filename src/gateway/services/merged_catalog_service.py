@@ -226,6 +226,7 @@ def alias_model(
     pricing_lookup: dict[str, ModelPricing],
     *,
     models_dev: ModelsDevCatalog | None,
+    organization_id: uuid.UUID | None = None,
 ) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
@@ -251,7 +252,14 @@ def alias_model(
     apply_default_pricing(obj, pricing_selector=canonical_target)
     # Limits and capabilities from the target too, for the same reason. Exposing them does not
     # reveal the target; its display name would, so the alias gets none.
-    apply_model_metadata(config, models_dev, obj, metadata_selector=canonical_target, with_name=False)
+    apply_model_metadata(
+        config,
+        models_dev,
+        obj,
+        metadata_selector=canonical_target,
+        with_name=False,
+        organization_id=organization_id,
+    )
     return obj
 
 
@@ -497,6 +505,9 @@ class CatalogScope:
     model and so sees it unflagged, but still does not hold its key.
     """
 
+    organization_id: uuid.UUID | None = None
+    """The organization whose ``offered_keys`` these are, whose own keys say how their servers serve each model."""
+
 
 def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:
     """Whether ``model_key`` names a model the caller reaches on a deployment-owned key.
@@ -675,6 +686,7 @@ async def catalog_scope(
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
                 offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
+                organization_id=organization_id,
                 hosted_models=hosted_models,
                 byo_providers=operator_byo_providers,
                 # The label's line is the member flag's, not the withhold's: a
@@ -693,6 +705,7 @@ async def catalog_scope(
             deployment_supplied_providers=scope.deployment_supplied_providers,
             offered_keys=scope.offered_keys if include_offered else frozenset(),
             hosted_keys=scope.hosted_keys,
+            organization_id=session_identity.active_organization_id,
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because its organization is
@@ -720,7 +733,13 @@ async def catalog_scope(
         dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
     deployment_key_models = _without(hosted_models, byo_providers)
+    if is_master_key and include_offered:
+        # Its offered keys are the default workspace's organization's.
+        default_workspace_id = await lookup_default_workspace_id(db)
+        if default_workspace_id is not None:
+            organization_id = await organization_for_workspace_id(db, default_workspace_id)
     return CatalogScope(
+        organization_id=organization_id if include_offered else None,
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
         deployment_supplied_providers=frozenset(),
@@ -967,7 +986,7 @@ async def build_merged_catalog(
     # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
-        apply_model_metadata(config, models_dev, obj)
+        apply_model_metadata(config, models_dev, obj, organization_id=scope.organization_id)
 
     # A hosted model phase 2b listed has no stored rate, and an organization's
     # override does not admit it past ``require_pricing`` either, so with the
@@ -983,7 +1002,9 @@ async def build_merged_catalog(
     # must not leak the alias mapping.
     if provider is None:
         for alias, target in aliases.items():
-            merged[alias] = alias_model(config, alias, target, pricing_lookup, models_dev=models_dev)
+            merged[alias] = alias_model(
+                config, alias, target, pricing_lookup, models_dev=models_dev, organization_id=scope.organization_id
+            )
         # Phase 5: policies whose candidate is decided per request. Listed last so
         # nothing else can price them, and excluded from a ``?provider=`` filter
         # for the same reason aliases are.

@@ -162,6 +162,15 @@ sends it.
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 from models.dev's entry for the model under the provider serving it:
 
+- A model a vLLM or SGLang server lists, through a configured instance, a
+  hosted provider or an organization's own key, reports the context length
+  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  above it. Each listing of the server is stored, so the value survives a
+  restart and reaches every worker within a minute. An organization's key is
+  read only for that organization's callers, and is listed when the key is
+  added or its models are refreshed. Where the provider has no models.dev entry for the model,
+  the entry comes from models.dev's Hugging Face listing, under the model's own
+  name or the model the server loaded.
 - Until the gateway has fetched models.dev, and always with
   `models_dev_metadata: false`, the entry comes from the models.dev catalog
   bundled with the gateway.
@@ -186,8 +195,13 @@ uses:
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
 
-All three are unset for a model models.dev does not describe, which means
-unknown rather than unsupported. An alias reports its target's capabilities but
+An SGLang server also says how it was started, and that overrides models.dev:
+without a tool-call parser it offers no `tools`, a reasoning parser adds
+`reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
+not say, so its models keep models.dev's flags.
+
+All three are unset for a model neither models.dev nor its server describes,
+which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,

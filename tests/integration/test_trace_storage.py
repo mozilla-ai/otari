@@ -43,7 +43,7 @@ from gateway.types.traces import BreakGlass, SpanRecord, TraceFilter, TraceScope
 from otari_agent.domain.definitions import GateDefinition, definition_digest
 
 
-def _no_window(provider: str | None, model: str) -> int | None:
+def _no_window(provider: str | None, model: str, organization_id: uuid.UUID | None) -> int | None:
     return None
 
 
@@ -66,6 +66,9 @@ class _Members:
 
     async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
         return WorkspaceContent(keeps=await self.is_member(workspace_id, user_id), tool_output=True)
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        return None
 
 
 @pytest_asyncio.fixture

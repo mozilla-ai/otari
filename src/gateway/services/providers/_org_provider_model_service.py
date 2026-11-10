@@ -72,7 +72,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
-from gateway.services.catalog import offered_model_types
+from gateway.services.catalog import KeyOwner, offered_model_types, record_served_models
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
@@ -759,11 +759,16 @@ class OrgProviderModelService:
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
-    @staticmethod
-    async def _dial(key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
-        """Ask the provider what it serves on this key. Never raises, never echoes the key."""
+    async def _dial(self, key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
+        """Ask the provider what it serves on this key, and keep what its engine says.
+
+        Never raises, never echoes the key.
+
+        Kept under the key and its organization: another organization can list a
+        different server under the same prefix.
+        """
         api_key = credential.get("api_key")
-        return await test_provider_credentials(
+        discovery = await test_provider_credentials(
             key.provider,
             api_key=api_key if isinstance(api_key, str) else None,
             api_base=key.api_base,
@@ -772,3 +777,12 @@ class OrgProviderModelService:
             declared=False,
             timeout=timeout,
         )
+        if discovery.error is None:
+            await record_served_models(
+                key.selector_prefix,
+                discovery.models,
+                discovery.engine_settings,
+                owner=KeyOwner(organization_id=key.organization_id, key_id=key.id),
+                uow=self.uow,
+            )
+        return discovery
