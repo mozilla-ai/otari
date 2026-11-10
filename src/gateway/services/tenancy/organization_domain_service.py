@@ -40,7 +40,7 @@ sign-in.
 import secrets
 import uuid
 from datetime import UTC, datetime
-from typing import cast
+from typing import Protocol, cast
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +76,6 @@ from gateway.models.tenancy import (
     User,
 )
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
-from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.services.tenancy.domain_verification import resolve_txt_records
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -87,18 +86,52 @@ from gateway.services.tenancy.organization_service import OrganizationService
 _VERIFICATION_TOKEN_BYTES = 24
 
 
+class ProvenDomainClaims(Protocol):
+    """Reads the one proven claim on an email domain."""
+
+    async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None: ...
+
+
+class AdmittedMemberships(Protocol):
+    """Reads a membership, and creates an active one where the person holds none."""
+
+    async def get_by_organization_and_user(
+        self, organization_id: uuid.UUID, user_id: uuid.UUID
+    ) -> OrganizationMember | None: ...
+
+    async def add_if_absent(
+        self, *, organization_id: uuid.UUID, user_id: uuid.UUID, role: str
+    ) -> tuple[OrganizationMember, bool]: ...
+
+
+class DefaultWorkspaceGrant(Protocol):
+    """Grants an organization's default workspace to a member it admitted without naming one."""
+
+    async def grant_default_workspace(
+        self, *, user_id: uuid.UUID, organization_id: uuid.UUID, role: OrganizationDomainRole
+    ) -> None: ...
+
+
 class DomainAutoJoinListener:
-    """Add a person who signs in to the organization that has proven their email domain."""
+    """Add a person who signs in to the organization that has proven their email domain.
+
+    Its collaborators are protocols naming the three things an admission does, rather than the
+    repositories and the service that satisfy them. This is the one path that grants access with
+    nobody deciding to, so what it may reach is worth stating in the types: a repository would
+    carry every write its domain can make, and the organization service would carry every use
+    case, including deleting the organization. The name says this only reacts to a sign-in, and
+    these types are what hold it to that.
+    """
 
     def __init__(
         self,
-        domains: OrganizationDomainRepository,
-        members: OrganizationMemberRepository,
-        organizations: OrganizationService,
+        domains: ProvenDomainClaims,
+        members: AdmittedMemberships,
+        workspaces: DefaultWorkspaceGrant,
     ) -> None:
         self.domains = domains
         self.members = members
-        self.organizations = organizations
+        self.workspaces = workspaces
 
     async def account_signed_in(self, account: User) -> None:
         """Run the domain auto-join for an account that has just signed in."""
@@ -163,7 +196,7 @@ class DomainAutoJoinListener:
             organization_id=claim.organization_id, user_id=user.id, role=claim.default_role
         )
         if created:
-            await self.organizations.grant_default_workspace(
+            await self.workspaces.grant_default_workspace(
                 user_id=user.id,
                 organization_id=claim.organization_id,
                 # NOTE: The column is a plain string. Every writer validates it against this Literal first.
