@@ -55,7 +55,11 @@ from gateway.api.trace_capture import begin_request_trace
 # parameters and every request fails validation before the handler runs.
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
-from gateway.exceptions.tools_exceptions import WorkspaceMcpServerAccessDeniedError
+from gateway.exceptions.tools_exceptions import (
+    McpConnectionUnavailableError,
+    McpSignInRequiredError,
+    WorkspaceMcpServerAccessDeniedError,
+)
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -84,6 +88,7 @@ from gateway.services.mcp_stateless import (
     CODE_SERVER_CHANGED,
     CODE_SERVER_NOT_FOUND,
     CODE_SERVICE_UNAVAILABLE,
+    CODE_SIGN_IN_REQUIRED,
     CODE_TOOL_NOT_ALLOWED,
     CODE_UNSAFE_URL,
     DISCOVERY_MAX_TOOLS,
@@ -136,6 +141,7 @@ SAFE_DETAILS: dict[str, str] = {
     CODE_RATE_LIMIT_EXCEEDED: "Rate limit exceeded",
     CODE_SERVICE_UNAVAILABLE: "MCP service is unavailable",
     CODE_SERVER_NOT_FOUND: "MCP server not found",
+    CODE_SIGN_IN_REQUIRED: "This MCP server uses each user's own account, and this key's user has not signed in to it",
     CODE_SERVER_CHANGED: "MCP server configuration changed, rediscover its tools",
     CODE_TOOL_NOT_ALLOWED: "The requested tool is not allowed for this MCP server",
     CODE_UNSAFE_URL: "MCP server URL is unsafe",
@@ -399,6 +405,14 @@ async def _resolve_server(
         if on_denied is not None:
             on_denied(denied)
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404) from None
+    except McpSignInRequiredError:
+        # Said only to a caller the access list admitted: the server exists for it, and what is
+        # missing is its user's own sign-in.
+        logger.info("Stateless MCP sign-in required server_id=%s", mcp_server_id)
+        raise McpExecutionError(CODE_SIGN_IN_REQUIRED, ExecutionState.NOT_STARTED, 403) from None
+    except McpConnectionUnavailableError:
+        logger.warning("Stateless MCP user token could not be renewed server_id=%s", mcp_server_id)
+        raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except (SecretDecryptionError, SecretBoxUnavailableError):
         # Connecting without the credential the workspace configured would send
         # an unauthenticated request to a server that expects one.
@@ -561,6 +575,10 @@ async def list_mcp_servers(
     owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
     (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
     the token are never returned. A master key has no workspace and is refused with a 404.
+
+    A server that sends each user's own credential is listed with `sign_in_required` true until this
+    key's user has signed in to it, and is left out for a key that has no user. Tool discovery and
+    execution answer such a server with a 403 and the code `mcp_sign_in_required`.
     """
     principal = await _authenticate(raw_request, db, config)
     return McpServersResponse(servers=await servers.list_reachable(principal.workspace_id, principal.mcp_access))

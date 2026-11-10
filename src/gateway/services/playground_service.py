@@ -46,8 +46,9 @@ from gateway.models.playground import (
     PlaygroundMessagePublic,
 )
 from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.users import User
+from gateway.repositories.tools import McpUserConnectionRepository
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
@@ -213,6 +214,8 @@ class McpServerAvailability:
     name: str
     purpose_hint: str | None
     enabled: bool
+    # The server sends each user's own credential, and this user has not signed in to it.
+    sign_in_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +306,8 @@ async def resolve_tool_availability(
         .all()
     )
     access = await resolve_request_mcp_access(db, None, workspace_id, session_user_id=user_id)
+    per_user = [server.id for server in servers if server.credential_mode == McpCredentialMode.PER_USER]
+    connected = await McpUserConnectionRepository(db).connected_server_ids(user_id, per_user)
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(
@@ -316,6 +321,7 @@ async def resolve_tool_availability(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.id in per_user and server.id not in connected,
             )
             for server in servers
             if access.patterns_for(server.id, server.everyone_tools, server.read_tools)

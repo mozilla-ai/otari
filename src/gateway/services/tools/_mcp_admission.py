@@ -128,6 +128,8 @@ async def admit_mcp_servers(
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
         McpServerConfigurationError: the stored servers cannot be used.
         WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds, or none the caller may reach.
+        McpSignInRequiredError: an ID names a per-user server the caller may reach, whose user has not signed in.
+        McpConnectionUnavailableError: that user's token has expired and cannot be renewed right now.
     """
     mcp_servers = inline_servers
     if (mcp_servers or provider_mcp) and not access.may_declare_servers:

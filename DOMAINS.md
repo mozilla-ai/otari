@@ -192,7 +192,10 @@ A workspace's MCP servers, web search policy and code execution policy are
 read from this deployment's own rows, by `WorkspaceMcpServers`,
 `WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
 between them and their callers. A resolved MCP server is connected to directly,
-and nothing proxies MCP traffic. The web search policy says who may search and
+and nothing proxies MCP traffic. A stored server sends one workspace token or,
+in per-user mode, each user's own: `McpConnectionService` runs a user's sign-in
+to such a server and ends a connection, and `McpUserTokens` reads the token a
+request carries (`mcp_user_connections`, `mcp_oauth_flows`). The web search policy says who may search and
 how far, and carries the workspace's own search key where its organization
 brought one; a tools service applies it to a request with one rule everywhere.
 The code execution policy says who may run code and within which limits, and

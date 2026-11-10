@@ -76,6 +76,11 @@ Which stored servers a key reaches, and which of their tools, is each server's
 as an unknown id does, and the tools it may not run are never offered to the
 model.
 
+A stored server sends either one token for the whole workspace or each user's
+own, as its [credential mode](#credential-mode) says. A request that names a
+server its user has not signed in to is refused with `403` and the code
+`mcp_sign_in_required`.
+
 [Caller-orchestrated MCP](#caller-orchestrated-mcp) refers to the same stored
 servers by id. It treats a disabled server differently: its endpoints answer
 `404` for it, where the managed loop skips it.
@@ -124,6 +129,69 @@ an owner/admin of that workspace.
   `read_tools` (default `[]`) the tools labeled read; see
   [Server access](#server-access).
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
+- `credential_mode` (default `shared`) says whose credential a call carries;
+  see [Credential mode](#credential-mode).
+
+#### Credential mode
+
+A server in `shared` mode sends its `authorization_token` for every caller, so
+everyone acts as the account that token belongs to. A server in `per_user` mode
+holds no shared token. Each user signs in to it with their own account, and a
+request carries the token of the user its API key belongs to.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
+  -H "Otari-Key: $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "drive", "url": "https://mcp.example.com/drive", "credential_mode": "per_user"}'
+```
+
+- **Who the user is.** The user an API key belongs to (its `user_id`). In the
+  Playground it is the signed-in person, who is the same user their own keys
+  belong to. A key created without a user belongs to the shared
+  `default` user, which is nobody's account: it cannot use a per-user server
+  and is told it does not exist.
+- **How a user signs in.** Through the
+  [MCP authorization flow](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization):
+  Otari reads the server's protected-resource metadata and its authorization
+  server's metadata, registers itself as a client, and runs the authorization
+  code flow with S256 PKCE. Where the authorization server does not register
+  clients on its own, set `oauth_client_id` (and `oauth_client_secret` if it
+  has one) on the server, with
+  `<public_base_url>/api/v1/mcp-connections/callback` as the client's redirect
+  URI.
+- **What it needs.** `public_base_url`, because the redirect URI is derived
+  from it, `OTARI_SECRET_KEY`, because the tokens are encrypted with it, and an
+  `https://` server URL. Every URL the server and its authorization server
+  publish passes the same SSRF check the server's own URL does.
+- **A connection belongs to one user on one server.** A server is a workspace's,
+  so the same person signs in once per workspace, and one user's connection is
+  never used for another's request.
+- **Tokens are renewed for you.** An access token close to its expiry is
+  refreshed before the request uses it. When the authorization server ends the
+  grant, the connection is removed and the user is asked to sign in again.
+- **What ends a connection.** The user disconnecting, a manager removing it,
+  deleting the server, deleting the user, the user leaving the workspace, and a
+  change to the server's URL, its OAuth client or its credential mode.
+- **The access list still comes first.** A key the ACL denies is told the
+  server does not exist, whether or not its user has signed in.
+
+A per-user server's connection check runs with the connection of the person
+asking, so `health` stays `null` until a manager who has signed in checks it.
+
+The routes, under `/api/v1/workspaces/{workspace_id}`, take a dashboard session
+or the master key:
+
+| Route | Does | Who |
+|---|---|---|
+| `POST /mcp-connections/{server_id}` | Starts your sign-in and returns `authorization_url`. Takes an optional `return_to`, a dashboard path to land on afterwards | Any member who can see the workspace |
+| `GET /mcp-connections` | Lists your own connections in the workspace | Any member who can see the workspace |
+| `DELETE /mcp-connections/{server_id}` | Ends your connection, and asks the authorization server to revoke its tokens | Any member who can see the workspace |
+| `GET /mcp-servers/{server_id}/connections` | Lists who is connected | Workspace or organization owners and admins |
+| `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
+
+A sign-in is single-use, expires after ten minutes, and finishes only in the
+dashboard session that started it. No route returns a token.
 
 #### Connection checks
 
@@ -211,6 +279,11 @@ server can mark any tool read-only, so a hint counts only once a manager saves i
   completion naming it in `mcp_server_ids` gets a `404`, and discovery and
   execution answer `404 mcp_server_not_found`. To see why a key was turned
   away, use `GET .../access/check` (below).
+- **A key the ACL admits, on a per-user server its user has not signed in to,
+  is told so.** `GET /api/v1/mcp/servers` lists the server with
+  `sign_in_required: true`, a completion naming it gets a `403` with the code
+  `mcp_sign_in_required`, and discovery and execution answer
+  `403 mcp_sign_in_required`. See [Credential mode](#credential-mode).
 - **A tool outside the key's rule is never offered to the model.** On
   `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
 - **In a completion, the model is told what it may not use.** The server's line in
@@ -349,7 +422,8 @@ Authorization: Bearer <token>
     {
       "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
       "name": "github",
-      "purpose_hint": "Use for repository and issue lookups"
+      "purpose_hint": "Use for repository and issue lookups",
+      "sign_in_required": false
     }
   ]
 }
@@ -357,7 +431,10 @@ Authorization: Bearer <token>
 
 The enabled stored servers of the key's workspace whose
 [access list](#server-access) grants it something, which is what to send in
-`mcp_server_ids`. The URL and the token are never returned. A master key has no
+`mcp_server_ids`. `sign_in_required` is true for a
+[per-user server](#credential-mode) the key's user has not signed in to yet; a
+key with no user does not see such a server at all. The URL and the token are
+never returned. A master key has no
 workspace and is refused with `404`, as on the other routes of this section; the
 route is rate limited and refuses a blocked user as they are.
 
@@ -543,6 +620,8 @@ exception text.
 | Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
 | Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
+| Per-user server the key's user has not signed in to | 403 | `mcp_sign_in_required` | `not_started` |
+| That user's sign-in has expired and cannot be renewed right now | 503 | `mcp_credentials_unavailable` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
 | Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |

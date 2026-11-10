@@ -280,6 +280,7 @@ describe("WorkspaceMcpServersCard", () => {
       allowed_tools: ["list_issues", "get_issue"],
       enabled: true,
       everyone_tools: ["*"],
+      credential_mode: "shared",
     })
     // No `authorization_token` key at all rather than an explicit null: the
     // operator typed no token, so the request says nothing about one.

@@ -2587,6 +2587,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp-connections/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Mcp Connection
+         * @description Finish a sign-in to a per-user MCP server, from the code its authorization server returned.
+         *
+         *     The dashboard calls this from the page the callback lands on. The state
+         *     is consumed whatever happens next, so it finishes one sign-in at most, and
+         *     it must be one the caller started: another person's is refused with a 400.
+         */
+        post: operations["mcp-connections-complete_mcp_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/execute": {
         parameters: {
             query?: never;
@@ -2634,6 +2658,10 @@ export interface paths {
          *     owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
          *     (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
          *     the token are never returned. A master key has no workspace and is refused with a 404.
+         *
+         *     A server that sends each user's own credential is listed with `sign_in_required` true until this
+         *     key's user has signed in to it, and is left out for a key that has no user. Tool discovery and
+         *     execution answer such a server with a 403 and the code `mcp_sign_in_required`.
          */
         get: operations["mcp-list_mcp_servers"];
         put?: never;
@@ -7335,6 +7363,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Mcp Connections
+         * @description List the caller's own connections to this workspace's MCP servers.
+         *
+         *     A connection is the caller's sign-in to a server whose `credential_mode`
+         *     is `per_user`. Any member who can see the workspace may call this. Tokens
+         *     are never included.
+         */
+        get: operations["mcp-connections-list_my_mcp_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Mcp Connection
+         * @description Start the caller's own sign-in to a per-user MCP server.
+         *
+         *     Returns the server's authorization page to send the browser to. Otari
+         *     discovers the server's authorization server, registers itself as a client
+         *     where the server holds no client ID, and uses the authorization code flow
+         *     with S256 PKCE. The sign-in is bound to the caller: it finishes only in
+         *     their own dashboard session, once, within ten minutes. The connection then
+         *     belongs to the caller's user, so every key they own in this workspace
+         *     reaches the server as them.
+         *
+         *     Any member who can see the workspace may call this. A server in `shared`
+         *     mode is refused with a 409, and a deployment with no `public_base_url`
+         *     with a 400, because the address the authorization server returns to is
+         *     derived from it.
+         */
+        post: operations["mcp-connections-start_mcp_connection"];
+        /**
+         * End My Mcp Connection
+         * @description End the caller's own connection to an MCP server.
+         *
+         *     The stored tokens are deleted, and the authorization server is asked to
+         *     revoke them where it publishes a revocation endpoint. The caller's keys
+         *     then get `mcp_sign_in_required` from this server until they sign in again.
+         */
+        delete: operations["mcp-connections-end_my_mcp_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7585,6 +7678,53 @@ export interface paths {
          */
         post: operations["mcp-servers-check_workspace_mcp_server"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Connections
+         * @description List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Each entry names the user the connection belongs to and, when that user
+         *     is a dashboard account, its email and name. Tokens are never included.
+         */
+        get: operations["mcp-connections-list_mcp_server_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Mcp Server Connection
+         * @description End one user's connection to an MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The stored tokens are deleted and the authorization server is asked to
+         *     revoke them. That user's keys get `mcp_sign_in_required` from this server
+         *     until they sign in again.
+         */
+        delete: operations["mcp-connections-remove_mcp_server_connection"];
         options?: never;
         head?: never;
         patch?: never;
@@ -13951,6 +14091,109 @@ export interface components {
             reason?: ("not_configured" | "workspace_disabled") | null;
         };
         /**
+         * McpConnectionComplete
+         * @description What the authorization server sent back, as the dashboard received it.
+         */
+        McpConnectionComplete: {
+            /**
+             * Code
+             * @description The authorization code from the redirect
+             */
+            code: string;
+            /**
+             * State
+             * @description The state from the redirect
+             */
+            state: string;
+        };
+        /**
+         * McpConnectionCompleted
+         * @description A finished sign-in: which server it connected, and where to land.
+         */
+        McpConnectionCompleted: {
+            /**
+             * Return To
+             * @description The dashboard path the sign-in was started with, if any
+             */
+            return_to: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /** Server Name */
+            server_name: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * McpConnectionPublic
+         * @description One of the caller's own connections. Never carries a token.
+         */
+        McpConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Expires At
+             * @description When the current access token expires; null when the server stated no lifetime
+             */
+            expires_at: string | null;
+            /**
+             * Renewable
+             * @description Whether Otari can renew the token on its own; false means signing in again once it expires
+             */
+            renewable: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * McpConnectionStart
+         * @description What a caller sends to start their own sign-in to a per-user MCP server.
+         */
+        McpConnectionStart: {
+            /**
+             * Return To
+             * @description A dashboard path to land on once signed in, such as /tools/mcp-servers. Anything that is not a path inside the dashboard is refused
+             */
+            return_to?: string | null;
+        };
+        /**
+         * McpConnectionStarted
+         * @description Where to send the caller's browser to sign in.
+         */
+        McpConnectionStarted: {
+            /**
+             * Authorization Url
+             * @description The MCP server's authorization page. It carries a single-use state that expires in ten minutes
+             */
+            authorization_url: string;
+        };
+        /** McpConnectionsPublic */
+        McpConnectionsPublic: {
+            /** Data */
+            data: components["schemas"]["McpConnectionPublic"][];
+        };
+        /**
+         * McpCredentialMode
+         * @description Whose credential the gateway sends to a stored MCP server.
+         * @enum {string}
+         */
+        McpCredentialMode: "shared" | "per_user";
+        /**
          * McpErrorBody
          * @description The one error shape both stored-server endpoints return.
          */
@@ -14035,6 +14278,39 @@ export interface components {
             url: string;
         };
         /**
+         * McpServerConnectionPublic
+         * @description One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token.
+         */
+        McpServerConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Email
+             * @description The dashboard account's email, when the user is one's
+             */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * User Id
+             * @description The request-plane user the connection belongs to
+             */
+            user_id: string;
+        };
+        /** McpServerConnectionsPublic */
+        McpServerConnectionsPublic: {
+            /** Data */
+            data: components["schemas"]["McpServerConnectionPublic"][];
+        };
+        /**
          * McpServerSummary
          * @description A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.
          */
@@ -14048,6 +14324,12 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and this key's user has not signed in to it, so a call is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
         };
         /**
          * McpServersResponse
@@ -16547,6 +16829,12 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint?: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and the caller has not signed in to it, so a message that attaches it is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
         };
         /**
          * PlaygroundMessageCreate
@@ -20704,6 +20992,11 @@ export interface components {
              */
             authorization_token?: string | null;
             /**
+             * @description Whose credential a call carries: 'shared' sends authorization_token for every caller; 'per_user' sends the calling user's own token, which each user gets by signing in to the server, and takes no authorization_token
+             * @default shared
+             */
+            credential_mode: components["schemas"]["McpCredentialMode"];
+            /**
              * Enabled
              * @description Whether a request naming this server actually reaches it
              * @default true
@@ -20719,6 +21012,16 @@ export interface components {
              * @description Label for the server, unique within the workspace
              */
             name: string;
+            /**
+             * Oauth Client Id
+             * @description For a per_user server whose authorization server does not register clients on its own: the OAuth client ID users sign in through. Omit it to let Otari register itself
+             */
+            oauth_client_id?: string | null;
+            /**
+             * Oauth Client Secret
+             * @description The secret of oauth_client_id, when it has one. Encrypted at rest, never returned
+             */
+            oauth_client_secret?: string | null;
             /**
              * Purpose Hint
              * @description Hint prepended to the system message to help the model choose
@@ -20898,6 +21201,8 @@ export interface components {
             allowed_tools: string[] | null;
             /** Created At */
             created_at: string;
+            /** @description 'shared': one workspace token for every caller. 'per_user': each user's own connection */
+            credential_mode: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled: boolean;
             /**
@@ -20905,6 +21210,8 @@ export interface components {
              * @description What every key of the workspace may call; [] denies everyone
              */
             everyone_tools: string[];
+            /** Has Oauth Client Secret */
+            has_oauth_client_secret: boolean;
             /** Has Token */
             has_token: boolean;
             /** @description The last connection check; null until one has run */
@@ -20916,6 +21223,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Oauth Client Id
+             * @description The OAuth client ID a manager supplied for a per_user server; null when Otari registers itself
+             */
+            oauth_client_id: string | null;
             /** Purpose Hint */
             purpose_hint: string | null;
             /**
@@ -20942,19 +21254,31 @@ export interface components {
          *     ``""`` to clear it, send a value to rotate it. An explicit ``null`` also
          *     leaves it alone, matching the platform: a client that serializes its whole
          *     form back, with an empty token box it never filled in, must not destroy a
-         *     token it was never shown.
+         *     token it was never shown. ``oauth_client_secret`` follows the same three
+         *     states, and so does ``oauth_client_id``, where ``""`` goes back to letting
+         *     Otari register itself.
+         *
+         *     Changing ``credential_mode``, the URL of a per-user server, or its OAuth
+         *     client ends every user's connection to it: the tokens were issued for the
+         *     server and the client as they were.
          */
         WorkspaceMcpServerUpdate: {
             /** Allowed Tools */
             allowed_tools?: string[] | null;
             /** Authorization Token */
             authorization_token?: string | null;
+            /** Credential Mode */
+            credential_mode?: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled?: boolean;
             /** Everyone Tools */
             everyone_tools?: string[];
             /** Name */
             name?: string;
+            /** Oauth Client Id */
+            oauth_client_id?: string | null;
+            /** Oauth Client Secret */
+            oauth_client_secret?: string | null;
             /** Purpose Hint */
             purpose_hint?: string | null;
             /** Read Tools */
@@ -25592,6 +25916,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-complete_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionComplete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionCompleted"];
                 };
             };
             /** @description Validation Error */
@@ -33809,6 +34166,103 @@ export interface operations {
             };
         };
     };
+    "mcp-connections-list_my_mcp_connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-start_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-end_my_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-list_workspace_mcp_servers": {
         parameters: {
             query?: {
@@ -34272,6 +34726,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "mcp-connections-list_mcp_server_connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-remove_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

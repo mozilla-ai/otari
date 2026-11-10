@@ -49,6 +49,8 @@ UNSUPPORTED_PARAMETER = "unsupported_parameter"
 # The model is a kind the endpoint cannot serve, such as an embedding model sent a chat completion.
 WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
+# A stored MCP server sends each user's own credential, and the caller's user has not signed in to it.
+MCP_SIGN_IN_REQUIRED = "mcp_sign_in_required"
 # The organization has no funds paid in to cover a request the deployment pays for.
 INSUFFICIENT_FUNDS = "insufficient_funds"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"

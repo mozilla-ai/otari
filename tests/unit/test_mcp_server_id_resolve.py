@@ -35,11 +35,13 @@ async def test_resolve_many_reads_the_workspaces_rows(monkeypatch: pytest.Monkey
     resolve = AsyncMock(return_value=stored)
     monkeypatch.setattr(workspace_mcp_server_service, "resolve_workspace_mcp_servers", resolve)
 
-    out = await WorkspaceMcpServers(session).resolve_many(workspace_id, ids, McpAccess(unrestricted=True))
+    servers = WorkspaceMcpServers(session)
+    out = await servers.resolve_many(workspace_id, ids, McpAccess(unrestricted=True))
 
     assert out is stored
+    # The reader of a per-user server's token rides along, on the same session.
     resolve.assert_awaited_once_with(
-        session, workspace_id=workspace_id, server_ids=ids, access=McpAccess(unrestricted=True)
+        session, workspace_id=workspace_id, server_ids=ids, access=McpAccess(unrestricted=True), tokens=servers._tokens
     )
 
 
@@ -51,7 +53,10 @@ async def test_resolve_one_reads_the_workspaces_row(monkeypatch: pytest.MonkeyPa
     resolve = AsyncMock(return_value=None)
     monkeypatch.setattr(workspace_mcp_server_service, "resolve_workspace_mcp_server", resolve)
 
-    out = await WorkspaceMcpServers(session).resolve_one(workspace_id, server_id)
+    servers = WorkspaceMcpServers(session)
+    out = await servers.resolve_one(workspace_id, server_id)
 
     assert out is None
-    resolve.assert_awaited_once_with(session, workspace_id=workspace_id, server_id=server_id, access=None)
+    resolve.assert_awaited_once_with(
+        session, workspace_id=workspace_id, server_id=server_id, access=None, tokens=servers._tokens
+    )

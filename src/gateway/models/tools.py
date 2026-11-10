@@ -83,6 +83,15 @@ class SearchToolCredential(Base):
         }
 
 
+class McpCredentialMode(StrEnum):
+    """Whose credential the gateway sends to a stored MCP server."""
+
+    SHARED = "shared"
+    """The one token the workspace stored, for every caller."""
+    PER_USER = "per_user"
+    """The calling user's own connection, made by signing in to the server; no shared token is sent."""
+
+
 class WorkspaceMcpServer(Base):
     """One MCP server a workspace has configured, referenced by id from a request.
 
@@ -139,6 +148,13 @@ class WorkspaceMcpServer(Base):
     # The tools a manager labeled read, which an access rule's '@read' stands for.
     # Empty until labeled, so a tool nobody labeled is never read.
     read_tools: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]", nullable=False)
+    # Whose credential a call carries: the workspace's one token, or the calling user's own connection.
+    credential_mode: Mapped[str] = mapped_column(
+        String, default=McpCredentialMode.SHARED, server_default=McpCredentialMode.SHARED, nullable=False
+    )
+    # The OAuth client users of a per-user server sign in through, in the shape ``StoredMcpOAuthClient``
+    # reads: a manager's own, or one the gateway registered itself. Its secret is encrypted inside it.
+    oauth_client: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # The last connection check, in the shape ``WorkspaceMcpServerHealth``
     # publishes; null until one has run, and cleared when the URL, the token or
     # the allow-list changes, since it described the old ones.
@@ -184,6 +200,77 @@ class WorkspaceMcpServerGrant(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class McpUserConnection(Base):
+    """One user's own sign-in to a per-user stored MCP server: the tokens its calls carry.
+
+    Keyed on the server and the request-plane user a key bills to, so every key that user owns in the
+    server's workspace reaches the server as them. Both tokens are Fernet-encrypted as
+    ``WorkspaceMcpServer.encrypted_token`` is, and nothing serializes either. ``client_id``,
+    ``client_auth_method``, ``token_endpoint`` and ``resource`` are what a refresh sends, kept from the
+    sign-in that issued the grant.
+
+    CASCADE on both: a connection means nothing without its server or its user.
+    """
+
+    __tablename__ = "mcp_user_connections"
+    __table_args__ = (UniqueConstraint("server_id", "user_id", name="uq_mcp_user_connections_server_user"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    encrypted_access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(Text, default=None)
+    # Null when the authorization server stated no lifetime: the token is used until the server refuses it.
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    scope: Mapped[str | None] = mapped_column(Text, default=None)
+    client_id: Mapped[str] = mapped_column(Text, nullable=False)
+    client_auth_method: Mapped[str] = mapped_column(String, nullable=False)
+    token_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    revocation_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
+    resource: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class McpOAuthFlow(Base):
+    """A sign-in to a per-user MCP server that has started and not yet come back.
+
+    Keyed on the SHA-256 of the ``state`` sent to the authorization server, so the row cannot be
+    replayed from a database read. It names the user and the server the sign-in is for, holds the PKCE
+    verifier encrypted, and is deleted when the callback consumes it or when it expires.
+    ``identity_id`` is the dashboard identity that started it, which must also be the one that finishes
+    it; null for a sign-in started outside a dashboard session.
+
+    CASCADE on both: a sign-in means nothing without its server or its user.
+    """
+
+    __tablename__ = "mcp_oauth_flows"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    identity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
+    encrypted_code_verifier: Mapped[str] = mapped_column(Text, nullable=False)
+    client_id: Mapped[str] = mapped_column(Text, nullable=False)
+    client_auth_method: Mapped[str] = mapped_column(String, nullable=False)
+    token_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    revocation_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
+    resource: Mapped[str | None] = mapped_column(Text, default=None)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str | None] = mapped_column(Text, default=None)
+    return_to: Mapped[str | None] = mapped_column(Text, default=None)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
 
 
 class CodeExecutor(StrEnum):

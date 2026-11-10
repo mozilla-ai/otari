@@ -812,3 +812,70 @@ class SandboxCredentialRequest(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(json_schema_extra={"example": {"api_key": "e2b_0123456789abcdef"}})
 
     api_key: str = pydantic.Field(min_length=1)
+
+
+class McpConnectionStart(pydantic.BaseModel):
+    """What a caller sends to start their own sign-in to a per-user MCP server."""
+
+    return_to: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="A dashboard path to land on once signed in, such as /tools/mcp-servers. "
+        "Anything that is not a path inside the dashboard is refused",
+    )
+
+
+class McpConnectionStarted(pydantic.BaseModel):
+    """Where to send the caller's browser to sign in."""
+
+    authorization_url: str = pydantic.Field(
+        description="The MCP server's authorization page. It carries a single-use state that expires in ten minutes"
+    )
+
+
+class McpConnectionComplete(pydantic.BaseModel):
+    """What the authorization server sent back, as the dashboard received it."""
+
+    state: str = pydantic.Field(min_length=1, max_length=512, description="The state from the redirect")
+    code: str = pydantic.Field(min_length=1, max_length=4096, description="The authorization code from the redirect")
+
+
+class McpConnectionCompleted(pydantic.BaseModel):
+    """A finished sign-in: which server it connected, and where to land."""
+
+    server_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    return_to: str | None = pydantic.Field(description="The dashboard path the sign-in was started with, if any")
+
+
+class McpConnectionPublic(pydantic.BaseModel):
+    """One of the caller's own connections. Never carries a token."""
+
+    server_id: uuid.UUID
+    connected_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None = pydantic.Field(
+        description="When the current access token expires; null when the server stated no lifetime"
+    )
+    renewable: bool = pydantic.Field(
+        description="Whether Otari can renew the token on its own; false means signing in again once it expires"
+    )
+
+
+class McpConnectionsPublic(pydantic.BaseModel):
+    data: list[McpConnectionPublic]
+
+
+class McpServerConnectionPublic(pydantic.BaseModel):
+    """One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token."""
+
+    user_id: str = pydantic.Field(description="The request-plane user the connection belongs to")
+    email: str | None = pydantic.Field(description="The dashboard account's email, when the user is one's")
+    full_name: str | None
+    connected_at: datetime
+    updated_at: datetime
+
+
+class McpServerConnectionsPublic(pydantic.BaseModel):
+    data: list[McpServerConnectionPublic]

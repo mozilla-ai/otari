@@ -46,8 +46,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import GatewayConfig
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
+    McpConnectionSetupError,
+    McpConnectionUnavailableError,
+    McpSignInRequiredError,
     WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
@@ -61,10 +65,28 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import MANAGEMENT_ROLES, User
-from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
-from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
-from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceMcpServerGrant
+from gateway.repositories.tenancy import (
+    OrganizationMemberRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+)
+from gateway.repositories.tools import (
+    McpOAuthFlowRepository,
+    McpUserConnectionRepository,
+    WorkspaceMcpServerGrantRepository,
+    WorkspaceMcpServerRepository,
+)
 from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
+from gateway.schemas.tools import (
+    McpConnectionCompleted,
+    McpConnectionPublic,
+    McpConnectionsPublic,
+    McpConnectionStarted,
+    McpServerConnectionPublic,
+    McpServerConnectionsPublic,
+)
 
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
@@ -84,6 +106,13 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tools import (
+    McpConnectionService,
+    McpUserTokens,
+    StoredMcpOAuthClient,
+    require_per_user_support,
+    stored_oauth_client,
+)
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
 
 if TYPE_CHECKING:
@@ -102,7 +131,12 @@ MAX_MCP_SERVERS_PER_WORKSPACE = 50
 MAX_ALLOWED_TOOLS = 200
 MAX_TOOL_NAME_LENGTH = 256
 
+MAX_OAUTH_CLIENT_ID_LENGTH = 512
+
 _MAX_LIST_LIMIT = 1000
+
+_PER_USER_TAKES_NO_TOKEN = "a per_user server takes no authorization_token: each user signs in with their own account"
+_SHARED_TAKES_NO_CLIENT = "oauth_client_id and oauth_client_secret apply to a per_user server only"
 
 # Sentinel for "this PATCH did not mention the token", which is not the same as
 # "this PATCH set it to null": see `WorkspaceMcpServerUpdate`.
@@ -143,11 +177,36 @@ class WorkspaceMcpServerCreate(BaseModel):
         description="The tool names a manager labeled read, which '@read' in an access rule stands for. "
         "The server's own readOnlyHint is never read as one",
     )
+    credential_mode: McpCredentialMode = Field(
+        default=McpCredentialMode.SHARED,
+        description="Whose credential a call carries: 'shared' sends authorization_token for every caller; "
+        "'per_user' sends the calling user's own token, which each user gets by signing in to the server, "
+        "and takes no authorization_token",
+    )
+    oauth_client_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_OAUTH_CLIENT_ID_LENGTH,
+        description="For a per_user server whose authorization server does not register clients on its own: "
+        "the OAuth client ID users sign in through. Omit it to let Otari register itself",
+    )
+    oauth_client_secret: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8192,
+        description="The secret of oauth_client_id, when it has one. Encrypted at rest, never returned",
+    )
 
     @model_validator(mode="after")
     def _check_tool_patterns(self) -> WorkspaceMcpServerCreate:
         self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
         self.read_tools = validate_mcp_read_tools(self.read_tools)
+        if self.credential_mode == McpCredentialMode.PER_USER and self.authorization_token:
+            raise ValueError(_PER_USER_TAKES_NO_TOKEN)
+        if self.credential_mode == McpCredentialMode.SHARED and (self.oauth_client_id or self.oauth_client_secret):
+            raise ValueError(_SHARED_TAKES_NO_CLIENT)
+        if self.oauth_client_secret and not self.oauth_client_id:
+            raise ValueError("oauth_client_secret needs oauth_client_id")
         return self
 
 
@@ -159,7 +218,13 @@ class WorkspaceMcpServerUpdate(BaseModel):
     ``""`` to clear it, send a value to rotate it. An explicit ``null`` also
     leaves it alone, matching the platform: a client that serializes its whole
     form back, with an empty token box it never filled in, must not destroy a
-    token it was never shown.
+    token it was never shown. ``oauth_client_secret`` follows the same three
+    states, and so does ``oauth_client_id``, where ``""`` goes back to letting
+    Otari register itself.
+
+    Changing ``credential_mode``, the URL of a per-user server, or its OAuth
+    client ends every user's connection to it: the tokens were issued for the
+    server and the client as they were.
     """
 
     # ``SkipJsonSchema[None]`` on the three that back NOT NULL columns: ``None``
@@ -177,6 +242,9 @@ class WorkspaceMcpServerUpdate(BaseModel):
     enabled: bool | SkipJsonSchema[None] = None
     everyone_tools: list[str] | SkipJsonSchema[None] = None
     read_tools: list[str] | SkipJsonSchema[None] = None
+    credential_mode: McpCredentialMode | SkipJsonSchema[None] = None
+    oauth_client_id: str | None = Field(default=None, max_length=MAX_OAUTH_CLIENT_ID_LENGTH)
+    oauth_client_secret: str | None = Field(default=None, max_length=8192)
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> WorkspaceMcpServerUpdate:
@@ -192,7 +260,7 @@ class WorkspaceMcpServerUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("name", "url", "enabled", "everyone_tools", "read_tools")
+            for field in ("name", "url", "enabled", "everyone_tools", "read_tools", "credential_mode")
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
@@ -276,6 +344,13 @@ class WorkspaceMcpServerPublic(BaseModel):
     everyone_tools: list[str] = Field(description="What every key of the workspace may call; [] denies everyone")
     read_tools: list[str] = Field(description="The tool names a manager labeled read, which '@read' stands for")
     has_token: bool
+    credential_mode: McpCredentialMode = Field(
+        description="'shared': one workspace token for every caller. 'per_user': each user's own connection"
+    )
+    oauth_client_id: str | None = Field(
+        description="The OAuth client ID a manager supplied for a per_user server; null when Otari registers itself"
+    )
+    has_oauth_client_secret: bool
     health: WorkspaceMcpServerHealth | None = Field(description="The last connection check; null until one has run")
     created_at: str
     updated_at: str
@@ -292,6 +367,8 @@ class WorkspaceMcpServerPublic(BaseModel):
         those components masked. A manager sees the URL as stored, because the
         edit form restates it and would otherwise save the mask back.
         """
+        client = stored_oauth_client(server)
+        own_client = client if client is not None and not client.dynamic else None
         return cls(
             id=server.id,
             workspace_id=server.workspace_id,
@@ -303,6 +380,9 @@ class WorkspaceMcpServerPublic(BaseModel):
             everyone_tools=server.everyone_tools,
             read_tools=server.read_tools,
             has_token=server.encrypted_token is not None,
+            credential_mode=McpCredentialMode(server.credential_mode),
+            oauth_client_id=own_client.client_id if own_client is not None else None,
+            has_oauth_client_secret=own_client is not None and own_client.encrypted_secret is not None,
             health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
             created_at=server.created_at.isoformat(),
             updated_at=server.updated_at.isoformat(),
@@ -414,6 +494,45 @@ class McpServerSummary(BaseModel):
     id: uuid.UUID
     name: str
     purpose_hint: str | None
+    sign_in_required: bool = Field(
+        default=False,
+        description="The server sends each user's own credential and this key's user has not signed in to it, "
+        "so a call is refused with mcp_sign_in_required until they do",
+    )
+
+
+def _own_client(client_id: str | None, client_secret: str | None) -> dict[str, object] | None:
+    """A manager's own OAuth client in its stored shape, its secret encrypted; ``None`` when they named none."""
+    if not client_id:
+        return None
+    return StoredMcpOAuthClient(
+        client_id=client_id, encrypted_secret=_encrypted(client_secret) if client_secret else None
+    ).model_dump()
+
+
+def _edited_client(
+    current: StoredMcpOAuthClient | None, client_id: object, client_secret: object
+) -> tuple[dict[str, object] | None, bool, bool]:
+    """A per-user server's stored client after an edit: the client, whether to store it, and whether it is another one.
+
+    Each of the two fields is left alone when omitted or null, cleared by ``""``, and set by a value.
+    Clearing the ID goes back to the client Otari registers itself. A new secret on the same ID is
+    the same client, so it keeps the users' connections: their grants name the client, not its secret.
+    """
+    own = current if current is not None and not current.dynamic else None
+    target_id = own.client_id if own is not None else None
+    if isinstance(client_id, str):
+        target_id = client_id or None
+    if target_id is None:
+        if isinstance(client_secret, str) and client_secret:
+            raise McpConnectionSetupError("oauth_client_secret needs oauth_client_id")
+        return None, own is not None, own is not None
+    same_client = own is not None and own.client_id == target_id
+    encrypted_secret = own.encrypted_secret if own is not None and same_client else None
+    if isinstance(client_secret, str):
+        encrypted_secret = _encrypted(client_secret) if client_secret else None
+    edited = StoredMcpOAuthClient(client_id=target_id, encrypted_secret=encrypted_secret)
+    return edited.model_dump(), edited != own, not same_client
 
 
 async def _validate_url(url: str, *, has_token: bool) -> None:
@@ -454,18 +573,24 @@ def _connect(url: str, token: str | None, *, server_id: uuid.UUID | None = None)
     )
 
 
-async def _check(server: WorkspaceMcpServer) -> ServerCheck:
+async def _check(server: WorkspaceMcpServer, tokens: McpUserTokens, user_id: str) -> ServerCheck:
     """Run the connection check on a stored row, settling its URL and token first.
 
     The same order the request path takes: a token that will not decrypt and a
     URL that is no longer safe each stop the check before anything is sent.
+    A per-user server has no token of its own, so it is checked with the
+    connection of ``user_id``, the person asking.
 
     Raises:
         McpCapacityUnavailable: no check slot was free, so nothing was checked.
+        McpSignInRequiredError: the server is per-user and the person asking has not signed in to it.
     """
     try:
-        token = _stored_token(server)
-    except (SecretDecryptionError, SecretBoxUnavailableError):
+        if server.credential_mode == McpCredentialMode.PER_USER:
+            token: str | None = await tokens.token_for(server, user_id)
+        else:
+            token = _stored_token(server)
+    except (SecretDecryptionError, SecretBoxUnavailableError, McpConnectionUnavailableError):
         return ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
     try:
         await validate_mcp_url(server.url, has_authorization_token=token is not None)
@@ -499,6 +624,7 @@ async def resolve_workspace_mcp_servers(
     workspace_id: uuid.UUID,
     server_ids: list[uuid.UUID],
     access: McpAccess,
+    tokens: McpUserTokens | None = None,
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the workspace's stored configs.
 
@@ -507,6 +633,12 @@ async def resolve_workspace_mcp_servers(
     So does one the caller's ``access`` grants nothing on, which answers exactly as an unknown ID does,
     and each returned config carries the tool patterns the caller holds on it.
     A disabled server is skipped rather than refused.
+
+    A per-user server carries the token of ``access.user_id``, read through ``tokens``. A caller
+    with no user cannot use one, which also answers as an unknown ID. One whose user has not
+    signed in raises :class:`McpSignInRequiredError` naming the server, after the access rules
+    admitted it, and one whose expired token cannot be renewed right now raises
+    :class:`McpConnectionUnavailableError`.
 
     No authorization check, and none is missing: ``workspace_id`` comes off the
     key that authenticated the request (`services/workspace_scope.py`), never
@@ -521,6 +653,7 @@ async def resolve_workspace_mcp_servers(
     """
     if not server_ids:
         return []
+    tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
 
     ordered_ids = list(dict.fromkeys(server_ids))
     rows = (
@@ -538,7 +671,11 @@ async def resolve_workspace_mcp_servers(
     by_id = {row.id: row for row in rows}
 
     patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, row.read_tools) for row in rows}
-    missing = [server_id for server_id in ordered_ids if server_id not in by_id or not patterns[server_id]]
+    missing = [
+        server_id
+        for server_id in ordered_ids
+        if server_id not in by_id or not patterns[server_id] or _needs_a_user(by_id[server_id], access)
+    ]
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
 
@@ -552,7 +689,7 @@ async def resolve_workspace_mcp_servers(
             McpServerConfig(
                 name=row.name,
                 url=row.url,
-                authorization_token=_stored_token(row),
+                authorization_token=await _caller_token(row, access, tokens),
                 purpose_hint=row.purpose_hint,
                 allowed_tools=row.allowed_tools,
                 caller_tool_patterns=None if "*" in granted else granted,
@@ -563,12 +700,33 @@ async def resolve_workspace_mcp_servers(
     return resolved
 
 
+def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
+    """Whether a server sends each user's own credential and the caller has no user to send one for."""
+    return row.credential_mode == McpCredentialMode.PER_USER and (access is None or access.user_id is None)
+
+
+async def _caller_token(row: WorkspaceMcpServer, access: McpAccess | None, tokens: McpUserTokens) -> str | None:
+    """The token a caller's calls to a server carry: the workspace's, or on a per-user server their own.
+
+    Raises:
+        McpSignInRequiredError: the server is per-user and the caller's user has not signed in to it.
+        McpConnectionUnavailableError: that user's token has expired and cannot be renewed right now.
+        SecretDecryptionError: a stored token will not decrypt.
+    """
+    if row.credential_mode != McpCredentialMode.PER_USER:
+        return _stored_token(row)
+    if access is None or access.user_id is None:
+        raise WorkspaceMcpServerNotFoundError(row.id)
+    return await tokens.token_for(row, access.user_id)
+
+
 async def resolve_workspace_mcp_server(
     db: AsyncSession,
     *,
     workspace_id: uuid.UUID,
     server_id: uuid.UUID,
     access: McpAccess | None = None,
+    tokens: McpUserTokens | None = None,
 ) -> ResolvedMcpServer | None:
     """Resolve one stored server for the caller-orchestrated MCP endpoints.
 
@@ -593,6 +751,10 @@ async def resolve_workspace_mcp_server(
     :class:`~gateway.exceptions.tools_exceptions.WorkspaceMcpServerAccessDeniedError`,
     both before the token is decrypted, so a token that will not decrypt cannot
     tell a caller with no access that the server exists.
+
+    A per-user server is ``None`` for a caller with no user, and raises
+    :class:`McpSignInRequiredError` when the caller's user has not signed in
+    to it, which is only ever said to a caller the access list admitted.
     """
     row = (
         await db.execute(
@@ -610,11 +772,16 @@ async def resolve_workspace_mcp_server(
         if not access.patterns_for(row.id, row.everyone_tools, row.read_tools):
             source, _ = access.decide(row.id, row.everyone_tools)
             raise WorkspaceMcpServerAccessDeniedError(row.id, name=row.name, decided_by=f"mcp_{source}")
+    if _needs_a_user(row, access):
+        return None
+    per_user = row.credential_mode == McpCredentialMode.PER_USER
     return ResolvedMcpServer(
         id=row.id,
         name=row.name,
         url=row.url,
-        authorization_token=_stored_token(row),
+        authorization_token=await _caller_token(row, access, tokens or McpUserTokens(McpUserConnectionRepository(db))),
+        # A user's token changes at every renewal, which is not a change to the server's configuration.
+        credential_revision=McpCredentialMode.PER_USER if per_user else None,
         enabled=row.enabled,
         everyone_tools=row.everyone_tools,
         read_tools=row.read_tools,
@@ -624,9 +791,13 @@ async def resolve_workspace_mcp_server(
 
 
 async def list_reachable_mcp_servers(
-    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess
+    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess, tokens: McpUserTokens | None = None
 ) -> list[McpServerSummary]:
-    """The enabled stored servers of a workspace the caller may reach, oldest first."""
+    """The enabled stored servers of a workspace the caller may reach, oldest first.
+
+    A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
+    one whose user has not signed in to it.
+    """
     rows = (
         (
             await db.execute(
@@ -638,10 +809,22 @@ async def list_reachable_mcp_servers(
         .scalars()
         .all()
     )
-    return [
-        McpServerSummary(id=row.id, name=row.name, purpose_hint=row.purpose_hint)
+    reachable = [
+        row
         for row in rows
-        if access.patterns_for(row.id, row.everyone_tools, row.read_tools)
+        if access.patterns_for(row.id, row.everyone_tools, row.read_tools) and not _needs_a_user(row, access)
+    ]
+    per_user = [row.id for row in reachable if row.credential_mode == McpCredentialMode.PER_USER]
+    tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
+    connected = await tokens.connected(access.user_id, per_user)
+    return [
+        McpServerSummary(
+            id=row.id,
+            name=row.name,
+            purpose_hint=row.purpose_hint,
+            sign_in_required=row.id in per_user and row.id not in connected,
+        )
+        for row in reachable
     ]
 
 
@@ -673,38 +856,51 @@ class WorkspaceMcpServers:
     A caller connects to a returned server directly; nothing here proxies MCP traffic.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, tokens: McpUserTokens | None = None) -> None:
         self._db = db
+        # Reads the token a per-user server's caller carries, on the same session.
+        self._tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
 
     async def resolve_many(
         self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess
     ) -> list[McpServerConfig]:
         """See :func:`resolve_workspace_mcp_servers`."""
         return await resolve_workspace_mcp_servers(
-            self._db, workspace_id=workspace_id, server_ids=server_ids, access=access
+            self._db, workspace_id=workspace_id, server_ids=server_ids, access=access, tokens=self._tokens
         )
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
-        return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access)
+        return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access, tokens=self._tokens)
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
     ) -> ResolvedMcpServer | None:
         """See :func:`resolve_workspace_mcp_server`."""
         return await resolve_workspace_mcp_server(
-            self._db, workspace_id=workspace_id, server_id=server_id, access=access
+            self._db, workspace_id=workspace_id, server_id=server_id, access=access, tokens=self._tokens
         )
 
 
 class WorkspaceMcpServerService:
     """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
-    def __init__(self, db: AsyncSession, api_keys: ApiKeyService | None = None):
+    def __init__(
+        self,
+        db: AsyncSession,
+        api_keys: ApiKeyService | None = None,
+        *,
+        connections: McpConnectionService | None = None,
+        config: GatewayConfig | None = None,
+    ):
         self.db = db
         self.organizations = OrganizationService(db, membership_listener=None)
         # Reads the workspace's keys, which a server's access list names.
         self.api_keys = api_keys
+        # Runs a user's sign-in to a per-user server, on the request's Unit of Work.
+        self.connections = connections
+        self.config = config
+        self._tokens = McpUserTokens(McpUserConnectionRepository(db))
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.
@@ -731,8 +927,34 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerNotFoundError(server_id)
         return server
 
-    async def _record_check(self, server: WorkspaceMcpServer) -> bool:
+    def _connection_service(self) -> McpConnectionService:
+        if self.connections is None:
+            raise RuntimeError("WorkspaceMcpServerService was built without the connection service a sign-in needs")
+        return self.connections
+
+    def _require_per_user_support(self) -> None:
+        """Refuse per-user mode where this deployment could not run a sign-in or keep its tokens."""
+        if self.config is None:
+            raise RuntimeError("WorkspaceMcpServerService was built without the config per-user mode reads")
+        require_per_user_support(self.config)
+
+    async def _end_connections(self, server: WorkspaceMcpServer) -> None:
+        """Stage the end of every user's connection to a server, and of the client Otari registered for it.
+
+        For a change after which the tokens no longer fit: another URL, another client, or shared mode.
+        A manager's own client is kept, so a server moved to shared mode and back still has it.
+        """
+        await McpUserConnectionRepository(self.db).remove_for_server(server.id)
+        await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
+        client = stored_oauth_client(server)
+        if client is not None and client.dynamic:
+            server.oauth_client = None
+
+    async def _record_check(self, server: WorkspaceMcpServer, user: User, *, required: bool = False) -> bool:
         """Check a stored server's connection and save the outcome as its health.
+
+        A per-user server is checked with the connection of ``user``, the person asking. When they
+        have none, nothing is checked and its health stays empty, unless the check is ``required``.
 
         The transaction is ended first, so no pooled connection is held while
         the gateway waits on a remote server for up to the discovery deadline.
@@ -743,15 +965,20 @@ class WorkspaceMcpServerService:
         before the write, and a check of a URL, token or allow-list the row no
         longer holds is dropped: that edit cleared health and runs its own.
         """
-        checked = (server.url, server.encrypted_token, server.allowed_tools)
+        checked = (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode)
         await self.db.commit()
         try:
-            check = await _check(server)
+            check = await _check(server, self._tokens, str(user.id))
         except McpCapacityUnavailable:
             logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
             return False
+        except McpSignInRequiredError:
+            if required:
+                raise
+            await self.db.refresh(server)
+            return True
         await self.db.refresh(server, with_for_update=True)
-        if (server.url, server.encrypted_token, server.allowed_tools) != checked:
+        if (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode) != checked:
             await self.db.commit()
             logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
             return True
@@ -817,7 +1044,11 @@ class WorkspaceMcpServerService:
     ) -> WorkspaceMcpServerPublic:
         """Register a server, encrypting its token before it is stored."""
         resolved_workspace_id = await self._require_management(user, workspace_id)
-        await _validate_url(request.url, has_token=bool(request.authorization_token))
+        per_user = request.credential_mode == McpCredentialMode.PER_USER
+        if per_user:
+            self._require_per_user_support()
+        # A per-user server is held to https as one with a token is: a user's token travels to it.
+        await _validate_url(request.url, has_token=per_user or bool(request.authorization_token))
 
         # The workspace lock stops a concurrent create from invalidating the count below before this insert.
         await WorkspaceRepository(self.db).lock(resolved_workspace_id)
@@ -842,6 +1073,8 @@ class WorkspaceMcpServerService:
             enabled=request.enabled,
             everyone_tools=request.everyone_tools,
             read_tools=request.read_tools,
+            credential_mode=request.credential_mode,
+            oauth_client=_own_client(request.oauth_client_id, request.oauth_client_secret),
         )
         self.db.add(server)
         # The unique index is the arbiter, not a preceding existence check: two
@@ -858,7 +1091,7 @@ class WorkspaceMcpServerService:
         await self.db.commit()
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
-        await self._record_check(server)
+        await self._record_check(server, user)
         return WorkspaceMcpServerPublic.from_model(server)
 
     async def update_server(
@@ -875,6 +1108,22 @@ class WorkspaceMcpServerService:
         fields = request.model_dump(exclude_unset=True)
 
         new_token = fields.pop("authorization_token", _UNSET)
+        new_client_id = fields.pop("oauth_client_id", _UNSET)
+        new_client_secret = fields.pop("oauth_client_secret", _UNSET)
+        was_per_user = server.credential_mode == McpCredentialMode.PER_USER
+        per_user = fields.get("credential_mode", server.credential_mode) == McpCredentialMode.PER_USER
+        mode_changed = per_user != was_per_user
+        if per_user and isinstance(new_token, str) and new_token:
+            raise McpConnectionSetupError(_PER_USER_TAKES_NO_TOKEN)
+        if not per_user and (
+            (isinstance(new_client_id, str) and new_client_id)
+            or (isinstance(new_client_secret, str) and new_client_secret)
+        ):
+            raise McpConnectionSetupError(_SHARED_TAKES_NO_CLIENT)
+        if per_user and mode_changed:
+            self._require_per_user_support()
+            # The shared token goes with the mode: nothing sends it any more.
+            new_token = ""
         if new_token == "":
             effective_has_token = False
         elif isinstance(new_token, str):
@@ -889,12 +1138,13 @@ class WorkspaceMcpServerService:
         # edit (rename, disable, change the tool list) does no DNS lookup at
         # all, so disabling a server never depends on its host still resolving.
         url_changed = "url" in fields and fields["url"] != server.url
-        if url_changed or isinstance(new_token, str):
-            await _validate_url(fields.get("url") or server.url, has_token=effective_has_token)
+        if url_changed or mode_changed or (isinstance(new_token, str) and not per_user):
+            await _validate_url(fields.get("url") or server.url, has_token=per_user or effective_has_token)
         # What the stored health described. Rechecked after the commit; cleared
         # here so a check that cannot run leaves no health rather than a stale one.
         connection_changed = (
             url_changed
+            or mode_changed
             or isinstance(new_token, str)
             or ("allowed_tools" in fields and fields["allowed_tools"] != server.allowed_tools)
         )
@@ -903,6 +1153,17 @@ class WorkspaceMcpServerService:
             server.encrypted_token = None
         elif isinstance(new_token, str):
             server.encrypted_token = _encrypted(new_token)
+
+        another_client = False
+        if per_user:
+            client, store_client, another_client = _edited_client(
+                stored_oauth_client(server), new_client_id, new_client_secret
+            )
+            if store_client:
+                server.oauth_client = client
+        # The users' tokens were issued for the server and the client as they were.
+        if was_per_user and (mode_changed or url_changed or another_client):
+            await self._end_connections(server)
 
         for field, value in fields.items():
             setattr(server, field, value)
@@ -922,7 +1183,7 @@ class WorkspaceMcpServerService:
 
         await self.db.commit()
         if connection_changed:
-            await self._record_check(server)
+            await self._record_check(server, user)
         else:
             await self.db.refresh(server)
         return WorkspaceMcpServerPublic.from_model(server)
@@ -1190,6 +1451,10 @@ class WorkspaceMcpServerService:
             token = request.authorization_token or None
         elif request.server_id is not None:
             server = await self._get_or_404(resolved_workspace_id, request.server_id)
+            if server.credential_mode == McpCredentialMode.PER_USER:
+                raise McpConnectionSetupError(
+                    "A per-user server holds no token to test with: connect your account, then check the server"
+                )
             try:
                 token = _stored_token(server)
             except (SecretDecryptionError, SecretBoxUnavailableError):
@@ -1211,20 +1476,139 @@ class WorkspaceMcpServerService:
         """Check a server's connection now and store the outcome as its health.
 
         A failing check is a result, not an error: the request succeeded in
-        finding out that the server did not.
+        finding out that the server did not. A per-user server is checked with
+        the caller's own connection.
+
+        Raises:
+            McpSignInRequiredError: the server is per-user and the caller has not signed in to it.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
-        if not await self._record_check(server):
+        if not await self._record_check(server, user, required=True):
             raise WorkspaceMcpServerCheckBusyError
         return WorkspaceMcpServerPublic.from_model(server)
 
     async def delete_server(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """Delete a server and the token stored with it."""
+        """Delete a server, the token stored with it, and every user's connection to it."""
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
+        # Staged here as well as cascaded by the foreign keys, so the tokens go where a database enforces none.
+        await McpUserConnectionRepository(self.db).remove_for_server(server.id)
+        await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
         await self.db.delete(server)
         await self.db.commit()
+
+    async def _visible_workspace_id(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        return workspace.id
+
+    async def start_connection(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, return_to: str | None
+    ) -> McpConnectionStarted:
+        """Start the caller's own sign-in to a per-user server, for any member who can see the workspace.
+
+        The connection belongs to the caller's request-plane user, the one their keys and the
+        Playground bill to, so every key they own in this workspace then reaches the server as them.
+        The sign-in finishes only in the caller's own dashboard session.
+
+        Raises:
+            McpConnectionSetupError: the caller's user was deleted by an operator.
+        """
+        resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        user_id = str(user.id)
+        if user_id not in await provision_attribution_users(self.db, [user_id]):
+            raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot hold a connection")
+        await self.db.commit()
+        url = await self._connection_service().start(
+            server_id=server.id, user_id=user_id, return_to=return_to, identity_id=user.id
+        )
+        return McpConnectionStarted(authorization_url=url)
+
+    async def complete_connection(self, *, user: User, state: str, code: str) -> McpConnectionCompleted:
+        """Finish a sign-in the caller started, from the code its authorization server returned."""
+        done = await self._connection_service().complete(state=state, code=code, identity_id=user.id)
+        return McpConnectionCompleted(
+            server_id=done.server_id,
+            workspace_id=done.workspace_id,
+            server_name=done.server_name,
+            return_to=done.return_to,
+        )
+
+    async def my_connections(self, *, user: User, workspace_id: uuid.UUID) -> McpConnectionsPublic:
+        """The caller's own connections to this workspace's servers, oldest first."""
+        resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
+        server_ids = await WorkspaceMcpServerRepository(self.db).ids_in_workspace(resolved_workspace_id)
+        rows = await McpUserConnectionRepository(self.db).for_user(str(user.id), server_ids)
+        return McpConnectionsPublic(
+            data=[
+                McpConnectionPublic(
+                    server_id=row.server_id,
+                    connected_at=row.created_at,
+                    updated_at=row.updated_at,
+                    expires_at=row.expires_at,
+                    renewable=row.encrypted_refresh_token is not None,
+                )
+                for row in rows
+            ]
+        )
+
+    async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
+        """End the caller's own connection to a server.
+
+        Raises:
+            McpConnectionNotFoundError: the caller has no connection to it.
+        """
+        resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        await self._connection_service().disconnect(server_id=server.id, user_id=str(user.id))
+
+    async def server_connections(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+    ) -> McpServerConnectionsPublic:
+        """Who is connected to a server, oldest first. Workspace managers only.
+
+        A connection's user is named by the dashboard account it belongs to, when it is one's.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        rows = await McpUserConnectionRepository(self.db).for_server(server.id)
+        identity_ids: dict[str, uuid.UUID] = {}
+        for row in rows:
+            try:
+                identity_ids[row.user_id] = uuid.UUID(row.user_id)
+            except ValueError:
+                continue
+        identities = {
+            identity.id: identity for identity in await UserRepository(self.db).get_by_ids(identity_ids.values())
+        }
+        data: list[McpServerConnectionPublic] = []
+        for row in rows:
+            identity = identities.get(identity_ids[row.user_id]) if row.user_id in identity_ids else None
+            data.append(
+                McpServerConnectionPublic(
+                    user_id=row.user_id,
+                    email=identity.email if identity is not None else None,
+                    full_name=identity.full_name if identity is not None else None,
+                    connected_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+            )
+        return McpServerConnectionsPublic(data=data)
+
+    async def remove_connection(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, user_id: str
+    ) -> None:
+        """End one user's connection to a server. Workspace managers only.
+
+        Raises:
+            McpConnectionNotFoundError: that user has no connection to it.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        await self._connection_service().disconnect(server_id=server.id, user_id=user_id)
 
 
 __all__ = [

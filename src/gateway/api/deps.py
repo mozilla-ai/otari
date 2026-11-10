@@ -90,9 +90,12 @@ from gateway.repositories.tenancy import (
     ids_in_organization,
 )
 from gateway.repositories.tools import (
+    McpOAuthFlowRepository,
+    McpUserConnectionRepository,
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
@@ -213,6 +216,7 @@ from gateway.services.tools import (
     DirectToolLedger,
     DirectToolService,
     DirectToolUsage,
+    McpConnectionService,
     McpGrantMembershipListener,
     SearchToolService,
     ToolRateInForce,
@@ -1098,7 +1102,7 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP grants in step.
+    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP access in step.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
@@ -1643,11 +1647,30 @@ def get_workspace_activation_service(
 WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
 
 
+def get_mcp_connection_service(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> McpConnectionService:
+    """Build the service that runs a user's sign-in to a per-user MCP server, on the request's Unit of Work."""
+    return McpConnectionService(
+        uow,
+        WorkspaceMcpServerRepository(uow),
+        McpUserConnectionRepository(uow),
+        McpOAuthFlowRepository(uow),
+        config,
+    )
+
+
+McpConnectionServiceDep = Annotated[McpConnectionService, Depends(get_mcp_connection_service)]
+
+
 def get_workspace_mcp_server_service(
-    db: Annotated[AsyncSession, Depends(get_db)], api_keys: ApiKeyServiceDep
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+    connections: McpConnectionServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceMcpServerService:
-    """Build the service on the request's session, with the keys its access lists name."""
-    return WorkspaceMcpServerService(db, api_keys)
+    """Build the service on the request's session, with the keys its access lists name and the sign-ins it starts."""
+    return WorkspaceMcpServerService(db, api_keys, connections=connections, config=config)
 
 
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]

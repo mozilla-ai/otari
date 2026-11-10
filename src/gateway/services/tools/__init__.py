@@ -10,7 +10,11 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
-``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
+``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
+``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
+``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
+through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
+that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -107,6 +111,16 @@ from gateway.services.tools._mcp_admission import (
     admit_mcp_servers,
     declares_provider_mcp,
     refuse_shadowed_builtin_tools,
+)
+from gateway.services.tools._mcp_connections import (
+    DASHBOARD_CALLBACK_ROUTE,
+    CompletedConnection,
+    FlowLanding,
+    McpConnectionService,
+    McpUserTokens,
+    StoredMcpOAuthClient,
+    require_per_user_support,
+    stored_oauth_client,
 )
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
 from gateway.services.tools._native import (
@@ -278,6 +292,14 @@ __all__ = [
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "McpGrantMembershipListener",
+    "DASHBOARD_CALLBACK_ROUTE",
+    "CompletedConnection",
+    "FlowLanding",
+    "McpConnectionService",
+    "McpUserTokens",
+    "StoredMcpOAuthClient",
+    "require_per_user_support",
+    "stored_oauth_client",
     "admit_mcp_servers",
     "declares_provider_mcp",
     "admit_web_access",

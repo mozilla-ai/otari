@@ -76,6 +76,9 @@ class ResolvedMcpServer(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(min_length=1)
     authorization_token: str | None = None
+    # What stands for the credential in the revision when it is set: a per-user server's token
+    # changes at every renewal, which no application authorized against.
+    credential_revision: str | None = None
     enabled: StrictBool = True
     # Not part of the revision: who may reach a server is the caller's concern, not its configuration.
     everyone_tools: list[str] = Field(default_factory=lambda: ["*"])
@@ -100,7 +103,7 @@ class ResolvedMcpServer(BaseModel):
         canonical = json.dumps(
             {
                 "url": self.url,
-                "credential": _credential_fingerprint(self.authorization_token),
+                "credential": _credential_fingerprint(self.credential_revision or self.authorization_token),
                 "enabled": self.enabled,
                 "allowed_tools": None if self.allowed_tools is None else sorted(self.allowed_tools),
             },

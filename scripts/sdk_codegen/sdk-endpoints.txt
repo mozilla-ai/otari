@@ -565,3 +565,9 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access    # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections     # operator surface
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-connections                         # dashboard surface: a member's own sign-ins
+POST /api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}            # dashboard surface: starts a browser sign-in
+DELETE /api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}          # dashboard surface: a member's own sign-ins
+POST /api/v1/mcp-connections/complete                                         # dashboard surface: finishes a browser sign-in

@@ -32,6 +32,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
 from mcp.types import PaginatedRequestParams
 
+from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
@@ -128,6 +129,8 @@ CODE_SERVER_CHANGED = "mcp_server_changed"
 CODE_TOOL_NOT_ALLOWED = "mcp_tool_not_allowed"
 CODE_UNSAFE_URL = "unsafe_mcp_url"
 CODE_CREDENTIALS_UNAVAILABLE = "mcp_credentials_unavailable"
+# The server sends each user's own credential and the key's user has not signed in to it.
+CODE_SIGN_IN_REQUIRED = MCP_SIGN_IN_REQUIRED
 CODE_AUTHENTICATION_FAILED = "authentication_failed"
 CODE_MISDIRECTED_REQUEST = "misdirected_request"
 CODE_PAYMENT_REQUIRED = "payment_required"

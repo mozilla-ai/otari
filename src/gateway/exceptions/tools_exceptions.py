@@ -1,10 +1,11 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
+import uuid
 from enum import StrEnum
 
 from fastapi import status
 
-from gateway.core.error_codes import PRICING_REQUIRED, WEB_ACCESS_DISABLED
+from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED, PRICING_REQUIRED, WEB_ACCESS_DISABLED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -109,6 +110,63 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
             "manages on behalf of many workspaces, and a container id addresses state on that account "
             "rather than on your workspace. Use a model served by your own provider key."
         )
+
+
+class McpSignInRequiredError(TenancyForbiddenError):
+    """A per-user MCP server the caller may reach, whose user has no connection to it.
+
+    A result of its own and not a missing server: the caller's access rules admitted it, and what is
+    absent is the user's sign-in. It names the server and the user, so a caller can offer that sign-in.
+    """
+
+    error_code = MCP_SIGN_IN_REQUIRED
+
+    def __init__(self, mcp_server_id: uuid.UUID, *, name: str, user_id: str):
+        super().__init__(
+            f"MCP server '{name}' ({mcp_server_id}) uses each user's own account, and this user has not "
+            "signed in to it yet. Connect it under MCP servers in the dashboard."
+        )
+        self.mcp_server_id = mcp_server_id
+        self.name = name
+        self.user_id = user_id
+
+
+class McpConnectionUnavailableError(TenancyError):
+    """A user's connection to a per-user MCP server has an expired token that could not be renewed right now."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self, mcp_server_id: uuid.UUID):
+        super().__init__(f"The sign-in to MCP server {mcp_server_id} could not be renewed; try again shortly")
+        self.mcp_server_id = mcp_server_id
+
+
+class McpConnectionNotFoundError(TenancyNotFoundError):
+    def __init__(self, mcp_server_id: object):
+        super().__init__(f"No connection to MCP server {mcp_server_id}")
+
+
+class McpConnectionModeError(TenancyConflictError):
+    """A sign-in was asked of a server that sends the workspace's shared token."""
+
+    def __init__(self, mcp_server_id: object):
+        super().__init__(f"MCP server {mcp_server_id} uses a shared token; nobody signs in to it")
+
+
+class McpConnectionSetupError(TenancyValidationError):
+    """Per-user sign-in cannot be set up on a server as it is configured, or on this deployment."""
+
+
+class McpConnectionFlowError(TenancyValidationError):
+    """A sign-in could not be finished: its state is unknown, used, expired, or another person's."""
+
+
+class McpConnectionUpstreamError(TenancyValidationError):
+    """The MCP server or its authorization server refused or failed a sign-in step.
+
+    A 4xx and not a 502, so the person signing in is shown what failed: the message is written here
+    and never repeats what the remote party sent.
+    """
 
 
 class McpServerDeclarationError(TenancyValidationError):
@@ -532,6 +590,13 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
+    "McpConnectionFlowError",
+    "McpConnectionModeError",
+    "McpConnectionNotFoundError",
+    "McpConnectionSetupError",
+    "McpConnectionUnavailableError",
+    "McpConnectionUpstreamError",
+    "McpSignInRequiredError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",

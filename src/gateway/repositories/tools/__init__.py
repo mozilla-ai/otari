@@ -1,5 +1,7 @@
 """Data access for the tools the gateway runs itself."""
 
+from gateway.repositories.tools.mcp_oauth_flow_repository import McpOAuthFlowRepository
+from gateway.repositories.tools.mcp_user_connection_repository import McpUserConnectionRepository
 from gateway.repositories.tools.sandbox_credential_repository import SandboxCredentialRepository
 from gateway.repositories.tools.search_tool_repository import SearchToolConflict, SearchToolRepository
 from gateway.repositories.tools.web_search_key_repository import (
@@ -15,6 +17,8 @@ from gateway.repositories.tools.workspace_mcp_server_grant_repository import Wor
 from gateway.repositories.tools.workspace_mcp_server_repository import WorkspaceMcpServerRepository
 
 __all__ = [
+    "McpOAuthFlowRepository",
+    "McpUserConnectionRepository",
     "OrgWebSearchKeyRepository",
     "SandboxCredentialRepository",
     "SearchKeyCandidate",

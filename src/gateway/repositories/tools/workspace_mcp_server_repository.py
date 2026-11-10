@@ -22,6 +22,13 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, WorkspaceMcpServer)
 
+    async def find(self, server_id: uuid.UUID, *, lock: bool = False) -> WorkspaceMcpServer | None:
+        """One stored server by id, or ``None``; ``lock`` holds the row until the caller commits."""
+        query = select(WorkspaceMcpServer).where(WorkspaceMcpServer.id == server_id)
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return (await self.db.execute(query)).scalar_one_or_none()
+
     async def ids_in_workspace(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
         """The ids of a workspace's stored servers."""
         return list(

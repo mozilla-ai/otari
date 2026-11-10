@@ -182,8 +182,10 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionRefusedError,
     ContainerOnManagedCredentialError,
     GatewayToolPricingRequiredError,
+    McpConnectionUnavailableError,
     McpServerConfigurationError,
     McpServerDeclarationError,
+    McpSignInRequiredError,
     SearchToolMisconfiguredError,
     WebAccessRefusedError,
     WebSearchCredentialRefusedError,
@@ -4559,9 +4561,9 @@ async def _admit_mcp_servers(
             access=access,
             provider_mcp=provider_mcp,
         )
-    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
+    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError, McpSignInRequiredError) as exc:
         raise domain_error(adapter, exc) from exc
-    except McpServerConfigurationError as exc:
+    except (McpServerConfigurationError, McpConnectionUnavailableError) as exc:
         # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
         raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
