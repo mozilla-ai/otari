@@ -416,34 +416,30 @@ The first provider whose SDK sends defaults on options that have a list of value
 
 ### 2026-11-10, You.com (any-fetch)
 
-The first fetch provider added before its SDK had a method for it, and the first fetch provider
-with a cost tier.
+The first fetch provider with a cost tier.
 
-- When the SDK has no method for the endpoint yet (`youdotcom` 3.6.0 has `contents`, not
-  `extract`), the API's own defaults are the ones to follow, and the docstring says which SDK
-  version was checked, so the next author knows to look again.
-- An API's default can be its dearer tier. You.com's `parse_effort` defaults to `standard`, which
-  bills each PDF page on top of the URL, so a 350-page PDF costs about 200 times the `lite` price.
+- Two efforts available under `parse_effort`: `lite` and `standard`.
+  Note: these only have an effect when fetching PDFs. There is no effect when fetching standard web pages.
+- Defaults to `standard`, which bills each PDF page on top of the URL. Check the [docs](you.com/docs) for the latest.
   The human author chose to send `lite` unless passed and to mark the option `cost_tier`, with
   `lite` as its `default`, since that is what a call without it costs. `None` counts as not
-  passed, so it cannot slip a host's enum check and land on the dearer tier.
-- An empty answer can be a cache miss rather than an empty page: under
-  `extraction_source: cache`, You.com answers `{}` for a page it has no copy of, which its
+  passed.
+- An empty response can be a cache miss rather than an empty page: under
+  `extraction_source: cache`, You.com returns `{}` for a page it has no copy of, which its
   documentation calls "nothing extracted". It is a `FetchError` (`not_cached`), not an empty page
   and not `unexpected_response`; an empty page is `markdown: ""`, which a site's 500 and HTML with
   an empty body both returned. Tag the same shape by what it can mean in each mode
   (`nothing_extracted` outside the cache).
 - A provider's cached copy can differ from the page: `blend`, the default, answered
   `python.org/downloads/` with 3,154 characters titled `Release schedules`, and `fetch` with
-  7,753 titled `Download Python | Python.org`, and `example.com` from the cache with no title. Record
-  the `normal` fixture with the live crawl, so the title the docs promise is in it.
+  7,753 titled `Download Python | Python.org`, and `example.com` from the cache with no title.
 - A native option can share a name with the library's own argument: You.com's `timeout` caps its
   side of the call, but `afetch(timeout=)` is the fetcher's, so the native option reaches the
   provider only through `fetch`. Say so in the option's description rather than renaming it, and
   say which of the two must be the longer.
 - A provider can document error codes as stable. You.com's `error.code` (`invalid_url`,
   `site_unreachable`) is one, so it is the tag, while its `details.reason` can name the host and
-  is not read. The gateway in front of the API still answers 401, 403 and a key-less 402 with
+  is not read. The gateway in front of the API still returns 401, 403 and a key-less 402 with
   bodies of its own, so those are tagged by status as the search adapter does.
 - Fixture recipes: `normal` with `https://example.com/` and `extraction_source=fetch`; `empty`
   with an httpbin `base64` URL holding HTML whose body is empty; `in_body_error` with

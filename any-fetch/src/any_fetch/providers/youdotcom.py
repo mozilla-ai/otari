@@ -1,61 +1,30 @@
 """You.com Extract: ``POST /v1/extract``, with the key in the ``X-API-Key`` header.
 
-You.com's Extract API fetches one web page or PDF per call and returns it as
-Markdown, the page's text, with its title when You.com found one. You.com's
-Python SDK (``youdotcom`` 3.6.0) has no method for it yet, so the adapter sends
-the API's own defaults, except ``parse_effort``: it sends ``lite`` unless told
-otherwise, where You.com's default is ``standard``, which bills each PDF page
-on top of the URL. ``parse_effort`` is the cost tier. ``full_page`` is sent as
-given, with ``markdown`` added to its ``extraction_formats`` when they lack
-it, since the text is the Markdown; an HTML copy stays in ``raw``. The other
-native options, ``extraction_source`` and ``timeout``, are sent as given, and
-an option passed as ``None`` counts as not passed. You.com has no length cap,
-so ``max_chars`` cuts the text it returns, and without ``max_chars`` the whole
-page is returned.
+One web page or PDF per call, as Markdown. ``parse_effort`` is ``lite`` unless
+passed: You.com's own default, ``standard``, bills each PDF page on top of the
+URL. ``full_page`` is sent as given, with ``markdown`` added when its formats
+lack it. ``extraction_source`` and ``timeout`` are sent as given; ``None``
+counts as not passed. You.com has no length cap, so ``max_chars`` cuts the text.
 
-``final_url`` is the ``url`` You.com answered for, which is the URL as asked
-even after a redirect (checked live 2026-11-10), so a caller cannot check
-where a redirect You.com followed led. You.com says neither what the page was
-served as nor when it was published, so ``content_type`` is empty and
-``published`` is ``None``; ``metadata`` (the site's name and favicon) stays in
-``raw``. You.com reports no cost.
+``final_url`` is the URL as asked, even after a redirect. You.com reports
+neither a content type, a publish date, nor a cost.
 
-You.com signals a failure with an HTTP status. A 422, 500, 502, 503 or 504
-carries ``error.code``, a code You.com documents as stable (``invalid_url``,
-``site_blocked``, ``site_unreachable``, ``unsupported_content``, ``timeout``),
-which becomes the tag; its ``message`` and ``details`` are never read. A page
-You.com cannot extract fails the call with a 502: a zero-byte file came back
-``site_unreachable``. A refused key is a 403 with ``{"message": "Forbidden"}``
-from the gateway in front of the API, so 401 and 403 are tagged by status,
-``unauthorized`` and ``forbidden``. A 402's ``error`` is a code, either
-itself or in its ``code``, since the gateway answers a missing key with a body
-of its own, and ``payment_required`` when it is neither. Any other status is
-``http_error``. A page whose site answered with an error status, such as a 404
-or a 500, comes back as the text of that page, which can be empty, since
-You.com does not say what status the site answered with.
+A 422, 500, 502, 503 or 504 is tagged with ``error.code`` (``invalid_url``,
+``site_blocked``, ``site_unreachable``, ``unsupported_content``, ``timeout``);
+the message and details are not read. 401 and 403 are tagged by status, and a
+402 from its ``error``, else ``payment_required``. Any other status is
+``http_error``. A site's own error page comes back as that page's text.
 
-You.com documents an answer without ``contents``, seen live as ``{}``, as
-nothing having been extracted. It is what ``extraction_source`` ``cache``
-answers for a page You.com has no copy of, so it becomes ``FetchedPage.error``,
-tagged ``not_cached`` when the request asked for the cache only and
-``nothing_extracted`` otherwise.
+A body without ``contents`` is ``FetchedPage.error``: ``not_cached`` when the
+request asked for the cache only, else ``nothing_extracted``.
 
-Every field read from a successful answer is checked, so a change on You.com's
-side fails the call rather than degrading it. ``url`` and ``title``, which
-You.com documents as optional, must be strings when present; ``contents``,
-when present, must be an object whose ``full_page`` is an object whose
-``markdown`` is a string, which the adapter always asks for. An empty
-``markdown`` is an empty page. Anything else raises ``unexpected_response``.
-Fields the adapter does not read are ignored, so a field You.com adds breaks
-nothing.
+``url`` and ``title`` must be strings when present. ``contents``, when present,
+must hold ``full_page.markdown`` as a string; an empty string is an empty page.
+Anything else raises ``unexpected_response``. Unread fields are ignored.
 
-API: https://you.com/docs/api-reference/extract, and the guide on You.com's
-preview of its docs, https://ydc-preview-extract-official-launch-docs.docs.buildwithfern.com/docs/guides/extract.
-Pricing, read 2026-11-10, from the same preview:
+API: https://you.com/docs/api-reference/extract. Pricing, read 2026-11-10,
 https://ydc-preview-extract-official-launch-docs.docs.buildwithfern.com/docs/administration/billing:
-$0.90 per 1,000 URLs; ``parse_effort`` ``standard`` adds $0.50 per 1,000 PDF
-pages, so a 350-page PDF costs $0.0009 under ``lite`` and $0.1759 under
-``standard``. Volume discounts by arrangement.
+$0.90 per 1,000 URLs; ``standard`` adds $0.50 per 1,000 PDF pages.
 """
 
 from typing import Any
@@ -99,8 +68,8 @@ class YouDotComProvider(AnyFetch):
                 name="full_page",
                 type="object",
                 description=(
-                    'The formats to return, as {"extraction_formats": ["markdown", "html"]}. Markdown, which '
-                    "becomes the text, is always asked for; an HTML copy stays in raw."
+                    'Formats to return, as {"extraction_formats": ["markdown", "html"]}. Markdown is always asked '
+                    "for; an HTML copy stays in raw."
                 ),
             ),
             OptionSpec(
@@ -109,10 +78,8 @@ class YouDotComProvider(AnyFetch):
                 enum=["blend", "cache", "fetch"],
                 default="blend",
                 description=(
-                    "Where the page comes from: blend serves You.com's cached copy when it has one and crawls the "
-                    "page live otherwise; cache serves the cached copy only, the fastest, and answers the error "
-                    "not_cached for a page it has none of; fetch always crawls the page live, the freshest and the "
-                    "slowest."
+                    "blend uses a cached copy when You.com has one, else crawls live; cache never crawls and errors "
+                    "not_cached when it has none; fetch always crawls live."
                 ),
             ),
             OptionSpec(
@@ -120,10 +87,8 @@ class YouDotComProvider(AnyFetch):
                 type="integer",
                 default=30,
                 description=(
-                    "Seconds, from 2 to 100, You.com may spend on the whole extraction, its cache lookup and crawl "
-                    "included, before failing it with a 504. Keep the fetcher's own timeout above it, which is 15 s "
-                    "unless set, or the fetcher gives up first. afetch takes its timeout argument as the fetcher's, "
-                    "so pass this one through fetch."
+                    "Seconds You.com may spend, 2 to 100, before a 504. Pass the fetcher a longer timeout: afetch's "
+                    "timeout argument is the fetcher's, so this option goes through fetch."
                 ),
             ),
             OptionSpec(
@@ -133,9 +98,8 @@ class YouDotComProvider(AnyFetch):
                 default=DEFAULT_PARSE_EFFORT,
                 cost_tier=True,
                 description=(
-                    "How much work goes into each PDF page; no effect on a web page. lite, sent unless passed, "
-                    "extracts the text each page embeds, at the price of the URL alone; standard also reads charts "
-                    "and images with a model, and You.com bills each PDF page on top of the URL."
+                    "PDF pages only. lite, sent unless passed, reads embedded text at the URL price; standard also "
+                    "reads charts and images, and You.com bills each PDF page."
                 ),
             ),
         ],
