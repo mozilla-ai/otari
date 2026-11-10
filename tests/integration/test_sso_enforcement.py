@@ -549,7 +549,11 @@ async def test_a_demotion_whose_revocation_fails_does_not_stand(
 async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_a_member(
     async_db: AsyncSession,
 ) -> None:
-    """The dashboard resends the stored account, so a removed one must not block the way out."""
+    """The dashboard resends the stored account, so a removed one must not block the way out.
+
+    Removal suspends the membership rather than deleting it, which is the status used here: a
+    status nothing writes would prove nothing about the path a person actually takes.
+    """
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
         async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
@@ -562,7 +566,7 @@ async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_
     organization.sso_break_glass_user_id = removed.id
     async_db.add(organization)
     membership = await _membership_of(async_db, organization, removed)
-    membership.status = "removed"
+    membership.status = "suspended"
     async_db.add(membership)
     await async_db.commit()
 
