@@ -53,6 +53,8 @@ Where the organization already holds another account for the address a
 connection's first sign-in claims, the two accounts are never merged
 automatically and neither one is told about the other.
 
+A first sign-in also joins the organization's workspace named **Default workspace**, at the role the connection grants, so the new account has somewhere to work. An organization that has no workspace of that name grants none, and an owner or admin assigns one from the organization's **Members & roles** page.
+
 **API keys are rotated, not moved.** A key stranded on an older account stays
 usable from that account; there is no operation that transfers a key to
 another account. Issue fresh keys on the new account and revoke the old ones.
