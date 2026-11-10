@@ -34,9 +34,9 @@ def test_relative_links_resolve(doc: Path) -> None:
     assert not broken, f"{doc.relative_to(_DOCS_DIR)} has unresolvable link(s): {broken}"
 
 
-def test_index_links_every_use_with_guide() -> None:
-    index = (_DOCS_DIR / "index.md").read_text(encoding="utf-8")
+def test_framework_integrations_links_every_use_with_guide() -> None:
+    integrations = (_DOCS_DIR / "framework-integrations.md").read_text(encoding="utf-8")
     guides = sorted(p.name for p in _DOCS_DIR.glob("use-with-*.md"))
     assert guides, "no use-with guides found under docs/"
-    missing = [name for name in guides if f"({name})" not in index]
-    assert not missing, f"docs/index.md does not link: {missing}"
+    missing = [name for name in guides if f"({name})" not in integrations]
+    assert not missing, f"docs/framework-integrations.md does not link: {missing}"

@@ -53,6 +53,7 @@ import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { Chip } from "@/design-system/indicators/Chip"
+import { useAdoptBrowserAvatar } from "@/features/account/avatar/avatarChoice"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
@@ -500,6 +501,9 @@ function AppShellChrome() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   useDocumentTitle(pageLabelForPath(pathname))
+  // Every signed-in page, so an avatar picked before picks were stored reaches
+  // the profile on the first load, whichever page that is.
+  useAdoptBrowserAvatar()
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
   // server would refuse. An unregistered path (the guide, the 404 splat) has no

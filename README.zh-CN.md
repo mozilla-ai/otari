@@ -95,7 +95,7 @@ OpenAI 客户端只需将 `base_url` 设置为
 brew install mozilla-ai/tap/otari
 ```
 
-参见 [Agent Guardrails](docs/agent-guardrails.md) 和
+参见 [Agent Guardrails](cli/docs/agent-guardrails.md) 和
 [在 Claude Code 中使用](docs/use-with-claude-code.md)。
 
 ## 运行完整服务栈
@@ -133,7 +133,7 @@ docker compose --profile code-exec --profile web-search up -d
 Otari 还提供更完整的 OpenAI 兼容 API 和管理 API。运行中的服务在 `/api/v1/docs` 发布 Swagger UI，在
 `/api/v1/openapi.json` 发布 OpenAPI 规范。参见 [API 参考](docs/api-reference.md)。
 
-控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [管理控制台](docs/dashboard.md)。
+控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [运行控制台](docs/run-the-dashboard.md)。
 
 ## 开发
 
@@ -167,8 +167,8 @@ make typecheck
 - [路由](docs/routing.md)
 - [访问控制](docs/access-control.md)
 - [内置工具](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
-- [SDK 与智能体集成](docs/index.md#integrations)
+- [Agent Guardrails](cli/docs/agent-guardrails.md)
+- [SDK 与智能体集成](docs/framework-integrations.md)
 - [架构](ARCHITECTURE.md)
 
 ## 许可证

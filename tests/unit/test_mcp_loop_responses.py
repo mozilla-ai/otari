@@ -21,6 +21,7 @@ from openai.types.responses import (
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
+    ResponseFunctionWebSearch,
     ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
@@ -53,7 +54,9 @@ from gateway.services.tools import (
     ToolUseBudget,
     WebSearchBackend,
     WebToolCallCap,
+    provider_web_searches,
     resolve_in_loop_search,
+    with_provider_web_searches,
 )
 from gateway.types.code_execution import ResultBlock
 
@@ -413,6 +416,34 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage.output_tokens == 5
     assert out.usage.output_tokens_details.reasoning_tokens == 3
     assert out.usage.total_tokens == 27
+
+
+def _provider_search(item_id: str) -> ResponseFunctionWebSearch:
+    """A ``web_search_call`` OpenAI's own tool ran."""
+    return ResponseFunctionWebSearch.model_validate(
+        {"id": item_id, "type": "web_search_call", "status": "completed", "action": {"type": "search", "query": "q"}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each round reports its own searches, one in its usage and one only as an item, so the final carries both."""
+    first = _response(output=[_provider_search("ws_1"), _function_call("c1", "fetch_url", "{}")])
+    first.usage = with_provider_web_searches(first.usage, 1)
+    responses = iter([first, _response(output=[_provider_search("ws_2")])])
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+
+    assert provider_web_searches(out) == 2
 
 
 @pytest.mark.asyncio
@@ -1267,6 +1298,45 @@ async def test_stream_counts_every_rounds_input(monkeypatch: pytest.MonkeyPatch)
     assert usage.input_tokens == 4100
     assert usage.input_tokens_details.cached_tokens == 3800
     assert usage.total_tokens == 4108
+
+
+def _searched_terminal(searches: int) -> ResponseStreamEvent:
+    """A completed event whose usage says OpenAI ran ``searches`` searches that round."""
+    event = cast(Any, _response_terminal("completed", output_tokens=1))
+    event.response.usage = with_provider_web_searches(event.response.usage, searches)
+    return cast(ResponseStreamEvent, event)
+
+
+@pytest.mark.asyncio
+async def test_stream_adds_the_provider_searches_of_hidden_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The terminal event reports the searches of every round, not just the final one's."""
+    fc = _function_call("call_1", "fetch_url", '{"u": "x"}')
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, fc),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _searched_terminal(2),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "done"), _searched_terminal(1)),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    assert provider_web_searches(cast(Any, events[-1]).response) == 3
 
 
 @pytest.mark.asyncio

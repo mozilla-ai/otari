@@ -102,7 +102,7 @@ The command a developer runs next to a coding agent (`otari hook`,
 brew install mozilla-ai/tap/otari
 ```
 
-See [Agent Guardrails](docs/agent-guardrails.md) and
+See [Agent Guardrails](cli/docs/agent-guardrails.md) and
 [Use with Claude Code](docs/use-with-claude-code.md).
 
 ## Run the full stack
@@ -146,7 +146,7 @@ running server publishes Swagger UI at `/api/v1/docs` and OpenAPI at
 
 The dashboard manages providers, models, routing, tools, keys, members, budgets,
 settings, activity, and usage. Its navigation adapts to the signed-in person's
-authority. See [Admin dashboard](docs/dashboard.md).
+authority. See [Run the dashboard](docs/run-the-dashboard.md).
 
 ## Development
 
@@ -180,8 +180,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Routing](docs/routing.md)
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
-- [SDK and agent integrations](docs/index.md#integrations)
+- [Agent Guardrails](cli/docs/agent-guardrails.md)
+- [SDK and agent integrations](docs/framework-integrations.md)
 - [Architecture](ARCHITECTURE.md)
 
 ## License

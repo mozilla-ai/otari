@@ -121,7 +121,6 @@ see your request with its model, tokens and cost. The OpenAI provider is under
 ## Next steps
 
 - [Run the dashboard](run-the-dashboard.md): sign in as the operator and set up the dashboard.
-- [Admin dashboard](dashboard.md): manage keys, users and providers in the browser.
 - [Access control](access-control.md): give each application its own key and budget.
 - [Models](models.md): connect more providers and choose model names.
 - [Connect a llama.cpp server](providers/llamacpp.md): serve a model you run yourself.
