@@ -12720,6 +12720,387 @@
         "title": "ManagedTool",
         "type": "object"
       },
+      "McpCatalogFeatureRequest": {
+        "additionalProperties": false,
+        "description": "The catalog server to feature.",
+        "properties": {
+          "server_id": {
+            "description": "The id of a catalog server.",
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id"
+        ],
+        "title": "McpCatalogFeatureRequest",
+        "type": "object"
+      },
+      "McpCatalogFeaturedListPublic": {
+        "description": "An organization's featured shelf, by title.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpCatalogFeaturedPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpCatalogFeaturedListPublic",
+        "type": "object"
+      },
+      "McpCatalogFeaturedPublic": {
+        "description": "A server the organization recommends, as it was when it was featured.",
+        "properties": {
+          "catalog_server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The catalog server this entry was copied from, null once the catalog no longer lists it. Feature it again to take the copy afresh.",
+            "title": "Catalog Server Id"
+          },
+          "catalog_status": {
+            "description": "`current` while the catalog lists this server at the same URL, `changed` once it lists another URL, `removed` once it lists none. The featured entry keeps the URL it was featured with.",
+            "enum": [
+              "current",
+              "changed",
+              "removed"
+            ],
+            "title": "Catalog Status",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_token": {
+            "title": "Requires Token",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "description",
+          "url",
+          "requires_token",
+          "website_url",
+          "source",
+          "catalog_status",
+          "catalog_server_id",
+          "created_at"
+        ],
+        "title": "McpCatalogFeaturedPublic",
+        "type": "object"
+      },
+      "McpCatalogServerPublic": {
+        "description": "One remote MCP server the catalog lists.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The source's own identifier, such as `com.example/mcp`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_token": {
+            "description": "The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.",
+            "title": "Requires Token",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Where the entry came from. `registry` is the official MCP Registry.",
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "The server's streamable HTTP endpoint.",
+            "title": "Url",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "description",
+          "url",
+          "requires_token",
+          "website_url",
+          "version",
+          "source"
+        ],
+        "title": "McpCatalogServerPublic",
+        "type": "object"
+      },
+      "McpCatalogServersPublic": {
+        "description": "A page of catalog servers. `count` is how many match in all.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpCatalogServerPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpCatalogServersPublic",
+        "type": "object"
+      },
+      "McpCatalogSyncStatus": {
+        "description": "Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the last sync was partial or failed.",
+            "title": "Error"
+          },
+          "fetched": {
+            "description": "Registry entries read.",
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "kept": {
+            "description": "Entries stored: remote servers Otari can connect to.",
+            "title": "Kept",
+            "type": "integer"
+          },
+          "last_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a sync last read the whole registry.",
+            "title": "Last Completed At"
+          },
+          "mode": {
+            "description": "The deployment's `mcp_catalog_sync` setting.",
+            "enum": [
+              "off",
+              "manual",
+              "scheduled"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "next_sync_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the next scheduled sync is due, if the mode is scheduled.",
+            "title": "Next Sync At"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.",
+            "title": "Outcome"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "removed": {
+            "description": "Servers a complete sync deleted because the registry no longer lists them.",
+            "title": "Removed",
+            "type": "integer"
+          },
+          "requested": {
+            "description": "A sync was asked for and no worker has started it yet.",
+            "title": "Requested",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "server_count": {
+            "description": "Servers in the catalog now.",
+            "title": "Server Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "mode",
+          "running",
+          "requested",
+          "outcome",
+          "error",
+          "started_at",
+          "finished_at",
+          "last_completed_at",
+          "next_sync_at",
+          "pages",
+          "fetched",
+          "kept",
+          "removed",
+          "server_count"
+        ],
+        "title": "McpCatalogSyncStatus",
+        "type": "object"
+      },
       "McpErrorBody": {
         "description": "The one error shape both stored-server endpoints return.",
         "properties": {
@@ -37894,6 +38275,146 @@
         ]
       }
     },
+    "/api/v1/mcp-catalog/servers": {
+      "get": {
+        "description": "Search the catalog of remote MCP servers, or page through all of it with no `q`.\n\nA title that starts with `q` comes first, then a title that contains it, then a\nmatch in the name or description alone. The catalog is\nempty until a sync has run, and stays empty on a deployment whose\n`mcp_catalog_sync` is `off`. Listing a server here permits nothing: a\nworkspace reaches a server only once it is added to that workspace.",
+        "operationId": "mcp-catalog-search_mcp_catalog",
+        "parameters": [
+          {
+            "description": "Text to find in a server's title, name or description",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Text to find in a server's title, name or description",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogServersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Search Mcp Catalog",
+        "tags": [
+          "mcp-catalog"
+        ]
+      }
+    },
+    "/api/v1/mcp-catalog/sync": {
+      "get": {
+        "description": "Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.",
+        "operationId": "mcp-catalog-get_mcp_catalog_sync",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogSyncStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Mcp Catalog Sync",
+        "tags": [
+          "mcp-catalog"
+        ]
+      },
+      "post": {
+        "description": "Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.\n\nA sync that is already running is left to finish, and this one follows it.",
+        "operationId": "mcp-catalog-request_mcp_catalog_sync",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogSyncStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Request Mcp Catalog Sync",
+        "tags": [
+          "mcp-catalog"
+        ]
+      }
+    },
     "/api/v1/mcp/execute": {
       "post": {
         "description": "Execute one caller-authorized tool call against a stored MCP server.\n\nThe calling application owns any user approval, argument editing,\ncancellation and action history; Otari executes exactly the tool name and\narguments it is given, once, and returns the remote server's native result.\nA result with ``isError: true`` is a definitive outcome and comes back as an\nHTTP 200.\n\n**This request must never be retried automatically.** ``client_execution_id``\nis correlation, not idempotency: once the call has been dispatched Otari\ncannot know whether the tool ran, and an ``outcome_unknown`` response means\nexactly that. Proxies, service meshes and SDKs on this path have to disable\nretries for it, including on connection resets and 5xx responses.",
@@ -40894,6 +41415,129 @@
         "summary": "Rotate Own Key",
         "tags": [
           "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-catalog/featured": {
+      "get": {
+        "description": "The servers the caller's organization recommends, by title. Any member of the organization.\n\nEach entry is the copy taken when it was featured, and `catalog_status`\nsays whether the catalog still lists it at that URL.",
+        "operationId": "mcp-catalog-list_featured_mcp_servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogFeaturedListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Featured Mcp Servers",
+        "tags": [
+          "mcp-catalog"
+        ]
+      },
+      "post": {
+        "description": "Recommend a catalog server to the caller's organization. Organization owners and admins only.\n\nThe entry is copied as the catalog lists it now, and a later sync neither\nchanges nor removes the copy. Featuring a server that is already featured\ntakes the copy again. An organization features at most 50 servers; one more\nis refused with a 409.",
+        "operationId": "mcp-catalog-feature_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpCatalogFeatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogFeaturedPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Feature Mcp Server",
+        "tags": [
+          "mcp-catalog"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-catalog/featured/{featured_id}": {
+      "delete": {
+        "description": "Stop recommending a server. Organization owners and admins only.\n\nServers already added to a workspace from it are left as they are.",
+        "operationId": "mcp-catalog-unfeature_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "featured_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Featured Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unfeature Mcp Server",
+        "tags": [
+          "mcp-catalog"
         ]
       }
     },

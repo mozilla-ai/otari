@@ -283,6 +283,20 @@ polls, and the conditional update on the settings row decides which one runs.
 
 Built in the target shape from the start.
 
+### mcp-catalog
+
+The catalog of remote MCP servers a workspace can add: a copy of the official
+MCP Registry, kept only where Otari can connect, the sync that fills it, and
+each organization's featured shelf. A featured entry is the organization's own
+copy, so a sync never changes or removes it.
+
+The catalog permits nothing and the model never calls it, so it is not part of
+tools. A workspace's stored servers stay its allow list, and a catalog server
+becomes one through the tools domain's own create. Every replica polls, and the
+conditional update on the sync state row decides which one syncs.
+
+Built in the target shape from the start.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows

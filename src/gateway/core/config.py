@@ -25,6 +25,7 @@ from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.mcp_catalog import McpCatalogSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
@@ -569,6 +570,7 @@ class GatewayConfig(
     ProviderSettings,
     FeedbackSettings,
     HealthCheckFeatureSettings,
+    McpCatalogSettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,

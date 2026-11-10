@@ -1561,6 +1561,18 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/health_checks/health_check_settings_repository.py",
         "baseline": (),
     },
+    "gateway.models.mcp_catalog.McpCatalogFeatured": {
+        "repository": "gateway/repositories/mcp_catalog/mcp_catalog_featured_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.mcp_catalog.McpCatalogServer": {
+        "repository": "gateway/repositories/mcp_catalog/mcp_catalog_server_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.mcp_catalog.McpCatalogSyncState": {
+        "repository": "gateway/repositories/mcp_catalog/mcp_catalog_sync_state_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.ProviderEndpoint": {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
         "baseline": (),

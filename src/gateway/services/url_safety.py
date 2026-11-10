@@ -376,3 +376,33 @@ async def validate_federation_url(url: str, *, allow_private_hosts: bool = False
     if allow_private_hosts:
         return
     await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")
+
+
+def validate_public_https_url_shape(url: str, *, label: str) -> None:
+    """Refuse a URL whose text alone shows the gateway should not offer it, without resolving its host.
+
+    For a URL read in bulk from a public listing, where a lookup per entry is
+    not affordable: it must be https, carry no credentials, and name a host
+    that is neither an internal address literal nor a local name. It is a
+    screen, not the SSRF check: whoever dials the URL still runs
+    :func:`validate_mcp_url`, which resolves the host.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = _parse_safe_url(url, label=label)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeURLError(f"{label} URL must use https")
+    if parsed.username is not None or parsed.password is not None:
+        raise UnsafeURLError(f"{label} URL must not carry credentials")
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        raise UnsafeURLError(f"{label} URL must include a hostname")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        if "." not in host or host.endswith((".localhost", ".local", ".internal")):
+            raise UnsafeURLError(f"{label} host {host!r} is a local name") from None
+        return
+    reason = _blocked_reason(literal)
+    if reason is not None:
+        raise UnsafeURLError(f"{label} host {host!r} is {reason}")

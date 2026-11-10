@@ -2587,6 +2587,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp-catalog/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Mcp Catalog
+         * @description Search the catalog of remote MCP servers, or page through all of it with no `q`.
+         *
+         *     A title that starts with `q` comes first, then a title that contains it, then a
+         *     match in the name or description alone. The catalog is
+         *     empty until a sync has run, and stays empty on a deployment whose
+         *     `mcp_catalog_sync` is `off`. Listing a server here permits nothing: a
+         *     workspace reaches a server only once it is added to that workspace.
+         */
+        get: operations["mcp-catalog-search_mcp_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Catalog Sync
+         * @description Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.
+         */
+        get: operations["mcp-catalog-get_mcp_catalog_sync"];
+        put?: never;
+        /**
+         * Request Mcp Catalog Sync
+         * @description Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.
+         *
+         *     A sync that is already running is left to finish, and this one follows it.
+         */
+        post: operations["mcp-catalog-request_mcp_catalog_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/execute": {
         parameters: {
             query?: never;
@@ -3560,6 +3612,60 @@ export interface paths {
          */
         post: operations["organization-keys-rotate_own_key"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-catalog/featured": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Featured Mcp Servers
+         * @description The servers the caller's organization recommends, by title. Any member of the organization.
+         *
+         *     Each entry is the copy taken when it was featured, and `catalog_status`
+         *     says whether the catalog still lists it at that URL.
+         */
+        get: operations["mcp-catalog-list_featured_mcp_servers"];
+        put?: never;
+        /**
+         * Feature Mcp Server
+         * @description Recommend a catalog server to the caller's organization. Organization owners and admins only.
+         *
+         *     The entry is copied as the catalog lists it now, and a later sync neither
+         *     changes nor removes the copy. Featuring a server that is already featured
+         *     takes the copy again. An organization features at most 50 servers; one more
+         *     is refused with a 409.
+         */
+        post: operations["mcp-catalog-feature_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-catalog/featured/{featured_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unfeature Mcp Server
+         * @description Stop recommending a server. Organization owners and admins only.
+         *
+         *     Servers already added to a workspace from it are left as they are.
+         */
+        delete: operations["mcp-catalog-unfeature_mcp_server"];
         options?: never;
         head?: never;
         patch?: never;
@@ -13949,6 +14055,183 @@ export interface components {
              * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
              */
             reason?: ("not_configured" | "workspace_disabled") | null;
+        };
+        /**
+         * McpCatalogFeatureRequest
+         * @description The catalog server to feature.
+         */
+        McpCatalogFeatureRequest: {
+            /**
+             * Server Id
+             * Format: uuid
+             * @description The id of a catalog server.
+             */
+            server_id: string;
+        };
+        /**
+         * McpCatalogFeaturedListPublic
+         * @description An organization's featured shelf, by title.
+         */
+        McpCatalogFeaturedListPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpCatalogFeaturedPublic"][];
+        };
+        /**
+         * McpCatalogFeaturedPublic
+         * @description A server the organization recommends, as it was when it was featured.
+         */
+        McpCatalogFeaturedPublic: {
+            /**
+             * Catalog Server Id
+             * @description The catalog server this entry was copied from, null once the catalog no longer lists it. Feature it again to take the copy afresh.
+             */
+            catalog_server_id: string | null;
+            /**
+             * Catalog Status
+             * @description `current` while the catalog lists this server at the same URL, `changed` once it lists another URL, `removed` once it lists none. The featured entry keeps the URL it was featured with.
+             * @enum {string}
+             */
+            catalog_status: "current" | "changed" | "removed";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Requires Token */
+            requires_token: boolean;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Website Url */
+            website_url: string | null;
+        };
+        /**
+         * McpCatalogServerPublic
+         * @description One remote MCP server the catalog lists.
+         */
+        McpCatalogServerPublic: {
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Name
+             * @description The source's own identifier, such as `com.example/mcp`.
+             */
+            name: string;
+            /**
+             * Requires Token
+             * @description The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.
+             */
+            requires_token: boolean;
+            /**
+             * Source
+             * @description Where the entry came from. `registry` is the official MCP Registry.
+             */
+            source: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description The server's streamable HTTP endpoint.
+             */
+            url: string;
+            /** Version */
+            version: string | null;
+            /** Website Url */
+            website_url: string | null;
+        };
+        /**
+         * McpCatalogServersPublic
+         * @description A page of catalog servers. `count` is how many match in all.
+         */
+        McpCatalogServersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpCatalogServerPublic"][];
+        };
+        /**
+         * McpCatalogSyncStatus
+         * @description Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.
+         */
+        McpCatalogSyncStatus: {
+            /**
+             * Error
+             * @description Why the last sync was partial or failed.
+             */
+            error: string | null;
+            /**
+             * Fetched
+             * @description Registry entries read.
+             */
+            fetched: number;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Kept
+             * @description Entries stored: remote servers Otari can connect to.
+             */
+            kept: number;
+            /**
+             * Last Completed At
+             * @description When a sync last read the whole registry.
+             */
+            last_completed_at: string | null;
+            /**
+             * Mode
+             * @description The deployment's `mcp_catalog_sync` setting.
+             * @enum {string}
+             */
+            mode: "off" | "manual" | "scheduled";
+            /**
+             * Next Sync At
+             * @description When the next scheduled sync is due, if the mode is scheduled.
+             */
+            next_sync_at: string | null;
+            /**
+             * Outcome
+             * @description How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.
+             */
+            outcome: ("complete" | "partial" | "failed") | null;
+            /** Pages */
+            pages: number;
+            /**
+             * Removed
+             * @description Servers a complete sync deleted because the registry no longer lists them.
+             */
+            removed: number;
+            /**
+             * Requested
+             * @description A sync was asked for and no worker has started it yet.
+             */
+            requested: boolean;
+            /** Running */
+            running: boolean;
+            /**
+             * Server Count
+             * @description Servers in the catalog now.
+             */
+            server_count: number;
+            /** Started At */
+            started_at: string | null;
         };
         /**
          * McpErrorBody
@@ -25605,6 +25888,82 @@ export interface operations {
             };
         };
     };
+    "mcp-catalog-search_mcp_catalog": {
+        parameters: {
+            query?: {
+                /** @description Text to find in a server's title, name or description */
+                q?: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-get_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-request_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+        };
+    };
     "mcp-execute_mcp_tool": {
         parameters: {
             query?: never;
@@ -27404,6 +27763,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CreateKeyResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-list_featured_mcp_servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogFeaturedListPublic"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-feature_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpCatalogFeatureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogFeaturedPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-unfeature_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                featured_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

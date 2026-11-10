@@ -65,6 +65,11 @@ from gateway.repositories.health_checks import (
 )
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
+from gateway.repositories.mcp_catalog import (
+    McpCatalogFeaturedRepository,
+    McpCatalogServerRepository,
+    McpCatalogSyncStateRepository,
+)
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
@@ -149,6 +154,7 @@ from gateway.services.inference import (
 from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -2023,6 +2029,35 @@ def get_health_check_service(
 
 
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
+
+
+def build_mcp_catalog_service(
+    uow: UnitOfWork, config: GatewayConfig, organizations: OrganizationService | None = None
+) -> McpCatalogService:
+    """Build the MCP catalog service on a request's Unit of Work, or the sync worker's own.
+
+    The worker passes no organizations service: it only syncs, and the featured shelf is a request's.
+    """
+    return McpCatalogService(
+        uow,
+        McpCatalogServerRepository(uow),
+        McpCatalogFeaturedRepository(uow),
+        McpCatalogSyncStateRepository(uow),
+        organizations,
+        config,
+    )
+
+
+def get_mcp_catalog_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
+) -> McpCatalogService:
+    """The request's service. The sync worker builds its own through ``build_mcp_catalog_service``."""
+    return build_mcp_catalog_service(uow, config, organizations)
+
+
+McpCatalogServiceDep = Annotated[McpCatalogService, Depends(get_mcp_catalog_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
@@ -2901,6 +2936,8 @@ __all__ = [
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",
+    "McpCatalogServiceDep",
+    "build_mcp_catalog_service",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",

@@ -91,6 +91,7 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [MCP server catalog](mcp-catalog.md)
 * [Run the guardrails service](guardrails-service.md)
 * [Store agent traces](trace-storage.md)
 * [Service keys on a deployment you run](operator-service-keys.md)

@@ -59,6 +59,9 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),
+    ("GET", f"{API_ROOT}/mcp-catalog/sync"),
+    # A sync makes the gateway call the MCP Registry.
+    ("POST", f"{API_ROOT}/mcp-catalog/sync"),
     ("POST", f"{API_ROOT}/pricing"),
 ]
 
@@ -126,6 +129,8 @@ _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/workspaces"),
     ("GET", f"{API_ROOT}/admin/access"),
     ("GET", f"{API_ROOT}/tool-settings"),
+    ("GET", f"{API_ROOT}/mcp-catalog/servers"),
+    ("GET", f"{API_ROOT}/organizations/me/mcp-catalog/featured"),
 ]
 
 
