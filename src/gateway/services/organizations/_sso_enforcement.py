@@ -13,8 +13,9 @@ class SsoEnforcement(Protocol):
     """Answers whether some organization a person actively belongs to refuses them a way in outside its own connection.
 
     The identity domain implements it. NOTE: an implementation reads through the request's Unit of Work, so call
-    it before staging any write, or inside a block already open on that Unit of Work. ``revoke_refused_sessions``
-    is the exception and is called after the write it follows, because it acts on what that write left behind.
+    it before staging any write, or inside a block already open on that Unit of Work.
+    ``revoke_refused_sessions`` is called inside the block that made the change calling for it, so the
+    two commit together.
     """
 
     async def refuses_every_membership(self, *, user: User) -> bool:
@@ -28,8 +29,9 @@ class SsoEnforcement(Protocol):
     async def revoke_refused_sessions(self, *, organization: Organization) -> None:
         """End the live session of every active member ``organization``'s enforcement now refuses.
 
-        Callers hand this the organization after a write that may have changed who it refuses. An
-        organization requiring nothing, or holding no connection, refuses nobody and loses no
-        session.
+        NOTE: Callers must call this inside the block that staged the change calling for it, so a
+        revocation that fails takes the change with it rather than leaving a session the
+        organization no longer admits. An organization requiring nothing, or holding no connection,
+        refuses nobody and loses no session.
         """
         ...

@@ -730,11 +730,12 @@ class OrganizationService:
         """Resolve the caller's organization, repairing a stale pointer if it can.
 
         The reachable stale case is a membership that was suspended after the
-        pointer was set: falling back to the caller's oldest live membership
-        keeps the dashboard usable instead of refusing every page. A pointer at a
-        *deleted* organization is not reachable, since a deletion moves every
-        pointer first and the foreign key would refuse otherwise; the check
-        survives for a database that arrived by another route.
+        pointer was set: falling back to the caller's oldest live membership that
+        admits them keeps the dashboard usable instead of refusing every page. A
+        pointer at a *deleted* organization is not reachable, since a deletion
+        clears every pointer into it first and the foreign key would refuse
+        otherwise; the check survives for a database that arrived by another
+        route.
 
         Unlike the platform this never provisions an organization as a fallback:
         first boot owns that (see `provisioning_service`), and every later
@@ -2520,8 +2521,11 @@ class OrganizationService:
             if target_user is None:
                 raise OrganizationMemberNotFoundError(organization_member_id)
             await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
+            # Inside the block, so the change and the revocation it calls for commit together. Left
+            # outside, a revocation that failed would leave the membership changed and the session
+            # it no longer admits still acting.
+            await sso_enforcement.revoke_refused_sessions(organization=organization)
 
-        await sso_enforcement.revoke_refused_sessions(organization=organization)
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
         if updated.status == "invited":

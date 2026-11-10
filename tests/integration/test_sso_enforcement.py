@@ -488,6 +488,58 @@ async def test_demoting_the_break_glass_owner_ends_the_session_the_exception_kep
     assert await _live_session_count(async_db, exempt.id) == 0
 
 
+async def test_a_demotion_whose_revocation_fails_does_not_stand(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The change and the revocation it calls for are one step, so a failed revocation takes it back.
+
+    Committed separately, the demotion would persist while the session it no longer admits stayed
+    usable, which is the direction this must not fail in.
+    """
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    exempt = await _member_with_email(
+        async_db,
+        organization,
+        role="owner",
+        email="glass@acme.example",
+        full_name="Glass Owner",
+        password=True,
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = exempt.id
+    async_db.add(organization)
+    await _dashboard_session(async_db, exempt)
+    await async_db.commit()
+    membership = await _membership_of(async_db, organization, exempt)
+    # Held before the call: a rollback expires every attribute on the instances, and reading one
+    # afterwards reloads it lazily outside an await.
+    organization_id, exempt_id = organization.id, exempt.id
+    enforcement = _connection_service(async_db)
+
+    async def _fail(*, organization: Organization) -> None:
+        raise RuntimeError("the sessions could not be revoked")
+
+    monkeypatch.setattr(enforcement, "revoke_refused_sessions", _fail)
+    service = OrganizationService(async_db, **membership_writes(async_db))
+
+    with pytest.raises(RuntimeError, match="could not be revoked"):
+        await service.update_active_organization_member_for_user(
+            user=owner,
+            organization_member_id=membership.id,
+            request=ActiveOrganizationMemberUpdateRequest(role="member"),
+            sso_enforcement=enforcement,
+        )
+
+    kept = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(organization_id, exempt_id)
+    assert kept is not None
+    assert kept.role == "owner"
+    assert await _live_session_count(async_db, exempt_id) == 1
+
+
 async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_a_member(
     async_db: AsyncSession,
 ) -> None:
