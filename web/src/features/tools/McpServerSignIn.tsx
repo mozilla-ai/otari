@@ -138,7 +138,7 @@ function ConnectedUsers({
   const remove = useRemoveMcpServerConnection()
   const [removing, setRemoving] = useState<McpServerConnection>()
   const rows = connections.data?.data ?? []
-  const nameOf = (row: McpServerConnection) =>
+  const describeUser = (row: McpServerConnection) =>
     row.full_name ?? row.email ?? row.user_id
 
   const columns: DataTableColumn<McpServerConnection>[] = [
@@ -148,8 +148,8 @@ function ConnectedUsers({
       isRowHeader: true,
       cell: (row) => (
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="font-medium break-all">{nameOf(row)}</span>
-          {row.email && row.email !== nameOf(row) ? (
+          <span className="font-medium break-all">{describeUser(row)}</span>
+          {row.email && row.email !== describeUser(row) ? (
             <span className="text-caption break-all">{row.email}</span>
           ) : null}
         </span>
@@ -167,7 +167,7 @@ function ConnectedUsers({
         <RowAction
           icon={FiTrash2}
           label="Remove connection"
-          ariaLabel={`Remove the connection of ${nameOf(row)}`}
+          ariaLabel={`Remove the connection of ${describeUser(row)}`}
           onPress={() => {
             remove.reset()
             setRemoving(row)
@@ -181,7 +181,7 @@ function ConnectedUsers({
     <div className="flex flex-col gap-3">
       <h3 className="text-title">Connected users</h3>
       <ErrorBanner error={connections.error} />
-      {rows.length === 0 ? (
+      {connections.error ? null : rows.length === 0 ? (
         <p className="text-caption">
           {connections.isPending && !connections.data
             ? "Loading…"
@@ -208,7 +208,7 @@ function ConnectedUsers({
         heading="Remove connection"
         body={
           removing
-            ? `${nameOf(removing)} stops reaching ${server.name} until they connect again.`
+            ? `${describeUser(removing)} stops reaching ${server.name} until they connect again.`
             : ""
         }
         confirmLabel="Remove connection"

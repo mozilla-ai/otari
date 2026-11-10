@@ -45,6 +45,7 @@ import { fetchAllPaged } from "@/shared/api/paging"
 import {
   GUARDRAIL_PROFILES,
   ORGANIZATION_GUARDRAILS,
+  PLAYGROUND,
   SEARCH_PROVIDERS,
   SEARCH_TOOLS,
   TOOL_SETTINGS,
@@ -794,6 +795,11 @@ function mcpConnectionsKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "mcp-connections"] as const
 }
 
+/** The Playground's tools menu says which servers still need a sign-in. */
+function playgroundToolsKey(workspaceId: string) {
+  return [PLAYGROUND, workspaceId, "tools"] as const
+}
+
 function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
   return [
     WORKSPACES,
@@ -809,6 +815,8 @@ export function useMyMcpConnections(workspaceId: string | null) {
   return useQuery({
     queryKey: mcpConnectionsKey(workspaceId ?? ""),
     enabled: workspaceId !== null,
+    // Every write that moves it invalidates it, so a minute between reads is safe.
+    staleTime: 60_000,
     queryFn: ({ signal }) =>
       apiFetch<McpConnections>(
         `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-connections`,
@@ -850,6 +858,9 @@ export function useCompleteMcpConnection() {
         queryKey: mcpConnectionsKey(done.workspace_id),
       })
       void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(done.workspace_id),
+      })
+      void queryClient.invalidateQueries({
         queryKey: mcpServerConnectionsKey(done.workspace_id, done.server_id),
       })
     },
@@ -876,6 +887,9 @@ export function useDisconnectMcp() {
         queryKey: mcpConnectionsKey(workspaceId),
       })
       void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
         queryKey: mcpServerConnectionsKey(workspaceId, serverId),
       })
     },
@@ -891,6 +905,8 @@ export function useMcpServerConnections(
   return useQuery({
     queryKey: mcpServerConnectionsKey(workspaceId, serverId),
     enabled,
+    // Other people connect without this page hearing of it, so it is read again sooner.
+    staleTime: 30_000,
     queryFn: ({ signal }) =>
       apiFetch<McpServerConnections>(
         `${mcpServerPath(workspaceId, serverId)}/connections?limit=${MCP_CONNECTIONS_PAGE_SIZE}`,
@@ -922,6 +938,9 @@ export function useRemoveMcpServerConnection() {
       })
       void queryClient.invalidateQueries({
         queryKey: mcpConnectionsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
       })
     },
   })

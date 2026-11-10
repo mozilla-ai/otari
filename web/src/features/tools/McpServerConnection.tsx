@@ -121,7 +121,7 @@ export function McpServerConnection({
     clientIdField !== undefined ||
     clientSecretField !== undefined
   // The tokens people hold were issued for the server and the client as they were.
-  const endsConnections =
+  const willEndConnections =
     wasPerUser &&
     (!isPerUser || body.url !== server.url || clientIdField !== undefined)
   const isInvalid =
@@ -254,7 +254,7 @@ export function McpServerConnection({
               options={CREDENTIAL_MODES}
             />
           ) : null}
-          {endsConnections ? (
+          {willEndConnections ? (
             <InfoBanner tone="warning">
               Saving this disconnects everyone who has connected their account.
               They connect again afterwards.

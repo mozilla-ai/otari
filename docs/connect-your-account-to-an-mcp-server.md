@@ -61,6 +61,11 @@ You come back to the server's page, which now says **Connected**. From then on
 every API key you own in this workspace, and the Playground, use the server with
 your account.
 
+Connecting does not change who may use the server. Its
+[access list](control-access-to-an-mcp-server.md) still decides that: a key the
+access list denies is told the server does not exist, whether or not you have
+connected.
+
 The link you are sent to works once, for ten minutes, and only in the browser
 session that started it.
 
@@ -69,8 +74,8 @@ the server's page, click **Check connection** under **Exposed tools**.
 
 ## What your keys see before you connect
 
-A key whose user has not connected is told to sign in, instead of getting a
-generic failure:
+A key the access list allows, whose user has not connected, is told to sign in
+instead of getting a generic failure:
 
 - `GET /api/v1/mcp/servers` lists the server with `sign_in_required: true`.
 - A request naming the server in `mcp_server_ids` is refused with `403` and the
@@ -83,7 +88,9 @@ it does not exist. Create the key for a user instead.
 
 - **Your own account.** On the server's page, click **Disconnect** under
   **Your account**. Otari deletes your tokens and asks the server to revoke
-  them.
+  them. That request is best effort: not every server offers it, and it can
+  fail. To be sure the access has ended, also remove Otari from your account
+  with the server's provider.
 - **Somebody else's.** Owners and admins see **Connected users** on the server's
   page. Click the bin on a row, then **Remove connection**.
 
@@ -97,3 +104,7 @@ Otari renews your sign-in on its own for as long as the server allows it. When
 the server ends it, for example because you revoked Otari's access there, your
 connection is removed and the page says **Not connected** again. Click
 **Connect your account** to sign in again.
+
+Otari only learns this when it next renews your sign-in. Until then the page can
+still say **Connected** while calls to the server fail. Click **Reconnect** to
+sign in again straight away.
