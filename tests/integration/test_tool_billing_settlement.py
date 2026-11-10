@@ -1211,6 +1211,30 @@ async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: 
 
 
 @pytest.mark.asyncio
+async def test_searches_openai_ran_on_responses_are_billed_at_the_models_rate(async_db: AsyncSession) -> None:
+    """OpenAI bills its own web search per call, which the catalog prices beside the model at $10 per 1,000."""
+    configure_default_pricing(True)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model="gpt-5",
+        provider="openai",
+        provider_type="openai",
+        endpoint="/v1/responses",
+        usage_override=GatewayUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15, provider_web_searches=2),
+    )
+
+    [row] = writer.logs
+    [line] = [entry for entry in row.pricing_breakdown or [] if entry.get("label") == "openai:web_search"]
+    assert (line["units"], line["unit_rate"], line["cost"]) == (2, 0.01, 0.02)
+    assert row.cost is not None
+    assert row.cost >= Decimal("0.02")
+
+
+@pytest.mark.asyncio
 async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession) -> None:
     configure_default_pricing(True)
     async_db.add(
