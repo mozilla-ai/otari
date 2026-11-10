@@ -7215,8 +7215,8 @@ export interface paths {
          *     no way to tell those apart. A stream that failed, including one the provider
          *     cut, always writes an error row. A stream the client abandoned before the
          *     provider reported usage, with no gateway tool work, writes a row only under
-         *     the ``estimate`` policy, billed on an estimate; otherwise it writes none, so
-         *     its id stays 404.
+         *     the ``estimate`` policy, billed on an estimate, and settles as
+         *     ``incomplete``; otherwise it writes none, so its id stays 404.
          */
         get: operations["usage-get_request_settlement"];
         put?: never;
@@ -18327,7 +18327,9 @@ export interface components {
          *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
          *     their ``request_group_id``, so this is the request's whole bill rather than one
          *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
-         *     when no row was priced.
+         *     when no row was priced. ``status`` is ``error`` if any row is an error, and
+         *     ``incomplete`` for a stream the client abandoned before the provider reported
+         *     any usage.
          */
         RequestSettlement: {
             /** Completion Tokens */
@@ -18344,7 +18346,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "success" | "error";
+            status: "success" | "error" | "incomplete";
             /** Total Tokens */
             total_tokens: number;
         };

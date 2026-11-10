@@ -366,3 +366,33 @@ def test_a_side_call_alone_is_not_a_settled_request(
     response = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
 
     assert response.status_code == 404
+
+
+def test_a_stream_the_client_abandoned_settles_as_incomplete(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Its only row is the ``incomplete`` one billed on an estimate, and that row settles it."""
+    request_id = str(uuid.uuid4())
+    with db_session_factory() as db:
+        db.add(
+            UsageLog(
+                id=str(uuid.uuid4()),
+                workspace_id=seed_workspace_id(db),
+                timestamp=datetime.now(UTC),
+                model=MODEL_NAME,
+                provider="openai",
+                endpoint="/v1/chat/completions",
+                status="incomplete",
+                cost=Decimal("0.000009"),
+                request_group_id=request_id,
+            )
+        )
+        db.commit()
+
+    settled = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
+
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "incomplete"
+    assert settled.json()["cost_usd"] == "0.000009"
