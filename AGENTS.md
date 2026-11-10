@@ -181,6 +181,10 @@ Some pages bind code rather than describe it:
 - [docs/code-execution-protocol.md](docs/code-execution-protocol.md) is the wire
   contract a peer implements. It is normative for the semantics a schema cannot
   carry, so a change to the wire is a change to the page first.
+- [docs/platform-connect-protocol.md](docs/platform-connect-protocol.md) is the
+  wire contract otari.ai implements for **Connect otari.ai**. It is built in
+  another repository against that page, so a change to the wire is a change to
+  the page first.
 
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).

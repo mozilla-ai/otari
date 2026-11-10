@@ -718,7 +718,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
-| The workspace turned web search off | 403 | |
+| The workspace turned web search off | 403 | `web_access_disabled` |
 | The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
@@ -839,7 +839,7 @@ A fetch the workspace's organization fetch key served is priced under
 | A `provider_options` key the provider does not take from a request | 400 | |
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as a `max_chars` below 1 | 422 | `invalid_request` |
-| The workspace turned web access off | 403 | |
+| The workspace turned web access off | 403 | `web_access_disabled` |
 | The workspace's domain lists disallow the URL, asked for or found after a redirect | 403 | |
 | The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
@@ -1123,6 +1123,7 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body, when the scope is `user` and the billed user is a service key's [end user](end-users.md#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
+| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |

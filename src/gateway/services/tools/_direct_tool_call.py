@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 from gateway.core.config import END_USER_BUDGET_HEADER
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
-from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
+from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, WEB_ACCESS_DISABLED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import (
@@ -510,6 +510,7 @@ class DirectToolService:
                 model=unresolved_model,
                 provider=unresolved_provider,
                 workspace_id=workspace_id,
+                answer_headers=error_headers(WEB_ACCESS_DISABLED),
             )
         if isinstance(picked, TenancyError):
             standing = stand_in(policy) if stand_in is not None else None

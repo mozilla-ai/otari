@@ -4927,6 +4927,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Platform Connect
+         * @description Where the connection stands: idle, pending, connected, expired or denied.
+         *
+         *     While pending, a read asks otari.ai whether the code was approved, at most
+         *     once per the interval otari.ai gave. On approval the ``otari-ai`` hosted
+         *     provider is stored with the issued key, its models are listed, and the
+         *     status reads connected.
+         */
+        get: operations["platform-connect-get_platform_connect"];
+        put?: never;
+        /**
+         * Start Platform Connect
+         * @description Ask otari.ai for a code to approve, and return the code and the page that approves it.
+         *
+         *     This is the first request this deployment sends to otari.ai. While an
+         *     attempt is pending it is returned as it stands, and otari.ai is not asked
+         *     again. The provider a connection stores is kept to the caller's
+         *     organization.
+         */
+        post: operations["platform-connect-start_platform_connect"];
+        /**
+         * Cancel Platform Connect
+         * @description Forget the current attempt. A stored ``otari-ai`` provider is left as it is.
+         */
+        delete: operations["platform-connect-cancel_platform_connect"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playground/chat/completions": {
         parameters: {
             query?: never;
@@ -11437,6 +11475,12 @@ export interface components {
              */
             passkeys_ready: boolean;
             /**
+             * Platform Connect
+             * @description Whether this deployment offers connecting to otari.ai from the dashboard (the platform_url setting is not empty). False, the dashboard shows no such option and the routes are not mounted.
+             * @default false
+             */
+            platform_connect: boolean;
+            /**
              * Privacy Url
              * @description Where this deployment's privacy notice lives. Set, the account menu's Data & Privacy row links to it; null, no address is configured and that row stays disabled, carrying the standing note that there is nothing to configure there yet. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
@@ -12513,7 +12557,7 @@ export interface components {
             require_pricing: boolean;
             /**
              * Secret Key Configured
-             * @description Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, so a deployment without it can store none. The dashboard reads the same fact from the membership context's provider_key_encryption_available, because this endpoint is operator-only and the provider-key pages are read by tenants.
+             * @description Whether the server has a key to encrypt stored credentials with: OTARI_SECRET_KEY, or the key file a SQLite deployment generates beside its database. Provider credentials are encrypted at rest with it, so a deployment without one can store none. The dashboard reads the same fact from the membership context's provider_key_encryption_available, because this endpoint is operator-only and the provider-key pages are read by tenants.
              */
             secret_key_configured: boolean;
             /** Version */
@@ -13076,9 +13120,10 @@ export interface components {
          * @description One offered model, with the price the deployment currently serves it at.
          *
          *     ``price_source`` says which rung of the deployment's ladder answered:
-         *     ``deployment`` for a rate an operator set, ``defaults`` for the
-         *     community-maintained rate, whether this surface stored it or the fallback
-         *     supplies it, and None when nothing prices the model yet. ``unit`` says what
+         *     ``deployment`` for a rate an operator set, ``provider`` for the rate the
+         *     provider's own listing named, ``defaults`` for the community-maintained
+         *     rate, whether this surface stored it or the fallback supplies it, and None
+         *     when nothing prices the model yet. ``unit`` says what
          *     the rates are per, so a per-request rate is not read as a per-token one.
          *     ``enabled`` is the serving switch; a model offered without a discoverable
          *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
@@ -13112,7 +13157,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Price Source */
-            price_source?: ("organization" | "deployment" | "defaults") | null;
+            price_source?: ("organization" | "deployment" | "defaults" | "provider") | null;
             /** Provider */
             provider: string;
             /** Type */
@@ -16614,6 +16659,39 @@ export interface components {
              * @description What the opening answers: a legal request's number, a ticket.
              */
             reference: string;
+        };
+        /**
+         * PlatformConnectStartPublic
+         * @description What an operator needs to approve a connection on otari.ai.
+         *
+         *     ``user_code`` is what the approval page shows back, ``verification_uri_complete``
+         *     the page to open, and ``expires_in`` the seconds left to approve.
+         */
+        PlatformConnectStartPublic: {
+            /** Expires In */
+            expires_in: number;
+            /** User Code */
+            user_code: string;
+            /** Verification Uri Complete */
+            verification_uri_complete: string;
+        };
+        /**
+         * PlatformConnectStatusPublic
+         * @description Where the deployment's connection to otari.ai stands.
+         *
+         *     ``idle`` means no attempt. The code, the link and the seconds left are set
+         *     while ``pending`` and null otherwise. ``connected`` means the ``otari-ai``
+         *     hosted provider holds the key otari.ai issued.
+         */
+        PlatformConnectStatusPublic: {
+            /** Expires In */
+            expires_in?: number | null;
+            /** Status */
+            status: "idle" | ("pending" | "connected" | "expired" | "denied");
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri Complete */
+            verification_uri_complete?: string | null;
         };
         /**
          * PlaygroundAttachment
@@ -30185,6 +30263,78 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "platform-connect-get_platform_connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformConnectStatusPublic"];
+                };
+            };
+        };
+    };
+    "platform-connect-start_platform_connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformConnectStartPublic"];
+                };
+            };
+            /** @description Too many attempts. Retry-After gives the wait in seconds. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description otari.ai could not be reached. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "platform-connect-cancel_platform_connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

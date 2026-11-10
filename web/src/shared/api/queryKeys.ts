@@ -88,6 +88,9 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
+// Not under HOSTED_PROVIDERS: a pending read asks otari.ai, so a provider edit
+// must not fire one.
+export const PLATFORM_CONNECT = "platform-connect"
 // What a provider says it serves on the stored key, and what a catalog update
 // would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm

@@ -77,6 +77,7 @@ from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
     OrgProviderKeyModelRepository,
+    PlatformConnectRepository,
     ProviderEndpointRepository,
     WorkspaceHostedAccessRepository,
     WorkspaceProviderPolicyRepository,
@@ -176,6 +177,8 @@ from gateway.services.providers import (
     HostedProviderService,
     HostedSources,
     OrgProviderModelService,
+    PlatformClient,
+    PlatformConnectService,
     ProviderEndpointService,
     ScheduledRun,
     WorkspaceHostedAccessService,
@@ -1881,6 +1884,23 @@ def get_hosted_provider_service(
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
 
 
+def get_platform_client(config: Annotated[GatewayConfig, Depends(get_config)]) -> PlatformClient:
+    """The otari.ai endpoints a connection uses, at the configured ``platform_url``."""
+    return PlatformClient(config.platform_url)
+
+
+def get_platform_connect_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    hosted: HostedProviderServiceDep,
+    client: Annotated[PlatformClient, Depends(get_platform_client)],
+) -> PlatformConnectService:
+    """Build the otari.ai connect service on the request's unit of work."""
+    return PlatformConnectService(uow, attempts=PlatformConnectRepository(uow), hosted=hosted, client=client)
+
+
+PlatformConnectServiceDep = Annotated[PlatformConnectService, Depends(get_platform_connect_service)]
+
+
 def get_agent_recommender_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> AgentRecommenderService:
     """Build the subagent router service on the request's unit of work."""
     return AgentRecommenderService(uow, AgentRecommenderRepository(uow))
@@ -2930,6 +2950,7 @@ __all__ = [
     "ModelProviderPortDep",
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",
+    "PlatformConnectServiceDep",
     "SearchToolServiceDep",
     "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
@@ -2956,6 +2977,7 @@ __all__ = [
     "set_config",
     "get_feedback_delivery_port",
     "get_feedback_service",
+    "get_platform_client",
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",

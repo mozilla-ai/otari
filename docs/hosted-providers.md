@@ -99,10 +99,77 @@ A deployment configures hosted providers in three places:
 A provider stored through the page or the API wins over a `config.yml` entry of
 the same name.
 
-Storing a hosted provider's key requires `OTARI_SECRET_KEY` (see
+Storing a hosted provider's key requires an encryption key: `OTARI_SECRET_KEY`,
+or on SQLite the key Otari generates beside the database (see
 [Runtime provider management](configuration.md#runtime-provider-management)).
 The API returns only the key's last four characters, and masks credentials in
 `client_args` and the base URL.
+
+## Connecting otari.ai
+
+[otari.ai](https://otari.ai) is a hosted Otari: one key reaches models from many
+providers. It is a paid service, and a request served on it leaves this gateway
+for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
+the `otari` implementation.
+
+On the Hosted providers page, **Connect otari.ai** is offered beside adding a
+provider of your own:
+
+1. The gateway asks otari.ai for a code and opens its approval page in a new
+   tab. The page here shows the code and the link while it waits.
+2. Sign in to otari.ai (or create an account) and approve the code.
+3. The gateway stores the key otari.ai issues, lists its models and prices
+   them. With no other provider yet, the dashboard moves on to the setup guide.
+
+What a connection stores:
+
+- A hosted provider `otari-ai`, restricted to the organization of the operator
+  who connected. Lift or change the restriction through
+  `/api/v1/hosted-providers`.
+- Its models, under the names otari.ai gives them: `<vendor>/<model>`, such as
+  `openai/gpt-4o-mini`. A request names one as
+  `otari-ai:<vendor>/<model>` (`otari-ai:openai/gpt-4o-mini`), which always
+  reaches otari.ai. The catalog (`GET /api/v1/models`) and the setup guide list
+  the same model as `openai/gpt-4o-mini`, which a request may send too.
+- A rate for each model, so it arrives switched on and a request can be sent
+  at once:
+  - the price otari.ai lists for the model, which is what it charges. The page
+    marks it **Listed**, and a refresh moves it when otari.ai changes it;
+  - where otari.ai lists none, the rate of the vendor's models.dev entry, an
+    estimate of what otari.ai charges, marked **Estimate**.
+
+  Both are stored whether `default_pricing` is on or off, for a provider of the
+  `otari` implementation only. Set your own rate to replace either. A model
+  neither prices is offered switched off, as on any hosted provider.
+
+Connecting again replaces the key of the existing `otari-ai` provider. The
+earlier key stays valid on otari.ai until you revoke it on its
+[API keys page](https://otari.ai/dashboard/#/keys). A code
+that expires or is declined leaves nothing behind; choose **Try again**.
+
+To disconnect, remove the `otari-ai` provider. That deletes this gateway's copy
+of the key only, so also revoke the key on otari.ai's
+[API keys page](https://otari.ai/dashboard/#/keys).
+
+**Without the button.** Create a key on otari.ai's API keys page and add it as
+any hosted provider: choose the `otari` implementation, name it `otari-ai`,
+paste the key, and set the base URL to `https://api.otari.ai` (the origin,
+without `/api/v1`). The result is the same provider.
+
+otari.ai shows the gateway, on its approval page and on the key, under the host
+of `public_base_url`, or under the machine's hostname where that is not set.
+
+When trying this against an otari.ai running on the same machine, open one of
+the two dashboards on `127.0.0.1` and the other on `localhost`. Browsers keep
+one cookie jar per host whatever the port, so two dashboards on `localhost`
+share a session cookie and sign each other out.
+
+Nothing is sent to otari.ai until an operator presses **Connect otari.ai**. The
+address it asks is the `platform_url` setting (`OTARI_PLATFORM_URL`,
+`https://api.otari.ai` by default); set it to an empty string and the option,
+every mention of it and its routes (`/api/v1/platform/connect`) are gone. The
+exchange itself is specified in the
+[Platform connect protocol](platform-connect-protocol.md).
 
 ## Roster and serving
 
@@ -131,7 +198,9 @@ Adding a provider offers every model its key lists:
 
 - A model the deployment price list already prices is switched on at that rate.
 - Otherwise, where `default_pricing` is on, the model is seeded with its
-  models.dev rate and switched on.
+  models.dev rate and switched on. A provider of the `otari` implementation is
+  priced whatever `default_pricing` says, at the price its own listing names
+  where it names one; see [Connecting otari.ai](#connecting-otariai).
 - Where `default_pricing` is off, or models.dev does not price the model, it is
   offered switched off until it is priced, by the operator or by a later
   refresh once models.dev prices it.
@@ -380,6 +449,9 @@ menu, and is listed only for a deployment operator.
   while its models can.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
+- **Connect otari.ai** is offered beside adding a provider, on the first-run
+  panel and above the table afterwards; see
+  [Connecting otari.ai](#connecting-otariai).
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).
@@ -415,8 +487,9 @@ when created and charged when its results are accounted.
 
 ### From a `providers:` block in config.yml
 
-1. Set `OTARI_SECRET_KEY` first if it is not set (`otari gen-secret-key`): an
-   entry whose key cannot be encrypted is not copied. To keep serving every
+1. On PostgreSQL, set `OTARI_SECRET_KEY` first if it is not set
+   (`otari gen-secret-key`): an entry whose key cannot be encrypted is not
+   copied. A SQLite deployment generates its own key, so its entries are copied. To keep serving every
    entry from `config.yml` for now, set `import_configured_providers: false`
    instead.
 2. Start the upgraded gateway, and read its log: it names each entry it copied

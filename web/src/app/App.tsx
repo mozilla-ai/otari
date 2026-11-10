@@ -211,6 +211,7 @@ const PUBLIC_AUTH_TITLES: Record<PublicAuthPath, string> = {
   "/recover-password": "Recover password",
   "/verify-email": "Verify email",
   "/reset-password": "Reset password",
+  "/setup": "Set up",
   "/auth/google/callback": "Sign in",
   "/auth/github/callback": "Sign in",
 }

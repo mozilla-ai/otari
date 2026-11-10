@@ -116,6 +116,7 @@ _SETTING_NAMES = frozenset(
         "open_signup",
         "passkeys_enabled",
         "password_reset_expiry_hours",
+        "platform_url",
         "port",
         "pricing",
         "pricing_refresh",

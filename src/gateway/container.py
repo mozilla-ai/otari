@@ -572,7 +572,7 @@ def build_container(
         # it is recorded rather than refused. Worth stating even so: which build
         # a process is running is otherwise invisible until traffic exposes it.
         container.summary = f"no bootstrap, core defaults for {_port_names(container)}"
-        logger.info("Composition root: %s", container.summary)
+        logger.debug("Composition root: %s", container.summary)
         return container
     if not bootstrap_selector.strip():
         # A blank-but-present selector is a broken deployment rather than a
