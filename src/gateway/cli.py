@@ -39,6 +39,10 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
     )
 
 
+# What a container health check, a load balancer or an orchestrator polls.
+HEALTH_PROBE_PATHS = tuple(f"{API_ROOT}/health{suffix}" for suffix in ("", "/liveness", "/readiness"))
+
+
 @click.group()
 def cli() -> None:
     """Otari CLI."""
@@ -139,7 +143,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
-            log_config=uvicorn_log_config(log_level),
+            log_config=uvicorn_log_config(log_level, probe_paths=HEALTH_PROBE_PATHS),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")

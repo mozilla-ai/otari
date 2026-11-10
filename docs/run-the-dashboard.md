@@ -28,7 +28,8 @@ It is shown only once and carries your master key, so treat it like one.
 That start prints nothing else unless something needs attention, and holds
 its reminders about optional settings left unset until the next start. Later
 starts print where Otari runs and where to sign in. `otari serve --log-level
-debug` shows every startup line. A deployment that generated its master key
+debug` shows every startup line, and the access lines of successful health
+probes, which are otherwise left out of the log. A deployment that generated its master key
 creates no bootstrap API key (see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config)); create the
 first key in the dashboard.

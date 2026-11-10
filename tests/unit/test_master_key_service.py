@@ -82,6 +82,15 @@ def test_setup_link_uses_the_interface_address_when_one_is_set() -> None:
     assert setup_link(config, "otari-mk-abc") == "https://otari.example.com/ui/#/setup?key=otari-mk-abc"
 
 
+def _startup_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """What the start logged, apart from the note a checkout with no built dashboard gets.
+
+    That note depends on whether ``make dashboard`` has run here, and it stays
+    visible on purpose: without a bundle the setup link has no page to open.
+    """
+    return [record for record in caplog.records if not record.getMessage().startswith("No dashboard bundle found")]
+
+
 def _start(config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> list[str]:
     """Boot ``config`` at the CLI's default level and return the plain lines it printed."""
     printed: list[str] = []
@@ -117,7 +126,7 @@ def test_a_first_start_prints_only_where_it_runs_and_the_setup_link(
     key = link.split("key=", 1)[1]
     assert hash_master_key(key) == _stored_hashes(config.database_url)[0]
     # Nothing else at the default level: no log record, so no key in one either.
-    assert [record.getMessage() for record in caplog.records] == []
+    assert [record.getMessage() for record in _startup_records(caplog)] == []
 
 
 def test_a_later_start_says_where_to_sign_in_and_shows_no_key(
@@ -131,8 +140,7 @@ def test_a_later_start_says_where_to_sign_in_and_shows_no_key(
 
     assert printed == ["Otari 1.2.3 is running at http://localhost:8000", "Sign in at http://localhost:8000/"]
     # The reminders the first start held back, and nothing below a warning.
-    assert caplog.records
-    assert {record.levelno for record in caplog.records} == {logging.WARNING}
+    assert {record.levelno for record in _startup_records(caplog)} == {logging.WARNING}
 
 
 def test_a_first_start_with_a_generated_master_key_creates_no_bootstrap_api_key(

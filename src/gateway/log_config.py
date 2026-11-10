@@ -60,7 +60,30 @@ def _mask_args(record: logging.LogRecord) -> bool:
     return True
 
 
-def uvicorn_log_config(level: int = logging.INFO) -> dict[str, Any]:
+class ProbeAccessFilter(logging.Filter):
+    """Drop uvicorn's access line for a successful request to a health probe path.
+
+    A container's health check asks every 30 seconds, and its lines push
+    everything else, the first start's setup link included, off the screen. A
+    probe that fails is still logged.
+    """
+
+    def __init__(self, paths: tuple[str, ...]) -> None:
+        super().__init__()
+        self._paths = frozenset(paths)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # uvicorn's access record: (client, method, path with query, HTTP version, status).
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        path, status = args[2], args[4]
+        if not isinstance(path, str) or not isinstance(status, int):
+            return True
+        return status >= 400 or path.partition("?")[0] not in self._paths
+
+
+def uvicorn_log_config(level: int = logging.INFO, probe_paths: tuple[str, ...] = ()) -> dict[str, Any]:
     """uvicorn's own logging config, with its handlers masking credentials as the gateway's does.
 
     uvicorn's loggers print through handlers of their own, so the gateway
@@ -69,7 +92,9 @@ def uvicorn_log_config(level: int = logging.INFO) -> dict[str, Any]:
 
     uvicorn's lifecycle lines ("Started server process", "Application startup
     complete") repeat what the gateway says itself at startup, so they print
-    only when ``level`` is DEBUG. Its warnings, errors and access log are unchanged.
+    only when ``level`` is DEBUG, and so do the access lines of successful
+    requests to ``probe_paths``. Its warnings, errors and every other access
+    line are unchanged.
     """
     from uvicorn.config import LOGGING_CONFIG
 
@@ -80,6 +105,9 @@ def uvicorn_log_config(level: int = logging.INFO) -> dict[str, Any]:
     if level > logging.DEBUG:
         for name in ("uvicorn", "uvicorn.error"):
             config["loggers"][name]["level"] = "WARNING"
+        if probe_paths:
+            config["filters"]["probes"] = {"()": ProbeAccessFilter, "paths": probe_paths}
+            config["handlers"]["access"]["filters"].append("probes")
     return config
 
 
