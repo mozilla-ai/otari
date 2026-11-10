@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/d20518082f5e7b856cb053cfe4ad50406902d012/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/6782122df8f9db1e802afcb1c97fcb9379605fb9/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -93,8 +93,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
-| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_audiences` | The audiences this deployment answers to, one of which an identity token must name in its `aud` claim. Required once `federation_issuers` or `federation_member_rules` is set. See [How a token is checked](workload-identity.md#how-a-token-is-checked). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
@@ -807,7 +808,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/d20518082f5e7b856cb053cfe4ad50406902d012/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/6782122df8f9db1e802afcb1c97fcb9379605fb9/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1800,7 +1801,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/d20518082f5e7b856cb053cfe4ad50406902d012/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/6782122df8f9db1e802afcb1c97fcb9379605fb9/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
