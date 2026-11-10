@@ -6765,8 +6765,10 @@ export interface paths {
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
          *     Called with an API key, a tool its workspace does not allow is listed as
-         *     unavailable. Every other `tools[]` entry, including provider-native keywords
-         *     not listed here, is forwarded to the upstream provider untouched.
+         *     unavailable. `direct_available` separately describes the default search/fetch
+         *     endpoint, including key and inherited user permissions. Every other `tools[]`
+         *     entry, including provider-native keywords not listed here, is forwarded to the
+         *     upstream provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -11016,7 +11018,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names, 'otari:web_search' for organization-key search, or '*' for every tool. A model wildcard never grants a tool.
              */
             allowed_tools?: string[] | null;
             /**
@@ -11152,7 +11154,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names ('*' for every tool). A key can only narrow your own tool access.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names, 'otari:web_search' for organization-key search, or '*' for every tool. A key can only narrow your own tool access.
              */
             allowed_tools?: string[] | null;
             /**
@@ -11347,7 +11349,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names ('*' for every tool).
+             * @description Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names, 'otari:web_search' for organization-key search, or '*' for every tool.
              */
             allowed_tools?: string[] | null;
             /**
@@ -14219,6 +14221,11 @@ export interface components {
              * @description What the tool does, as the model is told.
              */
             description: string;
+            /**
+             * Direct Available
+             * @description Whether the default direct POST /search or /fetch call is configured and permitted for this caller. Includes workspace restrictions and the key's or owner's tool grants. A legacy backend that only runs inside a model request does not qualify. Null for tools without one of these direct endpoints.
+             */
+            direct_available?: boolean | null;
             /**
              * Example
              * @description A ready-to-use `tools[]` entry.

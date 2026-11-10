@@ -191,6 +191,6 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches())}
+    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches(), frozenset())}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}

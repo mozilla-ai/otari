@@ -73,6 +73,9 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (False, "not_configured")
+    assert tools["otari_web_search"]["direct_available"] is False
+    assert tools["otari_web_fetch"]["direct_available"] is False
+    assert tools["otari_code_execution"]["direct_available"] is None
 
 
 def test_configured_tools_report_available(tmp_path: Path) -> None:
@@ -86,6 +89,8 @@ def test_configured_tools_report_available(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (True, None)
+    assert tools["otari_web_search"]["direct_available"] is False
+    assert tools["otari_web_fetch"]["direct_available"] is True
 
 
 def test_accepted_types_are_canonical_only_by_default(tmp_path: Path) -> None:

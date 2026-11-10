@@ -130,7 +130,8 @@ never widen it.
 governs `POST /api/v1/search` and `POST /api/v1/fetch`:
 
 - Entries are search or fetch tool names as the dashboard shows them,
-  `builtin_fetch` for Otari's own fetcher, or `*` for every tool.
+  `builtin_fetch` for Otari's own fetcher, `otari:web_search` for organization-key
+  search without a deployment instance, or `*` for every tool.
 - A key's list wins over its user's, and may narrow it but never widen it.
 - An empty list allows no tool.
 - A model wildcard never grants a tool. A search provider can share its name

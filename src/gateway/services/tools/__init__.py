@@ -37,6 +37,7 @@ tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds
 any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs the search tool on an
 ``InLoopSearch``, ``build_web_search_backends`` builds it and the fetch tool's beside it for a request, and
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
+``DirectToolCatalog`` discovers the default direct web tools on the already-resolved workspace policy.
 ``DirectToolService`` runs a direct tool call, from its billed user to its settled cost, over the
 interfaces beside it (``DirectToolAccounts``, ``DirectToolLedger``, ``DirectToolGates``,
 ``WorkspaceWebPolicies``), which the request's builder implements.
@@ -101,6 +102,7 @@ from gateway.services.tools._direct_tool_call import (
     DirectToolUsage,
     WorkspaceWebPolicies,
 )
+from gateway.services.tools._direct_tool_catalog import DirectToolCatalog
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import (
@@ -228,6 +230,7 @@ __all__ = [
     "DirectCaller",
     "DirectToolAccounts",
     "DirectToolCall",
+    "DirectToolCatalog",
     "DirectToolGates",
     "DirectToolLedger",
     "DirectToolOutcome",

@@ -504,12 +504,13 @@ class DirectToolService:
         # about the workspace.
         workspace_id = await self._ledger.workspace_of(api_key_id)
 
-        # The workspace's web access policy, read as the in-loop tool reads it. A
+        # Attribution to the default workspace gives a master key no tenant policy or credentials.
+        # The API key's web access policy is read as the in-loop tool reads it. A
         # workspace that has turned web access off has turned it off: leaving this
         # endpoint open would leave the switch bypassable by any key in that
         # workspace, which is a policy that fails open.
         try:
-            policy = await self._policies.resolve(workspace_id, policy_tools)
+            policy = await self._policies.resolve(api_key.workspace_id, policy_tools) if api_key is not None else None
         except WebSearchPolicyResolutionFailedError as exc:
             raise await refused(
                 exc.message,

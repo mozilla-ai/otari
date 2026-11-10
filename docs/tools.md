@@ -30,8 +30,17 @@ Unavailable but recognized tools remain in the response with
 - `workspace_disabled`: the API key's workspace does not allow it (a workspace
   admin turns it on under Tools in the dashboard).
 
+Each search and fetch entry also reports `direct_available`: whether the default
+`POST /api/v1/search` or `POST /api/v1/fetch` call is configured and permitted,
+including the API key's or owner's tool access. A legacy search backend that only
+runs during completions can have `available: true` and `direct_available: false`.
+This field currently covers only direct web tools; code execution reports `null`.
+Discovery does not check available funds, pricing or upstream health.
+
 A master key or a dashboard session belongs to no single workspace, so its
-answer reflects the deployment alone.
+answer reflects the deployment alone. Direct master-key requests use deployment
+settings too; the default workspace is only their usage attribution. A dashboard
+session may read this catalog but cannot execute a direct search or fetch.
 
 ## Who runs a tool
 
@@ -986,11 +995,12 @@ the pin, and any other member sees the list read-only.
 
 A workspace with a usable search key serves an explicit `otari_web_search`
 declaration even where the deployment has no search of its own, and the
-workspace's web-access policy still applies. Three things stay with the
-deployment's own configuration: `GET /api/v1/tools` and the Playground report
-web search only when the deployment can search, and a provider-native search
-declaration or the `Otari-Web-Search` header is handed to Otari only then, since
-that is decided before the workspace's policy is read. Elsewhere such a
+workspace's web-access policy still applies. The master-key and session views of
+`GET /api/v1/tools` and the Playground
+follow the deployment's own configuration. An API key's catalog counts its
+workspace's search key and policy. A provider-native search
+declaration or the `Otari-Web-Search` header is handed to Otari only when the
+deployment can search, since that is decided before the workspace's policy is read. Elsewhere such a
 declaration goes to the model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`

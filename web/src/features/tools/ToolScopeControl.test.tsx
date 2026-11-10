@@ -111,7 +111,7 @@ describe("ToolScopeControl", () => {
     )
   })
 
-  it("offers anyone else every tool or none, without reading the list", async () => {
+  it("offers organization search and every tool without reading deployment tools", async () => {
     const urls = mockApi()
     const user = userEvent.setup()
     const onChange = renderControl(["news"])
@@ -191,4 +191,21 @@ describe("ToolScopeControl", () => {
       }),
     ).toBeInTheDocument()
   })
+})
+
+it("grants organization search separately from a fetch instance with a similar name", async () => {
+  const urls = mockApi()
+  const user = userEvent.setup()
+  const onChange = renderControl(["web_search"])
+  await user.type(screen.getByLabelText("Add a search tool"), "Organization")
+  await user.click(
+    await screen.findByRole("option", { name: "Organization web search" }),
+  )
+  expect(onChange).toHaveBeenLastCalledWith(
+    ["web_search", "otari:web_search"],
+    true,
+  )
+  expect(urls.some((url) => url.includes(`${API_ROOT}/search-tools`))).toBe(
+    false,
+  )
 })

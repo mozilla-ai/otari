@@ -270,7 +270,7 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
         named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["search_tool"] == "web_search"
+    assert resp.json()["search_tool"] == "otari:web_search"
     assert resp.json()["results"][0]["snippet"] == "From the old client."
     credential = keyed.call_args.args[0]
     assert (credential.provider, credential.api_key) == ("tavily", "tvly-org-secret")
@@ -281,7 +281,7 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
     keyed.assert_awaited_once()
     rows = _search_rows(client, master_key_header, "no-tools-org-key")
     [served] = [row for row in rows if row["status"] == "success"]
-    assert (served["model"], served["provider"]) == ("web_search", "tavily")
+    assert (served["model"], served["provider"]) == ("otari:web_search", "tavily")
     assert served["cost"] == pytest.approx(0.005)
 
 
@@ -316,13 +316,13 @@ def test_an_unnamed_call_on_a_synthetic_key_runs_through_any_search_with_no_tool
     resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "max_results": 2}, headers=headers)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["search_tool"] == "web_search"
+    assert resp.json()["search_tool"] == "otari:web_search"
     assert len(resp.json()["results"]) == 2
     [request] = seen
     assert (request.url.host, request.url.path) == ("api.synthetic.new", "/v2/search")
     assert request.headers["authorization"] == "Bearer syn-org-secret"
     (row,) = _search_rows(client, master_key_header, "no-tools-synthetic")
-    assert (row["model"], row["provider"]) == ("web_search", "synthetic")
+    assert (row["model"], row["provider"]) == ("otari:web_search", "synthetic")
 
 
 def test_an_unnamed_call_runs_on_the_organizations_key_when_no_tool_is_the_default(
@@ -336,7 +336,7 @@ def test_an_unnamed_call_runs_on_the_organizations_key_when_no_tool_is_the_defau
         resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["search_tool"] == "web_search"
+    assert resp.json()["search_tool"] == "otari:web_search"
     keyed.assert_awaited_once()
 
 
@@ -2195,3 +2195,46 @@ def test_every_usage_row_names_its_request_its_workspace_and_counts_toward_budge
         assert row["api_key_id"] is not None
     workspaces = set(db_session.scalars(select(UsageLog.workspace_id).where(UsageLog.user_id == "row-shapes")).all())
     assert workspaces == {uuid.UUID(_default_workspace_id(client, master_key_header))}
+
+
+@pytest.fixture
+def organization_search_with_fetch_client(test_config: GatewayConfig, _secret_key: None) -> Generator[TestClient]:
+    yield from _client_on(
+        test_config,
+        search_tools={},
+        web_fetch_enabled=True,
+        fetch_tools={"web_search": {"provider": "fake", "options": {"text": "Fetch-only page."}}},
+    )
+
+
+def test_a_fetch_grant_cannot_authorize_organization_search(
+    organization_search_with_fetch_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = organization_search_with_fetch_client
+    headers = _keyed(client, master_key_header, "fetch-only")
+    _add_org_search_key(client, master_key_header, "tavily-key")
+    granted = client.patch(
+        f"{API_ROOT}/users/fetch-only", json={"allowed_tools": ["web_search"]}, headers=master_key_header
+    )
+    assert granted.status_code == 200, granted.text
+    tools = client.get(f"{API_ROOT}/tools", headers=headers).json()["data"]
+    assert next(tool for tool in tools if tool["id"] == "otari_web_search")["direct_available"] is False
+    assert client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers).status_code == 403
+    fetched = client.post(f"{API_ROOT}/fetch/web_search", json={"url": "https://example.com"}, headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["text"] == "Fetch-only page."
+    updated = client.patch(
+        f"{API_ROOT}/users/fetch-only", json={"allowed_tools": ["otari:web_search"]}, headers=master_key_header
+    )
+    assert updated.status_code == 200, updated.text
+    with patch(
+        "gateway.services.search_backend.run_keyed_search",
+        AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS)),
+    ):
+        searched = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    assert searched.status_code == 200, searched.text
+    assert searched.json()["search_tool"] == "otari:web_search"
+    assert (
+        client.post(f"{API_ROOT}/fetch/web_search", json={"url": "https://example.com"}, headers=headers).status_code
+        == 403
+    )

@@ -61,7 +61,7 @@ class CreateUserRequest(BaseModel):
         default=None,
         description="Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: "
         "null = the search tools allowed_models grants, [] = no tool, "
-        "or search and fetch tool names ('*' for every tool).",
+        "or search and fetch tool names, 'otari:web_search' for organization-key search, or '*' for every tool.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 

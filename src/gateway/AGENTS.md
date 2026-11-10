@@ -227,7 +227,11 @@ owned-endpoint client (`web_provider_client_for`), whatever
 workspace's explicit `otari_web_search` declarations where the deployment has no
 search of its own; provider-native declarations, the Playground and `GET /api/v1/tools`
 for a master key or a session follow the deployment's own search alone, while an
-API key's `GET /api/v1/tools` counts its workspace's key and switches.
+API key's `GET /api/v1/tools` counts its workspace's key and switches. Direct
+master-key search and fetch also use deployment settings only: attributing their
+usage to the default workspace does not grant that workspace's credentials or
+apply its policy. Catalog discovery reuses its resolved policy for
+`direct_available` rather than constructing the billable execution service.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 

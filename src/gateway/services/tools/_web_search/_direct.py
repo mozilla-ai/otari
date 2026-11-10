@@ -35,6 +35,7 @@ from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
+    ORGANIZATION_SEARCH_TOOL,
     WEB_SEARCH_PROVIDERS,
     ToolInstance,
     ToolKind,
@@ -50,7 +51,6 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
-from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
@@ -190,8 +190,8 @@ def organization_key_search_instance(policy: ResolvedWebSearchConfig | None) -> 
     """What a direct search that names no tool runs as when there is no instance to pick, or ``None``.
 
     It stands in for an instance where the workspace has an organization key
-    this gateway can search with: named ``web_search``, as the in-loop
-    tool is, on the key's provider, so the key's tool list, the rate rules and
+    this gateway can search with: named ``otari:web_search`` on the key's
+    provider, distinct from any configured fetch instance, so the tool list, rate rules and
     the usage row read it as that tool.
     """
     credential = policy.credential if policy is not None else None
@@ -201,7 +201,7 @@ def organization_key_search_instance(policy: ResolvedWebSearchConfig | None) -> 
     if not library_backed and credential.provider not in WEB_SEARCH_PROVIDERS:
         return None
     return ToolInstance(
-        name=WEB_SEARCH_TOOL_NAME, kind="search", provider=credential.provider, library_backed=library_backed
+        name=ORGANIZATION_SEARCH_TOOL, kind="search", provider=credential.provider, library_backed=library_backed
     )
 
 

@@ -117,7 +117,8 @@ class CreateKeyRequest(BaseModel):
     allowed_tools: list[str] | None = Field(
         default=None,
         description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, "
-        "[] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.",
+        "[] = no tool, or search and fetch tool names, "
+        "'otari:web_search' for organization-key search, or '*' for every tool. A model wildcard never grants a tool.",
     )
     exclude_from_budget: bool = Field(
         default=False,

@@ -21,6 +21,7 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchPolicyResolutionFailedError,
     WebSearchPolicyResolutionFailure,
 )
+from gateway.models.api_keys import APIKey
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, ToolUse
 from gateway.schemas.tools import FetchRequest, SearchRequest
@@ -144,6 +145,7 @@ async def _search(
     gates: _Gates | None = None,
     policies: _Policies | None = None,
     request: dict[str, Any] | None = None,
+    master: bool = False,
     **config: Any,
 ) -> Any:
     async with httpx.AsyncClient() as client:
@@ -155,7 +157,15 @@ async def _search(
             policies=policies or _Policies(),
             web_client=client,
         )
-        caller = DirectCaller(api_key=None, is_master_key=True, user="billed", end_user_budget_id=None, request_id="r1")
+        caller = DirectCaller(
+            api_key=None
+            if master
+            else APIKey(id="k1", user_id="billed", workspace_id=WORKSPACE, exclude_from_budget=False),
+            is_master_key=master,
+            user="billed",
+            end_user_budget_id=None,
+            request_id="r1",
+        )
         return await service.search(
             SearchRequest(query="otari", **(request or {})), caller=caller, tool_name=tool, endpoint="/v1/search"
         )
@@ -339,6 +349,7 @@ async def _fetch(
     gates: _Gates | None = None,
     policies: _Policies | None = None,
     options: dict[str, Any] | None = None,
+    master: bool = False,
     **config: Any,
 ) -> Any:
     async with httpx.AsyncClient() as client:
@@ -350,7 +361,15 @@ async def _fetch(
             policies=policies or _Policies(),
             web_client=client,
         )
-        caller = DirectCaller(api_key=None, is_master_key=True, user="billed", end_user_budget_id=None, request_id="r2")
+        caller = DirectCaller(
+            api_key=None
+            if master
+            else APIKey(id="k1", user_id="billed", workspace_id=WORKSPACE, exclude_from_budget=False),
+            is_master_key=master,
+            user="billed",
+            end_user_budget_id=None,
+            request_id="r2",
+        )
         request = FetchRequest(url=url, provider_options=options)
         return await service.fetch(request, caller=caller, tool_name="fake-fetch", endpoint="/v1/fetch")
 
@@ -402,3 +421,12 @@ async def test_a_page_found_at_a_disallowed_url_is_a_refusal_after_the_hold() ->
     assert ledger.steps[-1] == ("refund", "hold")
     (row,) = gates.rows
     assert (row.status, row.status_code, row.cost) == ("error", 403, None)
+
+
+@pytest.mark.asyncio
+async def test_master_calls_do_not_read_the_attribution_workspaces_policy() -> None:
+    policies = _Policies(unreadable=True)
+    search = await _search(master=True, policies=policies)
+    fetch = await _fetch(master=True, policies=policies)
+    assert search.response.search_tool == "fake-search"
+    assert fetch.response.fetch_tool == "fake-fetch"

@@ -218,6 +218,7 @@ from gateway.services.tool_settings_service import load_overrides, stage_overrid
 from gateway.services.tools import (
     DirectCaller,
     DirectToolCall,
+    DirectToolCatalog,
     DirectToolLedger,
     DirectToolService,
     DirectToolUsage,
@@ -2966,6 +2967,17 @@ class _DirectToolGates:
         await self._log_writer.put(new_usage_row(**vars(usage)))
 
 
+def get_direct_tool_catalog(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
+) -> DirectToolCatalog:
+    """Build non-billable tool discovery without the execution or accounting dependencies."""
+    return DirectToolCatalog(config=config, permissions=api_keys)
+
+
+DirectToolCatalogDep = Annotated[DirectToolCatalog, Depends(get_direct_tool_catalog)]
+
+
 def get_direct_tool_service(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -3057,5 +3069,6 @@ __all__ = [
     "verify_catalog_reader",
     "verify_master_key",
     "DirectToolServiceDep",
+    "DirectToolCatalogDep",
     "get_direct_tool_service",
 ]

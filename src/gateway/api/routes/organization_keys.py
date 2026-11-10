@@ -138,7 +138,8 @@ class CreateOwnKeyRequest(BaseModel):
     allowed_tools: list[str] | None = Field(
         default=None,
         description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, "
-        "[] = no tool, or search and fetch tool names ('*' for every tool). "
+        "[] = no tool, or search and fetch tool names, "
+        "'otari:web_search' for organization-key search, or '*' for every tool. "
         "A key can only narrow your own tool access.",
     )
     reject_user_mismatch: bool | None = Field(

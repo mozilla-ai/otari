@@ -647,7 +647,8 @@ for it works against Otari with its base URL changed. `include_raw` and
   usage row's model and provider.
 - Where there is no tool to pick (none configured, or several and no default),
   a call that names none still runs on the organization key, as the tool
-  `web_search` on the key's provider, with a 30 second timeout.
+  `otari:web_search` on the key's provider, with a 30 second timeout. This
+  permission cannot collide with a deployment fetch tool named `web_search`.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search
