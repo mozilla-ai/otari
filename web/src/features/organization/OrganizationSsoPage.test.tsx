@@ -35,7 +35,7 @@ interface MockOpts {
 }
 
 function mockApi(opts: MockOpts = {}) {
-  const sso = opts.sso ?? organizationSso()
+  let served = opts.sso ?? organizationSso()
   const requests: Request[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -47,12 +47,27 @@ function mockApi(opts: MockOpts = {}) {
     })
 
     if (url.includes("/sso/test")) {
-      return jsonResponse(sso)
+      return jsonResponse(served)
     }
     if (url.includes("/sso")) {
-      if (method === "GET") return jsonResponse(sso)
+      if (method === "GET") return jsonResponse(served)
       if (method === "PUT") {
-        return opts.save ? opts.save() : jsonResponse(sso)
+        if (opts.save) return opts.save()
+        // The served connection reflects the write, so a page that re-reads after saving sees the
+        // stored connection rather than none, which is what a real gateway answers.
+        const body = JSON.parse(String(init?.body ?? "{}"))
+        served = {
+          ...served,
+          connection: oidcConnection({
+            issuer: body.issuer,
+            resolved_issuer: body.issuer,
+            client_id: body.client_id,
+            client_secret_last4: String(body.client_secret ?? "").slice(-4),
+            display_name: body.display_name,
+            enabled: body.enabled,
+          }),
+        }
+        return jsonResponse(served)
       }
       if (method === "DELETE") return jsonResponse(undefined, 204)
     }
@@ -202,11 +217,14 @@ describe("OrganizationSsoPage", () => {
       default_role: "member",
       enabled: true,
     })
-    // The form closes only on a save the gateway accepted, so this is what
-    // separates a create from a request that was merely sent.
+    // The form closes only on a save the gateway accepted, and the page then
+    // shows the stored connection, which is what separates a create from a
+    // request that was merely sent.
     await waitFor(() => {
       expect(screen.queryByLabelText("Client secret")).not.toBeInTheDocument()
     })
+    expect(await screen.findByText("Acme Okta")).toBeInTheDocument()
+    expect(screen.getByText("••••t-98")).toBeInTheDocument()
   })
 
   it("keeps the stored secret when an edit leaves it blank", async () => {
