@@ -581,3 +581,9 @@ def test_a_service_key_bills_fetch_to_the_end_user_it_names(
     end_user = next(user for user in users if user["external_id"] == "fxa-123:fetch")
     assert end_user["budget_id"] == budget["budget_id"]
     assert len(_fetch_rows(client, master_key_header, end_user["user_id"])) >= 1
+    # The other end user's fetch is billed to that end user, not to the first one or the key.
+    other_user = next(user for user in users if user["external_id"] == "fxa-456:fetch")
+    assert other_user["budget_id"] == budget["budget_id"]
+    (other_row,) = _fetch_rows(client, master_key_header, other_user["user_id"])
+    assert other_row["status"] == "success"
+    assert other_row["cost"] == pytest.approx(0.002)
