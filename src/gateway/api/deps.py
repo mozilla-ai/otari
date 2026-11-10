@@ -52,6 +52,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
@@ -1338,6 +1339,14 @@ def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> Entitle
     return container.resolve(EntitlementPort, db)
 
 
+def get_signup_invite_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> SignupInvitePort:
+    """Resolve the signup-invite adapter this build bound at startup."""
+    return container.resolve(SignupInvitePort, db)
+
+
 def get_growth_signal_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
@@ -1619,6 +1628,7 @@ BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
+SignupInvitePortDep = Annotated[SignupInvitePort, Depends(get_signup_invite_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
@@ -2927,6 +2937,7 @@ __all__ = [
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",
+    "SignupInvitePortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",

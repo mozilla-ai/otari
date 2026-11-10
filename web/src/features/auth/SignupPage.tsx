@@ -4,8 +4,8 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useSignup } from "@/shared/api/auth"
-import { ApiError } from "@/shared/api/client"
-import { emailFromHash } from "@/shared/helpers/hashParams"
+import { ApiError, createSession } from "@/shared/api/client"
+import { emailFromHash, inviteFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
@@ -15,6 +15,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
+import { useAuth } from "./AuthContext"
 import { AuthEmailField, AuthPasswordField } from "./AuthFields"
 import { AuthHelp } from "./AuthHelp"
 import {
@@ -93,6 +94,10 @@ export function SignupPage({ hash }: { hash: string }) {
   // keyed on the whole hash, so a second link pasted into an open tab remounts
   // this page instead of re-rendering it with the first link's address.
   const invitedEmail = emailFromHash(hash)
+  // An invitation a build mailed to `invitedEmail`: it proves the mailbox, so a
+  // sign-up carrying it is verified at once and signs straight in.
+  const invite = inviteFromHash(hash)
+  const { login } = useAuth()
   const [isFormOpen, setIsFormOpen] = useState(
     () => providers.length === 0 || invitedEmail !== null,
   )
@@ -144,9 +149,25 @@ export function SignupPage({ hash }: { hash: string }) {
         // checkbox nobody saw. The box below is required, so reaching here with
         // terms published means it was ticked.
         ...(terms_url !== null ? { terms_accepted: true } : {}),
+        ...(invite !== null ? { invite } : {}),
       },
       {
-        onSuccess: () => {
+        onSuccess: async (response) => {
+          if (response.verified) {
+            recordEvent(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+              authentication_method: "password",
+              requires_verification: false,
+            })
+            const session = await createSession({
+              email: email.trim(),
+              password,
+            })
+            if (session.isOk) {
+              window.location.hash = "#/"
+              login()
+              return
+            }
+          }
           // Always verification-bound, and not a reading of the response: this
           // endpoint is enumeration-safe and says nothing about the address, so
           // the page navigates to check-email whatever came back.

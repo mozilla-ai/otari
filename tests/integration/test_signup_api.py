@@ -140,3 +140,73 @@ def test_signup_on_an_untouched_address_is_enumeration_safe(
 
     response = client.post(f"{API_ROOT}/auth/signup", json={"email": "nobody@example.com", "password": PASSWORD})
     assert response.status_code == 200
+
+
+class _Invites:
+    """An invitation ``tok`` sent to ada@example.com."""
+
+    async def invited_email(self, token: str) -> str | None:
+        return "ada@example.com" if token == "tok" else None
+
+
+@pytest.fixture
+def invites(client: TestClient):
+    from fastapi import FastAPI
+
+    from gateway.api.deps import get_signup_invite_port
+
+    app = client.app
+    assert isinstance(app, FastAPI)
+    app.dependency_overrides[get_signup_invite_port] = _Invites
+    yield
+    app.dependency_overrides.pop(get_signup_invite_port, None)
+
+
+@pytest.mark.usefixtures("invites")
+def test_an_invited_address_signs_up_verified_and_signs_in_at_once(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    _add_member(client, master_key_header, email="ada@example.com")
+
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        response = client.post(
+            f"{API_ROOT}/auth/signup", json={"email": "Ada@Example.com", "password": PASSWORD, "invite": "tok"}
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is True
+    # No verification email: the invitation already reached the mailbox.
+    assert not _TOKEN_IN_LINK.search(caplog.text)
+
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+
+
+@pytest.mark.usefixtures("invites")
+def test_an_invite_for_another_address_proves_nothing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    _add_member(client, master_key_header, email="grace@example.com")
+
+    response = client.post(
+        f"{API_ROOT}/auth/signup", json={"email": "grace@example.com", "password": PASSWORD, "invite": "tok"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is False
+    unverified = client.post(f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": PASSWORD})
+    assert unverified.status_code == 403

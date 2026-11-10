@@ -43,6 +43,7 @@ from gateway.adapters.identity_provider_adapter import DeploymentIdentityProvide
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
 from gateway.core.config import GatewayConfig
@@ -61,6 +62,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.repositories.tenancy import UserRepository
@@ -277,6 +279,12 @@ def _feedback_delivery_adapter(session: AsyncSession | None) -> FeedbackDelivery
 def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     """Build the core ``GrowthSignalPort`` adapter for one request."""
     return NullGrowthSignalAdapter(session)
+
+
+def _signup_invite_adapter(session: AsyncSession | None) -> SignupInvitePort:
+    """Build the core ``SignupInvitePort`` adapter, which knows no token."""
+    del session
+    return NullSignupInviteAdapter()
 
 
 def _usage_signal_adapter(session: AsyncSession | None) -> UsageSignalPort:
@@ -515,6 +523,8 @@ def build_container(
     # Growth and support-messenger notifications: the base has no vendor of its
     # own, so every lifecycle event is a no-op.
     container.bind(GrowthSignalPort, _growth_signal_adapter)
+    # Invitations that prove an address at sign-up: the base sends none.
+    container.bind(SignupInvitePort, _signup_invite_adapter)
     # Settled usage rows: the base reports them to nobody, its usage table
     # being the whole record. Resolved once, when the usage log writer is built.
     container.bind(UsageSignalPort, _usage_signal_adapter)
