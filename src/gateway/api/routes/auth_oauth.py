@@ -194,6 +194,13 @@ class OAuthSessionResponse(BaseModel):
             "from Account settings."
         ),
     )
+    new_account: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in created the account, or is the first way in to one nobody had claimed. "
+            "False for a sign-in to an account that was already usable."
+        ),
+    )
 
 
 def require_oauth_provider(
@@ -341,6 +348,7 @@ async def callback(
         user_id=identity.id,
         active_organization_id=signed_in.active_organization_id,
         password_removed=signed_in.password_removed,
+        new_account=signed_in.new_account,
     )
 
 

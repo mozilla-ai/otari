@@ -529,6 +529,25 @@ def test_a_second_sign_in_on_a_registered_address_founds_no_second_tenant(
     assert second.json()["active_organization_id"] == first.json()["active_organization_id"]
 
 
+def test_the_sign_in_that_made_the_account_says_so_and_the_next_one_does_not(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The dashboard records the first as a signup and the second as a login.
+    stub_exchange(monkeypatch, email="stranger@example.com")
+
+    first = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    client.cookies.clear()
+    second = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert first.status_code == 200, first.text
+    assert first.json()["new_account"] is True
+    assert second.status_code == 200, second.text
+    assert second.json()["new_account"] is False
+
+
 def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_verify(
     client: TestClient,
     oauth_configured: None,

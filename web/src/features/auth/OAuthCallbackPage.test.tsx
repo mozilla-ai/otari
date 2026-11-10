@@ -107,6 +107,24 @@ describe("OAuthCallbackPage", () => {
     )
   })
 
+  it("records a sign-in that created the account as a signup, not a login", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: true }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+      authentication_method: "google",
+    })
+    expect(recordEvent).not.toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.LOGIN_SUCCESS,
+      expect.anything(),
+    )
+  })
+
   it("clears the stored state, so one value answers exactly one callback", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
