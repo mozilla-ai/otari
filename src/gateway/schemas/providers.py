@@ -23,7 +23,13 @@ from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import (
+    HostedModelDisabledReason,
+    HostedProvider,
+    HostedProviderModel,
+    PlatformConnectState,
+    ProviderEndpoint,
+)
 from gateway.models.secret_fields import redact_secret_like_values
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
@@ -1102,3 +1108,29 @@ __all__ = [
     "WorkspaceProviderModelRestrictionRequest",
     "WorkspaceProviderModelRestrictionsPublic",
 ]
+
+
+class PlatformConnectStartPublic(SQLModel):
+    """What an operator needs to approve a connection on otari.ai.
+
+    ``user_code`` is what the approval page shows back, ``verification_uri_complete``
+    the page to open, and ``expires_in`` the seconds left to approve.
+    """
+
+    user_code: str
+    verification_uri_complete: str
+    expires_in: int
+
+
+class PlatformConnectStatusPublic(SQLModel):
+    """Where the deployment's connection to otari.ai stands.
+
+    ``idle`` means no attempt. The code, the link and the seconds left are set
+    while ``pending`` and null otherwise. ``connected`` means the ``otari-ai``
+    hosted provider holds the key otari.ai issued.
+    """
+
+    status: Literal["idle"] | PlatformConnectState
+    user_code: str | None = None
+    verification_uri_complete: str | None = None
+    expires_in: int | None = None

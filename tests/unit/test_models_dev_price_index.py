@@ -179,6 +179,20 @@ def test_huggingface_backend_via_implementation(index: ModelsDevPriceIndex) -> N
     assert price.provider_id == "togetherai"
 
 
+def test_an_otari_provider_prices_a_vendor_prefixed_id_from_the_vendor(index: ModelsDevPriceIndex) -> None:
+    price = index.resolve("otari-ai", "anthropic:claude-sonnet-4-5", implementation="otari")
+    assert price is not None
+    assert price.reference == "models.dev:anthropic/claude-sonnet-4-5"
+
+
+def test_a_vendor_prefixed_id_is_not_split_for_any_other_provider(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("openai-eu", "anthropic:claude-sonnet-4-5", implementation="openai") is None
+
+
+def test_an_otari_provider_does_not_price_a_model_its_vendor_does_not_list(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("otari-ai", "anthropic:no-such-model", implementation="otari") is None
+
+
 def test_huggingface_unpinned_uses_the_router_listing(index: ModelsDevPriceIndex) -> None:
     price = index.resolve("huggingface", "meta-llama/Llama-3.3-70B-Instruct")
     assert price is not None

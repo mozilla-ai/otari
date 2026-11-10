@@ -105,6 +105,52 @@ or on SQLite the key Otari generates beside the database (see
 The API returns only the key's last four characters, and masks credentials in
 `client_args` and the base URL.
 
+## Connecting otari.ai
+
+[otari.ai](https://otari.ai) is a hosted Otari: one key reaches models from many
+providers. It is a paid service, and a request served on it leaves this gateway
+for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
+the `otari` implementation.
+
+On the Hosted providers page, **Connect otari.ai** is offered beside adding a
+provider of your own:
+
+1. The gateway asks otari.ai for a code and opens its approval page in a new
+   tab. The page here shows the code and the link while it waits.
+2. Sign in to otari.ai (or create an account) and approve the code.
+3. The gateway stores the key otari.ai issues, lists its models and prices
+   them. With no other provider yet, the dashboard moves on to the setup guide.
+
+What a connection stores:
+
+- A hosted provider `otari-ai`, restricted to the organization of the operator
+  who connected. Lift or change the restriction through
+  `/api/v1/hosted-providers`.
+- Its models, named `otari-ai:<vendor>:<model>` (`otari-ai:openai:gpt-4o`).
+- A rate for each model its vendor's models.dev entry prices, where
+  `default_pricing` is on. That rate is the vendor's own, an estimate of what
+  otari.ai charges, and the page marks it **Estimate**. Set your own to change
+  it. A model with no rate is offered switched off, as on any hosted provider.
+
+Connecting again replaces the key of the existing `otari-ai` provider. A code
+that expires or is declined leaves nothing behind; choose **Try again**.
+
+To disconnect, remove the `otari-ai` provider. That deletes this gateway's copy
+of the key only, so also revoke the key on otari.ai's
+[API keys page](https://otari.ai/dashboard/#/keys).
+
+**Without the button.** Create a key on otari.ai's API keys page and add it as
+any hosted provider: choose the `otari` implementation, name it `otari-ai`,
+paste the key, and set the base URL to `https://api.otari.ai` (the origin,
+without `/api/v1`). The result is the same provider.
+
+Nothing is sent to otari.ai until an operator presses **Connect otari.ai**. The
+address it asks is the `platform_url` setting (`OTARI_PLATFORM_URL`,
+`https://api.otari.ai` by default); set it to an empty string and the option,
+every mention of it and its routes (`/api/v1/platform/connect`) are gone. The
+exchange itself is specified in the
+[Platform connect protocol](platform-connect-protocol.md).
+
 ## Roster and serving
 
 A hosted provider carries a roster: the models offered on it, each with a
@@ -381,6 +427,9 @@ menu, and is listed only for a deployment operator.
   while its models can.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
+- **Connect otari.ai** is offered beside adding a provider, on the first-run
+  panel and above the table afterwards; see
+  [Connecting otari.ai](#connecting-otariai).
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).

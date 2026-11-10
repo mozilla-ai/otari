@@ -2614,6 +2614,10 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
         os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
+# Fields an empty ``OTARI_<FIELD>`` switches off, where every other field reads an empty variable as unset.
+_EMPTY_ENV_SWITCHES_OFF = frozenset({"platform_url"})
+
+
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
 
@@ -2623,6 +2627,9 @@ def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """
     for field_name in GatewayConfig.model_fields:
         value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")
+        if value == "" and field_name in _EMPTY_ENV_SWITCHES_OFF:
+            config[field_name] = ""
+            continue
         if value is None or value == "":
             continue
         try:
