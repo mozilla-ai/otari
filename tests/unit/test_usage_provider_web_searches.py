@@ -5,14 +5,15 @@ from typing import Any
 
 import pytest
 from anthropic.types.message_delta_usage import MessageDeltaUsage
-from any_llm.types.completion import CompletionUsage
+from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CompletionUsage
 from any_llm.types.messages import MessageDeltaEvent, MessageResponse, MessageUsage
 from openai.types.responses import ResponseUsage
 
+from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
 from gateway.api.routes.responses import _ResponsesAdapter
 from gateway.core.usage import GatewayUsage, provider_web_searches_of
-from gateway.services.pricing import tool_rate_lookup
+from gateway.services.pricing import billed_provider_searches, tool_rate_lookup
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.streaming import merge_stream_usage
@@ -170,3 +171,64 @@ def test_whose_overrides_price_a_provider_search_follows_the_call_not_the_label(
         assert lookup is not None
         assert lookup.rate_keys == ("anthropic:web_search",)
         assert lookup.operator_set_only is deployment_paid
+
+
+def _grounded_usage(searches: int) -> dict[str, Any]:
+    return {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+        "server_tool_use": {"web_search_requests": searches},
+    }
+
+
+def test_a_chat_completion_carries_the_searches_gemini_grounding_ran() -> None:
+    """any-llm reports Gemini's Google Search queries as ``server_tool_use.web_search_requests``."""
+    result = ChatCompletion.model_validate(
+        {
+            "id": "c",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "gemini-3-flash",
+            "choices": [],
+            "usage": _grounded_usage(2),
+        }
+    )
+
+    usage = _ChatAdapter().extract_usage(result)
+
+    assert usage is not None
+    assert provider_web_searches_of(usage) == 2
+
+
+def test_a_chat_stream_reads_the_searches_off_its_usage_chunk() -> None:
+    chunk = ChatCompletionChunk.model_validate(
+        {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "gemini-3-flash",
+            "choices": [],
+            "usage": _grounded_usage(3),
+        }
+    )
+
+    usage = _ChatAdapter().extract_stream_usage(chunk)
+
+    assert usage is not None
+    assert provider_web_searches_of(usage) == 3
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "billed"),
+    [
+        ("gemini", "gemini-2.5-flash", 1),
+        ("vertexai", "publishers/google/models/gemini-2.0-flash-001", 1),
+        ("gemini", "gemini-3-flash-preview", 3),
+        ("gemini", "gemini-3.1-flash-lite", 3),
+        ("openai", "gpt-5", 3),
+    ],
+)
+def test_gemini_before_3_bills_one_search_per_grounded_prompt(provider: str, model: str, billed: int) -> None:
+    """Gemini 2.5 and earlier bill a grounded prompt once, however many queries it ran; Gemini 3 bills each query."""
+    assert billed_provider_searches(provider, model, 3) == billed

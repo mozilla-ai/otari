@@ -11,6 +11,7 @@ request does: an override the organization wrote itself would let it name the
 deployment's cost, down to zero.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -37,6 +38,18 @@ PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
     "anthropic:web_search": Decimal("0.01"),
     "openai:web_search": Decimal("0.01"),
 }
+
+# Gemini 2.5 and earlier bill Google Search grounding per grounded prompt, however
+# many queries it ran; Gemini 3 bills each query (https://ai.google.dev/gemini-api/docs/pricing).
+_PER_PROMPT_SEARCH_MODEL = re.compile(r"(?:^|/)gemini-[12][.-]")
+_GEMINI_PROVIDERS = frozenset({"gemini", "vertexai"})
+
+
+def billed_provider_searches(provider: str, model: str, searches: int) -> int:
+    """How many of the ``searches`` a model's provider ran it bills: one per prompt on Gemini 2.5 and earlier."""
+    if provider in _GEMINI_PROVIDERS and _PER_PROMPT_SEARCH_MODEL.search(model):
+        return min(searches, 1)
+    return searches
 
 
 class ToolRate(NamedTuple):
