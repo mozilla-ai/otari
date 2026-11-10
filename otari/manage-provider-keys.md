@@ -5,72 +5,53 @@ icon: key
 
 # Manage provider keys
 
-A provider key is the credential Otari uses to call a model provider, such as
-your OpenAI or Anthropic API key. Your applications never see it: they send an
-Otari [API key](https://docs.otari.ai/guides/organizations-and-access/api-keys), and Otari calls the provider with the provider key.
+For background, see [Provider keys](provider-keys.md).
 
-## Choose how you reach a provider
+## Add a provider key
 
-You do not need a provider key of your own to start. Two ways work side by side:
+There are two ways to get provider access:
 
-- **otari.ai's own keys.** Without any setup, requests can use models otari.ai
-  provides. otari.ai holds the upstream credential, and the requests are paid
-  from your organization's balance; see [Billing](billing.md).
-- **Your own keys.** Add a provider key you already have, and Otari uses it on
-  your behalf. The provider bills you directly, and Otari adds no per-token
-  charge.
+### Otari-managed keys
 
-When your organization has a key of its own for a provider, Otari uses it
-first.
+These are Otari's pre-provisioned keys you can use without bringing your own key material. Otari handles the upstream credential, and requests on them are paid from your organization's [balance](billing.md). There is nothing to add: create an API key, as in the [Quickstart](quickstart.md), and your requests can use them.
 
-## Add your own provider key
+### Your own keys
 
-1. Click **Organization**, then **Providers**, then **Inference**.
-2. Click **Add provider key** in the top-right corner.
-3. Select the **Provider**.
-4. Enter a **Name** that tells several keys for one provider apart, such as
-   `production`, `staging` or `backup`.
-5. Paste the provider's API key.
-6. For a compatible endpoint of your own (Synthetic, a vLLM server), enter its
-   **API base URL**. Requests then reach this key's models by its **Request
-   prefix**, such as `synthetic:hf:Qwen/Qwen3.8-27B`, rather than by the
-   provider's name; see
-   [Add a key for your own endpoint](provider-keys.md#add-a-key-for-your-own-endpoint).
-7. Click **Add provider key** to save it.
+Bring your existing provider API keys and let Otari use them on your behalf. The upstream provider bills you directly, and Otari adds no per-token routing charge. When your organization has a key of its own for a provider, Otari uses it first. To add your own key:
+
+1. From the main dashboard, click **Organization**.
+2. Select **Providers**, then **Inference**.
+3. Click **Add provider key** in the top-right corner.
+4. Select the **Provider** from the dropdown.
+5. Enter a **Name** to easily distinguish multiple keys for the same provider, such as `production`, `staging`, or `backup`.
+6. Paste your **API key**.
+7. For a compatible endpoint of your own, such as Synthetic or a vLLM server, enter its **API base URL**. Requests then reach this key's models by its **Request prefix**; see [Add a key for your own endpoint](provider-keys.md#add-a-key-for-your-own-endpoint).
+8. Click **Add provider key** to save it.
 
 ![The New provider key dialog, with OpenAI selected and a key named production.](assets/screenshots/manage-provider-keys-add.png)
 
 ## Set a default key per provider
 
-When a provider has several keys, mark one as the default so workspaces use it
-without further setup. On **Inference**, click **Make default provider** (the star
-icon) on the key.
+If you have multiple keys for the same provider, mark one as the default so workspaces inherit it automatically.
+
+1. On **Inference**, find the keys for the provider.
+2. Click **Make default provider** (the star icon) on the key you want workspaces to inherit.
 
 ![Two OpenAI keys on the Inference page, production marked as the default.](assets/screenshots/manage-provider-keys-list.png)
 
-## Control which keys a workspace uses
+Workspaces inherit the organization default per provider unless you define a different key.
 
-Every workspace follows the organization's default key for each provider unless
-you choose otherwise. Open **Organization**, then **Workspaces**, open the
-workspace from the list, and select its **Providers** tab. A provider with
-several keys is one row: click it to show its keys. Each key has:
+## Control workspace access
 
-- A switch: turn it off to keep the workspace off this key.
-- **Models**: limit which of the provider's models the workspace may use with
-  this key.
-- **Always use this key**, in the key's **More** menu: pin the workspace to
-  this key, even after the organization's default changes. The menu offers it
-  only where the organization has more than one key for the provider and the
-  key is switched on.
+Once a provider key has been added at the organization level, open **Organization** → **Workspaces**, open the relevant workspace, and select its **Providers** tab to manage its provider access. Click a provider to show its keys. For each key, you can:
 
-A key you leave as it is follows the organization. To undo a pin, choose **Stop
-always using this key** in the same menu. The workspace then uses the
-organization's default key, or, when there is no default or the workspace
-turned it off, the oldest key the workspace has not turned off; see
-[Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys).
+* Leave it as it is to follow the organization.
+* Turn its switch off to prevent the workspace from using that provider key.
+* Select **Always use this key** from the key's **More** menu to ensure the workspace uses a specific provider key. Choose Stop always using this key in the same menu to follow the organization again.
+* Use its Models control to restrict access to specific models from that provider.
+
+A row you changed is marked Customized, and Reset in its menu returns it to the organization's settings.
 
 ![A workspace's Providers tab, with the production and backup OpenAI keys each switched on.](assets/screenshots/manage-provider-keys-workspace.png)
 
-To replace a key without breaking anything, see
-[Rotate a provider key](rotate-a-provider-key.md). More detail is in
-[Provider keys](provider-keys.md).
+To replace a key without breaking anything, see [Rotate a provider key](rotate-a-provider-key.md).

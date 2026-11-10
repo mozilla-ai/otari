@@ -4,24 +4,17 @@ icon: code
 
 # Configure code execution
 
-Each workspace decides whether its requests can run code in a sandbox. These
-steps are in the dashboard; the settings they change are described in
-[Built-in tools](https://docs.otari.ai/reference/gateway/tools).
+The **Code execution** settings let you control whether requests from a workspace can run generated code in a sandbox. You can apply more restrictive settings than the deployment to individual workspaces.
 
-A workspace setting can only narrow what the deployment allows: it cannot turn
-on code execution when the deployment has no sandbox.
+To configure code execution for a workspace:
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools**, then **Code execution**.
-3. Turn **Allow in <workspace>** on or off.
-4. Under **Who runs provider code tools**, choose whether a provider's own code
-   tool or Otari's sandbox runs the code.
+2. Go to **Tools** → **Code execution**.
+3. Turn **Allow in <workspace>** on to allow code execution for requests in this workspace, or off to block it.
+4. Configure **Who runs provider code tools** to control whether supported provider-native code tools or the Otari sandbox handle execution.
 
 ![A workspace's Code execution page, with the switch and who runs provider code tools.](assets/screenshots/configure-code-execution.png)
 
-The other fields of the policy, such as the iteration cap, the execution timeout
-and the sandbox image, are set through the API.
+Workspace settings can restrict what is allowed at the deployment level, but they **cannot enable code execution if no sandbox has been configured for the deployment**. Without one, a provider's own code tool still runs on the provider, and these settings do not apply to it.
 
-The policy these steps set is described in
-[Per-workspace code policy](https://docs.otari.ai/reference/gateway/tools#per-workspace-code-policy), and who runs the
-code in [Code-execution executor](https://docs.otari.ai/reference/gateway/tools#code-execution-executor).
+The prompt hint, the tool-loop iteration cap, the execution timeout, and the sandbox image are set through the API; see [Per-workspace code policy](https://docs.otari.ai/reference/gateway/tools#per-workspace-code-policy).

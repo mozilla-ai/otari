@@ -12,6 +12,10 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/organizations/me/routing-policies/explain" method="post" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/organizations/me/routing-policies/{name}" method="delete" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}

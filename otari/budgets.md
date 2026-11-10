@@ -4,171 +4,74 @@ icon: square-dollar
 
 # Budgets
 
-A budget caps what can be spent over a period, and Otari refuses requests that
-would pass it. This guide sets one up in the dashboard. How enforcement works
-(the budget forms, the spend, token and request axes, reservations, refusals and
-`Retry-After`) is under [How it works](#how-it-works).
+A budget caps how much can be spent in a period and blocks requests when the limit is reached. You can set budgets at the organization or workspace level, and narrow them to specific members or providers when you need finer control.
 
-In the dashboard a budget comes in two parts. The **budget** defines a limit and
-a period. A **spend ceiling** applies that budget to something: the
-organization or a workspace, optionally for one provider only. A budget on its
-own blocks nothing until a ceiling uses it. Each ceiling is checked on its own,
-so a request has to fit every ceiling that applies to it. On otari.ai a request
-also has to fit the organization's [balance](billing.md#budgets-are-a-different-control).
+A budget is applied with a **spend ceiling**, which names what it caps, or by putting a service key's [end users](https://docs.otari.ai/guides/organizations-and-access/end-users) on it. A budget nothing uses blocks nothing.
 
-## Create a budget and a spend ceiling
+## Scope: where the budget applies
 
-1. Open **Organization** and select **Spend & budgets**.
-2. Click **Add budget**, then set an optional **Name**, the **Limit (USD)**
-   (blank for no dollar limit) and how often it **Resets**: Daily, Weekly
-   (Mondays) or Monthly (the first of the month), at midnight UTC. Under
-   **Token and request limits**, optionally cap tokens or requests per period.
-   Click **Add budget**.
-3. Click **Add ceiling**, then choose what it caps under **Capping** (the
-   organization or one of its workspaces), optionally a **Provider instance** to
-   cap one provider only, the **Budget** to use, and an optional **Name**. Click
-   **Add ceiling**.
+Every ceiling has two scope dimensions.
 
-Requests matching the ceiling count toward its budget. When the budget is used
-up, new matching requests are refused until the next reset. Requests already
-running finish normally.
+**Level:**
 
-To cap one API key, set its budget on the key itself; see
-[Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend). Through the API, a budget can
-also cap tokens and requests, limit each user per minute, or use a rolling
-duration instead of a calendar period; the fields are in
-[What a budget limits](#what-a-budget-limits).
+* Organization caps spend across the whole organization.
+* Workspace caps spend within a single workspace.
 
-## Check a budget's status
+**Applies to:**
 
-**Spend & budgets** shows each budget's spend this period against its limit,
-and marks a budget once it passes 80% of it and once it is used up.
+* Overall is one total cap for everything at that level.
+* A member caps one person's spend within a workspace. It is set on **Members & roles**, beside the person.
+* A provider caps spend on one provider only.
 
-A refused request, and the headers it carries, are described in
-[Refusals and `Retry-After`](#refusals-and-retry-after).
+**Combine the two to get a specific scope.**
 
-## How it works
+* **Organization > Overall**: total organization spend cap.
+* **Organization > A specific provider**: cap spend on one provider across all workspaces.
+* **Workspace > All providers**: cap spend on every provider used by that workspace.
+* **Workspace > A specific member**: cap one contributor's spend within one workspace.
 
-### Budget forms
+Each budget is enforced independently. If a workspace has a $500/month overall cap and one member has a $100/month cap inside that workspace, both limits are checked on that member's requests. The first budget to run out blocks the request. Other members' requests are checked against the workspace cap only. On otari.ai a request must also fit the organization's [balance](billing.md#budgets-are-a-different-control).
 
-Otari enforces budgets before dispatch and reconciles actual cost afterwards.
+To cap a single API key, set a budget on the key itself; see [Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend).
 
-Two budget forms exist:
+## Period: how often it resets
 
-- A per-user budget limits each attached user independently.
-- A scoped budget limits an organization, workspace, membership, or API key and
-  can optionally narrow the limit to one provider.
+| Period | Resets |
+| --- | --- |
+| **Daily** | Every day at UTC midnight. |
+| **Weekly** | Every Monday at UTC midnight. |
+| **Monthly** | On the first of the month at UTC midnight. |
 
-A routing fallback to another provider must also pass that provider's budgets, as [Routing](https://docs.otari.ai/reference/gateway/routing#what-is-billed-and-what-the-caller-sees) describes.
+All resets are automatic. No cleanup is required.
 
-### What a budget limits
+## Enforcement
 
-A budget caps up to three things over its period, each set independently and
-each unlimited when left unset, and can also limit each user on it per minute:
+When a budget is exhausted, Otari blocks matching requests until the next period starts.
 
-| Field | Limits | Over |
-| --- | --- | --- |
-| `max_budget` | Spend in USD | The budget's period |
-| `token_limit` | Total tokens | The budget's period |
-| `request_limit` | Requests | The budget's period |
-| `rpm_limit` | Requests, per user | One minute |
-| `tpm_limit` | Tokens, per user | One minute |
+Existing in-flight requests complete normally. New requests at or above the cap fail until the next reset.
 
-A request must have room on every axis the budget caps. Spend and tokens are held at an upper bound before
-dispatch and reconciled to the measured figures afterwards; only the unused part
-of an over-estimate is released, and what the request measurably used stays
-charged. A request counts as one request when it is admitted. A model priced at
-zero spends no dollars, and still spends tokens and one request.
-A request whose dollar hold is larger than what remains is refused even when
-nothing has been spent yet, and the refusal says so with both amounts:
-`User 'alice' has $0.0015 of budget remaining, less than this request's
-estimated cost of $0.01025`. On chat completions, messages and responses the
-estimate prices the request's output token limit (`max_tokens`, or
-`max_output_tokens` on responses; a deployment default, 1024 tokens unless
-changed, when it sets none), and where the model charges for output the refusal names that
-figure, so a lower limit may let the request fit. A
-budget already at its cap is refused as `has exceeded budget limit`. On a
-service key, the refusal names the end user as the request did
-(`End user 'alice'`), not by Otari's internal id.
-Endpoints that hold no token estimate (embeddings, rerank, and the other
-pass-through routes) are refused once a token cap is exhausted rather than
-reserving headroom for themselves, so a token cap can be passed by the requests
-already in flight when it runs out. What each of them holds in dollars is what
-it can measure before the call: image generation the images asked for at the
-`size` asked for, speech the characters of its input, moderations one request,
-and transcription nothing, because the audio's length is not read here
-([Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit)).
-Every hold is priced at the rules of the model's price the request meets
-before the call: its estimated context, the tier it asks for, an image's size
-and a video's resolution, and the time it starts. Settlement prices the call
-at the rules it met, the tier the provider reports serving it at included, so
-a request that asks for one tier and is served at a dearer one can settle
-above its hold ([Overrides and multipliers](https://docs.otari.ai/self-hosting/configuration#overrides-and-multipliers)).
+A request is also blocked when its estimated cost no longer fits in what is left, even before the budget is fully spent. The estimate includes the request's whole output token limit (`max_tokens`), so a lower limit can let a request fit.
 
-### Per-minute limits
+## Status indicators
 
-The per-minute limits, `rpm_limit` and `tpm_limit`, count tokens on what each
-request used, as LiteLLM counts them: a request is admitted while the user's minute is under the
-limit. They apply to a user's own budget on chat completions, messages,
-responses and search, not to a scoped ceiling, and a refusal is a 429 naming the
-rule `budget`. A self-hosted deployment chooses where they are counted; see
-[Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement).
+**Spend & budgets** shows each budget's spend against its limit as a bar:
 
-### Periods and exemptions
+| Spend | Bar |
+| --- | --- |
+| **Under 80%** | Healthy. |
+| **80–100%** | Approaching the limit: the part past 80% is shown in red. At exactly 100% the budget is used up and matching requests are blocked. |
+| **Over 100%** | Exhausted: the whole bar and the amount turn red. Matching requests are blocked until reset. |
 
-Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
-`exclude_from_budget` bypasses enforcement; a self-hosted deployment can also turn
-enforcement off as a whole
-([Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement)).
+## What a budget limits
 
-### Imported usage and batches
+Spend limits are defined in USD. Budgets can also cap tokens and request count.
 
-Imported usage is retrospective and never counts toward a budget. Batch cost is
-also settled after submission, so operators should not treat those paths as a
-hard real-time cap. Batch settles dollars alone: its results arrive outside the
-reservation that gated the submission, so a batch counts as the one request that
-created it and contributes no tokens to a token cap, however many prompts it
-carried. The same holds for the vision side-call a request makes to describe an
-attachment, and for a video job: its length is reserved at the model's
-per-second price while the job starts, and its cost is settled, in dollars
-alone, by the start call when the provider returns the job completed, else by
-the first read that finds it so. Cap batch-heavy workloads in dollars rather
-than in tokens. See [Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
+Usage you import never counts toward a budget, and batch jobs are settled after the fact rather than blocked in real time; see [Importing external usage](https://docs.otari.ai/guides/observability/external-usage) and [Budget enforcement](https://docs.otari.ai/reference/gateway/budget-enforcement#imported-usage-batches-and-video).
 
-### Reservations are taken up front
+## Refusals and `Retry-After`
 
-The hold is the request's worst case, taken before dispatch: its prompt at
-roughly four characters per token, plus its whole output token limit. A request
-with `max_tokens: 8192` therefore holds the price of 8192 output tokens however
-few the model ends up writing, and a user close to the cap is refused once that
-hold no longer fits, even when the answer would have cost a fraction of it.
-The trade is deliberate: a request is admitted only when its estimated worst
-case fits, at the price of refusing some requests near the cap that would have
-fit. The prompt side is an estimate, and settlement records what the request
-actually cost, so a request can still settle a little past its hold (and its
-budget past the cap) when the prompt tokenizes heavier than the estimate
-assumes. A client that sends a realistic output limit, rather than the model's
-maximum, keeps more of its allowance usable near the cap.
+A blocked request gets an error with the code `budget_exceeded` and, when the budget resets, a `Retry-After` header with the seconds until the next period. See [Error codes](https://docs.otari.ai/reference#error-codes).
 
-Holds are also what bound concurrent requests from one user or end user. Each
-admitted request keeps its hold until it settles, and a new request is admitted
-only while recorded spend, every hold still in flight and its own hold together
-fit under the cap, checked in one conditional update so two requests cannot both
-take the last of it. Ten parallel requests near the cap are therefore admitted
-only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after
-`budget_reservation_ttl_sec`, 15 minutes by default (see
-[Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement)). Scoped ceilings hold the
-same way, so a key's ceiling bounds all of its end users' in-flight requests
-together.
+How holds, estimates, per-minute limits and refusals work is in [Budget enforcement](https://docs.otari.ai/reference/gateway/budget-enforcement).
 
-### Refusals and `Retry-After`
-
-A refusal is a 403 with `Otari-Error-Code: budget_exceeded`, and
-`Otari-Budget-Scope` names the budget that refused: `user`, or the ceiling's
-scope. When that budget resets, the refusal also carries `Retry-After`, the
-whole seconds (rounded up) until its current window ends: the next UTC
-midnight, ISO week or month for a calendar budget, and the end of the user's or
-ceiling's own period for a rolling one, which only the gateway knows. Where
-several budgets apply, it is the window of the one that refused. A budget with
-no period never resets and sends no `Retry-After`, and neither does a refusal of
-a hold larger than the whole cap, since a fresh window would refuse it too.
+Ready to set up a budget? See [Set a budget and ceiling](set-a-budget-and-ceiling.md).

@@ -5,37 +5,36 @@ icon: rotate
 
 # Rotate a provider key
 
-Rotate a provider key by adding its replacement first, and keep the old one
-active until requests succeed with the new one. Provider keys are looked up on
-every request, so your applications' API keys need no change.
+Rotate a provider key by adding its replacement first. Keep the existing key active until requests succeed with the new credential.
 
-Rotate when a key has been exposed, or you suspect it has, when your
-organization rotates keys on a schedule, or when you move traffic to a new
-provider account.
+Provider keys are resolved at request time. Your application's API keys do not need changes during rotation.
 
-## Add the new key
+## When to rotate a provider key
 
-1. Create a new API key in your provider's dashboard. Do not revoke the old key
-   yet.
-2. In Otari, open **Organization**, then **Providers**, then **Inference**.
-3. Click **Add provider key**, select the same provider, enter a distinct
-   **Name**, paste the new key, and click **Add provider key** to save it.
-4. Make the new key the provider's default with **Make default provider** (its
-   star icon).
-5. For each workspace that pins the old key, open it on **Workspaces**, select
-   its **Providers** tab, and choose **Always use this key** from the new key's
-   **More** menu. A workspace keeps using a pinned key after
-   the organization's default changes.
-6. Send a test request from each affected workspace, and confirm it in the
-   workspace's **Overview**, on its **Requests** tab.
+* A provider key has been compromised, or you suspect it has.
+* Your organization has a periodic key rotation policy.
+* You're migrating traffic to a new provider account.
 
-## Retire the old key
+## Rotate the key
 
-1. Back in **Organization**, then **Providers**, then **Inference**, **Archive**
-   the old key. An
-   archived key can then be deleted.
-2. Revoke the old key in the provider's dashboard. Removing a key from Otari
-   does not revoke it with the provider.
+1. Create a new API key in your provider's dashboard. Do not revoke the existing key yet.
+2. In otari.ai, select **Organization**, then **Providers**, then **Inference**.
+3. Click **Add provider key**. Select the same provider, enter a distinct **Name**, and paste the new API key.
+4. Set the new key as the provider's default by clicking **Make default provider** (its star icon).
+5. For each workspace that pins the old key, open it on **Workspaces**, select its **Providers** tab, and choose **Always use this key** from the new key's **More** menu.
+6. Send a test request from each affected workspace. Confirm it completes successfully, and not on a fallback, in the workspace's **Overview**, on its **Requests** tab.
 
-If you suspect the key was exposed, assign the replacement immediately, then
-revoke the exposed key with the provider.
+## Remove the old key
+
+Once requests are flowing through the new key, revoke the old key in the upstream provider dashboard.
+
+1. Return to **Organization** → **Providers** → **Inference** in Otari.
+2. **Archive** the old provider key. An archived key can then be deleted.
+
+Update every workspace that pins the old key before revoking it. A workspace can continue using a pinned key even after you change the organization default.
+
+If you suspect compromise, create and assign the replacement immediately. Then revoke the exposed key with the provider.
+
+## Rotate a key for your own endpoint
+
+A key with its own [request prefix](provider-keys.md#add-a-key-for-your-own-endpoint) is rotated in place, since no other key can take its prefix: edit the key on **Inference**, paste the new API key, and save.
