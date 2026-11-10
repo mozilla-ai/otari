@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from gateway.api.deps import get_web_provider_client, get_workspace_web_search_policies
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
 from gateway.models.tools import ResolvedWebSearchConfig, WebFetchCredential, WebTool
 from gateway.services.secret_box import generate_secret_key
 
@@ -294,6 +295,7 @@ def test_a_workspace_with_web_access_off_is_refused(
 
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == "web access is not enabled for this workspace"
+    assert resp.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     ((_, requested),) = stub.asked
     assert requested == (WebTool.FETCH,)
     (row,) = _fetch_rows(client, master_key_header, api_key_obj["user_id"])

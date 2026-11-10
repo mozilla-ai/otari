@@ -5,9 +5,9 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 
 | Command | What it does |
 |---|---|
-| `otari hook` | The callback a coding agent's hook calls. Composes the repository's guardrail files under `.otari/`, and your own under `~/.otari/`, and evaluates them in process; see `docs/agent-guardrails.md`. |
+| `otari hook` | The callback a coding agent's hook calls. Composes the repository's guardrail files under `.otari/`, and your own under `~/.otari/`, and evaluates them in process; see `cli/docs/agent-guardrails.md`. |
 | `otari hook setup` | Registers that callback in the agent's own settings file. |
-| `otari guardrails check` | Runs the repository's gates against a change, such as a pull request in CI; see `docs/agent-guardrails.md`. |
+| `otari guardrails check` | Runs the repository's gates against a change, such as a pull request in CI; see `cli/docs/agent-guardrails.md`. |
 | `otari guardrails generate` | Proposes guardrail gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
 | `otari guardrails validate` | Checks the composed guardrail offline, and dry-runs it against a command or a path. |
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
@@ -61,7 +61,7 @@ reports whenever that variable is set; the gateway reads the same one, in
 ## This repository's own guardrail CI
 
 Two workflows run `otari guardrails check` on every pull request to `main`,
-following the steps in `docs/agent-guardrails.md` ("Checking a pull request in
+following the steps in `cli/docs/agent-guardrails.md` ("Checking a pull request in
 CI"). Both take the CLI, the guardrail files and the verifier scripts from the
 base commit, and both skip with a notice when the base commit's CLI has no
 `otari guardrails check`, rather than take the command from the pull request.

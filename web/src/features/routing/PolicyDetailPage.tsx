@@ -13,6 +13,7 @@ import { MainSelectionGroup } from "./MainSelectionGroup"
 import { PolicyNameGroup } from "./PolicyNameGroup"
 import { PolicyPreview } from "./PolicyPreview"
 import { PolicyReadOnly } from "./PolicyReadOnly"
+import { PolicyTestGroup } from "./PolicyTestGroup"
 import { draftFromSpec, fallthroughOf, isRouted } from "./policyDraft"
 import { isEditableInForm, rowKeyOf } from "./policyModel"
 import { TierDownGroup } from "./TierDownGroup"
@@ -70,6 +71,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   const isRepresentable = isEditableInForm(row.spec)
   const isEditable = canEdit && !isConfig && isRepresentable
   const stored = draftFromSpec(row.spec)
+  const explainWorkspaceId = row.workspace_id ?? writeWorkspaceId
   const sectionProps = {
     row,
     stored,
@@ -178,6 +180,11 @@ export function PolicyDetailPage({ name }: { name: string }) {
           </p>
         </>
       )}
+
+      {/* The tenant surface compiles in a named workspace only. */}
+      {row.kind === "policy" && (isOperator || explainWorkspaceId !== null) ? (
+        <PolicyTestGroup row={row} workspaceId={explainWorkspaceId} />
+      ) : null}
     </div>
   )
 }

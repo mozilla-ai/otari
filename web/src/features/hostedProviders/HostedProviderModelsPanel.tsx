@@ -37,9 +37,24 @@ import { refreshOutcome } from "./refreshOutcome"
 // history stay where the operator can turn it back on. Unavailable beside it
 // marks a model the gateway switched off because its provider refused to serve it.
 
-function PriceSourceBadge({ source }: { source: HostedModel["price_source"] }) {
+/**
+ * Where a model's rate comes from. `provider` is the price the provider's own
+ * listing named, as another Otari's does. A default on an `otari` provider is
+ * the vendor's public rate, which the Otari behind it may not charge, so it is
+ * named an estimate.
+ */
+function PriceSourceBadge({
+  source,
+  isEstimate,
+}: {
+  source: HostedModel["price_source"]
+  isEstimate: boolean
+}) {
   if (source === "deployment") return <Badge tone="muted">Custom</Badge>
-  if (source === "defaults") return <Badge tone="muted">Default</Badge>
+  if (source === "provider") return <Badge tone="muted">Listed</Badge>
+  if (source === "defaults") {
+    return <Badge tone="muted">{isEstimate ? "Estimate" : "Default"}</Badge>
+  }
   return <Badge tone="warn">Unpriced</Badge>
 }
 
@@ -84,7 +99,12 @@ export function HostedProviderModelsPanel({
     {
       id: "source",
       header: "Rate",
-      cell: (row) => <PriceSourceBadge source={row.price_source} />,
+      cell: (row) => (
+        <PriceSourceBadge
+          source={row.price_source}
+          isEstimate={provider.provider === "otari"}
+        />
+      ),
     },
     {
       id: "enabled",

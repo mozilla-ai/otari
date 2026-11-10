@@ -389,7 +389,7 @@ process, needing no running gateway and no credential, and the Hook Server
 (`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for a
 caller that wants a gateway to evaluate over HTTP. Otari ships no such caller;
 the route's rework is tracked in #1699. See
-[docs/agent-guardrails.md](../../docs/agent-guardrails.md).
+[cli/docs/agent-guardrails.md](../../cli/docs/agent-guardrails.md).
 
 ## Logging
 

@@ -222,7 +222,7 @@ describe("ResetPasswordPage", () => {
     expect(
       await screen.findByText("Accept the terms of service to continue"),
     ).toBeInTheDocument()
-    await user.click(screen.getByLabelText("I accept the terms of service"))
+    await user.click(screen.getByLabelText("I accept the Terms of Service"))
     expect(
       screen.queryByText("Accept the terms of service to continue"),
     ).toBeNull()

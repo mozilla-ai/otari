@@ -52,29 +52,27 @@ Otari 位于你的应用和模型提供商之间。它为请求做身份验证�
 
 ## 快速开始
 
-使用 Docker 运行一个临时网关：
+使用 Docker 运行 Otari，无需任何配置：
 
 ```bash
-docker run --rm -p 8000:8000 \
-  -e OPENAI_API_KEY=YOUR_OPENAI_KEY \
-  -e OTARI_CONFIG_YAML='
-default_pricing: true
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
-' \
-  mzdotai/otari:latest \
-  otari serve
+docker run -v otari:/data -p 127.0.0.1:8000:8000 mzdotai/otari:latest
 ```
 
-首次遇到空数据库时，Otari 会创建一个 API 密钥并只打印一次：
+首次启动时，Otari 会打印一次设置链接：
 
 ```text
-No API keys found. Created bootstrap key for first run. Save this key now:
-tk-...
+Otari 1.0.0 is running at http://localhost:8000
+
+Open this link to choose your password and finish setup:
+
+http://localhost:8000/#/setup?key=otari-mk-...
+
+It is shown only once and carries your master key, so treat it like one.
 ```
 
-使用该密钥发送请求：
+打开该链接，选择用于登录的邮箱和密码。然后在控制台的 **Hosted providers** 页面添加一个提供商，并在该页面启用默认定价。链接中的密钥就是网关的主密钥，请妥善保管该链接。
+
+在控制台中创建一个 API 密钥（通过 **Overview** 上的设置向导，或在 **API keys** 页面），然后用它发送请求：
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
@@ -89,7 +87,7 @@ curl http://localhost:8000/api/v1/chat/completions \
 OpenAI 客户端只需将 `base_url` 设置为
 `http://localhost:8000/api/v1` 即可使用。
 
-该容器在内部使用 SQLite，容器停止后数据即被删除。如需持久化数据，请使用下文的 Compose 部署方式。
+`otari` 卷保存 SQLite 数据库，以及旁边那个用于加密已存储提供商凭据的自动生成密钥，因此使用同一个 `-v otari:/data` 启动的新容器会保留数据。不带 `-v` 时，Docker 会为每个容器创建一个新的匿名卷。如需使用 PostgreSQL，请使用下文的 Compose 部署方式。
 
 开发者配合编程智能体使用的命令（`otari hook`、`otari import claude-code`）可以单独安装，无需服务端：
 
@@ -97,7 +95,7 @@ OpenAI 客户端只需将 `base_url` 设置为
 brew install mozilla-ai/tap/otari
 ```
 
-参见 [Agent Guardrails](docs/agent-guardrails.md) 和
+参见 [Agent Guardrails](cli/docs/agent-guardrails.md) 和
 [在 Claude Code 中使用](docs/use-with-claude-code.md)。
 
 ## 运行完整服务栈
@@ -113,13 +111,13 @@ docker compose pull
 docker compose up -d
 ```
 
-Compose 会搭配 PostgreSQL 运行 Otari。可选的 profile 会额外启动代码沙箱、网页搜索和护栏服务：
+Compose 会搭配 PostgreSQL 运行 Otari。可选的 profile 会额外启动代码沙箱和网页搜索服务：
 
 ```bash
-docker compose --profile code-exec --profile web-search --profile guardrails up -d
+docker compose --profile code-exec --profile web-search up -d
 ```
 
-控制台地址为 `http://localhost:8000/`。如需通过控制台保存提供商密钥，请将 `OTARI_SECRET_KEY` 设置为由
+控制台地址为 `http://localhost:8000/`。如需在 PostgreSQL 上通过控制台保存提供商密钥，请将 `OTARI_SECRET_KEY` 设置为由
 `otari gen-secret-key` 生成的 Fernet 密钥。
 
 [Railway](deploy/railway/README.md) 提供一键部署模板。
@@ -135,7 +133,7 @@ docker compose --profile code-exec --profile web-search --profile guardrails up 
 Otari 还提供更完整的 OpenAI 兼容 API 和管理 API。运行中的服务在 `/api/v1/docs` 发布 Swagger UI，在
 `/api/v1/openapi.json` 发布 OpenAPI 规范。参见 [API 参考](docs/api-reference.md)。
 
-控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [管理控制台](docs/dashboard.md)。
+控制台用于管理提供商、模型、路由、工具、密钥、成员、预算、设置、活动和用量。其导航会根据登录用户的权限自动调整。参见 [运行控制台](docs/run-the-dashboard.md)。
 
 ## 开发
 
@@ -169,8 +167,8 @@ make typecheck
 - [路由](docs/routing.md)
 - [访问控制](docs/access-control.md)
 - [内置工具](docs/tools.md)
-- [Agent Guardrails](docs/agent-guardrails.md)
-- [SDK 与智能体集成](docs/index.md#integrations)
+- [Agent Guardrails](cli/docs/agent-guardrails.md)
+- [SDK 与智能体集成](docs/framework-integrations.md)
 - [架构](ARCHITECTURE.md)
 
 ## 许可证

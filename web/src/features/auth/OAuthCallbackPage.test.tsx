@@ -371,7 +371,7 @@ describe("OAuthCallbackPage", () => {
         }),
       ).toBeInTheDocument()
       expect(
-        screen.getByRole("link", { name: "terms of service" }),
+        screen.getByRole("link", { name: "Terms of Service" }),
       ).toHaveAttribute("href", "https://otari.example.com/terms")
       // Either way on keeps the page the refused sign-in started from.
       expect(
@@ -381,7 +381,7 @@ describe("OAuthCallbackPage", () => {
       expect(again).toBeDisabled()
 
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(again)
 

@@ -17,7 +17,7 @@ For background on what workspaces are and how they fit into the organization, se
 
 Workspaces inherit all provider keys available at the organization level. If a provider has multiple keys, you can choose which one a specific workspace should use, and which of its models the workspace can call.
 
-To select which provider keys a workspace can use, open the workspace from the list and select its **Providers** tab; see [Control workspace access](manage-provider-keys.md#control-workspace-access).
+To select which provider keys a workspace can use, open the workspace from the list and select its **Providers** tab; see [Control workspace access](model-providers.md#control-workspace-access).
 
 ## Manage a workspace
 

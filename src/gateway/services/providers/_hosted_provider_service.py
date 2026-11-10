@@ -103,7 +103,7 @@ from gateway.services.providers._hosted_name_index import (
     remember_hosted_name,
     remember_hosted_zero_data_retention,
 )
-from gateway.services.providers._hosted_offers import HostedOffers
+from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedSource, HostedSources
 from gateway.services.providers._model_kinds import page_by_kind
@@ -855,6 +855,8 @@ class HostedProviderService:
         if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=name) for model in declared]
             return ProviderDiscovery(provider=name, models=models)
+        if implementation == OTARI_IMPLEMENTATION:
+            self.offers.remember_listing(name, discovery.models)
         return dataclasses.replace(discovery, provider=name)
 
     @staticmethod
@@ -922,8 +924,20 @@ async def _undecryptable(provider: str) -> ProviderDiscovery:
 
 
 def _kinds(source: HostedSource, models: Sequence[str]) -> dict[str, ModelType | None]:
-    """What kind each model ``source`` offers is, by models.dev."""
-    return offered_model_types(cached_models_dev_catalog(), source.implementation, models)
+    """What kind each model ``source`` offers is, by models.dev.
+
+    Another Otari names a model ``vendor/model``, which models.dev knows under
+    the vendor, so that is where its kind is read. The kind its own listing
+    gives does not reach here: the client the listing is read with drops it.
+    """
+    catalog = cached_models_dev_catalog()
+    if source.implementation != OTARI_IMPLEMENTATION:
+        return offered_model_types(catalog, source.implementation, models)
+    kinds: dict[str, ModelType | None] = {}
+    for model in models:
+        vendor, separator, name = model.partition("/")
+        kinds[model] = offered_model_types(catalog, vendor, [name])[name] if separator else None
+    return kinds
 
 
 def _same_version(shown: datetime | None, stored: datetime | None) -> bool:

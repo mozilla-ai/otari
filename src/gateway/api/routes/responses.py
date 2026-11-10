@@ -82,6 +82,7 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_web_searches,
 )
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
@@ -207,7 +208,7 @@ def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dic
 
 
 def _usage_to_completion_usage(
-    usage: ResponseUsage | OpenResponsesUsage | None, *, service_tier: str | None = None
+    usage: ResponseUsage | OpenResponsesUsage | None, *, service_tier: str | None = None, provider_searches: int = 0
 ) -> CompletionUsage | None:
     if usage is None:
         return None
@@ -220,7 +221,17 @@ def _usage_to_completion_usage(
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
+        provider_web_searches=provider_searches,
         service_tier=service_tier,
+    )
+
+
+def _response_usage(response: Any) -> CompletionUsage | None:
+    """The usage row of a whole response, the searches its provider ran included."""
+    return _usage_to_completion_usage(
+        getattr(response, "usage", None),
+        service_tier=_served_tier(response),
+        provider_searches=provider_web_searches(response),
     )
 
 
@@ -306,11 +317,11 @@ class _ResponsesAdapter:
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
         if response_obj and getattr(response_obj, "usage", None):
-            return _usage_to_completion_usage(response_obj.usage, service_tier=_served_tier(response_obj))
+            return _response_usage(response_obj)
         return None
 
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
-        return _usage_to_completion_usage(getattr(result, "usage", None), service_tier=_served_tier(result))
+        return _response_usage(result)
 
     def attach_cost(
         self,

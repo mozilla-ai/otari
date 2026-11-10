@@ -40,9 +40,9 @@ export const PARITY = {
 // tool, exported over OTLP the way an instrumented agent sends it. No `chat`
 // span, so the export adds nothing to the usage log the other specs count.
 export const PARITY_SESSION = {
-  agent: "parity-agent",
-  tool: "parity_lookup",
-  conversation: "parity-conversation",
+  agent: "support-agent",
+  tool: "search_docs",
+  conversation: "support-chat-1042",
   keyName: "parity-otlp",
   // Fixed, so a re-run against a warm database re-sends the same spans rather
   // than starting another trace.

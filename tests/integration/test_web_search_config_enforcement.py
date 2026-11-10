@@ -29,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tools import WebSearchBackend
 from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
@@ -264,6 +265,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
     detail = response.json()
     assert detail["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert seen.ran is False, "the tool loop must never have run"
 
 
@@ -835,6 +837,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
 
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == "web search is not enabled for this workspace"
+    assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert ran.await_count == 0
 
     rows = client.get(

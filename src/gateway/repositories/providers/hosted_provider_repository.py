@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Never, cast
 
-from sqlalchemy import CursorResult, delete, func, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -188,30 +188,6 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
             )
         )
         return result.scalar_one_or_none()
-
-    async def list_for_provider(
-        self, provider: str, *, skip: int = 0, limit: int = 500
-    ) -> tuple[Sequence[HostedProviderModel], int]:
-        """One page of a provider's offered models, and how many there are in total."""
-        rows = (
-            (
-                await self.db.execute(
-                    select(HostedProviderModel)
-                    .where(HostedProviderModel.provider == provider)
-                    .order_by(HostedProviderModel.model)
-                    .offset(skip)
-                    .limit(limit)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        total = (
-            await self.db.execute(
-                select(func.count()).select_from(HostedProviderModel).where(HostedProviderModel.provider == provider)
-            )
-        ).scalar_one()
-        return rows, total
 
     async def list_all_for_provider(self, provider: str) -> Sequence[HostedProviderModel]:
         """Every offered row on one provider, for the pass that reprices them."""

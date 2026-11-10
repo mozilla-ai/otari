@@ -205,7 +205,7 @@ service cannot run or gives no verdict; `monitor` lets the request continue and
 records the skipped check. Only input checks can be mandated by a policy.
 
 Organization-mandated and request-provided guardrails compose with policy
-guardrails. See [Guardrails](guardrails.md).
+guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
 
 ## Explain a policy
 
@@ -218,8 +218,18 @@ otari routing explain balanced --allowed-model "anthropic:*"
 ```
 
 The command shows ordered candidates, filtered candidates and their reasons,
-effective weighted shares, and mandatory guardrails. The API equivalent is
-`POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
+effective weighted shares, and mandatory guardrails. It reads `config.yml`
+only, so it does not see policies created in the dashboard or through the API.
+
+For those, open the policy in the dashboard: its **Test** section shows the
+same plan, and for a policy with a budget tier-down, a budget-used field to
+try it with. On a deployment you run, the API equivalent is
+`POST /api/v1/routing/policies/explain`, which needs the operator; it can also
+validate an unsaved draft. Members of an organization use
+`POST /api/v1/organizations/me/routing-policies/explain` instead, from a
+dashboard session, naming one of their workspaces in `workspace_id`. There, a
+model the organization cannot reach is listed as left out, whether it comes from
+a draft or a saved policy.
 
 ## Agent model recommendations
 
