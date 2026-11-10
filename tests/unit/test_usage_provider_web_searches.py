@@ -220,15 +220,16 @@ def test_a_chat_stream_reads_the_searches_off_its_usage_chunk() -> None:
 
 
 @pytest.mark.parametrize(
-    ("provider", "model", "billed"),
+    ("model", "billed"),
     [
-        ("gemini", "gemini-2.5-flash", 1),
-        ("vertexai", "publishers/google/models/gemini-2.0-flash-001", 1),
-        ("gemini", "gemini-3-flash-preview", 3),
-        ("gemini", "gemini-3.1-flash-lite", 3),
-        ("openai", "gpt-5", 3),
+        ("gemini-2.5-flash", 1),
+        ("publishers/google/models/gemini-2.0-flash-001", 1),
+        ("gemini-3-flash-preview", 3),
+        ("gemini-3.1-flash-lite", 3),
+        ("gpt-5", 3),
+        ("claude-sonnet-4-5", 3),
     ],
 )
-def test_gemini_before_3_bills_one_search_per_grounded_prompt(provider: str, model: str, billed: int) -> None:
+def test_gemini_before_3_bills_one_search_per_grounded_prompt(model: str, billed: int) -> None:
     """Gemini 2.5 and earlier bill a grounded prompt once, however many queries it ran; Gemini 3 bills each query."""
-    assert billed_provider_searches(provider, model, 3) == billed
+    assert billed_provider_searches(model, 3) == billed

@@ -41,13 +41,14 @@ PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
 
 # Gemini 2.5 and earlier bill Google Search grounding per grounded prompt, however
 # many queries it ran; Gemini 3 bills each query (https://ai.google.dev/gemini-api/docs/pricing).
+# Keyed on the model alone: only Google's grounding reports searches on these
+# models, and a hosted provider or organization key serving them has a name of its own.
 _PER_PROMPT_SEARCH_MODEL = re.compile(r"(?:^|/)gemini-[12][.-]")
-_GEMINI_PROVIDERS = frozenset({"gemini", "vertexai"})
 
 
-def billed_provider_searches(provider: str, model: str, searches: int) -> int:
+def billed_provider_searches(model: str, searches: int) -> int:
     """How many of the ``searches`` a model's provider ran it bills: one per prompt on Gemini 2.5 and earlier."""
-    if provider in _GEMINI_PROVIDERS and _PER_PROMPT_SEARCH_MODEL.search(model):
+    if _PER_PROMPT_SEARCH_MODEL.search(model):
         return min(searches, 1)
     return searches
 

@@ -1270,6 +1270,26 @@ async def test_searches_gemini_grounding_ran_are_billed_as_google_bills_them(
 
 
 @pytest.mark.asyncio
+async def test_a_gemini_2_5_prompt_bills_once_on_a_provider_with_a_name_of_its_own(async_db: AsyncSession) -> None:
+    """A hosted provider or organization key serving Gemini has its own name, which must not lift the per-prompt cap."""
+    configure_default_pricing(True)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model="gemini-2.5-flash",
+        provider="team-gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=GatewayUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15, provider_web_searches=3),
+    )
+
+    [row] = writer.logs
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession) -> None:
     configure_default_pricing(True)
     async_db.add(
