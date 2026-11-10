@@ -170,7 +170,11 @@ async def admit_mcp_servers(
             # names the environment variable, so it stays in the log.
             logger.error("MCP server token could not be decrypted for workspace %s: %s", workspace_id, exc)
             raise McpServerConfigurationError(MCP_SERVER_TOKEN_UNREADABLE_DETAIL) from exc
-        stored_servers, sign_in = resolved.servers, resolved.sign_in
+        # An attached server gives way to one the request brought under the same name, and never refuses it.
+        stored_servers = [
+            server for server in resolved.servers if not (server.attached and server.name in inline_names)
+        ]
+        sign_in = resolved.sign_in
         await _validate_mcp_server_urls(stored_servers, stored=True, workspace_id=workspace_id)
         stored_name_counts = Counter(server.name for server in stored_servers)
         # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.

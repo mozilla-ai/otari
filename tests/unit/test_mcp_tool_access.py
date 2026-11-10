@@ -186,3 +186,26 @@ def test_the_callers_patterns_are_off_the_wire_the_schema_and_the_revision() -> 
     plain = ResolvedMcpServer(id=uuid.UUID(int=1), name="s", url="https://93.184.216.34/mcp")
     other = ResolvedMcpServer(id=uuid.UUID(int=1), name="s", url="https://93.184.216.34/mcp", everyone_tools=[])
     assert plain.revision == other.revision
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_gives_way_to_a_request_server_of_the_same_name() -> None:
+    class _Attached:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                servers=[McpServerConfig(name="mine", url="https://93.184.216.34/mcp", attached=True)]
+            )
+
+    admitted = await admit_mcp_servers(
+        [McpServerConfig(name="mine", url="https://93.184.216.35/mcp")],
+        None,
+        servers=cast(WorkspaceMcpServers, _Attached()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert admitted.servers is not None
+    assert [server.url for server in admitted.servers] == ["https://93.184.216.35/mcp"]

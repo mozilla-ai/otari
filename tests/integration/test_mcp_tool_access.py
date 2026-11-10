@@ -207,7 +207,15 @@ def test_a_key_lists_the_enabled_servers_whose_everyone_rule_lets_it_in(
 
     assert response.status_code == 200, response.text
     assert response.json() == {
-        "servers": [{"id": str(visible.id), "name": "github", "purpose_hint": "github hint", "sign_in_required": False}]
+        "servers": [
+            {
+                "id": str(visible.id),
+                "name": "github",
+                "purpose_hint": "github hint",
+                "sign_in_required": False,
+                "sign_in_url": None,
+            }
+        ]
     }
     for secret in ("ghp_token", "93.184.216.34"):
         assert secret not in response.text
