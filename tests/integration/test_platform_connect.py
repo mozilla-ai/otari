@@ -599,6 +599,13 @@ def test_on_a_default_configuration_a_connected_model_serves_a_request_at_once(
         assert provider.await_args is not None
         assert provider.await_args.kwargs["api_key"] == ISSUED_KEY
 
+        # With its stored rate deleted, the page shows none: the dataset is not what a request would be priced on.
+        deleted = client.delete(f"{API_ROOT}/pricing/otari-ai:openai:gpt-4o", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        models = client.get(f"{HOSTED}/otari-ai/models", headers=headers).json()["data"]
+        shown = next(model for model in models if model["model"] == "openai:gpt-4o")
+        assert (shown["price_source"], shown["input_price_per_million"]) == (None, None)
+
 
 def test_the_toggle_still_decides_for_every_other_hosted_provider(
     postgres_url: str, clean_database: None, monkeypatch: pytest.MonkeyPatch
