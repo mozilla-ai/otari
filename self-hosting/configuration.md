@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/9c31dce214f3c3084c07e775ebec736b6ee94540/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -80,6 +80,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -806,7 +807,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/9c31dce214f3c3084c07e775ebec736b6ee94540/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -981,6 +982,12 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
+
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then
@@ -1004,8 +1011,15 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
-It refuses models.dev data the gateway cannot read: a document that lists
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+which publishes the same documents at the same paths, built from models.dev's
+catalog plus the models it does not list yet; each of those is also offered to
+models.dev, and leaves the fork once it lands there. `https://models.dev` reads
+models.dev itself, and a private mirror works when it serves the same paths.
+An update refuses models.dev data the gateway cannot read: a document that lists
 no models, or one with more than a quarter of its models damaged. When neither
 catalog can be read, the prices in force stay, and the update reports an error.
 
@@ -1017,7 +1031,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 The bundled snapshot is the whole models.dev catalog, so it also carries the
 model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+saved v2 `api.json`, adding `--input-version v1` for a v1 one; `--base-url`
+fetches from somewhere other than the default) and commit
 `src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
@@ -1785,7 +1800,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/fe8cf5d1dad3afe77e7d38644bb3a98839c07ce7/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/9c31dce214f3c3084c07e775ebec736b6ee94540/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

@@ -123,7 +123,9 @@ share the estimate equally. A subagent's own requests are counted exactly.
 The context map shows what fills the model's context window, as blocks sized by
 tokens, with the unused part as **Free**. It reads the session's last LLM call,
 and also names the fullest call when that was an earlier one. Hover, focus or tap
-a block to see its tokens and share of the window.
+a block to see its tokens and share of the window. The window is the one the
+model's vLLM or SGLang server reports, where it does, and models.dev's otherwise
+(see [Models](models.md)).
 
 - **Every call** is split into cache reads, cache writes and fresh input.
 - **A request Otari served itself** is also split into system prompt, tool
