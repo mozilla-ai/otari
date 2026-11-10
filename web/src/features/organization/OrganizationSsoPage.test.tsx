@@ -389,6 +389,24 @@ describe("OrganizationSsoPage", () => {
     ).not.toBeChecked()
   })
 
+  it("does not claim every member uses the provider when none loses access", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflight: organizationSsoPreflight({
+        total_members: 4,
+        affected_count: 0,
+        affected_members: [],
+      }),
+    })
+    renderPage(<OrganizationSsoPage />)
+
+    expect(
+      await screen.findByText(
+        /Nobody loses access\. All 4 members either sign in with your provider already or are exempt from this\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("says API keys stay on the old account and must be rotated", async () => {
     mockApi({
       sso: organizationSso({ connection: oidcConnection() }),

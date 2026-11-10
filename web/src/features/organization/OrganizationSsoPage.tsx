@@ -340,7 +340,7 @@ function strandedKeysExplanation(): string {
 function affectedHeadline(preflight: OrganizationSsoPreflight): string {
   const { affected_count: affected, total_members: total } = preflight
   if (affected === 0) {
-    return `All ${total} members already use it. Nobody loses access.`
+    return `Nobody loses access. All ${total} members either sign in with your provider already or are exempt from this.`
   }
   return `${affected} of ${total} members lose access until they sign in with your provider.`
 }
