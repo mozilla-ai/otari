@@ -123,10 +123,10 @@ class DomainAutoJoinListener:
         sign-in that triggered this commits the membership and the session
         together.
         """
-        # An identity with no address at all is the deployment's master-key
-        # operator, which signs in through the same route. It has no domain to
-        # match and no verification to have done, so it falls out here rather
-        # than at the address check below.
+        # An identity with no address at all is either the deployment's master-key operator or an SSO
+        # account, told apart by `oauth_provider`: an SSO account carries it and the operator carries
+        # none. Neither has a domain to match or a verification to have done, so both fall out here
+        # rather than at the address check below.
         # A vouched address is one an organization admin asserted, not one the
         # person proved, and any organization can vouch for any address.
         if user.email is None or user.email_verified_at is None or user.email_vouched_at is not None:
@@ -159,6 +159,16 @@ class DomainAutoJoinListener:
                 domain,
             )
         return membership
+
+
+class VerifiedDomainLookup:
+    """Answers whether an email domain's claim is currently proven."""
+
+    def __init__(self, domains: OrganizationDomainRepository) -> None:
+        self._domains = domains
+
+    async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:
+        return await self._domains.get_verified_by_domain(domain)
 
 
 class OrganizationDomainService:
@@ -413,4 +423,4 @@ class OrganizationDomainService:
         )
 
 
-__all__ = ["DomainAutoJoinListener", "OrganizationDomainService"]
+__all__ = ["DomainAutoJoinListener", "OrganizationDomainService", "VerifiedDomainLookup"]
