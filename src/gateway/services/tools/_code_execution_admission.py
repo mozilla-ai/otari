@@ -13,7 +13,7 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionDeclarationError,
     CodeExecutionRefusedError,
 )
-from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, SandboxProvider
 from gateway.services.code_execution import (
     CONTAINER_AUTO,
     CONTAINER_ID_PREFIX,
@@ -68,6 +68,10 @@ SANDBOX_TOOLS_EXCLUDED_DETAIL = (
 # it here would send an operator instruction to a data-plane caller, which is the
 # boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
 SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
+SANDBOX_IMAGE_NOT_RUN_DETAIL = (
+    "this workspace's code-execution policy pins a sandbox image, and this deployment runs code on Monty, "
+    "which runs no images"
+)
 ENVIRONMENT_NOT_OFFERED_DETAIL_TEMPLATE = (
     "Environment '{environment}' is not offered on this gateway. "
     f"GET {API_ROOT}/code/environments lists those it offers."
@@ -289,6 +293,7 @@ class DeclaredCodeExecution:
     async def _admit_executor(
         self, executor: CodeExecutor | None, *, beside_sandbox: bool, environment: str | None
     ) -> AdmittedCodeExecution:
+        """Settle where this request's code runs and what the gateway sandbox may do, or refuse what it cannot serve."""
         config = self.config
         sandbox_tool_entry = self.sandbox_tool_entry
         tools_after_sandbox = self.tools_after_sandbox
@@ -340,7 +345,10 @@ class DeclaredCodeExecution:
                 if code_execution_policy.image is not None:
                     # Re-checked because an operator may remove an image after a workspace pinned it.
                     if code_execution_policy.image not in config.pinnable_sandbox_images():
-                        raise CodeExecutionRefusedError(SANDBOX_IMAGE_NOT_ALLOWED_DETAIL)
+                        on_monty = config.effective_sandbox_provider() is SandboxProvider.MONTY
+                        raise CodeExecutionRefusedError(
+                            SANDBOX_IMAGE_NOT_RUN_DETAIL if on_monty else SANDBOX_IMAGE_NOT_ALLOWED_DETAIL
+                        )
                     sandbox_session_image = code_execution_policy.image
                     if environment is not None and environment != sandbox_session_image:
                         raise CodeExecutionRefusedError(

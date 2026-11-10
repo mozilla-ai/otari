@@ -150,10 +150,14 @@ providers:
 #     price_per_call: 0   # USD; with require_pricing, an unpriced tool is refused
 # web_search_default_tool: local
 
-# What runs code-execution tool calls: "protocol" (the default) talks to the
-# backend at sandbox_url, "e2b" runs them on E2B from this process and needs
-# the e2b extra plus E2B_API_KEY. See docs/tools.md.
+# What runs code-execution tool calls: "protocol" talks to the backend at
+# sandbox_url, "e2b" runs them on E2B from this process and needs the e2b extra
+# plus E2B_API_KEY, and "monty" runs a subset of Python in this gateway's own
+# worker processes and needs the monty extra. Unset picks "protocol" when
+# sandbox_url is set, else "monty" when its extra is installed. See docs/tools.md.
 # sandbox_provider: protocol
+# The most heap one session may use on the "monty" provider.
+# sandbox_monty_max_memory_mb: 256
 # How long a sandbox is held after its request so the next request can resume
 # it by container id, and the longest one may live from its first lease.
 # 0 releases every sandbox when its request ends.

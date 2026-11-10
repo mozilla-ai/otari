@@ -403,8 +403,8 @@ with the reference one rather than merely similar to it.
 
 | Setting | Env var | Meaning |
 |---|---|---|
-| `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` (the default) speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process and needs no backend of your own. |
-| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected. |
+| `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process; `monty` runs a subset of Python in the gateway's own worker processes. The last two need no backend of your own. Unset, `protocol` when `sandbox_url` is set, else `monty` when its extra is installed. |
+| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected, unless `sandbox_provider` is also unset and the `monty` extra is installed. |
 | `sandbox_purpose_hint` | `OTARI_SANDBOX_PURPOSE_HINT` | Default purpose hint for the tool, when a request supplies none. |
 | `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](tools.md#code-execution-executor). |
 
@@ -428,6 +428,7 @@ certifies a backend rather than an adapter.
 provider calls the sandbox a run gets: on `e2b`, a template's name or id, built
 in the provider's own account. The `e2b` adapter creates each sandbox from the
 session image as its template, and from E2B's default template when none is set.
+The `monty` adapter runs no images, so none is offered or pinnable on it.
 
 The isolation a run gets is the provider's too, and it is worth knowing what
 you traded for not running a container. What the reference backend confines,

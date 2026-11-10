@@ -1396,7 +1396,8 @@ export interface paths {
          *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
          *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
          *     sending that id back runs in the same sandbox, with its files and
-         *     interpreter state. A priced run answers with its settled cost in
+         *     interpreter state. A sandbox that cannot hold a session, such as Monty,
+         *     names no id, so each run starts fresh. A priced run answers with its settled cost in
          *     ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
          *
          *     Authentication modes:
@@ -10978,7 +10979,7 @@ export interface components {
             code: string;
             /**
              * Container
-             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.
+             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. A sandbox that cannot hold a session, such as Monty, runs 'auto' as a single run and names no id. Omitted, the sandbox is released when the run ends.
              */
             container?: string | null;
             /**
@@ -19003,7 +19004,7 @@ export interface components {
          *     Values are read without regard to case or surrounding whitespace.
          * @enum {string}
          */
-        SandboxProvider: "protocol" | "e2b";
+        SandboxProvider: "protocol" | "e2b" | "monty";
         /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
@@ -20257,7 +20258,7 @@ export interface components {
             fields: components["schemas"]["ToolSettingField"][];
             /** @description The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment. */
             sandbox_credential?: components["schemas"]["SandboxCredentialPublic"] | null;
-            /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
+            /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url), 'e2b' or 'monty'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
             sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
         /**

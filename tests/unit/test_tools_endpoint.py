@@ -88,6 +88,17 @@ def test_configured_tools_report_available(tmp_path: Path) -> None:
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (True, None)
 
 
+def test_with_the_monty_extra_code_execution_is_available_and_says_what_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("gateway.core.config.monty_installed", lambda: True)
+    with _client(tmp_path) as client:
+        code = _tools(client)["otari_code_execution"]
+
+    assert (code["available"], code["reason"]) == (True, None)
+    assert "part of the standard library" in code["description"]
+
+
 def test_accepted_types_are_canonical_only_by_default(tmp_path: Path) -> None:
     with _client(tmp_path, web_search_url="http://searxng:8080") as client:
         tools = _tools(client)

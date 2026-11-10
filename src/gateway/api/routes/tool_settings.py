@@ -150,7 +150,7 @@ class ToolSettingsResponse(BaseModel):
     sandbox_provider: SandboxProvider | None = Field(
         default=None,
         description=(
-            "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, "
+            "What runs generated code: 'protocol' (a sandbox at sandbox_url), 'e2b' or 'monty'. Set at startup, "
             "not editable here. Null for a reader who does not operate the deployment."
         ),
     )

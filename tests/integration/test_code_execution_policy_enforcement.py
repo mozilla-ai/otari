@@ -516,6 +516,34 @@ def test_an_image_the_operator_no_longer_allows_refuses_the_request(
     assert seen.max_iterations is None, "the tool loop must never have run"
 
 
+def test_monty_refuses_a_pinned_image_rather_than_ignoring_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Monty runs no images, so a pin made for a container sandbox is refused, never quietly dropped."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _OTHER_IMAGE)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(client, master_key_header, workspace_id, enabled=True, image=_OTHER_IMAGE)
+
+    monkeypatch.delenv("OTARI_SANDBOX_URL")
+    monkeypatch.setattr("gateway.core.config.monty_installed", lambda: True)
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": True, "image": _OTHER_IMAGE},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert "Monty" in response.text
+    assert seen.max_iterations is None, "the tool loop must never have run"
+    assert stored.status_code == 400
+    assert "Monty" in stored.text
+
+
 def test_an_image_the_operator_never_allowed_cannot_be_stored(
     client: TestClient,
     master_key_header: dict[str, str],
