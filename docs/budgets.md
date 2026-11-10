@@ -66,7 +66,7 @@ A request is also blocked when its estimated cost no longer fits in what is left
 
 Spend limits are defined in USD. Budgets can also cap tokens and request count.
 
-Usage you import never counts toward a budget, and batch jobs are settled after the fact rather than blocked in real time; see [Importing external usage](external-usage.md) and [Budget enforcement](budget-enforcement.md#imported-usage-batches-and-video).
+Usage you import never counts toward a budget, and batch jobs are settled after the fact rather than blocked in real time; see [Import usage from outside Otari](external-usage.md) and [Budget enforcement](budget-enforcement.md#imported-usage-batches-and-video).
 
 ## Refusals and `Retry-After`
 
