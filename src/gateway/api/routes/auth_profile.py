@@ -31,7 +31,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
-from gateway.models.tenancy import AVATAR_FACE_COUNT, MAX_FULL_NAME_LENGTH, CallerIdentityPublic
+from gateway.models.tenancy import MAX_FULL_NAME_LENGTH, CallerIdentityPublic
+from gateway.schemas.identity import UpdateAvatarRequest
 from gateway.services.tenancy import describe_caller, update_avatar_face, update_full_name
 
 # Declared on the router rather than left to arrive through ``CurrentIdentity``,
@@ -64,23 +65,6 @@ class UpdateProfileRequest(BaseModel):
             "The name to be known by on this deployment, or null to have none. Whitespace is "
             "collapsed, and a value with nothing else in it is stored as null, which leaves "
             "every surface naming this identity by its address again."
-        ),
-    )
-
-
-class UpdateAvatarRequest(BaseModel):
-    """The caller's own avatar: a preset face by index, or ``null`` for the one their id gives them."""
-
-    model_config = {"json_schema_extra": {"example": {"face": 1234}}}
-
-    # Required for the reason ``full_name`` is: a face, or null for none.
-    face: int | None = Field(
-        strict=True,
-        ge=0,
-        lt=AVATAR_FACE_COUNT,
-        description=(
-            "The index of a preset face from the dashboard's avatar set, or null to go back to "
-            "the face this identity's id gives it."
         ),
     )
 
