@@ -60,19 +60,41 @@ def test_a_block_in_a_later_section_is_not_the_quickstart() -> None:
         check.quickstart_command(readme)
 
 
-def test_it_reads_the_bootstrap_key_off_its_own_line() -> None:
-    log = (
-        "WARNING  No API keys found, so created a 'bootstrap' API key ... Save this key now:\n"
-        "tk-abc_DEF-123\n"
-        "INFO:     Application startup complete.\n"
-    )
+_FIRST_START = (
+    "\n"
+    "Otari 1.2.3 is running at http://localhost:8000\n"
+    "\n"
+    "Open this link to choose your password and finish setup:\n"
+    "\n"
+    "http://localhost:8000/#/setup?key=otari-mk-abc_DEF-123\n"
+    "\n"
+    "It is shown only once and carries your master key, so treat it like one.\n"
+    "\n"
+    'INFO:     172.17.0.1:40030 - "GET /api/v1/health HTTP/1.1" 200 OK\n'
+)
 
-    assert check.bootstrap_key(log) == "tk-abc_DEF-123"
+
+def test_it_reads_the_master_key_off_the_setup_link() -> None:
+    assert check.setup_key(_FIRST_START) == "otari-mk-abc_DEF-123"
 
 
-def test_no_bootstrap_key_is_a_failure() -> None:
-    with pytest.raises(check.QuickstartFailure, match="no bootstrap API key"):
-        check.bootstrap_key("INFO:     Application startup complete.\n")
+def test_no_setup_link_is_a_failure() -> None:
+    with pytest.raises(check.QuickstartFailure, match="no setup link"):
+        check.setup_key("Otari 1.2.3 is running at http://localhost:8000\n")
+
+
+def test_a_first_start_that_prints_only_its_notice_has_nothing_unexpected() -> None:
+    assert check.unexpected_lines(_FIRST_START) == []
+
+
+def test_startup_chatter_is_reported_without_a_key() -> None:
+    log = _FIRST_START + "INFO:     Application startup complete.\nSave this key now:\ntk-abc_DEF-123\n"
+
+    assert check.unexpected_lines(log) == [
+        "INFO:     Application startup complete.",
+        "Save this key now:",
+        "[redacted]",
+    ]
 
 
 def test_a_failure_prints_no_key() -> None:

@@ -57,11 +57,16 @@ Run Otari with Docker. It needs no configuration:
 docker run -v otari:/data -p 127.0.0.1:8000:8000 mzdotai/otari:latest
 ```
 
-On its first start, Otari prints a setup link once:
+On its first start, Otari prints a setup link once, and little else:
 
 ```text
-Open this link to set your password:
+Otari 1.0.0 is running at http://localhost:8000
+
+Open this link to choose your password and finish setup:
+
 http://localhost:8000/#/setup?key=otari-mk-...
+
+It is shown only once and carries your master key, so treat it like one.
 ```
 
 Open it and choose the email and password you will sign in with. Then add a
@@ -69,14 +74,8 @@ provider on the dashboard's **Hosted providers** page and enable default
 pricing there. The key in the link is the gateway's master key, so keep the
 link private.
 
-The same first start creates an API key and prints it once:
-
-```text
-No API keys found. Created bootstrap key for first run. Save this key now:
-tk-...
-```
-
-Send a request with that key:
+Create an API key in the dashboard, from the setup guide on the **Overview** or
+on the **API keys** page, and send a request with it:
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \

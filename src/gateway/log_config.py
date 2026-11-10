@@ -60,12 +60,16 @@ def _mask_args(record: logging.LogRecord) -> bool:
     return True
 
 
-def uvicorn_log_config() -> dict[str, Any]:
+def uvicorn_log_config(level: int = logging.INFO) -> dict[str, Any]:
     """uvicorn's own logging config, with its handlers masking credentials as the gateway's does.
 
     uvicorn's loggers print through handlers of their own, so the gateway
     handler's filter never sees them, and an access log line carries the query
     string.
+
+    uvicorn's lifecycle lines ("Started server process", "Application startup
+    complete") repeat what the gateway says itself at startup, so they print
+    only when ``level`` is DEBUG. Its warnings, errors and access log are unchanged.
     """
     from uvicorn.config import LOGGING_CONFIG
 
@@ -73,6 +77,9 @@ def uvicorn_log_config() -> dict[str, Any]:
     config.setdefault("filters", {})["mask_credentials"] = {"()": CredentialMaskingFilter}
     for handler in config["handlers"].values():
         handler.setdefault("filters", []).append("mask_credentials")
+    if level > logging.DEBUG:
+        for name in ("uvicorn", "uvicorn.error"):
+            config["loggers"][name]["level"] = "WARNING"
     return config
 
 
@@ -99,6 +106,20 @@ def log_secret(message: str, secret: str, *, level: int = logging.WARNING) -> No
     _log_console().print(secret, soft_wrap=True, crop=False, highlight=False, markup=False)
 
 
+def log_plain(*lines: str, level: int = logging.INFO) -> None:
+    """Print lines as they are, with no timestamp, level or source columns, when ``level`` is enabled.
+
+    For the few lines a person reads at startup, such as where the gateway is
+    running. They bypass the credential filter, as :func:`log_secret` does, so
+    the setup link survives; pass nothing here that should have been masked.
+    """
+    if not logger.isEnabledFor(level):
+        return
+    console = _log_console()
+    for line in lines:
+        console.print(line, soft_wrap=True, crop=False, highlight=False, markup=False)
+
+
 def setup_logger(
     level: int = logging.WARNING,
     rich_tracebacks: bool = True,
@@ -122,6 +143,9 @@ def setup_logger(
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
 
+    # The source column takes a third of an 80-column container log and wraps
+    # every message beside it, so it is kept for debugging.
+    kwargs.setdefault("show_path", level <= logging.DEBUG)
     handler = RichHandler(rich_tracebacks=rich_tracebacks, markup=True, **kwargs)
     handler.addFilter(CredentialMaskingFilter())
 

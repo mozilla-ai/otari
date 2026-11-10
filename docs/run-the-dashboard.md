@@ -16,9 +16,22 @@ If `OTARI_MASTER_KEY` is unset on a new database, Otari generates a master key
 and prints it once, inside a setup link:
 
 ```text
-Open this link to set your password:
+Otari 1.0.0 is running at http://localhost:8000
+
+Open this link to choose your password and finish setup:
+
 http://localhost:8000/#/setup?key=otari-mk-...
+
+It is shown only once and carries your master key, so treat it like one.
 ```
+
+That start prints nothing else unless something needs attention, and holds
+its reminders about optional settings left unset until the next start. Later
+starts print where Otari runs and where to sign in. `otari serve --log-level
+debug` shows every startup line. A deployment that generated its master key
+creates no bootstrap API key (see
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config)); create the
+first key in the dashboard.
 
 The key is the part after `key=`. It sits in the link's fragment, which the
 browser does not send to the server, and the setup page removes it from the

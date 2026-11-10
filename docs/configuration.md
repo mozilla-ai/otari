@@ -394,7 +394,11 @@ declaration that cannot be applied, such as a key naming a budget that does not
 exist, stops the start and nothing is written.
 
 Declarations are applied before the first-run bootstrap key, so a fresh
-deployment that declares a key does not mint and print one.
+deployment that declares a key does not mint and print one. Neither does a
+deployment that generated its own master key: it starts from the setup link,
+and its operator creates the first key in the dashboard. Set
+`bootstrap_api_key: true` (`OTARI_BOOTSTRAP_API_KEY=true`) to have that
+deployment mint and print one anyway.
 
 ### Mismatched `user` fields
 

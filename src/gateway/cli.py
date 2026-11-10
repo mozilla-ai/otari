@@ -4,9 +4,11 @@ import re
 import shutil
 import subprocess
 import sys
+import warnings
 
 import click
 import uvicorn
+from sqlalchemy.exc import SAWarning
 from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
@@ -102,6 +104,9 @@ def serve(
     except ValueError as e:
         raise click.ClickException(str(e)) from e
     setup_logger(level=log_level)
+    if log_level > logging.DEBUG:
+        # SQLAlchemy's advice to developers, printed raw to stderr among the startup lines.
+        warnings.filterwarnings("ignore", category=SAWarning)
 
     if host:
         gateway_config.host = host
@@ -134,7 +139,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
-            log_config=uvicorn_log_config(),
+            log_config=uvicorn_log_config(log_level),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")

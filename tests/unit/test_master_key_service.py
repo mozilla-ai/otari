@@ -1,8 +1,10 @@
 """Unit tests for first-run master-key bootstrap and the enriched 402 body."""
 
 import hashlib
+import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Session
 from gateway.api import deps
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
+from gateway.models.api_keys import APIKey
 from gateway.models.platform import RuntimeSetting
 from gateway.services import master_key_service
 from gateway.services.master_key_service import (
@@ -46,6 +49,15 @@ def _stored_hashes(database_url: str) -> list[str]:
         engine.dispose()
 
 
+def _api_key_names(database_url: str) -> list[str]:
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as db:
+            return [str(name) for (name,) in db.query(APIKey.key_name).all()]
+    finally:
+        engine.dispose()
+
+
 def test_generate_master_key_format() -> None:
     token = generate_master_key()
     assert token.startswith("otari-mk-")
@@ -70,22 +82,82 @@ def test_setup_link_uses_the_interface_address_when_one_is_set() -> None:
     assert setup_link(config, "otari-mk-abc") == "https://otari.example.com/ui/#/setup?key=otari-mk-abc"
 
 
-def test_first_run_banner_prints_the_setup_link_and_the_key_only_inside_it(
+def _start(config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Boot ``config`` at the CLI's default level and return the plain lines it printed."""
+    printed: list[str] = []
+    monkeypatch.setattr("gateway.main.log_plain", lambda *lines, level: printed.extend(lines))
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="gateway"), TestClient(create_app(config)):
+        pass
+    return printed
+
+
+def test_a_first_start_prints_only_where_it_runs_and_the_setup_link(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    secrets_logged: list[str] = []
-    monkeypatch.setattr(master_key_service, "log_secret", lambda _message, secret: secrets_logged.append(secret))
-    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", require_pricing=False, port=8000)
+    """Pins the whole of a zero-config first start's output, so startup chatter does not creep back."""
+    monkeypatch.setattr("gateway.main.__version__", "1.2.3")
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", port=8000)
 
-    with caplog.at_level("WARNING", logger="gateway"), TestClient(create_app(config)):
-        pass
+    printed = _start(config, monkeypatch, caplog)
 
-    assert len(secrets_logged) == 1
-    link = secrets_logged[0]
+    link = printed[5]
     assert link.startswith("http://localhost:8000/#/setup?key=otari-mk-")
+    assert printed == [
+        "",
+        "Otari 1.2.3 is running at http://localhost:8000",
+        "",
+        "Open this link to choose your password and finish setup:",
+        "",
+        link,
+        "",
+        "It is shown only once and carries your master key, so treat it like one.",
+        "",
+    ]
     key = link.split("key=", 1)[1]
     assert hash_master_key(key) == _stored_hashes(config.database_url)[0]
-    assert key not in caplog.text
+    # Nothing else at the default level: no log record, so no key in one either.
+    assert [record.getMessage() for record in caplog.records] == []
+
+
+def test_a_later_start_says_where_to_sign_in_and_shows_no_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr("gateway.main.__version__", "1.2.3")
+    database_url = f"sqlite:///{tmp_path / 'mk.db'}"
+    _start(GatewayConfig(database_url=database_url, port=8000), monkeypatch, caplog)
+
+    printed = _start(GatewayConfig(database_url=database_url, port=8000), monkeypatch, caplog)
+
+    assert printed == ["Otari 1.2.3 is running at http://localhost:8000", "Sign in at http://localhost:8000/"]
+    # The reminders the first start held back, and nothing below a warning.
+    assert caplog.records
+    assert {record.levelno for record in caplog.records} == {logging.WARNING}
+
+
+def test_a_first_start_with_a_generated_master_key_creates_no_bootstrap_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'mk.db'}"
+
+    _start(GatewayConfig(database_url=database_url), monkeypatch, caplog)
+
+    assert _api_key_names(database_url) == []
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"master_key": "operator-chosen-master-key"}, {"bootstrap_api_key": True}],
+    ids=["operator master key", "bootstrap key asked for"],
+)
+def test_the_bootstrap_api_key_is_still_created_where_it_was_asked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, settings: dict[str, Any]
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'mk.db'}"
+
+    _start(GatewayConfig(database_url=database_url, **settings), monkeypatch, caplog)
+
+    assert _api_key_names(database_url) == ["bootstrap"]
 
 
 def test_first_run_generates_and_persists_a_hash(tmp_path: Path) -> None:

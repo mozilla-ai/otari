@@ -61,20 +61,18 @@ docker run -v otari:/data -p 127.0.0.1:8000:8000 mzdotai/otari:latest
 首次启动时，Otari 会打印一次设置链接：
 
 ```text
-Open this link to set your password:
+Otari 1.0.0 is running at http://localhost:8000
+
+Open this link to choose your password and finish setup:
+
 http://localhost:8000/#/setup?key=otari-mk-...
+
+It is shown only once and carries your master key, so treat it like one.
 ```
 
 打开该链接，选择用于登录的邮箱和密码。然后在控制台的 **Hosted providers** 页面添加一个提供商，并在该页面启用默认定价。链接中的密钥就是网关的主密钥，请妥善保管该链接。
 
-同一次首次启动还会创建一个 API 密钥并只打印一次：
-
-```text
-No API keys found. Created bootstrap key for first run. Save this key now:
-tk-...
-```
-
-使用该密钥发送请求：
+在控制台中创建一个 API 密钥（通过 **Overview** 上的设置向导，或在 **API keys** 页面），然后用它发送请求：
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
