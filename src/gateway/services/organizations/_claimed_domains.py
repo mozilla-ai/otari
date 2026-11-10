@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from gateway.models.tenancy import OrganizationDomain
 from gateway.repositories.tenancy import OrganizationDomainRepository
 
 
@@ -33,6 +34,10 @@ class ClaimedDomains(Protocol):
         """Return the organization's claims, in the order the claim surface lists them."""
         ...
 
+    async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:
+        """Return the one proven claim on ``domain``, or None where nobody holds one."""
+        ...
+
 
 class OrganizationClaimedDomains:
     """Answers the question above from this organization's own rows."""
@@ -44,3 +49,7 @@ class OrganizationClaimedDomains:
         """Return the organization's claims, oldest first, as the claim surface lists them."""
         claimed = await self._domains.list_by_organization(organization_id)
         return [ClaimedDomain(domain=row.domain, verified_at=row.verified_at, enabled=row.enabled) for row in claimed]
+
+    async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:
+        """Return the one proven claim on ``domain``, or None where nobody holds one."""
+        return await self._domains.get_verified_by_domain(domain)

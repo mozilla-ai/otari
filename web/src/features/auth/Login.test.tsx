@@ -1220,7 +1220,7 @@ describe("Login with a passkey", () => {
     // The ceremony is open. Fill the form and submit it anyway.
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("Password"), "a-real-password")
-    expect(screen.getByRole("button", { name: /Sign in/ })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled()
     await user.keyboard("{Enter}")
 
     expect(
@@ -1456,9 +1456,12 @@ describe("Login with a passkey", () => {
         </Mounted>,
       )
       // A deployment that registered no OAuth client carries no affordance at
-      // all: absent rather than disabled.
+      // all: absent rather than disabled. The company row is excluded from
+      // this match: it carries no such gate and is offered regardless.
       expect(
-        screen.queryByRole("button", { name: /Sign in with/ }),
+        screen.queryByRole("button", {
+          name: /^Sign in with (?!your company\b)/,
+        }),
       ).not.toBeInTheDocument()
 
       rerender(
@@ -1646,6 +1649,38 @@ describe("Login with a passkey", () => {
           },
         ),
       )
+    })
+  })
+
+  describe("Company sign-in (SSO)", () => {
+    it("renders the SSO row last, after the provider, passkey and credential rows", () => {
+      render(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+
+      const methodButtons = screen
+        .getAllByRole("button")
+        .filter((button) => /^Sign in with/.test(button.textContent ?? ""))
+
+      expect(methodButtons.at(-1)).toHaveTextContent(
+        "Sign in with your company (SSO)",
+      )
+    })
+
+    it("is offered on a deployment that configures no OAuth provider and no passkey", () => {
+      render(
+        <Mounted signInMethods={["master_key"]}>
+          <Harness />
+        </Mounted>,
+      )
+
+      expect(
+        screen.getByRole("button", {
+          name: "Sign in with your company (SSO)",
+        }),
+      ).toBeInTheDocument()
     })
   })
 })

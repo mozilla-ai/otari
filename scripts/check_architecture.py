@@ -1602,8 +1602,8 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tenancy.OAuthPendingState": {
-        "repository": None,
-        "baseline": ("gateway/services/oauth_service.py",),
+        "repository": "gateway/repositories/identity/oauth_pending_state_repository.py",
+        "baseline": (),
     },
     "gateway.models.tenancy.Organization": {
         "repository": "gateway/repositories/tenancy/organization_repository.py",
