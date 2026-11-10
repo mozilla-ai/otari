@@ -19,7 +19,13 @@ from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource, Te
 from conftest import TaskGroupMcpTransport
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.models.mcp import McpServerConfig
-from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin_bound_http_client, _result_text
+from gateway.services.mcp_client import (
+    MCP_RESULT_MAX_CHARS,
+    MCPClientPool,
+    _ConnectedServer,
+    _origin_bound_http_client,
+    _result_text,
+)
 
 
 @pytest.mark.asyncio
@@ -386,6 +392,42 @@ def test_an_embedded_blob_resource_is_summarized_not_decoded() -> None:
     )
 
     assert _result_text(result) == "[resource uri=repo://o/r/contents/a.png type=image/png bytes_b64=8]"
+
+
+def _pool_returning(result: CallToolResult) -> MCPClientPool:
+    pool = MCPClientPool([])
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=result))
+    pool._servers["fixture"] = _ConnectedServer(name="fixture", session=cast(Any, session))
+    pool._tool_owner["lookup"] = "fixture"
+    return pool
+
+
+@pytest.mark.asyncio
+async def test_a_result_at_the_limit_reaches_the_model_whole() -> None:
+    text = "a" * MCP_RESULT_MAX_CHARS
+    pool = _pool_returning(CallToolResult(content=[TextContent(type="text", text=text)]))
+
+    outcome = await pool.call_tool_outcome("lookup", {})
+
+    assert outcome.content == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_a_result_over_the_limit_is_cut_and_says_so(is_error: bool) -> None:
+    """A server can return any amount; the model reads a bounded prefix and is told the rest exists."""
+    text = "a" * MCP_RESULT_MAX_CHARS + "b" * 10
+    pool = _pool_returning(CallToolResult(content=[TextContent(type="text", text=text)], is_error=is_error))
+
+    outcome = await pool.call_tool_outcome("lookup", {})
+
+    note = (
+        f"\n[truncated: the tool returned {MCP_RESULT_MAX_CHARS + 10} characters; "
+        f"only the first {MCP_RESULT_MAX_CHARS} are shown]"
+    )
+    shown = "a" * MCP_RESULT_MAX_CHARS + note
+    assert outcome.activity_content == shown
+    assert outcome.content == (f"[tool error] {shown}" if is_error else shown)
 
 
 # --------------------------------------------------------------------------- #
