@@ -490,6 +490,7 @@ async def test_concurrent_demotions_cannot_strip_the_last_owner(
                 user=actor,
                 organization_member_id=target_membership_id,
                 request=ActiveOrganizationMemberUpdateRequest(role="member"),
+                sso_enforcement=NO_SSO_ENFORCEMENT,
             )
 
         return attempt
@@ -1860,6 +1861,7 @@ async def test_a_key_write_during_a_membership_change_waits_for_it_and_is_refuse
                     user=actor,
                     organization_member_id=membership.id,
                     request=ActiveOrganizationMemberUpdateRequest(role="viewer"),
+                    sso_enforcement=NO_SSO_ENFORCEMENT,
                 )
 
     assert isinstance(await writing, NotAuthorizedError)

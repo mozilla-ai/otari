@@ -2483,8 +2483,14 @@ class OrganizationService:
         user: User,
         organization_member_id: uuid.UUID,
         request: ActiveOrganizationMemberUpdateRequest,
+        sso_enforcement: SsoEnforcement,
     ) -> ActiveOrganizationMemberPublic:
-        """Change a member's role or status."""
+        """Change a member's role or status.
+
+        NOTE: A role or status this organization's own enforcement refuses also ends the member's
+        live session, because no later request re-asks and the session was minted while it admitted
+        them.
+        """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
             user=user,
@@ -2515,6 +2521,7 @@ class OrganizationService:
                 raise OrganizationMemberNotFoundError(organization_member_id)
             await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
 
+        await sso_enforcement.revoke_refused_sessions(organization=organization)
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
         if updated.status == "invited":

@@ -613,6 +613,19 @@ class OIDCConnectionService:
             )
         ]
 
+    async def revoke_refused_sessions(self, *, organization: Organization) -> None:
+        """End the live session of every active member this organization's enforcement now refuses.
+
+        For a caller that has just changed who the enforcement refuses without touching the
+        connection or the switch, such as a membership whose role no longer earns the break-glass
+        exception. No authority check runs: the caller proved its own, and this grants nothing.
+        """
+        async with self._uow:
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                return
+            await self._revoke_blocked_sessions(organization, connection)
+
     async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
         """End the live session of every active member this organization's enforcement now refuses.
 

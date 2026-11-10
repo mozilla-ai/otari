@@ -32,6 +32,7 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.exceptions.organizations_exceptions import InvitationPasswordNotAcceptedError, NotAuthorizedError
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, OIDCConnection, oidc_identity_provider
 from gateway.models.tenancy import (
+    ActiveOrganizationMemberUpdateRequest,
     DashboardSession,
     InviteOrganizationMemberRequest,
     Organization,
@@ -444,6 +445,47 @@ async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_
     )
 
     assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_demoting_the_break_glass_owner_ends_the_session_the_exception_kept_alive(
+    async_db: AsyncSession,
+) -> None:
+    """No later request re-asks the rule, so the session has to go when the exception stops applying.
+
+    The exception holds only while the named account is an active owner. Demoted, they are refused
+    like any unlinked member, and the session minted while they were exempt would otherwise keep
+    acting in the organization until it expired.
+    """
+    organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    exempt = await _member_with_email(
+        async_db,
+        organization,
+        role="owner",
+        email="glass@acme.example",
+        full_name="Glass Owner",
+        password=True,
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = exempt.id
+    async_db.add(organization)
+    await _dashboard_session(async_db, exempt)
+    await async_db.commit()
+    assert await _live_session_count(async_db, exempt.id) == 1
+    membership = await _membership_of(async_db, organization, exempt)
+
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    await service.update_active_organization_member_for_user(
+        user=owner,
+        organization_member_id=membership.id,
+        request=ActiveOrganizationMemberUpdateRequest(role="member"),
+        sso_enforcement=_connection_service(async_db),
+    )
+
+    assert await _live_session_count(async_db, exempt.id) == 0
 
 
 async def test_enforcement_can_be_turned_off_while_the_named_owner_is_no_longer_a_member(

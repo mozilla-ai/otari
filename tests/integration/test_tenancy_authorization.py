@@ -208,6 +208,7 @@ async def test_an_admin_cannot_modify_an_owner(async_db: AsyncSession) -> None:
             user=admin,
             organization_member_id=target.id,
             request=ActiveOrganizationMemberUpdateRequest(role="member"),
+            sso_enforcement=NO_SSO_ENFORCEMENT,
         )
 
 
@@ -231,6 +232,7 @@ async def test_an_admin_cannot_promote_themselves_to_owner(async_db: AsyncSessio
             user=admin,
             organization_member_id=own.id,
             request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+            sso_enforcement=NO_SSO_ENFORCEMENT,
         )
 
 
@@ -249,6 +251,7 @@ async def test_an_admin_cannot_promote_another_member_to_owner(async_db: AsyncSe
             user=admin,
             organization_member_id=target.id,
             request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+            sso_enforcement=NO_SSO_ENFORCEMENT,
         )
 
 
@@ -283,6 +286,7 @@ async def test_an_owner_can_promote_someone_to_owner(async_db: AsyncSession) -> 
         user=owner,
         organization_member_id=target.id,
         request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+        sso_enforcement=NO_SSO_ENFORCEMENT,
     )
 
     assert updated.role == "owner"
@@ -348,6 +352,7 @@ async def test_an_owner_can_demote_another_owner(async_db: AsyncSession) -> None
         user=owner,
         organization_member_id=target.id,
         request=ActiveOrganizationMemberUpdateRequest(role="admin"),
+        sso_enforcement=NO_SSO_ENFORCEMENT,
     )
 
     assert updated.role == "admin"

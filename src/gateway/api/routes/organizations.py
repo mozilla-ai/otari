@@ -299,6 +299,7 @@ async def create_active_organization_member(
 @router.patch("/me/members/{organization_member_id}")
 async def update_active_organization_member(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     body: ActiveOrganizationMemberUpdateRequest,
@@ -308,6 +309,7 @@ async def update_active_organization_member(
         user=current_identity,
         organization_member_id=organization_member_id,
         request=body,
+        sso_enforcement=connections,
     )
 
 
