@@ -1,60 +1,32 @@
 """You.com: ``POST /v1/search``, with the key in the ``X-API-Key`` header.
 
-The adapter sends what You.com's Python SDK (``youdotcom`` 3.6.0) sends for a
-search: the query, ``count``, ``language`` ``EN``, ``knowledge`` ``core`` and
-``extraction`` with ``extraction_mode`` ``highlights``, and the native options
-passed. An option passed as ``None`` is not sent, so ``knowledge=None`` and
-``extraction=None`` turn those defaults off, as they do in the SDK. ``count``
-is ``max_results``, 10 when it is not passed, at most 100, and at most 50 under
-highlights, which You.com refuses above that with a 422. Above 100 it answers
-no results rather than refusing. ``time_range`` becomes ``freshness``, which
-takes You.com's own ``day`` to ``year``, and wins over that option.
+Sends what You.com's SDK (``youdotcom`` 3.6.0) sends: the query, ``count``,
+``language`` ``EN``, ``knowledge`` ``core``, highlights extraction, and the
+native options passed. ``None`` is not sent, which turns those defaults off.
+``count`` is ``max_results`` (10 when unset), at most 100, and at most 50 under
+highlights. ``time_range`` becomes ``freshness`` and wins over that option.
 
-Each web result's ``contents.highlights``, the passages of the page that
-address the query, joined, become the hit's snippet; a result without
-highlights has its ``description`` as the snippet. ``contents.markdown``, which
-comes back only with ``extraction_mode`` ``full_page``, is the hit's text.
-``page_age`` is the hit's date when it is ISO 8601, taken as UTC since it
-carries no zone. You.com documents no format for it, and its SDK has met
-``7/29/2024 10:38:56 AM`` and ``171 days ago``, so a value in another form
-stays in ``raw``. The ``knowledge`` results, which carry no URL, the
-``snippets`` of a search without highlights and ``contents.html`` stay in
-``raw`` too.
+Joined highlights are the snippet, or ``description`` when there are none.
+``contents.markdown``, only under ``full_page``, is the text. ``page_age`` is
+the date when it parses as ISO 8601, taken as UTC; another form stays in
+``raw``.
 
-You.com signals every failure with an HTTP status. A refused key is a 403
-with ``{"message": "Forbidden"}``, answered by the gateway in front of the API
-rather than the 401 the documentation lists, and a 422's ``error`` is a
-sentence that can quote the request, so the tag is the adapter's own, by
-status: ``unauthorized`` for a 401, ``forbidden`` for a 403, which a key
-without the scope gets too, and ``invalid_request`` for a 422. A 402's
-``error`` is a code, such as ``payment_required`` for an account out of
-credit, and becomes the tag. Any other status is ``http_error``. A successful
-search carries no error of its own. Checked live 2026-11-09: You.com does not
-refuse a ``freshness`` or a ``country`` it does not take, or an ``offset`` of
-10, and answers ``count`` 0 or 101 with no results.
+401, 403 and 422 are tagged by status (``unauthorized``, ``forbidden``,
+``invalid_request``): those bodies are a sentence or the gateway's, not a code.
+A 402 is tagged from its ``error``, else ``payment_required``. Any other status
+is ``http_error``.
 
-Every field read from a successful answer is checked, so a change on You.com's
-side fails the call: ``results`` must be an object, and its ``web``, which
-You.com leaves out of a search with no results, a list when present. Each item
-read before the count is reached must be an object whose ``url`` is a string
-or null, whose ``title`` and ``description`` are strings, whose ``page_age``
-is a string or null, and whose ``contents`` is an object with ``highlights``
-a list of strings and ``markdown`` a string, each when present; a
-``page_age`` that starts like an ISO 8601 date and does not parse is refused
-too. Anything else raises ``unexpected_response``. You.com's schema makes
-every field of a result optional, so a result without a ``url`` that is an
-http or https URL with a host is dropped, and the count is filled from the
-items after it. Fields the adapter does not read are ignored, so a field
-You.com adds breaks nothing. You.com reports no cost.
+``results`` must be an object, and ``web`` a list when present. Each item read
+must have ``url`` and ``page_age`` as a string or null, ``title`` and
+``description`` as strings, and, when present, ``contents`` as an object whose
+``highlights`` is a list of strings and whose ``markdown`` is a string. A
+``page_age`` that looks like ISO 8601 but does not parse is refused. A result
+without an http or https URL is dropped. Anything else raises
+``unexpected_response``. Unread fields are ignored. You.com reports no cost.
 
-API: https://you.com/docs/api-reference/search/v1-search and its OpenAPI
-spec, https://you.com/docs/openapi/web-search.json. Pricing, read 2026-11-09,
-https://you.com/docs/administration/billing: $5.00 per 1,000 calls, up to 100
-results each, highlights and knowledge results included. Full-page extraction
-adds $1.00 per 1,000 pages crawled live: with ``extraction_source`` ``blend``,
-the default, only the pages not in You.com's cache, with ``cache`` none, with
-``fetch`` every page. So a full-page search for 10 results costs from $0.005
-to $0.015. Volume discounts by arrangement.
+API: https://you.com/docs/api-reference/search/v1-search. Pricing, read
+2026-11-09, https://you.com/docs/administration/billing: $5.00 per 1,000 calls.
+Full-page extraction adds $1.00 per 1,000 pages crawled live.
 """
 
 import re
@@ -136,22 +108,21 @@ class YouDotComProvider(AnySearch):
                 name="freshness",
                 type="string",
                 description=(
-                    "Only pages from this span: day, week, month or year, or a range of dates as "
-                    "YYYY-MM-DDtoYYYY-MM-DD. time_range, when passed, wins. When the query names a span of its own, "
-                    "such as 'this week', You.com searches the broader of the two."
+                    "Only pages from day, week, month, year, or YYYY-MM-DDtoYYYY-MM-DD. time_range wins. A span "
+                    "named in the query, such as 'this week', widens this to the broader of the two."
                 ),
             ),
             OptionSpec(
                 name="offset",
                 type="integer",
                 default=0,
-                description="The page of results to return, counted in pages of max_results, from 0 to 9.",
+                description="Result page, in pages of max_results, from 0 to 9.",
             ),
             OptionSpec(
                 name="country",
                 type="string",
                 enum=_COUNTRIES,
-                description="The country to focus the results on, a two-letter code in capitals.",
+                description="Country to focus on, a two-letter code in capitals.",
             ),
             # language and knowledge name their values in the description, not an enum: a host refuses a
             # value its enum lacks, and null, which turns the default off, is in none.
@@ -160,8 +131,8 @@ class YouDotComProvider(AnySearch):
                 type="string",
                 default="EN",
                 description=(
-                    f"The language of the results, one of {', '.join(_LANGUAGES)}. Sent as EN unless passed; "
-                    "null sends none. You.com ignores a value it does not take."
+                    f"Result language, one of {', '.join(_LANGUAGES)}. EN unless passed; null sends none. "
+                    "You.com ignores a value it does not take."
                 ),
             ),
             OptionSpec(
@@ -176,58 +147,45 @@ class YouDotComProvider(AnySearch):
                 type="string",
                 default="core",
                 description=(
-                    "core, the one value, also returns knowledge results from You.com's licensed data providers. "
-                    "They carry no URL, so they never become hits and stay in raw. Sent as core unless passed; "
-                    "null sends none."
+                    "core, the only value, also returns licensed knowledge results. They have no URL, so they stay "
+                    "in raw. Sent unless passed; null sends none."
                 ),
             ),
             OptionSpec(
                 name="include_domains",
                 type="array",
-                description=(
-                    "Up to 500 domains to limit the results to. You.com refuses it together with exclude_domains "
-                    "or boost_domains."
-                ),
+                description="Up to 500 domains to limit results to. Refused with exclude_domains or boost_domains.",
             ),
             OptionSpec(
                 name="exclude_domains",
                 type="array",
-                description="Up to 5,000 domains to leave out of the results.",
+                description="Up to 5,000 domains to leave out.",
             ),
             OptionSpec(
                 name="boost_domains",
                 type="array",
-                description="Up to 500 domains to rank higher, without leaving out the others.",
+                description="Up to 500 domains to rank higher, without leaving the others out.",
             ),
             OptionSpec(
                 name="strict_operators",
                 type="boolean",
                 default=False,
-                description=(
-                    "Apply search operators such as quoted phrases and site: exactly, rather than relaxing them "
-                    "when nothing matches. No effect under highlights."
-                ),
+                description="Apply quoted phrases and site: exactly. No effect under highlights.",
             ),
             OptionSpec(
                 name="extraction",
                 type="object",
                 default={"extraction_mode": "highlights"},
                 description=(
-                    'What to return of each page, sent as given. {"extraction_mode": "highlights"}, sent unless '
-                    "passed, returns the passages that address the query, which become the snippet; "
-                    '{"extraction_mode": "full_page"} returns the page as Markdown, which becomes the text, and '
-                    "You.com bills each page it crawls live on top of the search. null sends none, and the snippet "
-                    "is each result's description."
+                    "Sent as given. highlights, sent unless passed, returns the passages that become the snippet; "
+                    "full_page returns Markdown as the text and bills each page crawled live. null sends none."
                 ),
             ),
             OptionSpec(
                 name="crawl_timeout",
                 type="integer",
                 default=10,
-                description=(
-                    "Seconds, from 1 to 60, to wait for each page under full_page extraction; keep the search's "
-                    "own timeout above it. You.com refuses it under highlights."
-                ),
+                description="Seconds to wait per page under full_page, 1 to 60. Refused under highlights.",
             ),
         ],
     )

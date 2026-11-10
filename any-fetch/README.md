@@ -213,49 +213,34 @@ Fields the adapter does not read are ignored, so a field Tabstack adds breaks no
 
 `youdotcom` calls You.com's [Extract API](https://you.com/docs/api-reference/extract),
 `POST /v1/extract`, with the key in the `X-API-Key` header, read from `YDC_API_KEY` when not
-passed, the key You.com's search takes too. It fetches one web page or PDF per call and returns
-its text as Markdown, with its title when You.com found one. You.com's Python SDK has no method
-for it yet, so the adapter sends the API's own defaults, with one exception: `parse_effort` is
-`lite` unless passed, where You.com's default, `standard`, bills each PDF page on top of the URL.
-`parse_effort` is the cost tier.
+passed. One web page or PDF per call, returned as Markdown. `parse_effort` is `lite` unless
+passed: You.com's default, `standard`, bills each PDF page on top of the URL, and the option is
+the cost tier.
 
-You.com has no length cap, so `max_chars` cuts the text it returns and sets `text_truncated`, and
-without `max_chars` the whole page comes back. The native options are `full_page`, sent as given
-with `markdown` added to its `extraction_formats` when they lack it, so an HTML copy stays in
-`raw`; `extraction_source` (`blend`, the default, `cache` or `fetch`); `timeout`, the seconds,
-from 2 to 100, You.com may spend before failing the call with a 504; and `parse_effort` (`lite`
-or `standard`). An option passed as `None` counts as not passed. `timeout` defaults to 30 on
-You.com's side, longer than the fetcher's own 15, so pass the fetcher a `timeout` above it; and
-`afetch` takes its `timeout` argument as the fetcher's, so pass You.com's through `fetch`.
-`blend` can serve a cached copy that differs from the live page: one came back shorter and
-under another title, so pass `extraction_source="fetch"` where the page as it is now matters.
+You.com has no length cap, so `max_chars` cuts the text and sets `text_truncated`. Native options:
+`full_page` (Markdown is always asked for; an HTML copy stays in `raw`), `extraction_source`
+(`blend`, `cache`, `fetch`), `timeout` (2 to 100 seconds) and `parse_effort` (`lite`, `standard`).
+`None` counts as not passed. You.com's `timeout` is longer than the fetcher's own 15 seconds, and
+`afetch`'s `timeout` argument is the fetcher's, so pass You.com's through `fetch` and give the
+fetcher a longer one. `blend` can serve a cached copy that differs from the live page, so pass
+`extraction_source="fetch"` where the page as it is now matters.
 
-`final_url` is the `url` You.com answered for, which is the URL as asked even after a redirect, so
-`reports_final_url` is false: a caller cannot check where a redirect You.com followed led.
-`content_type` is empty and `published` is `None`: You.com says neither what the page was served
-as nor when it was published. Its `metadata`, the site's name and favicon, stays in `raw`.
-You.com reports no cost.
+`final_url` is the URL as asked, even after a redirect, so `reports_final_url` is false.
+`content_type` is empty, `published` is `None`, and You.com reports no cost.
 
-An answer without `contents`, seen as `{}`, is what You.com sends when nothing was extracted, as
-`extraction_source="cache"` does for a page it has no copy of. It comes back as
-`FetchedPage.error`, tagged `not_cached` when the fetch asked for the cache only and
-`nothing_extracted` otherwise. A page whose site answered with an error status, such as a 404 or a
-500, comes back as the text of that page, which can be empty, since You.com does not say what
-status the site answered with.
+A body without `contents` is `FetchedPage.error`: `not_cached` when the fetch asked for the cache
+only, else `nothing_extracted`. A site's own error page, such as a 404, comes back as that page's
+text, which can be empty.
 
-A failed call raises `ProviderError` with You.com's HTTP status. A 422, 500, 502, 503 or 504 is
-tagged with the `error.code` You.com documents as stable, such as `invalid_url` (a private or
-unresolvable host), `site_blocked`, `site_unreachable` (seen for a zero-byte file),
-`unsupported_content` or `timeout`; its `message` and `details` never reach the error. A
-made-up or revoked key gets a 403 from the gateway in front of the API, tagged `forbidden`, and a
-401 is tagged `unauthorized`. A 402 is tagged with the code in its `error`, such as
-`payment_required`. Any other status is `http_error`.
+A failed call raises `ProviderError`. A 422, 500, 502, 503 or 504 is tagged with `error.code`
+(`invalid_url`, `site_blocked`, `site_unreachable`, `unsupported_content`, `timeout`); the message
+and details are not read. 401 is `unauthorized`, a refused key's 403 is `forbidden`, and a 402
+takes the code in `error`, else `payment_required`. Any other status is `http_error`.
 
-Every field read from a successful answer is checked: a `url` or `title` that is not a string,
-or a `contents` that is not an object whose `full_page` is an object whose `markdown` is a string,
-raises `ProviderError` with the tag `unexpected_response`. You.com documents `url` and `title` as
-optional, and without them the URL is the one asked for and the title is empty. An empty
-`markdown` is an empty page. Fields the adapter does not read are ignored.
+A `url` or `title` that is not a string, or `contents` that does not hold `full_page.markdown` as
+a string, raises `ProviderError` with the tag `unexpected_response`. Both are optional: without
+them the URL is the one asked for and the title is empty. An empty `markdown` is an empty page.
+Unread fields are ignored.
 
 ## The fake provider
 
