@@ -25,13 +25,8 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._mcp_sign_in_pages import SignInPage, conversation_page
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.tools_exceptions import (
-    McpConnectionFlowError,
-    McpConnectionModeError,
-    McpConnectionSetupError,
-    McpConnectionUpstreamError,
-    WorkspaceMcpServerNotFoundError,
-)
+from gateway.exceptions import TenancyError
+from gateway.exceptions.tools_exceptions import McpConnectionFlowError
 from gateway.log_config import logger
 from gateway.schemas.tools import (
     McpConnectionComplete,
@@ -189,12 +184,9 @@ async def open_mcp_sign_in_link(
         url = await connections.start_from_link(ticket)
     except McpConnectionFlowError:
         return conversation_page(SignInPage.LINK_EXPIRED)
-    except (
-        WorkspaceMcpServerNotFoundError,
-        McpConnectionModeError,
-        McpConnectionSetupError,
-        McpConnectionUpstreamError,
-    ) as exc:
+    except TenancyError as exc:
+        # The server is gone or changed mode, the deployment cannot run a sign-in, or the
+        # authorization server could not be reached: the person can only try later.
         logger.info("MCP sign-in link refused reason=%s", type(exc).__name__)
         return conversation_page(SignInPage.CANNOT_START)
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)

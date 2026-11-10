@@ -54,6 +54,7 @@ from gateway.repositories.tools import (
 from gateway.repositories.users_repository import DEFAULT_USER_ID
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
+    SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
     get_secret_box,
@@ -579,11 +580,17 @@ class McpConnectionService:
         if pending.identity_id is not None and pending.identity_id != identity_id:
             logger.warning("MCP sign-in refused reason=other_identity server_id=%s", pending.server_id)
             raise McpConnectionFlowError("This sign-in was started by another person. Start your own.")
-        client = (
-            _client_for(server, client_id=pending.client_id, auth_method=pending.client_auth_method)
-            if server is not None and server.credential_mode == McpCredentialMode.PER_USER
-            else None
-        )
+        try:
+            client = (
+                _client_for(server, client_id=pending.client_id, auth_method=pending.client_auth_method)
+                if server is not None and server.credential_mode == McpCredentialMode.PER_USER
+                else None
+            )
+            verifier = decrypt_secret(pending.encrypted_code_verifier)
+        except (SecretDecryptionError, SecretBoxUnavailableError):
+            # OTARI_SECRET_KEY changed or went away since the sign-in started. The state is spent, so it starts again.
+            logger.warning("MCP sign-in secrets unreadable server_id=%s", pending.server_id)
+            raise McpConnectionFlowError("This sign-in can no longer be finished. Start it again.") from None
         if server is None or client is None:
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
         # Copied now: the row is read again below into this same object.
@@ -594,7 +601,7 @@ class McpConnectionService:
                 client,
                 code=code,
                 redirect_uri=pending.redirect_uri,
-                verifier=decrypt_secret(pending.encrypted_code_verifier),
+                verifier=verifier,
                 resource=pending.resource,
             )
         except McpOAuthTokenError as exc:
@@ -654,7 +661,8 @@ class McpConnectionService:
             McpConnectionNotFoundError: the user has no connection to this server.
         """
         async with self._uow:
-            connection = await self._connections.find(server_id, user_id)
+            # Locked, so a renewal in flight finishes first and it is the token it stored that is revoked.
+            connection = await self._connections.find(server_id, user_id, lock=True)
             if connection is None:
                 raise McpConnectionNotFoundError(server_id)
             server = await self._servers.find(server_id)
