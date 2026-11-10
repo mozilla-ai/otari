@@ -12,6 +12,7 @@ import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
 import {
   mcpCatalogFeatured,
   mcpCatalogServer,
+  organizationContext,
   workspaceMcpServer,
   workspaceMcpServerHealth,
 } from "@/tests/fixtures"
@@ -57,6 +58,9 @@ function mockApi({
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ url, method, body })
+    if (url.endsWith("/organizations/me")) {
+      return Response.json(organizationContext())
+    }
     if (url.includes("/mcp-catalog/featured")) {
       return Response.json({ data: featured, count: featured.length })
     }
@@ -199,7 +203,9 @@ describe("McpCatalogDialog", () => {
     renderDialog([workspaceMcpServer({ name: "Sentry" })])
     await screen.findByText("Stripe")
 
-    await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Linear" }),
+    )
     await user.click(screen.getByRole("checkbox", { name: "Select Stripe" }))
     await user.click(screen.getByRole("checkbox", { name: "Select Sentry" }))
     expect(screen.getByText("3 selected")).toBeInTheDocument()
@@ -295,6 +301,11 @@ describe("McpCatalogDialog", () => {
     renderDialog()
     await screen.findByRole("list", { name: "All servers" })
 
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("checkbox", { name: "Select Sentry" }),
+      ).toHaveLength(2),
+    )
     const [featured, listed] = screen.getAllByRole("checkbox", {
       name: "Select Sentry",
     })
@@ -325,6 +336,9 @@ describe("McpCatalogDialog", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       calls.push(url)
+      if (url.endsWith("/organizations/me")) {
+        return Response.json(organizationContext())
+      }
       if (url.includes("/mcp-catalog/featured")) {
         return Response.json({ data: [], count: 0 })
       }

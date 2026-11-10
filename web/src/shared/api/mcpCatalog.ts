@@ -11,6 +11,7 @@ import type {
   McpCatalogSyncStatus,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { MCP_CATALOG, MCP_CATALOG_SYNC_POLL_MS } from "@/shared/api/queryKeys"
 
 // A scheduled sync can start while the page sits open, so idle status is rechecked slowly.
@@ -39,6 +40,8 @@ export function useMcpCatalogServers({
     queryKey: [MCP_CATALOG, "servers", query, page, pageSize],
     placeholderData: keepPreviousData,
     staleTime: CATALOG_STALE_MS,
+    // A sync can fill the catalog while the list is open, and not every reader may see the sync status.
+    refetchInterval: CATALOG_STALE_MS,
     queryFn: () => {
       const params = new URLSearchParams({
         skip: String(page * pageSize),
@@ -52,9 +55,11 @@ export function useMcpCatalogServers({
 
 /** The servers the caller's organization recommends. Any member reads it. */
 export function useFeaturedMcpServers(enabled = true) {
+  // Keyed by organization, so a switch never leaves the old shelf actionable.
+  const organizationId = useOrganizationContext(enabled).data?.organization.id
   return useQuery({
-    queryKey: [MCP_CATALOG, "featured"],
-    enabled,
+    queryKey: [MCP_CATALOG, "featured", organizationId],
+    enabled: enabled && organizationId !== undefined,
     // Changed only by this organization's admins, and every write here invalidates it.
     staleTime: CATALOG_STALE_MS,
     queryFn: () =>
