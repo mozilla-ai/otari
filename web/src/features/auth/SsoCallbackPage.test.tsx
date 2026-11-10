@@ -339,7 +339,7 @@ describe("SsoCallbackPage", () => {
       expect(again).toBeDisabled()
 
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(again)
 
@@ -391,7 +391,7 @@ describe("SsoCallbackPage", () => {
         name: "Accept the terms to continue",
       })
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(
         screen.getByRole("button", { name: "Continue signing in" }),
