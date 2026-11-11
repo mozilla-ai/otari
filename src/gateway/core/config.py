@@ -573,6 +573,21 @@ def _default_database_url() -> str:
     return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
 
 
+def _is_origin(value: str) -> bool:
+    """Whether ``value`` is an http(s) origin: a scheme and a host, an optional port, and nothing else."""
+    try:
+        parts = urlsplit(value)
+        parts.port  # noqa: B018 - raises on a port that is not a number
+    except ValueError:
+        return False
+    return (
+        parts.scheme in ("http", "https")
+        and bool(parts.hostname)
+        and "@" not in parts.netloc
+        and value == f"{parts.scheme}://{parts.netloc}"
+    )
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -757,6 +772,13 @@ class GatewayConfig(
     )
     cors_allow_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
+    )
+    cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default_factory=list,
+        description=(
+            "Origins whose pages may call the model endpoints from a browser with an API key, or '*' for any. "
+            "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
+        ),
     )
     enable_metrics: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
@@ -2197,6 +2219,19 @@ class GatewayConfig(
         if value is not None and not value.strip():
             return None
         return value
+
+    @field_validator("cors_inference_origins")
+    @classmethod
+    def _validate_inference_origins(cls, origins: list[str]) -> list[str]:
+        """Accept ``*`` or an origin as a browser sends it, so an entry that could never match is refused at load."""
+        for origin in origins:
+            if origin != "*" and not _is_origin(origin):
+                msg = (
+                    f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
+                    "with an optional port and nothing after it, such as https://app.example.com, or '*'"
+                )
+                raise ValueError(msg)
+        return origins
 
     @field_validator("rate_limits")
     @classmethod

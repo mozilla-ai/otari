@@ -116,6 +116,8 @@ the corresponding startup value after the database is available.
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
+| `cors_allow_origins` | Origins whose pages may call any route, with credentials, so a dashboard served from another host keeps its session. Empty, the default, sends no CORS headers. Startup setting. |
+| `cors_inference_origins` | Origins whose pages may call the model endpoints from a browser with an API key, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -297,6 +299,36 @@ warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
 the edge. Browsers cannot send them cross-origin: they are not in the CORS
 allow-list.
+
+### Calling models from a browser
+
+`cors_inference_origins` lets a web page call a model directly with an API key,
+the way a script outside a browser already can:
+
+```yaml
+cors_inference_origins: ["*"]
+```
+
+It opens these endpoints, and no others: chat completions, responses,
+messages and message token counts, embeddings, rerank, moderations, the audio
+and image endpoints, and the model list (`GET /api/v1/models`), which a page
+reads to offer its models. The rest of the API, the dashboard's included,
+answers a page on another origin as it did before.
+
+A browser never sends credentials under it, so a page cannot use the session
+of someone signed in to the dashboard: only the API key the page itself holds.
+That key sits in the page, where its scripts and the browser's extensions can
+read it. Give a browser a key you can afford to lose: one that expires soon,
+with a small spend ceiling and only the models it needs. See
+[API keys](api-keys.md).
+
+Name origins instead of `*` to open the endpoints to those pages alone. Each
+entry is an origin as a browser sends it: a scheme and a host, with an optional
+port and nothing after it, such as `https://app.example.com` or
+`http://localhost:5173`. An entry that is not one is refused at startup.
+
+An origin listed in `cors_allow_origins` keeps that list's policy on every
+path, the model endpoints included.
 
 ## Budgets and API keys in config
 
