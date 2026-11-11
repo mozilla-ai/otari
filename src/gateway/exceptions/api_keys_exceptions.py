@@ -6,6 +6,7 @@ from gateway.exceptions import (
     TenancyNotFoundError,
     TenancyValidationError,
 )
+from gateway.models.api_keys import DisabledReason
 
 
 class DeclaredKeySecretInUseError(TenancyConflictError):
@@ -59,11 +60,19 @@ class FederationRuleNotFoundError(TenancyNotFoundError):
         super().__init__(f"Federation rule '{rule_id}' not found")
 
 
-class OperatorDisabledKeyError(TenancyForbiddenError):
-    """A key's owner tried to switch on a key an operator switched off, which only an operator may undo."""
+class KeyEnableRefusedError(TenancyForbiddenError):
+    """The caller cannot enable a key disabled for a reason they cannot clear.
 
-    def __init__(self) -> None:
-        super().__init__("An operator switched this key off; ask them to switch it back on.")
+    The message names who can clear the reason, not who set it, because an
+    operator-clearable reason is also set by workspace and organization removal.
+    """
+
+    def __init__(self, reason: DisabledReason) -> None:
+        super().__init__(
+            "This key is disabled and only an operator can enable it."
+            if reason.operator_may_clear
+            else "This key was revoked and cannot be enabled. Create a new key."
+        )
 
 
 class EndUserSettingsOnPlainKeyError(TenancyValidationError):

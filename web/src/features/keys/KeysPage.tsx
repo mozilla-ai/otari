@@ -10,6 +10,7 @@ import {
 } from "react"
 import type {
   ApiKey,
+  ApiKeyDisabledReason,
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOwnKeyRequest,
@@ -141,6 +142,20 @@ type Layout = "wide" | "compact" | "mobile"
 function layoutFor(viewport: number, region = viewport): Layout {
   if (viewport < 768 || region < 600) return "mobile"
   return region < 1100 ? "compact" : "wide"
+}
+
+/**
+ * The reason this viewer cannot enable the key, or undefined if they can.
+ *
+ * An operator clears an operator reason. No caller clears a revocation.
+ */
+function cannotEnableReason(
+  apiKey: ApiKey,
+  isDeploymentWide: boolean,
+): ApiKeyDisabledReason | undefined {
+  const reason = apiKey.disabled_reason ?? undefined
+  if (reason === "revoked") return reason
+  return isDeploymentWide ? undefined : reason
 }
 
 function isExpired(key: ApiKey): boolean {
@@ -1434,7 +1449,7 @@ export function KeysPage() {
           apiKey.is_service_key ? () => setListingEndUsers(apiKey) : undefined
         }
         isReadOnly={isReadOnly}
-        isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
+        cannotEnable={cannotEnableReason(apiKey, isDeploymentWide)}
       />
     ),
     [

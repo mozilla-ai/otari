@@ -862,14 +862,14 @@ describe("KeysPage", () => {
     },
   )
 
-  it("keeps a member from switching back on a key an operator switched off", async () => {
+  it("keeps a member from enabling a key an operator disabled", async () => {
     mockApi({
       keys: [
         apiKey({
           id: "key-1",
           key_name: "locked",
           is_active: false,
-          operator_disabled: true,
+          disabled_reason: "operator",
         }),
       ],
       deploymentOperator: false,
@@ -885,8 +885,53 @@ describe("KeysPage", () => {
     const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
     expect(enable).toHaveAttribute("aria-disabled", "true")
     expect(
-      within(enable).getByText("Switched off by an operator"),
+      within(enable).getByText("Only an operator can enable it"),
     ).toBeInTheDocument()
+  })
+
+  it("lets an operator enable a key an operator disabled", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "held",
+          is_active: false,
+          disabled_reason: "operator",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("held")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for held" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).not.toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("keeps an operator from enabling a revoked key", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "revoked",
+          is_active: false,
+          disabled_reason: "revoked",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("revoked")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for revoked" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).toHaveAttribute("aria-disabled", "true")
+    expect(within(enable).getByText("Revoked permanently")).toBeInTheDocument()
   })
 
   it("offers a viewer their keys to read and nothing that changes one", async () => {

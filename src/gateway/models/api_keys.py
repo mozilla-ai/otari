@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base, UtcDateTime
@@ -16,6 +17,27 @@ MAX_END_USER_BUDGETS = 100
 SERVICE_KEY_OWNER_ID_PREFIX = "svc_"
 # How many federation rules one key may hold.
 MAX_FEDERATION_RULES_PER_KEY = 20
+
+
+class DisabledReason(StrEnum):
+    """Represents the reason an API key cannot be enabled by its owner.
+
+    A key with no reason set can be enabled by its owner.
+    """
+
+    OPERATOR = ("operator", True)
+    """Disabled by an operator, or by a removal from the key's workspace or organization."""
+    REVOKED = ("revoked", False)
+    """The credential was revoked. No caller can enable the key."""
+
+    # Declared per member, so a new member has to supply it.
+    operator_may_clear: bool
+
+    def __new__(cls, value: str, operator_may_clear: bool) -> "DisabledReason":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.operator_may_clear = operator_may_clear
+        return member
 
 
 class APIKey(Base):
@@ -59,10 +81,18 @@ class APIKey(Base):
     # key predates the column and its origin is unrecorded. Demoting a member
     # to viewer switches off only the true ones.
     self_service: Mapped[bool | None] = mapped_column(default=None)
-    # True while the key is off because an operator, or a removal from its
-    # workspace or organization, switched it off; its owner may not switch it
-    # back on. Cleared when an operator switches it on.
-    operator_disabled: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The reason the owner cannot enable this key. NULL for every other key,
+    # including one the owner disabled.
+    disabled_reason: Mapped[DisabledReason | None] = mapped_column(
+        Enum(
+            DisabledReason,
+            native_enum=False,
+            length=16,
+            values_callable=lambda members: [member.value for member in members],
+            validate_strings=True,
+        ),
+        default=None,
+    )
     # When true, requests authenticated with this key are logged with their computed
     # cost but skip budget reservation/reconciliation: their spend is never written to
     # User.spend and never gates enforcement. Default false keeps every existing key
