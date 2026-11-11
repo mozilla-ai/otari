@@ -1,6 +1,5 @@
 ---
 description: How your organization's balance is funded and spent, and what keeps it from running out.
-icon: wallet
 ---
 
 # Billing

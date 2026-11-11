@@ -1,7 +1,3 @@
----
-icon: list-tree
----
-
 # Sessions
 
 A session is one run of an agent: its turns, the model requests and the tools it
