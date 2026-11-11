@@ -63,18 +63,19 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         await self.db.execute(statement.values(**values))
 
     async def names_by_id(
-        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID]
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
     ) -> dict[str, str | None]:
-        """Each of these keys that still exists in these workspaces, to its name.
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
 
         Read in batches, so the ids never exceed a driver's bound-parameter limit.
         """
         ids = sorted(key_ids)
         names: dict[str, str | None] = {}
+        in_workspaces = [] if workspace_ids is None else [APIKey.workspace_id.in_(sorted(workspace_ids))]
         for start in range(0, len(ids), _NAMES_BATCH):
             result = await self.db.execute(
                 select(APIKey.id, APIKey.key_name).where(
-                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), APIKey.workspace_id.in_(sorted(workspace_ids))
+                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), *in_workspaces
                 )
             )
             names.update({key_id: name for key_id, name in result.all()})
@@ -86,6 +87,31 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             select(APIKey.key_name, APIKey.id).where(APIKey.end_user_budget_id == budget_id).order_by(APIKey.id)
         )
         return [name or key_id for name, key_id in result.all()]
+
+    async def summaries_in_workspace(
+        self, workspace_id: uuid.UUID, key_ids: Collection[str] | None = None
+    ) -> list[tuple[str, str | None, str | None, bool]]:
+        """A workspace's keys as ``(id, name, user id, active)``, oldest first; only ``key_ids`` when given."""
+        statement = (
+            select(APIKey.id, APIKey.key_name, APIKey.user_id, APIKey.is_active)
+            .where(APIKey.workspace_id == workspace_id)
+            .order_by(APIKey.created_at, APIKey.id)
+        )
+        if key_ids is not None:
+            statement = statement.where(APIKey.id.in_(list(key_ids)))
+        return [
+            (key_id, name, user_id, active)
+            for key_id, name, user_id, active in (await self.db.execute(statement)).all()
+        ]
+
+    async def owners_in_workspace(self, workspace_id: uuid.UUID, user_ids: Collection[str]) -> set[str]:
+        """Which of ``user_ids`` own at least one key in the workspace."""
+        result = await self.db.execute(
+            select(APIKey.user_id)
+            .where(APIKey.workspace_id == workspace_id, APIKey.user_id.in_(list(user_ids)))
+            .distinct()
+        )
+        return {user_id for user_id in result.scalars().all() if user_id is not None}
 
     async def remove_end_user_budget(self, budget_id: str) -> None:
         """Take ``budget_id`` off every key's ``end_user_budget_ids``.

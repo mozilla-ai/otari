@@ -43,6 +43,7 @@ import { Route as OrganizationGuardrailsRouteImport } from './routes/organizatio
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
+import { Route as OrganizationSsoRouteImport } from './routes/organization.sso'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
 import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
@@ -54,6 +55,8 @@ import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
+import { Route as ToolsMcpServersIndexRouteImport } from './routes/tools.mcp-servers.index'
+import { Route as ToolsMcpServersServerIdRouteImport } from './routes/tools.mcp-servers.$serverId'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -225,6 +228,11 @@ const OrganizationProviderKeysRoute =
     path: '/provider-keys',
     getParentRoute: () => OrganizationRoute,
   } as any)
+const OrganizationSsoRoute = OrganizationSsoRouteImport.update({
+  id: '/sso',
+  path: '/sso',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 const OrganizationUsageRoute = OrganizationUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
@@ -281,6 +289,16 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const ToolsMcpServersIndexRoute = ToolsMcpServersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ToolsMcpServersRoute,
+} as any)
+const ToolsMcpServersServerIdRoute = ToolsMcpServersServerIdRouteImport.update({
+  id: '/$serverId',
+  path: '/$serverId',
+  getParentRoute: () => ToolsMcpServersRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
@@ -314,12 +332,13 @@ export interface FileRoutesByFullPath {
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
+  '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
-  '/tools/mcp-servers': typeof ToolsMcpServersRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/models/': typeof ModelsIndexRoute
@@ -327,6 +346,8 @@ export interface FileRoutesByFullPath {
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesByTo {
   '/$': typeof SplatRoute
@@ -354,12 +375,12 @@ export interface FileRoutesByTo {
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
+  '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
-  '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/': typeof OverviewIndexRoute
@@ -368,6 +389,8 @@ export interface FileRoutesByTo {
   '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
+  '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -402,12 +425,13 @@ export interface FileRoutesById {
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
+  '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
-  '/tools/mcp-servers': typeof ToolsMcpServersRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/_overview/': typeof OverviewIndexRoute
@@ -416,6 +440,8 @@ export interface FileRoutesById {
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -451,6 +477,7 @@ export interface FileRouteTypes {
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
+    | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/routing/$name'
@@ -464,6 +491,8 @@ export interface FileRouteTypes {
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
+    | '/tools/mcp-servers/$serverId'
+    | '/tools/mcp-servers/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
@@ -491,12 +520,12 @@ export interface FileRouteTypes {
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
+    | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
-    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
     | '/'
@@ -505,6 +534,8 @@ export interface FileRouteTypes {
     | '/routing'
     | '/tools'
     | '/workspaces'
+    | '/tools/mcp-servers/$serverId'
+    | '/tools/mcp-servers'
   id:
     | '__root__'
     | '/$'
@@ -538,6 +569,7 @@ export interface FileRouteTypes {
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
+    | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/routing/$name'
@@ -552,6 +584,8 @@ export interface FileRouteTypes {
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
+    | '/tools/mcp-servers/$serverId'
+    | '/tools/mcp-servers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -820,6 +854,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationProviderKeysRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/sso': {
+      id: '/organization/sso'
+      path: '/sso'
+      fullPath: '/organization/sso'
+      preLoaderRoute: typeof OrganizationSsoRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/organization/usage': {
       id: '/organization/usage'
       path: '/usage'
@@ -897,6 +938,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/tools/mcp-servers/': {
+      id: '/tools/mcp-servers/'
+      path: '/'
+      fullPath: '/tools/mcp-servers/'
+      preLoaderRoute: typeof ToolsMcpServersIndexRouteImport
+      parentRoute: typeof ToolsMcpServersRoute
+    }
+    '/tools/mcp-servers/$serverId': {
+      id: '/tools/mcp-servers/$serverId'
+      path: '/$serverId'
+      fullPath: '/tools/mcp-servers/$serverId'
+      preLoaderRoute: typeof ToolsMcpServersServerIdRouteImport
+      parentRoute: typeof ToolsMcpServersRoute
+    }
   }
 }
 
@@ -935,6 +990,7 @@ interface OrganizationRouteChildren {
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
   OrganizationProviderKeysRoute: typeof OrganizationProviderKeysRoute
+  OrganizationSsoRoute: typeof OrganizationSsoRoute
   OrganizationUsageRoute: typeof OrganizationUsageRoute
   OrganizationWebSearchKeysRoute: typeof OrganizationWebSearchKeysRoute
   OrganizationIndexRoute: typeof OrganizationIndexRoute
@@ -946,6 +1002,7 @@ const OrganizationRouteChildren: OrganizationRouteChildren = {
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
   OrganizationProviderKeysRoute: OrganizationProviderKeysRoute,
+  OrganizationSsoRoute: OrganizationSsoRoute,
   OrganizationUsageRoute: OrganizationUsageRoute,
   OrganizationWebSearchKeysRoute: OrganizationWebSearchKeysRoute,
   OrganizationIndexRoute: OrganizationIndexRoute,
@@ -968,10 +1025,24 @@ const RoutingRouteChildren: RoutingRouteChildren = {
 const RoutingRouteWithChildren =
   RoutingRoute._addFileChildren(RoutingRouteChildren)
 
+interface ToolsMcpServersRouteChildren {
+  ToolsMcpServersServerIdRoute: typeof ToolsMcpServersServerIdRoute
+  ToolsMcpServersIndexRoute: typeof ToolsMcpServersIndexRoute
+}
+
+const ToolsMcpServersRouteChildren: ToolsMcpServersRouteChildren = {
+  ToolsMcpServersServerIdRoute: ToolsMcpServersServerIdRoute,
+  ToolsMcpServersIndexRoute: ToolsMcpServersIndexRoute,
+}
+
+const ToolsMcpServersRouteWithChildren = ToolsMcpServersRoute._addFileChildren(
+  ToolsMcpServersRouteChildren,
+)
+
 interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
-  ToolsMcpServersRoute: typeof ToolsMcpServersRoute
+  ToolsMcpServersRoute: typeof ToolsMcpServersRouteWithChildren
   ToolsWebSearchRoute: typeof ToolsWebSearchRoute
   ToolsIndexRoute: typeof ToolsIndexRoute
 }
@@ -979,7 +1050,7 @@ interface ToolsRouteChildren {
 const ToolsRouteChildren: ToolsRouteChildren = {
   ToolsCodeExecutionRoute: ToolsCodeExecutionRoute,
   ToolsGuardrailsRoute: ToolsGuardrailsRoute,
-  ToolsMcpServersRoute: ToolsMcpServersRoute,
+  ToolsMcpServersRoute: ToolsMcpServersRouteWithChildren,
   ToolsWebSearchRoute: ToolsWebSearchRoute,
   ToolsIndexRoute: ToolsIndexRoute,
 }

@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +32,7 @@ from gateway.api.deps import CurrentIdentity, RequestSessionModelProviderPortDep
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.settings.pricing import rates_shorthand
+from gateway.core.settings.pricing import rates_shorthand, token_prices_not_required
 from gateway.models.money import as_float
 from gateway.models.pricing import MODEL_KIND, OrganizationModelPricing, PricingKind, rates_of
 
@@ -46,7 +46,7 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument, stored_rates
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Master key on the router, as every management router declares it.
@@ -84,8 +84,10 @@ _EFFECTIVE_TO_DESCRIPTION = (
 class OrganizationModelPricingRates(BaseModel):
     """The rates and period shared by the create and update bodies."""
 
+    model_config = ConfigDict(json_schema_extra=token_prices_not_required)
+
     input_price_per_million: float = Field(
-        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests, images or characters"
     )
     output_price_per_million: float = Field(
         ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
@@ -105,7 +107,7 @@ class OrganizationModelPricingRates(BaseModel):
     unit: AcceptedPriceUnit = Field(
         default="token",
         description=(
-            "What the rates are per: token for a model, request or image for a non-token endpoint. "
+            "What the rates are per: token for a model, request, image or character for a non-token endpoint. "
             "A completion model priced per request is charged one request per successful call."
             " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
             "and prices nothing. The plural names tokens, requests and images are still read for one release."
@@ -209,7 +211,7 @@ class OrganizationModelPricingPublic(BaseModel):
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "token",
-            rates=RatesDocument.model_validate(rates_of(override)),
+            rates=stored_rates(rates_of(override)),
             effective_from=override.effective_from,
             effective_to=override.effective_to,
             created_at=override.created_at,
@@ -331,7 +333,11 @@ async def list_organization_pricing(
     "",
     status_code=status.HTTP_201_CREATED,
     responses={
-        status.HTTP_403_FORBIDDEN: {"description": "The deployment holds the credential that serves the model."},
+        status.HTTP_403_FORBIDDEN: {
+            "description": (
+                "The deployment holds the credential that serves the model, or runs the tool on its own account."
+            )
+        },
         status.HTTP_409_CONFLICT: {"description": "The period overlaps one already stored for the model."},
     },
 )
@@ -353,6 +359,9 @@ async def create_organization_pricing(
     deployment settles the upstream bill, so its rate is the deployment price
     list's rather than a tenant's.
 
+    A rate on a tool the deployment's own account runs, a search or fetch tool's
+    or ``otari:code_execution``, is refused with a 403 for the same reason.
+
     The key is normalized to its canonical ``instance:model`` form first, the same
     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
@@ -372,7 +381,7 @@ async def create_organization_pricing(
     "/{pricing_id}",
     responses={
         status.HTTP_403_FORBIDDEN: {
-            "description": "The deployment serves the model, or the deployment operator set the rate."
+            "description": "The deployment serves the model or runs the tool, or the deployment operator set the rate."
         }
     },
 )
@@ -389,9 +398,9 @@ async def replace_organization_pricing(
     keeps the cost it was billed, because a settled cost is stored on the usage
     row rather than recomputed.
 
-    Refused with a 403 on the same deployment-supplied-model rule the create path
-    carries, so a row stored before that rule existed cannot be edited into a rate
-    nobody could create today, and with a 403 for a rate the deployment operator
+    Refused with a 403 on the same deployment-supplied rules the create path
+    carries, so an edit cannot store a rate a create would refuse, and with a
+    403 for a rate the deployment operator
     set, which only the operator may change.
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))

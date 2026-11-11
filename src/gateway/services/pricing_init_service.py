@@ -1,5 +1,6 @@
 """Pricing initialization from configuration."""
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -11,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.money import to_usd
-from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind, rates_of
 from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     gateway_tool_pricing_key,
@@ -22,11 +24,14 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys, enriching_fetch_tool
+from gateway.types.price_rates import dump_rates, load_rates
 from gateway.types.tool_charges import InstanceRateKey
 
 
-async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when require_pricing is on but no pricing is configured.
+async def warn_if_require_pricing_without_pricing(
+    config: GatewayConfig, db: AsyncSession, level: int = logging.WARNING
+) -> None:
+    """Warn at startup, at ``level``, when require_pricing is on but no pricing is configured.
 
     With ``require_pricing=True`` (the default), any model lacking a pricing
     entry is rejected with HTTP 402 — so a deployment with zero pricing rows
@@ -58,15 +63,17 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     if count > 0:
         return
     if not config.default_pricing:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled but no model pricing is configured: ALL billable requests "
             f"will be rejected with HTTP 402. Add pricing (config `pricing` section or POST {API_ROOT}/pricing), "
-            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models."
+            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models.",
         )
     else:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402.",
         )
 
 
@@ -151,14 +158,43 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
         )
 
 
-async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
-    """Initialize model pricing from configuration file."""
+def _same_rates_block(stored: ModelPricing, configured: ModelPricing) -> bool:
+    """Whether two versions' ``rates`` blocks agree, numbers compared by value.
+
+    The columns cannot tell apart two blocks that differ only where no column
+    reaches, such as a rate on another modality.
+    """
+    return load_rates(dump_rates(rates_of(stored))) == load_rates(dump_rates(rates_of(configured)))
+
+
+async def initialize_pricing_from_config(
+    config: GatewayConfig, db: AsyncSession, pricing: DeploymentPricingService
+) -> None:
+    """Initialize model pricing from configuration file.
+
+    An entry with no ``effective_at`` is dated now, so it adds a version only
+    when its rates differ from the version in force: an unchanged file adds
+    nothing on a restart.
+    """
 
     if not config.pricing:
         logger.debug("No pricing configuration found in config file")
         return
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
+
+    now = datetime.now(UTC)
+    undated_keys: list[str] = []
+    # A dated entry this run may add can overtake the version in force, so an
+    # undated entry is skipped only over a version at least as new as it.
+    latest_dated: dict[str, datetime] = {}
+    for key, entry in config.pricing.items():
+        normalized_key = normalize_pricing_key(config, key)
+        if not entry.effective_at:
+            undated_keys.append(normalized_key)
+        elif (dated := normalize_effective_at(entry.effective_at)) <= now:
+            latest_dated[normalized_key] = max(dated, latest_dated.get(normalized_key, dated))
+    in_force = await pricing.current_versions(undated_keys, now) if undated_keys else {}
 
     # A search or fetch instance's rate written here under its old
     # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
@@ -205,6 +241,28 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
+        new_pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price,
+            output_price_per_million=output_price,
+            cache_read_price_per_million=cache_read_price,
+            cache_write_price_per_million=cache_write_price,
+            pricing_tiers=pricing_tiers,
+            unit=pricing_config.unit,
+            rates=None if pricing_config.rates is None else pricing_config.rates.document(),
+            origin="config",
+        )
+        current = None if pricing_config.effective_at else in_force.get(model_key)
+        if (
+            current is not None
+            and current.effective_at >= latest_dated.get(model_key, current.effective_at)
+            and DeploymentPricingService.rates_match(current, new_pricing)
+            and _same_rates_block(current, new_pricing)
+        ):
+            logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
+            continue
+
         existing_pricing = (
             await db.execute(
                 select(ModelPricing).where(
@@ -224,18 +282,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             )
             continue
 
-        new_pricing = ModelPricing(
-            model_key=model_key,
-            effective_at=effective_at,
-            input_price_per_million=input_price,
-            output_price_per_million=output_price,
-            cache_read_price_per_million=cache_read_price,
-            cache_write_price_per_million=cache_write_price,
-            pricing_tiers=pricing_tiers,
-            unit=pricing_config.unit,
-            rates=None if pricing_config.rates is None else pricing_config.rates.document(),
-            origin="config",
-        )
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)
 

@@ -54,6 +54,21 @@ def serve_stubs(monkeypatch: pytest.MonkeyPatch) -> ServeCapture:
     return captured
 
 
+def test_serve_reports_a_refused_config_value_without_repeating_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pydantic's own rendering prints the input, which here would be the credential being refused."""
+
+    def refuse(config_path: str | None = None) -> GatewayConfig:
+        return GatewayConfig(models_dev_base_url="https://user:password@mirror.example")
+
+    monkeypatch.setattr(gateway_cli, "load_config", refuse)
+    result = CliRunner().invoke(gateway_cli.serve, [])
+
+    assert result.exit_code == 1
+    assert "models_dev_base_url" in result.output
+    assert "must carry no username or password" in result.output
+    assert "password@mirror.example" not in result.output
+
+
 def test_serve_log_level_symbolic_name(serve_stubs: ServeCapture) -> None:
     result = CliRunner().invoke(gateway_cli.serve, ["--log-level", "info"])
     assert result.exit_code == 0, result.output

@@ -27,6 +27,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -40,6 +41,7 @@ from gateway.types.models_dev import (
     ModelsDevPricing,
     ModelsDevUnitPrice,
     Number,
+    condition_problem,
     direction_cost,
     parse_pricing,
     pricing_document,
@@ -231,17 +233,48 @@ def columns_from_rates(document: Mapping[str, Any]) -> RateColumns:
         raise ValueError(f"rates cannot be read: {'; '.join(issues.examples)}")
     if issues.unknown_units:
         raise ValueError(f"rates name a unit not known here: {', '.join(issues.unknown_units)}")
+    return columns_from_pricing(pricing)
+
+
+def columns_from_pricing(pricing: ModelsDevPricing) -> RateColumns:
+    """The six columns a parsed ``cost`` block gives, as :func:`columns_from_rates` reads them from a document.
+
+    Raises:
+        ValueError: The block prices nothing a column can hold, prices text
+            input and output in different units, or holds a rate no column can.
+    """
+    slot = _column_slot(pricing)
+    given, made = _prices_in(pricing, slot)
+    priced = [price for price in (given, made) if price is not None and price.price is not None]
+    unit = _unit_of(priced[0])
+    # An unpriced object that names a unit or carries a cache price is in a unit too; an empty one is not.
+    in_a_unit = [p for p in (given, made) if p is not None and (p.price is not None or p.unit or p.cache)]
+    if any(_unit_of(price) != unit for price in in_a_unit):
+        raise ValueError(f"rates price {slot.modality} input and output in different units")
+    return _columns(direction_cost(given, made), unit)
+
+
+def column_paths(pricing: ModelsDevPricing) -> tuple[str, str | None]:
+    """The paths of the prices the columns are read from: the input columns' price, and the output column's.
+
+    A path is a modality and a direction (``text.input``), or ``web_search``.
+    The output column of a one-price slot reads no price, so its path is ``None``.
+
+    Raises:
+        ValueError: The block prices nothing a column can hold.
+    """
+    slot = _column_slot(pricing)
+    if slot.modality is None:
+        return "web_search", None
+    return f"{slot.modality}.{slot.given}", None if slot.made is None else f"{slot.modality}.{slot.made}"
+
+
+def _column_slot(pricing: ModelsDevPricing) -> _Slot:
+    """The slot the columns are read from: the text prices, else the first other slot that is priced."""
     for slot in _READ_ORDER:
         given, made = _prices_in(pricing, slot)
-        priced = [price for price in (given, made) if price is not None and price.price is not None]
-        if not priced:
-            continue
-        unit = _unit_of(priced[0])
-        # An unpriced object that names a unit or carries a cache price is in a unit too; an empty one is not.
-        in_a_unit = [p for p in (given, made) if p is not None and (p.price is not None or p.unit or p.cache)]
-        if any(_unit_of(price) != unit for price in in_a_unit):
-            raise ValueError(f"rates price {slot.modality} input and output in different units")
-        return _columns(direction_cost(given, made), unit)
+        if any(price is not None and price.price is not None for price in (given, made)):
+            return slot
     raise ValueError("rates price nothing a rate column can hold: no text, image, audio, video or web_search price")
 
 
@@ -287,6 +320,29 @@ def _a_price(value: Any) -> Any:
     return value
 
 
+def stored_rates(document: Mapping[str, Any]) -> "RatesDocument":
+    """A row's block as the wire shows it, its rules taken as stored.
+
+    A block is held to models.dev's conditions when it is written, not when it
+    is read back: a seeded row keeps the catalog's block whole, which may name
+    a condition models.dev added after this version.
+    """
+    return RatesDocument.model_validate(document, context=_STORED)
+
+
+# The validation context of a block read back from a row.
+_STORED = {"stored": True}
+
+
+def _condition(when: dict[str, Any], info: ValidationInfo) -> dict[str, Any]:
+    """``when`` when it is a condition models.dev's schema allows; the refusal names what is not."""
+    if isinstance(info.context, Mapping) and info.context.get("stored"):
+        return when
+    if (problem := condition_problem(when)) is not None:
+        raise ValueError(problem)
+    return when
+
+
 def _finite(value: int | float | Decimal) -> bool:
     try:
         return math.isfinite(value)
@@ -323,6 +379,11 @@ class RateOverride(_Strict):
     def _as_numbers(cls, value: Any) -> Any:
         return _numbers(value)
 
+    @field_validator("when")
+    @classmethod
+    def _a_condition(cls, value: dict[str, Any], info: ValidationInfo) -> dict[str, Any]:
+        return _condition(value, info)
+
 
 class UnitRate(_Strict):
     """One price: of a modality's input or output, or of web search."""
@@ -356,6 +417,11 @@ class RateMultiplier(_Strict):
     def _as_numbers(cls, value: Any) -> Any:
         return _numbers(value)
 
+    @field_validator("when")
+    @classmethod
+    def _a_condition(cls, value: dict[str, Any], info: ValidationInfo) -> dict[str, Any]:
+        return _condition(value, info)
+
     @field_validator("factor", mode="before")
     @classmethod
     def _factors_are_prices(cls, value: Any) -> Any:
@@ -375,10 +441,10 @@ class RatesDocument(BaseModel):
     multipliers: list[RateMultiplier] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _modalities_have_the_shape(self) -> Self:
+    def _modalities_have_the_shape(self, info: ValidationInfo) -> Self:
         for modality, prices in (self.__pydantic_extra__ or {}).items():
             if not isinstance(prices, ModalityRates):
-                self.__pydantic_extra__[modality] = ModalityRates.model_validate(prices)
+                self.__pydantic_extra__[modality] = ModalityRates.model_validate(prices, context=info.context)
         return self
 
     @model_serializer(mode="wrap")
@@ -418,7 +484,8 @@ def _prices_in(pricing: ModelsDevPricing, slot: _Slot) -> tuple[ModelsDevUnitPri
 
 def _unit_of(price: ModelsDevUnitPrice | None) -> PriceUnit:
     unit = "token" if price is None or price.unit is None else price.unit
-    assert unit in PRICE_UNITS
+    if unit not in PRICE_UNITS:
+        raise ValueError(f"a price per {unit} is not in a unit a rate column holds")
     return unit
 
 

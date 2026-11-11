@@ -5,18 +5,20 @@ its own allowlist, budget and usage steps.
 
 - :func:`pick_direct_search_instance` returns the instance named in the path
   or in ``search_tool_name``, else the one ``web_search_default_tool`` names
-  when any-search serves it, else the only one.
+  when any-search serves it, else the only one. Where a call that names none
+  finds no instance to pick, :func:`organization_key_search_instance` stands
+  in for one when the workspace has an organization key.
 - :func:`resolve_direct_search` returns the :class:`DirectSearch`. A call that
   names its instance runs on the instance's own key. A call that names none
   runs on the organization key in the workspace's policy, when there is one,
   with that key's provider and options, under the rate key
   ``otari:web_search``. The count is capped at the policy's ``max_results``;
   the policy's provider options are not applied.
+  :func:`resolve_organization_key_search` does the same for the stand-in.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the SearXNG client for a ``searxng`` instance and the Tavily or Brave client
-  for an organization key on those providers.
+  the Tavily or Brave client for an organization key on those providers.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -33,6 +35,7 @@ from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
+    WEB_SEARCH_PROVIDERS,
     ToolInstance,
     ToolKind,
     ToolSettings,
@@ -47,6 +50,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
@@ -54,7 +58,7 @@ from gateway.services.tools._web_search._litellm import (
     litellm_native_options,
     litellm_results,
 )
-from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search
+from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search, resolve_search_on_key
 from gateway.services.tools._web_tool_failure import WebToolFailure, failed_text
 from gateway.types.tool_charges import RateKey, describe_rate_key
 
@@ -118,6 +122,17 @@ def _requires_key(provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
+def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
+    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick, or when the one picked cannot run.
+    """
+    try:
+        return pick_direct_search_instance(config, None).name
+    except (SearchToolSelectionError, SearchToolMisconfiguredError):
+        return None
+
+
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
     """``web_search_default_tool`` when it names an instance any-search serves, else the only instance.
 
@@ -168,6 +183,56 @@ def resolve_direct_search(
     if resolved is None:
         # Unreachable: a named instance resolves or raises.
         raise SearchToolMisconfiguredError(instance.name)
+    return _direct_search(instance, resolved, policy, request, organization_key)
+
+
+def organization_key_search_instance(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
+    """What a direct search that names no tool runs as when there is no instance to pick, or ``None``.
+
+    It stands in for an instance where the workspace has an organization key
+    this gateway can search with: named ``web_search``, as the in-loop
+    tool is, on the key's provider, so the key's tool list, the rate rules and
+    the usage row read it as that tool.
+    """
+    credential = policy.credential if policy is not None else None
+    if credential is None:
+        return None
+    library_backed = credential.provider in any_search.AnySearch.get_supported_providers()
+    if not library_backed and credential.provider not in WEB_SEARCH_PROVIDERS:
+        return None
+    return ToolInstance(
+        name=WEB_SEARCH_TOOL_NAME, kind="search", provider=credential.provider, library_backed=library_backed
+    )
+
+
+def resolve_organization_key_search(
+    instance: ToolInstance, policy: ResolvedWebSearchConfig | None, request: SearchRequest
+) -> DirectSearch:
+    """:func:`resolve_direct_search` for the instance :func:`organization_key_search_instance` stood in."""
+    credential = policy.credential if policy is not None else None
+    resolved = (
+        resolve_search_on_key(credential, name=instance.name, request_options=request.provider_options)
+        if credential is not None
+        else None
+    )
+    if resolved is None:
+        # Unreachable: the stand-in exists only for a key its provider can be called with.
+        raise SearchToolMisconfiguredError(instance.name)
+    return _direct_search(instance, resolved, policy, request, credential)
+
+
+def _direct_search(
+    instance: ToolInstance,
+    resolved: ResolvedSearch,
+    policy: ResolvedWebSearchConfig | None,
+    request: SearchRequest,
+    organization_key: WebSearchCredential | None,
+) -> DirectSearch:
+    """The search ``resolved`` runs, with its count capped by the workspace's ``max_results``.
+
+    Raises :class:`DirectSearchFieldRefusedError` for ``include_raw`` or
+    ``provider_options`` on a call that does not run on any-search.
+    """
     if resolved.runner != "library" and (request.include_raw or request.provider_options):
         raise DirectSearchFieldRefusedError(resolved.provider)
     asked = SearchQuery(
@@ -239,13 +304,12 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, orga
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search for a library-backed provider, on the SearXNG
-    client for a ``searxng`` instance, and on the Tavily or Brave client for an
+    The call runs on any-search, or on the Tavily or Brave client for an
     organization key on those providers. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error inside a successful answer
     included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the SearXNG, Tavily and Brave clients' own text
-    can quote the upstream body or a URL carrying the query.
+    failure's safe fields, since the Tavily and Brave clients' own text can
+    quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError
@@ -291,14 +355,12 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
 
 async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search, run_search, search_tool
+    from gateway.services.search_backend import run_keyed_search
 
-    if search.credential is not None:
-        outcome = await run_keyed_search(
-            search.credential, search.query, timeout_s=search.resolved.timeout, client=client
-        )
-    else:
-        outcome = await run_search(search_tool(search.resolved), search.query, client=client)
+    if search.credential is None:
+        # Unreachable: only an organization key on Tavily or Brave runs on the old client.
+        raise SearchToolMisconfiguredError(search.instance.name)
+    outcome = await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
     return DirectSearchResult(
         response=SearchResponse(
             search_tool=search.instance.name,

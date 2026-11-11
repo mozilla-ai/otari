@@ -11,7 +11,14 @@ import type {
 import { PublicCatalogPage } from "@/features/models/PublicCatalogPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 const GLM: CatalogModelSummary = {
   id: "z-ai/glm-5.3",
@@ -45,6 +52,7 @@ const GLM: CatalogModelSummary = {
   price_sources: ["defaults", "deployment"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
@@ -171,6 +179,25 @@ describe("PublicCatalogPage", () => {
     ).toBe(false)
   })
 
+  it("opens filtered on the list a link names", async () => {
+    const fetchMock = mockApi()
+    window.location.hash = "#/models?provider=mistral&provider=nebius&q=glm"
+    renderPage()
+
+    await screen.findByRole("list", { name: "Models" })
+    const requested = fetchMock.mock.calls
+      .map(([url]) => new URL(String(url), "http://localhost"))
+      .filter((url) => url.pathname.endsWith("/catalog/models"))
+    expect(requested.length).toBeGreaterThan(0)
+    for (const url of requested) {
+      expect(url.searchParams.getAll("provider")).toEqual(["mistral", "nebius"])
+      expect(url.searchParams.get("search")).toBe("glm")
+    }
+    expect(screen.getByRole("searchbox", { name: /search/i })).toHaveValue(
+      "glm",
+    )
+  })
+
   it("shows a model's offerings without the links that need a session", async () => {
     mockApi()
     renderPage("z-ai/glm-5.3")
@@ -201,6 +228,21 @@ describe("PublicCatalogPage", () => {
     expect(use).toHaveAttribute("href", "#/")
     // No drawer for a visitor: there is no key to send its request with.
     expect(screen.queryByRole("button", { name: "Use this model" })).toBeNull()
+  })
+
+  it("records a visitor's press as one made before signing in", async () => {
+    resetTelemetrySpy()
+    mockApi()
+    renderPage("z-ai/glm-5.3", true)
+
+    await userEvent.click(
+      await screen.findByRole("link", { name: "Use this model" }),
+    )
+
+    expect(recordEvent).toHaveBeenCalledExactlyOnceWith(
+      TELEMETRY_EVENTS.USE_MODEL_CLICKED,
+      { model: "z-ai/glm-5.3", signed_in: false },
+    )
   })
 
   it("starts an account from Use this model at signup where it is open", async () => {

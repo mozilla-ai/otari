@@ -179,6 +179,21 @@ def test_huggingface_backend_via_implementation(index: ModelsDevPriceIndex) -> N
     assert price.provider_id == "togetherai"
 
 
+@pytest.mark.parametrize("model", ["anthropic/claude-sonnet-4-5", "anthropic:claude-sonnet-4-5"])
+def test_an_otari_provider_prices_a_vendor_prefixed_id_from_the_vendor(index: ModelsDevPriceIndex, model: str) -> None:
+    price = index.resolve("otari-ai", model, implementation="otari")
+    assert price is not None
+    assert price.reference == "models.dev:anthropic/claude-sonnet-4-5"
+
+
+def test_a_vendor_prefixed_id_is_not_split_for_any_other_provider(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("openai-eu", "anthropic:claude-sonnet-4-5", implementation="openai") is None
+
+
+def test_an_otari_provider_does_not_price_a_model_its_vendor_does_not_list(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("otari-ai", "anthropic/no-such-model", implementation="otari") is None
+
+
 def test_huggingface_unpinned_uses_the_router_listing(index: ModelsDevPriceIndex) -> None:
     price = index.resolve("huggingface", "meta-llama/Llama-3.3-70B-Instruct")
     assert price is not None
@@ -497,6 +512,32 @@ def test_hosts_that_agree_on_the_whole_block_give_it() -> None:
 
     assert entry is not None and entry.pricing is not None
     assert entry.pricing.web_search is not None and entry.pricing.web_search.price == 10
+
+
+def _two_audio_hosts(first: float, second: float, *, second_search: float | None = None) -> ModelsDevPriceIndex:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    def host(name: str, price: float, search: float | None) -> dict[str, Any]:
+        cost: dict[str, Any] = {"audio": {"input": {"price": price, "unit": "minute"}}}
+        if search is not None:
+            cost["web_search"] = {"price": search}
+        return {"id": name, "models": {"shared-model": {"id": "shared-model", "cost": cost}}}
+
+    return ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2({"hosta": host("hosta", first, None), "hostb": host("hostb", second, second_search)})
+    )
+
+
+def test_a_model_priced_only_in_a_measured_slot_is_priced_where_the_hosts_agree_on_it() -> None:
+    """A per-minute audio price with no text price still prices the model, and still has to agree across hosts."""
+    agreed = _two_audio_hosts(0.006, 0.006).resolve(None, "shared-model")
+
+    assert agreed is not None and agreed.priced
+    assert agreed.slot_columns is not None
+    assert (agreed.slot_columns.unit, agreed.slot_columns.input_price_per_million) == ("minute", Decimal(6000))
+    assert _two_audio_hosts(0.006, 0.01).resolve(None, "shared-model") is None
+    # The slot price is read from the block, so hosts that differ elsewhere in it give no default.
+    assert _two_audio_hosts(0.006, 0.006, second_search=10).resolve(None, "shared-model") is None
 
 
 def test_hosts_that_write_the_same_block_in_another_order_still_agree() -> None:

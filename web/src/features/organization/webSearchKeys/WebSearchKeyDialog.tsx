@@ -25,7 +25,6 @@ import {
   useCreateOrgWebSearchKey,
   useUpdateOrgWebSearchKey,
 } from "@/shared/api/webSearchKeys"
-
 import { KIND_COPY, offeredProviders } from "./webSearchKeys"
 
 // Adds one of the organization's search or fetch keys, or edits one. The
@@ -99,8 +98,11 @@ export function WebSearchKeyDialog({
   const needsKeyAgain = movesHost && Boolean(editing?.last4)
   const keyRequired =
     (!isEdit && Boolean(provider?.requires_api_key)) || needsKeyAgain
-  const baseRequired =
-    Boolean(provider?.requires_api_base) && !provider?.default_api_base
+  // A provider that requires an endpoint has none of its own. For an operator,
+  // the catalog gives it the endpoint the deployment's tools inherit, which a
+  // key never does, so the key needs its own.
+  const baseRequired = Boolean(provider?.requires_api_base)
+  const defaultBase = baseRequired ? "" : (provider?.default_api_base ?? "")
   const built = buildOptions(provider, draft.options, draft.extraJson)
   const isReady =
     (isEdit || provider !== undefined) &&
@@ -146,10 +148,10 @@ export function WebSearchKeyDialog({
       value={draft.apiBase}
       onChange={(next) => set({ apiBase: next })}
       isRequired={baseRequired}
-      placeholder={provider?.default_api_base ?? "https://…"}
+      placeholder={defaultBase || "https://…"}
       description={[
-        provider?.default_api_base
-          ? `Optional. Blank uses ${provider.default_api_base}.`
+        defaultBase
+          ? `Optional. Blank uses ${defaultBase}.`
           : baseRequired
             ? "This provider has no endpoint of its own, so it needs one here."
             : "Optional.",

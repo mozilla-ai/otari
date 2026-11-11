@@ -8,8 +8,10 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
-needs a search provider (`web_search_provider` or `web_search_url`). Fetch runs
-in the gateway.
+needs a search tool (see [Search tools](configuration.md#search-tools)), a
+workspace's [organization search key](#organization-search-keys), or a legacy
+setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -21,11 +23,14 @@ curl http://localhost:8000/api/v1/tools \
 ```
 
 Unavailable but recognized tools remain in the response with
-`"available": false` and a `reason`: `not_configured` when nothing is set up
-to run the tool (for web search, an organization search key counts for an API
-key on that organization), or `workspace_disabled` when the API key's workspace does
-not allow it (a workspace admin turns it on under Tools in the dashboard). A
-master key or a dashboard session belongs to no single workspace, so its
+`"available": false` and a `reason`:
+
+- `not_configured`: nothing is set up to run the tool. For web search, an
+  organization search key counts for an API key on that organization.
+- `workspace_disabled`: the API key's workspace does not allow it (a workspace
+  admin turns it on under Tools in the dashboard).
+
+A master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.
 
 ## Who runs a tool
@@ -45,9 +50,7 @@ Function tools remain the caller's responsibility.
 Some clients can declare only provider-native search types: `web_search`,
 `web_search_<date>`, and `web_search_preview`. By default such a declaration is
 forwarded to the provider. Set `web_search_intercept: true` to run every one of
-them on Otari's configured backend instead. Interception is off by default
-because enabling it changes who performs searches for providers that already
-support a native search tool.
+them on Otari's configured backend instead. Interception is off by default.
 
 Without interception, a request can choose for itself with the
 `Otari-Web-Search` header:
@@ -60,11 +63,9 @@ Without interception, a request can choose for itself with the
   both on its compatible APIs: the dated keyword on `/api/v1/messages` with any
   of its models, and `web_search` on `/api/v1/responses` with `deepseek-v4-pro`
   only, since `deepseek-flash` ignores it there and answers without searching.
-  So a request
-  written for Claude's search keeps searching when its model is swapped, or
-  falls back, to one with no search of its own, and on Messages a dated keyword
-  is still answered with `server_tool_use` / `web_search_tool_result` blocks. A
-  request its first model answers natively opens and pays for no search.
+  On Messages, a dated keyword Otari runs is still answered with
+  `server_tool_use` / `web_search_tool_result` blocks. A request its first
+  model answers natively opens and pays for no Otari search.
 - `otari` always runs it on Otari's backend.
 - `provider` always forwards it and never runs Otari's search, so on a
   fallback to a model that cannot run the keyword itself, that attempt fails
@@ -79,15 +80,11 @@ activity log, and the request fails only when no model is left.
 A [workspace web-access policy](#per-workspace-web-access-policy) may pin
 `search_executor` to one of the same three values. The pin wins over the
 header, and a header that disagrees with it is refused with a 403, as for the
-[code-execution executor](#code-execution-executor). This is how a workspace
-takes over the searches of a client it cannot change: an Anthropic SDK app
-declaring `web_search_<date>` keeps working, and gets the same native blocks
-back, while every search runs on Otari.
+[code-execution executor](#code-execution-executor).
 
 The header and the pin can add a claim but never remove one: with
 `web_search_intercept` on, every search runs on Otari's backend whatever they
-say, and a `provider` header is refused with a 403, because interception is
-what puts every search under the workspace's web-search policy and tool pricing.
+say, and a `provider` header is refused with a 403.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
 workspace's web-search policy and tool pricing. All of this
@@ -114,10 +111,8 @@ it a tool nobody runs. The `Otari-Web-Fetch` header takes it over the same way
   like any other. Use `auto` to keep Anthropic's fetch and run Otari's only on
   a fallback that needs it.
 
-It is a header of its own, not part of `Otari-Web-Search`, because the two
-tools are native in different places and a request may want one taken over and
-not the other. There is no deployment-wide toggle like `web_search_intercept`
-for fetch; a [workspace web-access policy](#per-workspace-web-access-policy)
+There is no deployment-wide toggle like `web_search_intercept` for fetch; a
+[workspace web-access policy](#per-workspace-web-access-policy)
 may pin `fetch_executor` instead, which wins over the header the way
 `search_executor` does for search. A claimed declaration is an [Otari fetch](#web-fetch): it needs
 `web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
@@ -130,15 +125,12 @@ the model, as it does for search.
 ### Bounding the searches one request runs
 
 A declaration may carry `max_uses` to cap how many searches Otari runs for that
-request. Because a gateway-run search is billed per successful call, the cap is
-honored on every endpoint (`/api/v1/messages`, `/api/v1/chat/completions`,
-`/api/v1/responses`) and on every declaration shape, including `otari_web_search`.
-A failed search does not count against it, matching what is billed.
+request. The cap is honored on every endpoint (`/api/v1/messages`,
+`/api/v1/chat/completions`, `/api/v1/responses`) and on every declaration
+shape, including `otari_web_search`. A failed search does not count against it.
 
-`max_uses: 0` is a cap of zero searches, not the absence of a cap, so every
-search is refused. A negative or non-integer value is a caller mistake and is
-rejected with a 400 rather than guessed at; `1.5` and `5.0` are both non-integer
-here, so a float that happens to be whole is rejected too.
+`max_uses: 0` refuses every search. A negative or non-integer value (including
+`1.5` and `5.0`) is rejected with a 400.
 
 Past the cap, the model is told the search was refused and can answer without it.
 An Anthropic-native declaration is answered in its own vocabulary, a
@@ -154,9 +146,8 @@ tag `call_limit`. Even without
 `GET /api/v1/tool-settings` answers any signed-in identity, so a member is told how
 the built-in tools behave on their requests. A caller who does not operate the
 deployment is answered without `web_search_url`, `sandbox_url` and
-`guardrails_url`: those name this deployment's own infrastructure, which is what
-the network-safety gates on the Settings page are set against, and no tenant
-acts on them. Changing any setting stays a deployment operator's to do.
+`guardrails_url`, which name the deployment's own infrastructure. Only a
+deployment operator can change a setting.
 
 ## Pricing a gateway-run tool
 
@@ -171,14 +162,32 @@ otari:web_search
 otari:web_fetch
 ```
 
-`otari:code_execution` prices code execution. `otari:web_search` and
-`otari:web_fetch` price the calls on a workspace's
-[organization search or fetch key](#organization-search-keys), and
-`otari:web_search` also prices a search on the legacy settings. The dashboard's Web
-search and Code execution pricing pages, in the deployment view, set these
-rates, and Web search each search or fetch tool's own, in dollars per call. The
-pricing API stores the value in `input_price_per_million`, so one cent per call
-is `10000`.
+- `otari:code_execution` prices code execution.
+- `otari:web_search` and `otari:web_fetch` price the calls on a workspace's
+  [organization search or fetch key](#organization-search-keys).
+  `otari:web_search` also prices a search on the legacy settings.
+
+Where the prices are set and read:
+
+- The dashboard's Web search and Code execution pricing pages, in the
+  deployment view, set these rates; the Web search page also sets each search
+  or fetch tool's own, in dollars per call.
+- The pricing API stores the value in `input_price_per_million`, so one cent
+  per call is `10000`.
+- `GET /api/v1/search-tools` (`?kind=fetch` for the fetch tools) gives each
+  tool's `price_per_call` (the dollars a call settles at on the deployment's
+  own account when its provider reports no cost) and `price_source`, the row it
+  comes from: `own` (the tool's own row), `config` (that row while the tool's
+  `config.yml` entry sets `price_per_call`, which each start writes again),
+  `old_key` (its old `<provider>:<instance>` row), or `none` (with a null
+  `price_per_call`).
+- An override the operator set for one organization prices that
+  organization's calls instead.
+- An organization's owner or admin may override `otari:web_search` and
+  `otari:web_fetch` on `/api/v1/organizations/me/pricing`, for the calls on the
+  organization's own keys. Overriding `otari:code_execution` or a price of kind
+  `search` or `fetch` is refused with `403`, since those calls run on the
+  deployment's account.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price
 is refused before the model call, with a `402` and the code `pricing_required`.
@@ -192,23 +201,24 @@ charged. Charges settle on the final usage
 row alongside model tokens.
 
 Each call is also held against the caller's budgets and spend ceilings at its
-rate before it runs, on top of the hold the model call took. A call that would
-take the request past a limit is not run: the model is told it was refused
-(`[tool error] budget_exceeded`, with the tag `budget_exceeded` in Chat
-Completions' `otari_tool_calls`), it is recorded as a failed call and not
-charged, and the request goes on. A call priced only by the cost its provider
-reports, with no rate, holds nothing, since that cost is known only once it
-returns, and a call held at its rate that reports more is charged what it
-reported, which can take the request past a limit by the difference. The pages
-a search reads to enrich its results are one hold, taken
-once the search returns, for the pages it will read at the rate their fetch is
-billed at (the fetch instance's own, or `otari:web_fetch` on an organization
-fetch key); when it does not fit, no page is read, the results show their
-snippets, and the search itself is billed as usual. The hold stays until the
-request settles, as the model call's does. A request on a
-free model whose budgets and ceilings cap only dollars
-holds nothing for its model call, and its tool calls are not held either: they
-are charged at settlement, and that request can still end past the cap.
+rate before it runs, on top of the hold the model call took:
+
+- A call that would take the request past a limit is not run. The model is told
+  it was refused (`[tool error] budget_exceeded`, with the tag
+  `budget_exceeded` in Chat Completions' `otari_tool_calls`); it is recorded as
+  a failed call, not charged, and the request goes on.
+- A call priced only by the cost its provider reports, with no rate, holds
+  nothing. A call held at its rate that reports more is charged what it
+  reported, which can take the request past a limit by the difference.
+- The pages a search reads to enrich its results are one hold, taken once the
+  search returns, at the rate their fetch is billed at (the fetch instance's
+  own, or `otari:web_fetch` on an organization fetch key). When it does not
+  fit, no page is read, the results show their snippets, and the search itself
+  is billed as usual.
+- A hold stays until the request settles, as the model call's does.
+- A request on a free model whose budgets and ceilings cap only dollars holds
+  nothing for its model call or its tool calls; they are charged at settlement,
+  and the request can still end past the cap.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
@@ -221,18 +231,21 @@ served the calls:
 - `otari:<tool>` for everything else: code execution, MCP tools, and web search
   on the legacy settings.
 
-A call is priced at the cost its provider reported, when it reports one, and
-otherwise at the instance's own search or fetch row (its `price_per_call`, or a
-price row of kind `search` or `fetch` keyed by the instance's name,
-`builtin_fetch` for the built-in fetcher), or the `<provider>:<instance>`
-model-kind row it was priced under before tools had a kind of their own (read
-until a later release, with a startup warning). An instance with neither is
-unpriced, as a model with no price is. A tool's own row and a model's
-never share a key, so a search provider named like a model provider, such as
-DeepSeek, cannot price its models. The `otari:<tool>` rows of gateway-run tools
-stay model-kind rows. An organization key's calls take the `otari:` row only,
-since the deployment cannot price the organization's own account. The line's
-`unit_rate` is its cost over its calls.
+A call on a search or fetch instance is priced at, in order:
+
+1. the cost its provider reported, when it reports one;
+2. the instance's own search or fetch row (its `price_per_call`, or a price row
+   of kind `search` or `fetch` keyed by the instance's name, `builtin_fetch`
+   for the built-in fetcher);
+3. the `<provider>:<instance>` model-kind row it was priced under before tools
+   had a kind of their own (read until a later release, with a startup
+   warning).
+
+An instance with none of these is unpriced, as a model with no price is. A
+tool's own row and a model's never share a key, so a search provider named like
+a model provider, such as DeepSeek, cannot price its models. The `otari:<tool>`
+rows stay model-kind rows. An organization key's calls take the `otari:` row
+only. The line's `unit_rate` is its cost over its calls.
 
 Whose account runs a call decides whose prices count, as it does for a model
 call. A call on the deployment's account takes only the deployment's price, or
@@ -253,48 +266,63 @@ funds paid in, and so is a direct search on one of the deployment's tools.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings, or on a Tavily, Brave or
-SearXNG organization key, which the older backend still runs, is labeled
-`otari:web_search`. Searches a model's provider runs itself carry the provider's
-label, as the next section says.
+search instance. A search on the legacy settings or on a Tavily or Brave
+organization key is labeled `otari:web_search`: `web_search_url` searches on
+any-search's SearXNG adapter, and the older backend runs the rest. Searches a
+model's provider runs itself carry the provider's label, as the next section
+says.
 
 The pages a search reads to enrich its results are fetches on the fetch
-instance that read them, `builtin_fetch` included: each page that comes back is
-a `web_fetch` call under that instance's label, at the cost the provider
-reported or else the instance's rate, on a `web_fetch_calls` line of its own,
-and the instance's account pays for it whoever's account ran the search. Exa
-reports what a page costs; Tabstack and the built-in fetcher report nothing, so
-their pages cost the instance's rate, up to one page per result. A page that
-cannot be read is neither billed nor counted. Pages read on an
-[organization fetch key](#organization-search-keys) are labeled
-`org:<provider>` and priced under `otari:web_fetch`. A search the older
-backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
-key) reads its pages on the built-in fetcher and records no fetch, until that
-backend is removed. With `require_pricing` on, a search whose pages would be
-read through a fetch instance with no price is refused with `402` before it
-runs, the detail naming that instance's row; a search the older backend runs
-is not, since it records no fetch. `web_search_extract: false` turns the
-reading of pages off.
+instance that read them, `builtin_fetch` included:
+
+- Each page that comes back is a `web_fetch` call under that instance's label,
+  on a `web_fetch_calls` line of its own, at the cost the provider reported or
+  else the instance's rate. The instance's account pays for it whoever's
+  account ran the search.
+- Exa reports what a page costs; Tabstack and the built-in fetcher report
+  nothing, so their pages cost the instance's rate, up to one page per result.
+- A page that cannot be read is neither billed nor counted.
+- Pages read on an [organization fetch key](#organization-search-keys) are
+  labeled `org:<provider>` and priced under `otari:web_fetch`.
+- A search the older backend runs (`web_search_provider` with its key, or a
+  Tavily or Brave organization key) reads its pages on the built-in fetcher
+  and records no fetch, until that backend is removed.
+- With `require_pricing` on, a search whose pages would be read through a
+  fetch instance with no price is refused with `402` before it runs, the detail
+  naming that instance's row. A search the older backend runs is not.
+- `web_search_extract: false` turns the reading of pages off.
 
 ### Searches a provider runs itself
 
 A model's own search tool, such as Anthropic's `web_search_<date>` forwarded to
-an Anthropic model, is run and billed by the provider, per search. Otari reads
-the count the provider reports (Anthropic's
-`usage.server_tool_use.web_search_requests`) and adds those searches to the row
-as `web_search` calls labeled `<provider>:web_search`, so the row and the
-budget carry what the provider will charge. They are priced at the operator's
-`anthropic:web_search` row when there is one, otherwise, with `default_pricing`
-on, at the provider's list price: Anthropic's is $10 per 1,000 searches. An
-organization's override prices them as it prices the call's tokens, so a
-search on the organization's own provider key takes its override. With
-neither, the searches stay on the row at no cost. Searches across the rounds
-of a gateway tool loop are added up, as the rounds' tokens are. A search Otari runs in the
-model's place, under [interception](#web-search-interception) or the
-`Otari-Web-Search` header, is not the provider's. It is billed once, under the
-label of what served it in Otari (see
-[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)), and never also as
-`<provider>:web_search`.
+an Anthropic model on `/v1/messages`, `web_search` forwarded to an OpenAI
+model on `/v1/responses`, or `google_search` forwarded to a Gemini model on
+`/v1/chat/completions`, is run and billed by the provider, per search. Otari
+reads the count the provider reports (Anthropic's
+`usage.server_tool_use.web_search_requests`, OpenAI's
+`usage.tool_usage.web_search.num_requests`, or else one per `web_search_call`
+item the response lists, and Gemini's grounding queries) and adds those searches
+to the row as `web_search` calls labeled `<provider>:web_search`, so the row and
+the budget carry what the provider will charge. Gemini 2.5 and earlier bill a
+grounded prompt once however many queries it ran, so a call there counts as one
+search; Gemini 3 bills each query. They are priced at, in order:
+
+1. the operator's `<provider>:web_search` row, such as `openai:web_search`;
+2. the `web_search` price the model's own rate carries, per 1,000 searches,
+   which the catalog gives a model whose provider searches (Anthropic's and
+   OpenAI's are $10 per 1,000, Gemini 3's $14 and Gemini 2.5's $35) and a `rates` block can set
+   ([Every price in its unit](configuration.md#every-price-in-its-unit-rates));
+   the model's price applies its rules, a tier multiplier included
+   ([Overrides and multipliers](configuration.md#overrides-and-multipliers));
+3. with `default_pricing` on, the provider's list price;
+4. otherwise no cost; the searches stay on the row.
+
+An organization's override prices them as it prices the call's tokens, so a
+search on the organization's own provider key takes its override. Searches
+across the rounds of a gateway tool loop are added up. A search Otari runs in
+the model's place, under [interception](#web-search-interception) or the
+`Otari-Web-Search` header, is billed once, under the label of what served it in
+Otari, and never also as `<provider>:web_search`.
 
 Direct `POST /api/v1/search` prices a search on a tool at that tool's own search
 price, then at its old `<provider>:<search-tool-name>` row, or under
@@ -303,7 +331,7 @@ price, then at its old `<provider>:<search-tool-name>` row, or under
 reported cost, when it reports one, comes first. How that rate is reserved and
 settled, and how `require_pricing` refuses a missing one with a
 `402 pricing_required`, is in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 The deployment pays for a search on one of its tools, so only its own price, or
 an override the deployment operator set, prices it; a search an organization key
 served takes the organization's own override.
@@ -322,6 +350,9 @@ and exit status, an MCP call with its server, tool and the text it returned, and
 a failure with what may be shown about it. See [Gateway tool calls on Chat
 Completions](api-reference.md#gateway-tool-calls-on-chat-completions). Calls for
 tools the client must execute are preserved.
+A call to one of Otari's tools that the model was still writing when it ran out
+of output tokens is neither run nor returned. The response ends with the provider's
+stop reason, such as `length` or `max_tokens`, and holds no call the client cannot run.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show
@@ -437,7 +468,7 @@ held unless you ask: a request sends `container: "auto"` to say it wants a
 sandbox that outlives it, and the response comes back naming the one it got.
 Send that name on the next request and you get the same sandbox, with the
 workspace as the last run left it. A request that asks for nothing holds
-nothing, because a held sandbox costs the deployment for as long as it is held.
+nothing.
 
 This is the same contract as Anthropic's `container` and OpenAI's
 `code_interpreter` container:
@@ -467,48 +498,38 @@ provider indefinitely.
 
 An id that is unknown, expired, another tenant's, or from a different sandbox
 provider is refused with a 400 whose detail reads `Container '…' has expired or
-does not exist.`, the phrasing clients of the provider APIs already treat as
-"drop the id and start over". A container id is bound to the user and workspace
-that leased it, and the refusal is the same for all four cases, so an id never
-reveals whether someone else's sandbox exists.
+does not exist.` (the phrasing provider SDK clients treat as "drop the id and
+start over"). A container id is bound to the user and workspace that leased it,
+and the refusal is the same in all four cases.
 
 A sandbox runs one request at a time. Naming a container another of your own
-requests is still using is a 409, not a 400: the id is good and a retry works,
-where a 400 would have a client throw a live sandbox away. Two requests sharing
-one workspace would interleave their code and each collect the other's files.
+requests is still using is a 409: the id is good and a retry works.
 
 A response carries a container only when the sandbox really will still be there.
 A `protocol` backend that declines the idle timeout Otari asks for is told to
 destroy the session at the end of the request, and the response names no container rather than one that is already gone.
 
-`container` is only the gateway's where the gateway runs the code. A request
-whose code execution the provider serves (see
-[Code-execution executor](#code-execution-executor)) keeps the provider's own
-`container` field, forwarded untouched, so an id they minted still resumes their
-container. A value only Otari could have named, `auto` or an `otari_cntr_…` id,
-is refused there rather than forwarded: it would reach the provider as a
-malformed id of theirs, and the error would name a word Otari told you to send.
-Sending an id Otari minted is the exception, because it names one sandbox and
-the files in it, which already says where the code runs: under `auto` it pins
-execution here rather than letting a model swap hand the request to the
-provider and take the sandbox away. So a client can keep a container across
-turns without also tracking which executor served each one. Only an id does
-this; `auto` names no sandbox. Anything that outranks a request still outranks
-it, so `Otari-Code-Execution: provider` and a workspace policy pinned to the
-provider both win, and the id is refused as above.
+`container` is only the gateway's where the gateway runs the code. When the
+provider serves the code execution (see
+[Code-execution executor](#code-execution-executor)):
 
-The provider's own id is never forwarded on the deployment's provider key, the
-one a hosted provider serves a model on, because every organization the
-deployment serves shares that account and a container id addresses state on it
-rather than on a workspace. Such a request is refused with a 400, and a routing
-policy passes over that candidate for one on a key of your own. Asking the
-provider for a new container (OpenAI's `{"type": "auto"}`) still passes.
+- The provider's own `container` field is forwarded untouched, so an id they
+  minted still resumes their container.
+- `auto` is refused rather than forwarded.
+- An `otari_cntr_…` id Otari minted pins execution to Otari's sandbox under
+  executor `auto`, so a client can keep a container across turns without
+  tracking which executor served each. `Otari-Code-Execution: provider` and a
+  workspace policy pinned to the provider still win, and the id is then
+  refused.
+- The provider's own id is never forwarded on the deployment's provider key
+  (the one a hosted provider serves a model on), because every organization
+  shares that account. Such a request is refused with a 400, and a routing
+  policy passes over that candidate for one on a key of your own. Asking the
+  provider for a new container (OpenAI's `{"type": "auto"}`) still passes.
 
-`container: "auto"` is best-effort, unlike an id. A deployment that holds
-nothing, because an operator set the TTL to 0, serves the request exactly as it
-would have and reports no container. An id is a requirement rather than a wish,
-so the same deployment refuses it: the caller asked for specific files, and an
-empty sandbox in their place is the wrong answer.
+`container: "auto"` is best-effort: a deployment that holds nothing (TTL set to
+0) serves the request and reports no container. An id is a requirement, so the
+same deployment refuses it.
 
 The provider's own timer does the reclaiming: the gateway tells it the idle
 timeout when the request ends, and a periodic sweep only drops the rows that
@@ -528,10 +549,10 @@ declaration asks for:
 | `otari` | Always Otari's sandbox. |
 | `provider` | Always the provider; the declaration is forwarded untouched and Otari's sandbox is never used. On a fallback to a model that cannot run it, that attempt fails like any other. Use `auto` to keep the provider's tool and use the sandbox only on a fallback that needs it. |
 
-`auto` is what makes a model swap transparent. An Anthropic Messages request
-carrying `code_execution_20250825` runs natively against an Anthropic model, and
-the same request against an open model runs on the sandbox, with the same
-`server_tool_use` and `code_execution_tool_result` blocks coming back.
+Under `auto`, an Anthropic Messages request carrying `code_execution_20250825`
+runs natively against an Anthropic model, and the same request against an open
+model runs on the sandbox, with the same `server_tool_use` and
+`code_execution_tool_result` blocks coming back.
 
 Fallbacks are decided the same way, one attempt at a time. A routing policy or
 catalog ID that falls back from Claude to Claude on Vertex or Bedrock sends
@@ -544,13 +565,12 @@ the request is refused only when no attempt can run. A
 request that also declares `otari_code_execution` decides every attempt alike
 instead, running the code on the sandbox unless every model runs it natively.
 
-An `anthropic-beta` header travels only as far as it can be honored: against a
-model its provider serves with no Messages API of its own (any non-Claude model
-on Bedrock, say, or a Bedrock Claude request that sets `output_format`) it is
-dropped rather than refused, and so is a `context_management` field, which
-configures one of those betas, because a beta names an Anthropic feature that
-model was never going to serve, and refusing it would make the request fail
-purely because its model changed. On Responses a claimed `code_interpreter` is answered with a
+An `anthropic-beta` header, and a `context_management` field (which configures
+one of those betas), is dropped rather than refused against a model its
+provider serves with no Messages API of its own (any non-Claude model on
+Bedrock, say, or a Bedrock Claude request that sets `output_format`).
+
+On Responses a claimed `code_interpreter` is answered with a
 `code_interpreter_call` item per run, in the order the calls ran among the
 gateway's other native items (a `web_search_call`, say). Chat Completions has no
 native shape, so a claimed declaration there resolves inside the tool loop and
@@ -717,7 +737,9 @@ is unacceptable.
 
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
 names a provider for `otari_web_fetch`, for [`POST /api/v1/fetch`](#direct-fetch)
-and for enriching search results.
+and for enriching search results. A fetch provider's cost tier is set only by
+the tool's configuration where the provider reports no cost, as
+[Search providers](#search-providers) says for a search provider's.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results, so setting it moves enrichment too. A workspace
 whose organization has a [fetch key](#organization-search-keys) runs both on
@@ -728,21 +750,25 @@ enrichment falls back to the key, then the default, then the built-in fetcher.
 `POST /api/v1/search-tools/{name}/test` with a `url` tries an instance.
 
 On a fetch instance, the provider fetches the page and follows its redirects on
-its own side. Otari checks the requested URL before the call, and the URL the
-provider reports finding the page at after it. Its host must pass the domain
-policy, and may not be `localhost` or an IP address, in any of its forms, that is
-not public. Other hostnames are the provider's to resolve, so Otari does not check
-where they lead, as the built-in fetcher does. DeepSeek, Exa and Tabstack answer
-with the URL as asked even after a redirect (`reports_final_url` is false in the provider
-catalog), so a redirect they follow escapes the domain policy; where a workspace's
-domain lists must hold on every hop, keep the fetch tool, and enrichment, on
-`builtin_fetch`. Enriching a search's results, Otari applies the same checks
-under the search's own domain rules. Each
-provider's limits are in the
+its own side:
+
+- Otari checks the requested URL before the call, and the URL the provider
+  reports finding the page at after it. Its host must pass the domain policy,
+  and may not be `localhost` or a non-public IP address in any of its forms.
+- Other hostnames are the provider's to resolve; Otari does not check where
+  they lead, as the built-in fetcher does.
+- DeepSeek, Exa and Tabstack answer with the URL as asked even after a redirect
+  (`reports_final_url` is false in the provider catalog), so a redirect they
+  follow escapes the domain policy. Where a workspace's domain lists must hold
+  on every hop, keep the fetch tool, and enrichment, on `builtin_fetch`.
+- When enriching a search's results, the same checks apply under the search's
+  own domain rules.
+- A provider's failure reaches the model as
+  `[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when
+  there is one, and never with the provider's own message.
+
+Each provider's limits are in the
 [any-fetch README](https://github.com/mozilla-ai/otari/tree/main/any-fetch#exa).
-A provider's failure reaches the model as
-`[tool error] <provider> fetch failed (<tag>)`, with the HTTP status when there is
-one, and never with the provider's own message.
 
 - **DeepSeek** (`deepseek`) needs an API key, read from the instance's `api_key`,
   such as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. Name the
@@ -811,10 +837,15 @@ On the legacy settings, Otari reaches a licensed search API directly. Set
 `web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
 that provider's key; the key stays in the gateway process and never reaches a
 caller.
-`web_search_url` points at a backend exposing a SearXNG-compatible
-`/search?format=json` endpoint, such as the bundled SearXNG
-([try it](#try-web-search-with-the-bundled-searxng)), and a configured provider
-wins over it.
+`web_search_url`, which is deprecated (see
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)),
+points at a SearXNG instance, such as the bundled one
+([try it](#try-web-search-with-the-bundled-searxng)), which any-search's SearXNG
+adapter asks to search the engines in `web_search_engines`, else `duckduckgo`,
+`mojeek`, `qwant` and `wikipedia`; SearXNG skips a name it has no engine for,
+and when it knows none of the names it searches its own default engines, so a
+misspelled engine can send the query to engines the list leaves out. A
+configured provider wins over it.
 
 When content extraction is enabled, Otari retrieves each result through its
 bounded public-web client. It validates and pins the resolved address before
@@ -827,8 +858,9 @@ Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
 JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
 output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
-unextractable results fall back to the search provider's snippet. A provider's
-own `extracted_content` still takes precedence and is not fetched locally.
+unextractable results fall back to the search provider's snippet. Page text
+the provider already returned, such as Tavily's on the legacy settings, is used
+and not fetched again.
 
 Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The 1,500-character per-result content limit
@@ -904,8 +936,9 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists other than `searxng`, or `tavily` or
-  `brave`;
+  `GET /api/v1/search-tools/providers` lists, or `tavily` or `brave`. A
+  `searxng` key names its own instance in `api_base`, since a key never takes
+  the deployment's `web_search_url`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
   provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 
@@ -974,7 +1007,11 @@ For evaluation, the bundled SearXNG backend needs no key. Start it:
 docker compose --profile web-search up
 ```
 
-Then declare the tool on a request:
+While `OTARI_WEB_SEARCH_URL` is unset, Docker Compose points the deprecated
+`web_search_url` at it. With the variable empty, declare a `searxng` search tool
+instead, as
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)
+shows. Then declare the tool on a request:
 
 ```json
 {
@@ -993,16 +1030,16 @@ provider for production. A runnable example lives under `demo/web-search/`.
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 
-A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
-search can share one backend. They remain distinct surfaces with separate
-pricing keys.
+A search tool named in `web_search_default_tool` serves model-initiated search
+and unnamed direct searches, so the two can share one backend. They remain
+distinct surfaces with separate pricing keys.
 
 A direct search that names no tool runs on the workspace's usable
 [organization search key](#organization-search-keys), if it has one, in place of
-the deployment's default tool. That tool must still be configured, and the request
-is still checked against the key's `allowed_tools`, rate-limited and timed out
-as that tool and logged under its name, while the search is priced under
-`otari:web_search`. A search that names a tool, in the path or in
+the deployment's default tool. The request is still checked against the key's
+`allowed_tools`, rate-limited and timed out as that tool and logged under its
+name, or, with no default tool to pick, as `web_search` on the key's provider
+with a 30 second timeout. The search is priced under `otari:web_search`. A search that names a tool, in the path or in
 `search_tool_name`, runs on that tool with its own key. A
 Brave key localizes results to the request's `country`; Tavily takes a country by
 its full name, so a Tavily key does not.
@@ -1015,6 +1052,26 @@ The request, the response and the errors are in the
 A search instance serves direct search and, as the [in-loop default](#web-search),
 the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 [Pricing a gateway-run tool](#pricing-a-gateway-run-tool) says.
+
+Some providers charge each search or fetch at one of a few prices, chosen by an
+option: the provider's cost tiers, such as Perplexity's `search_type`. Where the
+provider does not report what a call cost, only the tool's configuration sets
+that option, in a tool's `options` or in an
+[organization key](#organization-search-keys)'s: a request that sets it is
+refused with a 400, and a workspace's `provider_options` that set it are left
+out with a warning. So a tool's calls run at the tier its price was set for, and
+an organization key's at the tier its owners and admins chose for their own
+account. To offer more than one tier, configure one tool for each, at its own
+price. `GET /api/v1/search-tools/providers` marks such an option `cost_tier`, and
+`operator_only` while it is set only this way; `?kind=fetch` lists the fetch
+providers'.
+
+A tool whose cost tier has a value the provider does not take, such as
+Perplexity's `search_type: Fast`, does not run, and the startup log says so: a
+search on it answers 400 `Search tool '<name>' is not configured correctly.`, the in-loop
+tool does not take it as its default, its connection test is refused, and a
+fetch tool is left out, as if nothing named it. The dashboard and the API
+refuse such a value when a tool is saved.
 
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
@@ -1051,6 +1108,33 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
   your plan costs you. A search returns at most 10 results, the Startup plan's
   limit, whatever the plan, and its hits carry a snippet but no page text.
+- **Perplexity** (`perplexity`) needs an API key, read from the tool's `api_key`,
+  such as `${PERPLEXITY_API_KEY}`, the key Perplexity's models take too. It
+  reports no cost, so a search is billed at the tool's own rate (its
+  `price_per_call`, or a `search` price set on the dashboard's Web search page or
+  through the API); a price for one of Perplexity's models never prices it. Don't
+  name the tool after one of them, such as `sonar`: until a later release, a
+  tool's price is also read under `perplexity:<tool name>`, which would be that
+  model's. Perplexity's
+  [pricing](https://docs.perplexity.ai/getting-started/pricing), read 2026-11-09,
+  is per search, whatever the number of results or the page text asked for, at
+  one of two cost tiers chosen by `search_type`: $5 per 1,000 for `web`, the
+  default, and $1 per 1,000 for `fast`. To offer both, configure two tools:
+
+  ```yaml
+  search_tools:
+    perplexity:      {provider: perplexity, api_key: "${PERPLEXITY_API_KEY}", price_per_call: 0.005}
+    perplexity-fast: {provider: perplexity, api_key: "${PERPLEXITY_API_KEY}", price_per_call: 0.001, options: {search_type: fast}}
+  ```
+
+  A search returns at most 20 results, and its hits carry page text, the
+  passages Perplexity takes from each page (`max_tokens_per_page` sizes them), and
+  no snippet, so the in-loop tool reads no page for them. Perplexity's own
+  filters, such as `search_domain_filter`, `country` and `search_recency_filter`,
+  apply when a call passes them in `provider_options`; on direct search, the
+  request's top-level `search_domain_filter` and `country` are applied by Otari as
+  for every provider but Exa. Perplexity refuses a `time_range` or a
+  `search_recency_filter` together with a publication date filter.
 - **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
   `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
   header and the query in the request URL, which Otari keeps out of its logs. Set
@@ -1063,8 +1147,27 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
   new account gets 2,500 credits for its first 30 days. A search returns at most
   10 results, and its hits carry a snippet but no page text.
+- **Synthetic** (`synthetic`) needs an API key, read from the tool's `api_key`,
+  such as `${SYNTHETIC_API_KEY}`. It reports no cost, so a search is billed at the
+  tool's own rate (its `price_per_call`, or a `search` price set on the dashboard's
+  Web search page or through the API). Synthetic's
+  [pricing](https://synthetic.new/pricing), read 2026-11-05, includes the search
+  API in every subscription (Go at $9 a month, Standard at $30, Big at $90) and
+  names no price per search; a key whose account has no subscription is
+  refused. Set the rate at what a search costs you, or 0. It
+  takes no result count and no recency filter: Otari keeps at most 10 results and,
+  for a `time_range`, drops the hits dated before it. Its hits carry page text but
+  no snippet.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
-  at the tool's rate.
+  at the tool's rate. The tool's `api_base` is the instance's root URL, and the
+  instance must list `json` under `search.formats`, or every search fails with
+  `forbidden`, SearXNG's 403. Searches use GET, SearXNG's default; `method: post`
+  sends them as form data, which keeps the query out of the instance's access
+  log. Only the operator sets `method` and `engines`, the engines to search,
+  since an engine that fails is suspended for every caller of the instance. A
+  search that leaves no usable hit while an engine failed fails with
+  `engines_unresponsive`. Hits carry SearXNG's snippet and date, and no page
+  text.
 
 ## Direct fetch
 
@@ -1087,15 +1190,14 @@ reported cost, else the tool's own `fetch` price, `builtin_fetch`'s included.
 
 The workspace's web access policy applies in full: its switch, and its allowed
 and blocked domain lists, which bind the URL asked for and, on `builtin_fetch`,
-every redirect. (Direct search reads the switch and the results ceiling only.)
-A provider tool is held to the URL it reports finding the page at, as
-[Fetch providers](#fetch-providers) says. A URL that names a private address is
-refused; whether a host resolves to one is checked by the built-in fetcher, and
-not for a provider tool, which resolves it on its own network. A
-URL the lists disallow is a `403`, and one that is not a public `http` or
-`https` URL a `400`, before anything is held for the call; a host the built-in
-fetcher cannot resolve, or that resolves to a private address, fails the fetch
-with a `502`.
+every redirect. A provider tool is held to the URL it reports finding the page
+at, as [Fetch providers](#fetch-providers) says.
+
+| Situation | Response |
+| --- | --- |
+| A URL the domain lists disallow | `403`, before anything is held |
+| Not a public `http` or `https` URL, or a URL naming a private address | `400`, before anything is held |
+| A host the built-in fetcher cannot resolve, or that resolves to a private address | `502` (a provider tool resolves hosts on its own network, unchecked) |
 
 The request, the response and the errors are in the
 [API reference](api-reference.md#fetch).
@@ -1103,6 +1205,18 @@ The request, the response and the errors are in the
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.38: only the operator prices code execution
+
+An organization owner's or admin's override of `otari:code_execution` on
+`/api/v1/organizations/me/pricing` is refused with `403`, as a price of kind
+`search` or `fetch` already is. Such an override has priced no sandbox run since
+0.33, because code execution runs on the deployment's account. It does price an
+MCP tool named `code_execution`, which is priced under the same key: an
+override already stored keeps pricing such a tool's calls until it is deleted,
+and without one they take the deployment's price. An override already stored
+stays: the organization can delete it, not change it, and the operator can
+replace or delete it. The operator sets the price with the master key.
 
 ### From 0.37: the pages a search reads are billed as fetches
 
@@ -1150,7 +1264,7 @@ makes the default) cannot be decrypted here, a workspace that used the next key
 now uses the deployment's instance. Check the keys' `usable` field before
 upgrading.
 
-### From 0.31: tool prices follow whose account runs the call
+### From 0.32: tool prices follow whose account runs the call
 
 An organization's own override of `otari:code_execution` or `otari:web_search`
 no longer prices code execution or a search on the legacy settings, since both

@@ -21,9 +21,12 @@ import {
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
+import { OfferingPriceRules } from "@/features/models/OfferingPriceRules"
 import {
   formatPricedRate,
+  hasOutputRate,
   type PricingUnit,
+  pricesMadeMedia,
   pricingUnitOf,
 } from "@/features/models/pricingUnit"
 import {
@@ -46,6 +49,8 @@ import {
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { providerModelId } from "./modelKey"
 
 // One model, on a page of its own: the header with its facts, then every
@@ -106,22 +111,17 @@ function rate(value: number | null | undefined): string {
 function RateCell({
   metered,
   unit,
-  tokenOnly = false,
 }: {
   metered: number | null | undefined
   /** What the offering's price is per; a non-token rate names its unit. */
   unit: PricingUnit
-  /** A rate only a token price has (output), shown as a dash on any other unit. */
-  tokenOnly?: boolean
 }) {
-  if (unit !== "token") {
-    return (
-      <span className="text-mono-caption">
-        {tokenOnly || metered == null ? "—" : formatPricedRate(metered, unit)}
-      </span>
-    )
-  }
-  return <span className="text-mono-caption">{rate(metered)}</span>
+  return (
+    // One line, so a rate and its unit ("$5.00 / 1M") never part.
+    <span className="text-mono-caption whitespace-nowrap">
+      {metered == null ? "—" : formatPricedRate(metered, unit)}
+    </span>
+  )
 }
 
 function percent(value: number | null): string {
@@ -138,6 +138,24 @@ interface OfferingRow {
   offering: CatalogOffering
   input: number | null
   output: number | null
+}
+
+/**
+ * Each base rate on the side it bills, as the provider tables show it: media the
+ * model makes under Output, a minute of audio's two rates on their own sides,
+ * and every other non-token price, which is one rate, under Input.
+ */
+function offeringRow(
+  offering: CatalogOffering,
+  type: string | null | undefined,
+): OfferingRow {
+  const unit = pricingUnitOf(offering.pricing?.unit)
+  const input = offering.pricing?.input_price_per_million ?? null
+  const output = offering.pricing?.output_price_per_million ?? null
+  if (unit === "token") return { offering, input, output }
+  if (pricesMadeMedia(unit, type))
+    return { offering, input: null, output: input }
+  return { offering, input, output: hasOutputRate(unit) ? output : null }
 }
 
 type OfferingSortColumn =
@@ -201,7 +219,9 @@ function offeringColumns({
       cell: ({ offering: row }) => (
         // The provider's own model ID sits on a second line, so two offerings on
         // one provider (Bedrock's regional profiles) read apart at a glance.
-        <span className="text-body flex items-center gap-2 whitespace-nowrap">
+        // On a phone the held lane wraps, so it does not take most of the
+        // screen from the prices scrolling beside it.
+        <span className="text-body flex items-center gap-2 whitespace-nowrap max-md:whitespace-normal">
           {/* Keyed on the type rather than the instance, which is what the
               instance is named after until an operator renames it. The name
               stays the instance either way, and the type is still spelled out
@@ -223,7 +243,7 @@ function offeringColumns({
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>
-            <code className="text-caption font-mono">
+            <code className="text-caption font-mono max-md:[overflow-wrap:anywhere]">
               {providerModelId(row.selector)}
             </code>
           </span>
@@ -232,7 +252,7 @@ function offeringColumns({
     },
     {
       id: "input",
-      header: "Input / 1M",
+      header: "Input",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
@@ -244,14 +264,13 @@ function offeringColumns({
     },
     {
       id: "outputPrice",
-      header: "Output / 1M",
+      header: "Output",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
         <RateCell
           metered={row.output}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
-          tokenOnly
         />
       ),
     },
@@ -367,6 +386,7 @@ export function ModelDetailView({
 }) {
   const organization = useOrganizationContext(!publicView)
   const { open_signup } = useDeployment()
+  const { recordEvent } = useTelemetry()
   // Not a pricing authority here: rates are set per model on Providers, which
   // answers to the organization role. It decides the two hints below that point
   // at deployment-wide pages.
@@ -391,6 +411,11 @@ export function ModelDetailView({
   }>({ column: "input", direction: "asc" })
 
   const model = selected.data
+  const recordUseModel = (id: string) =>
+    recordEvent(TELEMETRY_EVENTS.USE_MODEL_CLICKED, {
+      model: id,
+      signed_in: !publicView,
+    })
   // Only a failure with nothing to show replaces the page. A background
   // refetch that fails (every pricing, provider, alias and settings write
   // invalidates this key) keeps the rendered model and says so above it.
@@ -411,11 +436,7 @@ export function ModelDetailView({
       (offering) =>
         quantization === "all" || offering.quantization === quantization,
     )
-    .map((offering) => ({
-      offering,
-      input: offering.pricing?.input_price_per_million ?? null,
-      output: offering.pricing?.output_price_per_million ?? null,
-    }))
+    .map((offering) => offeringRow(offering, model.type))
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
   const unpriced = model.offerings.filter(
@@ -482,13 +503,22 @@ export function ModelDetailView({
               // model is reopened once the new session starts.
               <a
                 href={open_signup ? "#/signup" : "#/"}
-                onClick={() => rememberModel(model.id)}
+                onClick={() => {
+                  recordUseModel(model.id)
+                  rememberModel(model.id)
+                }}
                 className={buttonVariants({ variant: "primary" })}
               >
                 Use this model
               </a>
             ) : (
-              <Button variant="primary" onPress={() => setUseModel(true)}>
+              <Button
+                variant="primary"
+                onPress={() => {
+                  recordUseModel(model.id)
+                  setUseModel(true)
+                }}
+              >
                 Use this model
               </Button>
             )}
@@ -641,6 +671,7 @@ export function ModelDetailView({
             </p>
           ) : null}
         </section>
+        <OfferingPriceRules offerings={model.offerings} />
       </div>
       {publicView ? null : (
         <UseModelDrawer

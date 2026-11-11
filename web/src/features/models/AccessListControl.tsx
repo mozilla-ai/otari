@@ -2,6 +2,7 @@ import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
+import { MultiSelect } from "@/design-system/forms/MultiSelect"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 
@@ -24,6 +25,8 @@ export interface AccessOption {
   id: string
   // What the operator sees in the dropdown.
   label: string
+  // A muted second line, searched and read out with the label.
+  hint?: string
 }
 
 export interface AccessListCopy {
@@ -50,10 +53,9 @@ export interface AccessPicker {
   loadingMessage: string
 }
 
-// The shell both the model and the tool access-lists share; each wrapper builds
-// its own catalog and copy, and says what is still loading. ``pickers`` gives the
-// list several comboboxes, each over its own catalog, in place of the one that
-// ``catalog`` fills; every one adds to the same list of entries.
+// The shell the model and tool access-lists share. One ``catalog`` is picked in
+// a MultiSelect; ``pickers`` are comboboxes, each over its own catalog, all
+// adding to the same list of entries.
 export function AccessListControl({
   initial,
   onChange,
@@ -64,7 +66,6 @@ export function AccessListControl({
   pickers,
   hint,
   loadingMessage = null,
-  showPicker = true,
 }: {
   initial: string[] | undefined
   onChange: (value: string[] | undefined, valid: boolean) => void
@@ -76,19 +77,9 @@ export function AccessListControl({
   hint: string | null
   // Said in the empty dropdown while the catalog is still being read.
   loadingMessage?: string | null
-  showPicker?: boolean
 }) {
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
-  const shown: AccessPicker[] = pickers ?? [
-    {
-      label: "",
-      catalog,
-      inputLabel: copy.inputLabel ?? "",
-      placeholder: copy.placeholder ?? "",
-      loadingMessage: loadingMessage ?? "",
-    },
-  ]
 
   const emit = (nextMode: Mode, nextEntries: string[]) => {
     if (nextMode === "inherit") onChange(undefined, true)
@@ -109,6 +100,11 @@ export function AccessListControl({
 
   const removeEntry = (id: string) => {
     const next = entries.filter((entry) => entry !== id)
+    setEntries(next)
+    emit("only", next)
+  }
+
+  const pick = (next: string[]) => {
     setEntries(next)
     emit("only", next)
   }
@@ -143,7 +139,23 @@ export function AccessListControl({
         </div>
       ) : null}
 
-      {mode === "only" ? (
+      {mode === "only" && !pickers ? (
+        <MultiSelect
+          label={copy.inputLabel ?? ""}
+          options={catalog}
+          value={entries}
+          onChange={pick}
+          description={
+            [hint, entries.length === 0 ? copy.pickPrompt : null]
+              .filter(Boolean)
+              .join(" ") || undefined
+          }
+          searchPlaceholder={copy.placeholder}
+          emptyMessage={loadingMessage ?? hint ?? undefined}
+        />
+      ) : null}
+
+      {mode === "only" && pickers ? (
         <div className="flex flex-col gap-2 pointer-coarse:gap-3">
           <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-y-5">
             {entries.length === 0 ? (
@@ -160,16 +172,14 @@ export function AccessListControl({
             )}
           </div>
           {hint ? <span className="text-caption">{hint}</span> : null}
-          {showPicker
-            ? shown.map((picker) => (
-                <EntryPicker
-                  key={picker.inputLabel}
-                  picker={picker}
-                  entries={entries}
-                  onAdd={addEntry}
-                />
-              ))
-            : null}
+          {pickers.map((picker) => (
+            <EntryPicker
+              key={picker.inputLabel}
+              picker={picker}
+              entries={entries}
+              onAdd={addEntry}
+            />
+          ))}
         </div>
       ) : null}
     </div>

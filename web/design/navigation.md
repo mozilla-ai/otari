@@ -44,6 +44,10 @@ No track and no underline: the selected fill (`surface-subtle`) is the whole
 signal. Deliberately not `role="tablist"`, because these do not promise the
 roving-focus contract a tablist implies; they are buttons in a row.
 
+A row that runs past its column scrolls rather than wraps, and fades out on the
+edge that has more beyond it, so a tab cut at the screen's edge reads as more to
+reach rather than as a rendering fault.
+
 ## Segmented
 
 The track is what says "these are the alternatives and there are no others". Native

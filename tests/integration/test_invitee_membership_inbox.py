@@ -43,7 +43,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService
 
-from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes
+from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes, no_sso_enforcement
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -130,7 +130,7 @@ async def test_the_inbox_lists_an_invitation_the_switcher_deliberately_hides(
 
     issued = await _invite(service, admin, email="invitee@example.com", role="admin")
 
-    memberships = await service.list_organization_memberships_for_user(user=invitee)
+    memberships = await service.list_organization_memberships_for_user(user=invitee, blocked=no_sso_enforcement)
     assert {row.organization.slug for row in memberships.data} == {home.slug}
 
     inbox = await service.list_pending_organization_invitations_for_user(user=invitee)
@@ -195,7 +195,7 @@ async def test_accepting_from_the_inbox_needs_no_token_and_applies_the_parked_as
     assert result.organization_name == "Inviting"
     assert result.role == "member"
 
-    memberships = await service.list_organization_memberships_for_user(user=invitee)
+    memberships = await service.list_organization_memberships_for_user(user=invitee, blocked=no_sso_enforcement)
     assert {row.organization.slug for row in memberships.data} == {home.slug, "inviting"}
 
     assignment = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, invitee.id)
@@ -251,7 +251,8 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     with pytest.raises(InvitationAlreadyUsedError):
         await service.accept_invitation(token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES)
     assert inviting.id not in {
-        row.organization.id for row in (await service.list_organization_memberships_for_user(user=invitee)).data
+        row.organization.id
+        for row in (await service.list_organization_memberships_for_user(user=invitee, blocked=no_sso_enforcement)).data
     }
 
 

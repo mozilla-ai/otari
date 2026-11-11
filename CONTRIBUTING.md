@@ -142,13 +142,11 @@ make test        # unit + integration
 
 Run a single test: `uv run pytest tests/unit/test_gateway_cli.py -v`
 
-If you changed any API routes or schemas, regenerate both generated artifacts and commit them:
+If you changed any API routes or schemas, regenerate the generated artifact and commit it:
 
 ```bash
 uv run python scripts/generate_openapi.py
-uv run python scripts/generate_postman.py
 make openapi-check
-make postman-check
 ```
 
 ## Dependencies
@@ -207,8 +205,8 @@ are the sidebar groups under it:
 
 | Top bar | For |
 | --- | --- |
-| Home | What Otari is, and a first request |
-| Guides | Doing one thing with Otari: workspaces, keys, budgets, tools, integrations |
+| Otari | What Otari is, a first request, and the otari.ai guide: concepts, dashboard how-tos, workspace tools, integrations, the playground |
+| Guides | Doing one thing with Otari: access, the dashboard, agents and frameworks, guardrails, observability |
 | Self-Hosting | Deploying, configuring and operating your own gateway |
 | Reference | Lookup material: the API, models, routing, tools, file formats, protocols |
 

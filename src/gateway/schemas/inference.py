@@ -295,3 +295,75 @@ class ImageEditForm(BaseModel):
     # ``str`` the generation route accepts.
     response_format: str | None = None
     user: str | None = None
+
+
+class VideoGenerationRequest(BaseModel):
+    """Start a video generation job.
+
+    The fields are any-llm's ``VideoGenerationParams``, its ``model_id`` as
+    ``model``; a field any-llm adds fails a test until the route accepts it.
+    ``seconds`` is the length asked for, which the provider may round.
+    """
+
+    model: str
+    prompt: str
+    # An hour is far above any provider's longest video, and keeps the estimate's arithmetic in range.
+    seconds: int | None = Field(default=None, ge=1, le=3600)
+    # A job's record keeps the resolution and aspect ratio in columns 64 characters wide.
+    size: str | None = Field(default=None, max_length=64)
+    resolution: str | None = Field(default=None, max_length=64)
+    aspect_ratio: str | None = Field(default=None, max_length=64)
+    seed: int | None = None
+    negative_prompt: str | None = None
+    reference_images: list[str] | None = None
+    reference_audios: list[str] | None = None
+    reference_videos: list[str] | None = None
+    first_frame: str | None = None
+    last_frame: str | None = None
+    generate_audio: bool | None = None
+    user: str | None = None
+
+
+VideoJobStatus = Literal["queued", "in_progress", "completed", "failed"]
+
+
+class VideoError(BaseModel):
+    """Why a video job failed, in the provider's words."""
+
+    message: str
+    code: str | None = None
+
+
+class VideoJobResponse(BaseModel):
+    """A video generation job as the provider reports it, in the shape of OpenAI's video object."""
+
+    id: str
+    object: Literal["video"] = "video"
+    model: str
+    provider: str
+    status: VideoJobStatus
+    created_at: int | None = None
+    completed_at: int | None = None
+    progress: int | None = None
+    seconds: int | None = None
+    size: str | None = None
+    error: VideoError | None = None
+
+
+class VideoJobSummary(BaseModel):
+    """One job the gateway started, from its own records: what it knows without asking the provider."""
+
+    id: str
+    object: Literal["video"] = "video"
+    model: str
+    provider: str
+    created_at: datetime
+    seconds: int | None = Field(description="The length the request asked for, in seconds, when it named one.")
+    billed: bool = Field(description="Whether a retrieval has found the job completed and billed it.")
+
+
+class VideoJobList(BaseModel):
+    """The caller's video jobs, newest first."""
+
+    object: Literal["list"] = "list"
+    data: list[VideoJobSummary]

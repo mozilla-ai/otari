@@ -46,6 +46,9 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
+// Not under ROUTING_POLICIES: `useRoutingSyncing` holds every Save while that
+// head is fetching, and a plan being compiled is no reason to.
+export const ROUTING_EXPLAIN = "routing-explain"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
@@ -64,6 +67,9 @@ export const KEYS = "keys"
 // edit invalidates KEYS, and that changes nothing about which identities may
 // stand in for the key.
 export const FEDERATION_RULES = "federation-rules"
+// A service key's end users, which requests create rather than key edits, so
+// also a root of its own.
+export const KEY_END_USERS = "key-end-users"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
@@ -85,6 +91,9 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
+// Not under HOSTED_PROVIDERS: a pending read asks otari.ai, so a provider edit
+// must not fire one.
+export const PLATFORM_CONNECT = "platform-connect"
 // What a provider says it serves on the stored key, and what a catalog update
 // would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm
@@ -136,6 +145,13 @@ export const ORGANIZATION_PROVIDER_AVAILABLE_MODELS =
 // The organization's email-domain claims. Its own key for the same reason:
 // one page reads it, and claiming a domain has no bearing on anything else.
 export const ORGANIZATION_DOMAINS = "organization-domains"
+// The organization's own bring-your-own OIDC connection. Its own key: one page
+// reads it, and saving, testing or removing it has no bearing on anything else.
+export const ORGANIZATION_SSO = "organization-sso"
+// Who enabling that connection's enforcement would affect. A member linking
+// changes this count, so it invalidates independently of the connection
+// itself.
+export const ORGANIZATION_SSO_PREFLIGHT = "organization-sso-preflight"
 export const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make

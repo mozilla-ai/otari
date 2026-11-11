@@ -1,6 +1,7 @@
 """Pure selection over authorized summaries assembled from the catalog's sources."""
 
-from collections.abc import Sequence
+import re
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from gateway.schemas.catalog import (
@@ -11,6 +12,17 @@ from gateway.schemas.catalog import (
     CatalogQuery,
     CatalogVendorFacet,
 )
+from gateway.types.price_unit import PRICE_UNITS, PriceUnit
+
+
+def common_price_unit(units: Iterable[PriceUnit]) -> PriceUnit | None:
+    """The one unit a model's priced offerings all bill in, ``None`` where they bill in several or none.
+
+    A model's cheapest price compares offerings priced in one unit, never a
+    token price with an image price, so a model with no common unit has none.
+    """
+    distinct = set(units)
+    return distinct.pop() if len(distinct) == 1 else None
 
 
 def _has_capability(model: CatalogModelSummary, capability: CatalogCapability) -> bool:
@@ -26,11 +38,35 @@ def _pricing_matches(model: CatalogModelSummary, pricing: str) -> bool:
         case "default":
             return "defaults" in model.price_sources
         case "priced":
-            return model.min_input_price_per_million is not None
+            return model.unpriced_count < model.offering_count
         case "unpriced":
             return model.unpriced_count > 0
         case _:
             return True
+
+
+def _search_matches(model: CatalogModelSummary, term: str) -> bool:
+    """Every word of ``term`` is in the model's name, vendor, id, or the last segment of a selector.
+
+    The title a card prints, ``<vendor>: <name>``, is one more text to match, and a
+    term with a colon or a slash may be a pasted selector. A provider's name alone
+    matches nothing, not even inside a path like Fireworks' ``accounts/fireworks/models/...``:
+    a provider serves other vendors' models, and the provider filter covers it.
+    """
+    if (":" in term or "/" in term) and any(term in selector.casefold() for selector in model.selectors):
+        return True
+    vendor = model.vendor or ""
+    texts = [
+        text.casefold()
+        for text in (
+            model.name,
+            model.id,
+            vendor,
+            f"{vendor}: {model.name}",
+            *(selector.rpartition("/")[2].rpartition(":")[2] for selector in model.selectors),
+        )
+    ]
+    return all(any(word in text for text in texts) for word in re.split(r"[\s:]+", term) if word)
 
 
 def _source_matches(model: CatalogModelSummary, source: str) -> bool:
@@ -52,10 +88,7 @@ def _matching_models(
     types = set(query.type)
 
     def matches(model: CatalogModelSummary) -> bool:
-        if term and not any(
-            term in value.casefold()
-            for value in (model.name, model.id, model.vendor or "", *model.selectors, *model.providers)
-        ):
+        if term and not _search_matches(model, term):
             return False
         if providers and not providers.intersection(model.providers):
             return False
@@ -72,7 +105,9 @@ def _matching_models(
         if query.min_context and (model.context_window is None or model.context_window < query.min_context):
             return False
         if query.max_input is not None and (
-            model.min_input_price_per_million is None or model.min_input_price_per_million > query.max_input
+            model.price_unit != "token"
+            or model.min_input_price_per_million is None
+            or model.min_input_price_per_million > query.max_input
         ):
             return False
         if not _pricing_matches(model, query.pricing) or not _source_matches(model, query.source):
@@ -110,6 +145,9 @@ def _sorted_models(models: Sequence[CatalogModelSummary], query: CatalogQuery) -
     # Each sort column has one concrete value type; the presence flag leaves
     # the key comparable without turning a missing price into a real zero.
     known.sort(key=lambda model: value(model) or 0, reverse=query.direction == "desc")
+    if query.sort in ("input", "output"):
+        # A price compares only with prices in its unit: token prices first, then each other unit's.
+        known.sort(key=lambda model: PRICE_UNITS.index(model.price_unit) if model.price_unit else 0)
     return known + unknown
 
 

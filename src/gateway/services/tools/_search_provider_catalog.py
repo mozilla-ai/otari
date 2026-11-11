@@ -13,9 +13,6 @@ import any_fetch
 import any_search
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
-    SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_REQUIRING_API_KEY,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     ToolInstance,
     ToolKind,
     default_api_base,
@@ -24,6 +21,7 @@ from gateway.core.settings.tools import (
     supported_fetch_providers,
 )
 from gateway.schemas.tools import SearchProviderOptionSchema, SearchProviderSchema
+from gateway.services.tools._web_search import configuration_only_options
 
 
 def search_provider_catalog(config: GatewayConfig, kind: ToolKind, *, operates: bool) -> list[SearchProviderSchema]:
@@ -49,14 +47,23 @@ def _instance_names(instances: Mapping[str, ToolInstance]) -> dict[str, list[str
 
 
 def _option_schemas(
-    options: list[any_search.OptionSpec] | list[any_fetch.OptionSpec],
+    metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata,
 ) -> list[SearchProviderOptionSchema]:
-    """A library's option specs, as the catalog serves them."""
-    return [SearchProviderOptionSchema(**option.model_dump()) for option in options]
+    """A provider's option specs, as the catalog serves them.
+
+    ``operator_only`` is whether only a tool's configuration may set the
+    option, as the call's option check applies it: the library's own mark, or
+    a cost tier the provider reports no cost for.
+    """
+    configuration_only = configuration_only_options(metadata)
+    return [
+        SearchProviderOptionSchema(**{**option.model_dump(), "operator_only": option.name in configuration_only})
+        for option in metadata.options
+    ]
 
 
 def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchProviderSchema]:
-    """any-search's providers, and those it has no adapter for yet."""
+    """any-search's providers, other than the ones that exist only for tests."""
     instances = _instance_names(effective_search_instances(config)) if operates else {}
     served = {
         provider: any_search.AnySearch.get_provider_metadata(provider)
@@ -64,27 +71,11 @@ def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchPr
     }
     served = {provider: metadata for provider, metadata in served.items() if metadata.tier != "test"}
     entries = []
-    for provider in sorted({*served, *SEARCH_PROVIDERS_WITHOUT_ADAPTER}):
-        metadata = served.get(provider)
-        library_base = metadata.default_api_base if metadata is not None else None
+    for provider, metadata in sorted(served.items()):
         # An endpoint other than the library's comes from this deployment's
         # settings, such as the web_search_url a searxng tool inherits, so only
         # an operator is shown the one a tool would really use.
-        api_base = default_api_base(config, provider) if operates else library_base
-        if metadata is None:
-            # No adapter, so no metadata and no option schema: the gateway's own
-            # tables say what a tool on it needs, so the form can offer it.
-            entries.append(
-                SearchProviderSchema(
-                    id=provider,
-                    kind="search",
-                    requires_api_key=provider in SEARCH_PROVIDERS_REQUIRING_API_KEY,
-                    requires_api_base=provider in SEARCH_PROVIDERS_REQUIRING_API_BASE,
-                    default_api_base=api_base,
-                    instances=instances.get(provider, []),
-                )
-            )
-            continue
+        api_base = default_api_base(config, provider) if operates else metadata.default_api_base
         entries.append(
             SearchProviderSchema(
                 id=provider,
@@ -94,7 +85,8 @@ def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchPr
                 default_api_base=api_base,
                 doc_url=metadata.doc_url,
                 tier=metadata.tier,
-                options=_option_schemas(metadata.options),
+                options=_option_schemas(metadata),
+                reports_cost=metadata.reports_cost,
                 instances=instances.get(provider, []),
                 max_results=metadata.max_results,
                 query_in_url=metadata.query_in_url,
@@ -121,7 +113,8 @@ def _fetch_providers(config: GatewayConfig, *, operates: bool) -> list[SearchPro
                 default_api_base=metadata.default_api_base,
                 doc_url=metadata.doc_url,
                 tier=metadata.tier,
-                options=_option_schemas(metadata.options),
+                options=_option_schemas(metadata),
+                reports_cost=metadata.reports_cost,
                 instances=instances.get(provider, []),
                 max_urls_per_call=metadata.max_urls_per_call,
                 renders_javascript=metadata.renders_javascript,

@@ -44,20 +44,22 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A key reaches a provider only from where a declaration names it: an entry's own
-`api_key` (a `${VAR}` reference included), a hosted provider's key, or
-an organization's own provider key, which declares the provider for that
-organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
-is never read for it otherwise, so an entry with no `api_key`, or one carrying
-only `client_args`, has no credential. A request it cannot serve is refused with
-a `424` and the `provider_not_configured` code. Otherwise a variable present on
-the server would serve every caller that has no credential of its own.
+A key reaches a provider only from where a declaration names it:
+
+- an entry's own `api_key` (a `${VAR}` reference included);
+- a hosted provider's key;
+- an organization's own provider key, which declares the provider for that
+  organization's requests.
+
+A provider's native variable (such as `OPENAI_API_KEY`) is never read
+otherwise, so an entry with no `api_key`, or one carrying only `client_args`,
+has no credential. A request it cannot serve is refused with a `424` and the
+`provider_not_configured` code.
 
 Keyless local backends (`ollama`, `llamacpp`, `llamafile`, `lmstudio`, `vllm`)
 and providers authenticating from ambient cloud credentials (`bedrock`,
 `sagemaker`, `vertexai`) need a declaration too, but no key: a bare entry
-declares one. Undeclared, they are refused like any other provider, because the
-local server and the cloud role belong to the deployment.
+declares one. Undeclared, they are refused like any other provider.
 
 ```yaml
 providers:
@@ -142,69 +144,111 @@ rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
-The two surfaces differ on a value the gateway does not know.
-`GET /api/v1/models` and `GET /api/v1/models/{model_id}` leave the field out
-altogether, an unset cache rate inside `pricing` included. An offering under
-`GET /api/v1/catalog/models/{model_id}` sends `null` instead, and it is the
-offering that carries a price: the grouped listing summarizes one rather than
-describing it. A rate a pricing tier does not override is the exception, because
-it is stored as absent rather than as null, so neither surface sends it. Both
-model routes always send `pricing_source`, where `none` says nobody has priced
-the model. An offering carries `price_source`, which is `null` when nothing
-prices it.
+Where that rate is a models.dev one nobody set, a completion whose provider
+states what it charged is billed at that charge instead, which OpenRouter's
+does; see [Keeping the defaults current](configuration.md#keeping-the-defaults-current).
+
+An unknown price is reported differently per surface:
+
+| Surface | Unknown rate (including an unset cache rate in `pricing`) | Source field |
+| --- | --- | --- |
+| `GET /api/v1/models`, `GET /api/v1/models/{model_id}` | Field left out | `pricing_source`, always sent; `none` when unpriced |
+| An offering under `GET /api/v1/catalog/models/{model_id}` | `null` | `price_source`, `null` when unpriced |
+
+The grouped listing summarizes an offering's price rather than carrying it. A
+rate a pricing tier does not override is stored as absent, so neither surface
+sends it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
-so a client does not have to guess them. Both come from models.dev's entry for
-the model under the provider serving it. Until the gateway has fetched models.dev,
-and always with `models_dev_metadata: false`, that entry is the one in the
-models.dev catalog bundled with the gateway. Where the entry has no context window,
-the bundled or accepted models.dev pricing snapshot supplies one; the snapshot
-keeps no output limit, so a model the catalog does not describe reports no
-`max_output_tokens`. The same is true of any limit neither source knows. An alias reports its target's
-limits, and the grouped catalog reports the same values for each offering. An
-instance declared `openai-compatible` is looked up under OpenAI, so a model it
-serves under another name usually has no models.dev entry.
+from models.dev's entry for the model under the provider serving it:
+
+- A model a vLLM or SGLang server lists, through a configured instance, a
+  hosted provider or an organization's own key, reports the context length
+  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  above it. Each listing of the server is stored, so the value survives a
+  restart and reaches every worker within a minute. An organization's key is
+  read only for that organization's callers, and is listed when the key is
+  added or its models are refreshed. Where the provider has no models.dev entry for the model,
+  the entry comes from models.dev's Hugging Face listing, under the model's own
+  name or the model the server loaded.
+- Until the gateway has fetched models.dev, and always with
+  `models_dev_metadata: false`, the entry comes from the models.dev catalog
+  bundled with the gateway.
+- Where the entry has no context window, the bundled or accepted models.dev
+  pricing snapshot supplies one. The snapshot keeps no output limit, so a model
+  the catalog does not describe reports no `max_output_tokens`, nor any limit
+  neither source knows.
+- An alias reports its target's limits, and the grouped catalog reports the
+  same values for each offering.
+- An instance declared `openai-compatible` is looked up under OpenAI, so a
+  model it serves under another name usually has no models.dev entry.
 
 Each model also says what it accepts, in the fields OpenRouter's model listing
-uses, so a client built for that shape reads them unchanged. `name` is models.dev's
-display name. `supported_parameters` lists `tools` and `tool_choice` for a model
-that calls tools, `response_format` for one with structured output, and
-`reasoning` for a reasoning model; it names only the parameters models.dev records
-a flag for, not every parameter the model takes. `architecture` carries
-`input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
-are unset for a model models.dev does not describe, which means unknown rather
-than unsupported. An alias reports its target's capabilities but no `name`,
-because the target's name would say what the alias points at.
+uses:
+
+- `name`: models.dev's display name.
+- `supported_parameters`: `tools` and `tool_choice` for a model that calls
+  tools, `response_format` for one with structured output, and `reasoning` for
+  a reasoning model. It names only the parameters models.dev records a flag
+  for, not every parameter the model takes. `response_format` is left out where
+  Otari cannot send it to the provider, as on Bedrock for every model but
+  Anthropic's.
+- `architecture`: `input_modalities` and `output_modalities`, such as
+  `["text", "image"]`. models.dev gives an embedding model text output, as it
+  does a chat model, so `architecture` alone does not tell them apart.
+
+An SGLang server also says how it was started, and that overrides models.dev:
+without a tool-call parser it offers no `tools`, a reasoning parser adds
+`reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
+not say, so its models keep models.dev's flags.
+
+All three are unset for a model neither models.dev nor its server describes,
+which means unknown rather than unsupported. An alias reports its target's capabilities but
+no `name`.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
-`transcription`, `rerank`, `moderation`, `video`, `decision` or `realtime`, so a
-chat picker can offer chat models alone. `other` is a model that is not a chat
-model and nothing more is known of, which is what OVHcloud's listing says of a
-model that writes no completion tokens. It comes from the provider's own model
-listing where that says (Together's `type`, DeepInfra's tags, DeepSeek's
-`output_modalities`, OVHcloud's `max_completion_tokens`), otherwise from the
-`type` in models.dev's v2 catalog, and is unset where neither does. models.dev's
-`reranking` is `rerank`, its `audio` is `speech`, and a value it adds later is
-`other` until the gateway knows it. The v1 catalog gives no type, so while the
-gateway serves v1 only the listing gives one. models.dev gives an embedding model
-text output, as it does a chat model, so `architecture` alone does not tell them
-apart. A chat request whose every candidate is an embedding, rerank,
-transcription or `other` model is refused with `400` `wrong_model_type` before
-any provider is called, as is an embeddings request for a model its provider
-lists as another kind. A `decision` or `realtime` model is not refused, because
-some hosts serve one through chat completions.
+`transcription`, `rerank`, `moderation`, `video`, `decision`, `realtime`, or
+`other` (not a chat model, nothing more known; OVHcloud's listing says this of a
+model that writes no completion tokens).
 
-One worker downloads the catalog every `models_dev_cache_ttl_seconds` (a day by
-default) and stores it in the database, and every worker serves the stored copy
-within 30 seconds. A model listing never waits on the download, and after a
-restart the gateway serves the stored copy at once. A failed download is tried
-again a minute later. The gateway reads models.dev's v2 catalog, and its v1
-catalog when v2 cannot be fetched or read; it logs one warning when it falls back. v2 is still experimental at
-models.dev, and v1 is the reduced copy models.dev makes from it, so both give the
-same limits, capabilities and prices. When neither can be read, the last
-good copy stays in use and the gateway logs why. A document is refused when it
-lists no models or when more than a quarter of its models are damaged. A few
-damaged models are left out, and one warning names them.
+- It comes from the provider's own model listing where that says (Together's
+  `type`, DeepInfra's tags, DeepSeek's `output_modalities`, OVHcloud's
+  `max_completion_tokens`), otherwise from the `type` in models.dev's v2
+  catalog, and is unset where neither does. The v1 catalog gives no type.
+- models.dev's `reranking` maps to `rerank`, its `audio` to `speech`, and a
+  value it adds later is `other` until the gateway knows it.
+- A chat request whose every candidate is an embedding, rerank, transcription
+  or `other` model is refused with `400` `wrong_model_type` before any provider
+  is called, as is an embeddings request for a model its provider lists as
+  another kind. A `decision` or `realtime` model is not refused, because some
+  hosts serve one through chat completions.
+
+The models.dev catalog is refreshed as follows:
+
+- One worker downloads it every `models_dev_cache_ttl_seconds` (a day by
+  default) and stores it in the database; every worker serves the stored copy
+  within 30 seconds. A model listing never waits on the download, and after a
+  restart the stored copy is served at once.
+- The stored catalog records the `models_dev_base_url` it came from. After a
+  restart with another one, it is served until a download from the new source
+  replaces it, which is tried within a minute rather than after the interval.
+- A catalog update, **Update catalog** on the Hosted providers page or
+  `POST /api/v1/hosted-providers/catalog-update/preview`, stores the catalog
+  it downloads for the prices at once when `models_dev_metadata` is on, so a
+  new model's kind and details arrive with its price. A database error there
+  is logged and does not fail the update.
+- A failed download is tried again a minute later. The gateway reads
+  models.dev's v2 catalog (still experimental at models.dev), and its v1
+  catalog when v2 cannot be fetched or read, logging one warning when it falls
+  back. Both give the same limits, capabilities and prices.
+- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+  models.dev, which serves models.dev's catalog plus the models it does not
+  list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
+- When neither can be read, the last good copy stays in use and the gateway
+  logs why.
+- A document is refused when it lists no models or when more than a quarter of
+  its models are damaged. A few damaged models are left out, and one warning
+  names them.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
@@ -214,21 +258,34 @@ explicitly priced models. For a backend with no listing API, use the instance's
 
 An API key is shown the models its allow-list permits, so the catalog never
 advertises a model that would be refused at inference. A dashboard session is
-answered the same way, from its membership: a caller who operates the deployment
-sees the whole catalog, and anyone else sees every `providers:` instance, which
-is deployment-wide, plus the models their own organization's provider keys
-reach, plus the models a hosted provider serves where no workspace key of theirs
-supplies that provider, narrowed by any workspace model restriction. A deployment whose providers
-all come from `config.yml` therefore shows every tenant the same catalog it
-always did.
+answered from its membership:
 
-The models an organization's own key reaches are the ones offered on it, which
-is what the Providers page records when it pulls a key's catalog. Each carries a
-Serving switch, and a model switched off leaves the catalog and is refused at
-dispatch, because both read one allow-list. A key nobody has refreshed offers no
-rows at all, and that is not the same as offering none: it means the key is
-unnarrowed and reaches whatever its provider serves. Offering none, which is
-every model switched off, serves nothing.
+- A caller who operates the deployment sees the whole catalog.
+- Anyone else sees every `providers:` instance (deployment-wide), plus the
+  models their own organization's provider keys reach, plus the models a hosted
+  provider serves where no workspace key of theirs supplies that provider,
+  narrowed by any workspace model restriction.
+
+The models an organization's own key reaches are the ones offered on it, as the
+Providers page records when it pulls a key's catalog. Each carries a Serving
+switch; a model switched off leaves the catalog and is refused at dispatch. A
+key nobody has refreshed has no rows at all, which means it is unnarrowed and
+reaches whatever its provider serves. A key with every model switched off
+serves nothing.
+
+The Providers page lists a key's models one kind at a time: tabs above the
+table name each kind the key offers (Text, Image, Video, Embeddings and so on)
+with how many models it has, and **All** shows every kind. The kind comes from
+models.dev, and a model it does not know is under **Unknown**. The columns are
+the same on every tab. A token price is per million tokens. A price in another
+unit is shown under the side it bills, so an image price, or a video model's
+per-second price, is under **Output**, and hovering it names what it prices and
+its unit ("Video output, $0.045/second"). A per-second price on any other kind
+of model is audio, shown on the side it is stored on. On a phone, which cannot
+hover, the unit is shown beside the amount. The list endpoint,
+`GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
+kind as `type` (`unknown` included), returns each model's `type`, and counts
+every kind in `type_counts` whichever one it returns.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
@@ -238,24 +295,23 @@ such a model is offered switched on and served at no cost, like an unpriced
 model of a `providers:` instance (see
 [Default pricing](configuration.md#default-pricing)).
 
-A refusal on that path says which narrowing turned the model away. A model the
-key offers with its switch off is a 403 with the code `model_not_serving`, naming
-the key and pointing at the switch. A model no key of the provider offers is a
-404 with `model_not_found`. An undated name whose dated builds the key offers is
-answered for those builds: not serving where every one is switched off, and not
-found, naming them, where there is more than one to choose from (see
-[Catalog spellings](#catalog-spellings)). A model the key serves that a workspace restriction
-or the API key's own allow-list excludes keeps the 403 `model_not_allowed`. The
-Providers page shows each key's serving count beside it, so a key offering models
-and serving none is visible before the first request. See
-[Error codes](api-reference.md#error-codes).
+A refusal on that path says which narrowing turned the model away (see
+[Error codes](api-reference.md#error-codes)):
 
-Aliases and stored routing policies are workspace-scoped rows, and the catalog
-reads them for a workspace rather than filtering them by target, so a name alone
-would cross a tenant boundary that the allow-list cannot see. A session is
-therefore shown that layer only where the workspace it comes from is one the
-caller may see, which on a single-tenant deployment is everyone in it. An API key
-is unaffected: it names its own workspace.
+| Situation | Response |
+| --- | --- |
+| The key offers the model with its switch off | `403 model_not_serving`, naming the key and pointing at the switch |
+| No key of the provider offers the model | `404 model_not_found` |
+| An undated name whose dated builds are all switched off | `403 model_not_serving` |
+| An undated name with more than one dated build to choose from | `404 model_not_found`, naming them (see [Catalog spellings](#catalog-spellings)) |
+| The key serves the model but a workspace restriction or the API key's allow-list excludes it | `403 model_not_allowed` |
+
+The Providers page shows each key's serving count beside it.
+
+Aliases and stored routing policies are workspace-scoped rows. A session is
+shown them only where the workspace it comes from is one the caller may see
+(on a single-tenant deployment, everyone in it). An API key sees its own
+workspace's.
 
 ## Capabilities
 
@@ -350,6 +406,11 @@ folds it by model the same way, so `nebius:zai-org/GLM-5.3` and
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
 the size that matters rather than at their base rate.
+A model's minimum compares only prices in one unit. `price_unit` names it
+(`token`, `image`, `second`, and so on), and the minimum is per million of it.
+Where one offering bills per token and another per image, no number compares
+the two, so `price_unit` and both minimums are null; the model's offerings
+still carry their own prices.
 `GET /api/v1/catalog/models/{id}` lists every offering of one model the caller may
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
@@ -369,6 +430,13 @@ provider's id, else the model family (`claude`, `nemotron`). A dated build, a si
 reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
+
+An offering's `pricing` gives the per-million rates and their `unit`, and
+`pricing.rates` gives the whole price as a models.dev cost block: each
+modality's input and output price in its own unit, the web search price, and
+the overrides and multipliers that change a price when a condition holds (see
+[Overrides and multipliers](configuration.md#overrides-and-multipliers)).
+`GET /api/v1/models` carries the same field.
 
 Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
@@ -394,6 +462,7 @@ Each offering also lists the Otari routes its models.dev protocols map to, in
 | `transcriptions` | `/audio/transcriptions` |
 | `rerank` | `/rerank` |
 | `moderations` | `/moderations` |
+| `videos` | `/videos` |
 | `decisions` | `/decisions` |
 | `systemone` | `/systemone` |
 
@@ -409,13 +478,35 @@ route with that offering's selector is refused.
 Other protocols name no route. A vendor's native protocol, such as `converse`
 or `generate-content`, is what any-llm calls behind the routes above, so a
 client never calls it directly. A live, two-way session (`realtime`, `live`),
-`videos`, `fim` and `ocr` have no Otari route. An empty list means not known:
+`fim` and `ocr` have no Otari route. An empty list means not known:
 models.dev has no entry for the offering, its download is v1, which has no
 `api` block, or none of its protocols has a route. Otari does not guess routes
 from the model's `type`. The list repeats what models.dev says, so a model it
 gives the wrong protocol shows the wrong route until models.dev is corrected.
 
+The dashboard's "Use this model" drawer reads this list. It shows the request
+for the route of the offering that answers, and offers a choice where the list
+has more than one ([Browsing the grouped catalog](#browsing-the-grouped-catalog)).
+
 ### Browsing the grouped catalog
+
+**Models** shows one card per model, with filters beside the list. A model's page
+compares every offering in a table, with each offering's limits and the price
+your organization pays.
+
+- Prices are shown in the unit they bill, such as "$0.50 / 1M" for tokens or
+  "$0.04 per image". A card shows the cheapest price when all offerings bill in
+  one unit, and "priced in several units" otherwise.
+- **Price rules** under the table lists each offering's overrides and multipliers
+  in words, such as "×0.5 on every price when service tier is flex". They are
+  read-only here; see [Overrides and multipliers](configuration.md#overrides-and-multipliers).
+- Each row shows the provider's own model ID, which tells apart offerings on one
+  provider, such as Bedrock's regional inference profiles.
+- **Use this model** opens a drawer with a request to copy, for the route the
+  offering is served on.
+
+The page is read-only. An organization sets its own rate on **Providers >
+Inference**, which an offering on one of its keys links to.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -425,12 +516,16 @@ and `limit` select a page. `count` is the number of matching models before pagin
 Repeat `provider`, `vendor` or `type` to match any selected value. An empty `vendor`
 selects models whose vendor is unknown, and `type` never matches a model of
 unknown kind. A model's `type` is the kind most of its offerings give (see
-`type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
+`type` above); a tie goes to the vendor's own provider. The Models page's
+**Model kind** filter sets `type`, from the kinds in `facets.types`, and each
+model on the page names its kind. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
 `zero_data_retention`, and `released_within_days`. Release windows end today in
-UTC and exclude unknown and future dates. A price ceiling excludes models with
-no known input rate. `zero_data_retention=true` keeps the models at least one
+UTC and exclude unknown and future dates. `max_input` is a price per million
+tokens, so it excludes models with no known input rate and models priced in
+another unit. `pricing=priced` keeps every model with a priced offering,
+whatever its unit. `zero_data_retention=true` keeps the models at least one
 offering declared zero data retention serves.
 
 Each offering carries `zero_data_retention`, and each model lists the providers
@@ -443,7 +538,9 @@ sets the parameter.
 
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;
-names and catalog ids break ties so pages have a stable order.
+names and catalog ids break ties so pages have a stable order. A price sort
+compares a price only with prices in its unit: models priced per token come
+first, then each other unit's models in turn.
 
 Request `include_facets=true` to receive the provider, vendor and type choices from
 the complete authorized catalog, whatever the filters match, so a filter that
@@ -457,7 +554,13 @@ A provider's own id can be long, so the gateway also accepts the two spellings
 the catalog shows. Each is relabeled like an alias, so a response's `model` is
 what was sent, and pricing, budgets and usage key on the offering reached.
 
-- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) uses this baseline order for discovery and as a tie-breaker for automatic routing, which keeps the own key first as described below. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`). Discovery uses this baseline order, and automatic routing uses it as a tie-breaker:
+  1. Priced offerings before unpriced ones (an unpriced offering costs nothing and so escapes budgets).
+  2. Among the priced ones, the organization's own provider key, even where another offering is cheaper.
+  3. The vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`).
+  4. The other offerings, cheapest first at the caller's rates, ties in A-Z order.
+
+  To make an unpriced offering lead (an organization's own key or a local model, say), give it a price, even 0.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 - On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 
@@ -474,7 +577,22 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-A request that names a catalog id with more than one offering falls back across them. Automatic routing ranks eligible offerings for each request as described below. When the selected offering fails before it sends a response, the next one serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
+A request that names a catalog id with more than one offering falls back across
+them:
+
+- Automatic routing ranks eligible offerings for each request (see below). When
+  the selected offering fails before it sends a response, the next one serves
+  the request, as a routing policy's `on_failure` list does.
+- A catalog id spelled like the legacy `provider/model` of one of its own
+  offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries
+  that offering first and the others after it in the usual order.
+- The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is
+  the way to pin one provider.
+- The offerings a key may not use are left out first, so a key whose allow-list
+  names one offering reaches it by the catalog id.
+- A plan tries at most five offerings.
+- Usage rows record the catalog id as `policy_name`, `catalog` as the first
+  offering's `selection_reason`, and `on_failure` for the ones after it.
 
 ### Automatic provider selection
 
@@ -555,25 +673,28 @@ An offering whose initial budget reservation is refused is skipped, and the next
 is checked at its full price. Every budget still has to admit the serving provider;
 if none fits, the request is refused without an upstream call.
 
-Feedback is local to each gateway worker, bounded to 10,000 health entries and
-10,000 conversation digests, and reset on restart. It measures traffic through
-that worker, not a provider's global utilization. Existing rate-limit admission
-still enforces capacity, including shared Redis limits. Session affinity is scoped
-to the authenticated workspace, user, key and API; credentials are also part of
-the provider identity. A credential supplied only at dispatch by a deployment
-extension has no reusable binding until it can be identified during selection.
-Only keyed digests and numeric observations are retained,
-not prompt text or credentials. Credential rotation starts a new history.
-Bedrock client recreation and Vertex service-account token refresh preserve that
-identity. Opaque custom credential objects, or service-account signers without a
-key ID, do not retain affinity because their identity cannot be verified safely.
+State and scope:
+
+- Feedback is local to each gateway worker, bounded to 10,000 health entries and
+  10,000 conversation digests, and reset on restart. It measures traffic through
+  that worker, not a provider's global utilization. Existing rate-limit
+  admission still enforces capacity, including shared Redis limits.
+- Session affinity is scoped to the authenticated workspace, user, key and API;
+  credentials are also part of the provider identity. Credential rotation
+  starts a new history; Bedrock client recreation and Vertex service-account
+  token refresh preserve it.
+- No affinity is kept for a credential supplied only at dispatch by a
+  deployment extension, an opaque custom credential object, or a
+  service-account signer without a key ID.
+- Only keyed digests and numeric observations are retained, not prompt text or
+  credentials.
 
 Configure endpoint regions, relative capacity and the trusted location header in
 [`automatic_routing`](configuration.md#automatic-routing). Set `enabled: false`
 to restore baseline selection.
 
 The dashboard's Models page and the Routing page's Automatic fallback section
-show this catalog and this order; see [Models and Routing](dashboard.md#models-and-routing).
+show this catalog and this order; see [Automatic fallback](create-a-multi-provider-routing.md#automatic-fallback).
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the

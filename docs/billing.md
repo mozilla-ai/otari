@@ -1,88 +1,126 @@
+---
+description: How your organization's balance is funded and spent, and what keeps it from running out.
+icon: wallet
+---
+
 # Billing
 
-Requests served with otari.ai's own provider keys, and otari.ai's hosted tools, are paid from your organization's balance. Requests that use your own provider keys are billed by that provider, not from the balance.
+Your organization's balance pays for requests served with otari.ai's own
+provider keys and for otari.ai's hosted tools. Requests that use your own
+provider keys are billed by that provider instead.
 
-Billing is visible to the organization's owners and admins. Members see neither the balance nor the transactions. To find it, open **Organization** and select **Billing**.
+Only owners and admins see billing: open **Organization** and select
+**Billing**.
 
 ## The balance
 
-Every request is charged to the balance when it finishes. While a request is running, its expected cost is held, so the Billing page shows what is **Available**: the balance minus what running requests hold. A request starts only when something is available.
+Each request is charged to the balance when it finishes. While it runs, its
+expected cost is held, so the Billing page shows what is **Available**: the
+balance minus what running requests hold.
 
-When nothing is available, requests are refused until funds arrive. A request that was already running is allowed to finish, so the balance can end slightly below zero.
+When nothing is available, new requests paid from the balance are refused until funds arrive. Requests on your own provider keys are not affected.
+Requests already running finish, so the balance can end slightly below zero.
 
-A new organization gets $2 once the person who created it answers every question in the welcome questionnaire, so its first requests work before anyone adds funds.
+A new organization gets $2 once its creator answers every question in the
+welcome questionnaire.
 
 ## Three ways to add funds
 
-| | How it charges | Who controls it |
+| | Charges | Controlled by |
 | --- | --- | --- |
-| **One-off top-up** | Once, now, for an amount from $5 to $10,000. | Any owner or admin. |
-| **Auto top-up** | Whenever the balance falls below a threshold you choose. | The person who set it up (the cardholder). |
-| **Recurring top-up** | On a schedule: every day, every week, or on a day of the month. | The cardholder. |
+| **One-off top-up** | Once, for $5 to $10,000 | Any owner or admin |
+| **Auto top-up** | When the balance falls below a threshold | The cardholder who set it up |
+| **Recurring top-up** | Every day, every week, or on a day of the month | The cardholder |
 
-Payment happens on Stripe. Every charge adds a 4.5% service fee on top of the amount, and VAT is added at checkout based on the billing address. Only the amount itself is added to the balance. The person who paid receives the receipt by email, and each deposit is listed under **Transactions** with its receipt.
+Payment happens on Stripe. Each charge adds a 4.5% service fee and VAT based on
+the billing address; only the amount itself goes to the balance. The person who
+paid gets the receipt by email, and each deposit is listed under
+**Transactions**.
 
 ## Redeeming a voucher
 
-A voucher is a code from otari.ai that adds a fixed credit to the balance. Any owner or admin can redeem one: on the Billing page, enter the code under **Redeem a voucher** and select **Redeem**. The credit goes to the organization the dashboard is showing.
+A voucher is a code from otari.ai that adds credit to the balance. Any owner or
+admin can redeem one under **Redeem a voucher** on the Billing page; the credit
+goes to the organization the dashboard is showing.
 
-* Each person can redeem a voucher once, whichever organization they redeem it into. Another owner or admin of the same organization can redeem it too.
-* A voucher has an expiry date, and some can be redeemed only a set number of times in total.
-* A voucher works only in the region it was issued for.
-* Credit from a voucher is spent before paid funds, and it does not expire once it is on the balance.
+- Each person can redeem a voucher once. Another owner or admin of the same
+  organization can redeem it too.
+- A voucher expires, may have a total redemption limit, and works only in the
+  region it was issued for.
+- Voucher credit is spent before paid funds and does not expire once redeemed.
 
-Credits, including vouchers and the $2 welcome credit, are listed under **Transactions** beside deposits. They have no receipt, since nothing was paid.
+Credits, including vouchers and the welcome credit, are listed under
+**Transactions** without a receipt.
 
 ## Auto top-up
 
-An auto top-up keeps the balance from running out without anyone watching it. You set three amounts:
+An auto top-up refills the balance automatically. You set:
 
-* **Threshold**: when a request leaves the balance below this, a top-up is charged. It is checked as requests are billed or refused, and when you save.
-* **Amount**: what each top-up adds. It has to be at least the threshold, so one top-up always lifts the balance back above it.
-* **Monthly limit**: the most the card is charged in a calendar month (UTC), fee and VAT included. Once a top-up would pass it, no more are charged until the 1st. Requests keep running on whatever balance is left.
+- **Threshold**: when the balance drops below it, a top-up is charged.
+- **Amount**: what each top-up adds. It must be at least the threshold.
+- **Monthly limit**: the most the card is charged per calendar month (UTC),
+  fee and VAT included. Once reached, no more top-ups until the 1st; requests
+  keep running on what is left.
 
-Top-ups are at least one minute apart, so a burst of traffic cannot charge the card many times in a row.
+Top-ups are at least one minute apart.
 
-**The card belongs to the cardholder.** Whoever sets up the auto top-up saves their own card on Stripe and becomes its cardholder. Only they can change the card, the threshold, the amount or the limit. Any other owner or admin can turn it off, and can then set up their own. If the cardholder stops being an owner or admin of the organization, the auto top-up turns off, even while it is paused, so their card is never charged for an organization they no longer manage.
+Whoever sets up the auto top-up saves their own card on Stripe and becomes the
+**cardholder**. Only they can change the card or the amounts. Any other owner
+or admin can turn it off and set up their own. If the cardholder stops being an
+owner or admin, the auto top-up turns off.
 
-**When it pauses.** An auto top-up stops charging, and tells you why on the Billing page and by email, when:
+### When it pauses
 
-* the card is declined three times in a row, including because it expired or Stripe would no longer charge it;
-* the card is removed on Stripe;
-* Stripe cannot prepare the charge, usually because the billing address is incomplete;
-* the cardholder's bank asks to confirm a charge (it waits up to three days for the confirmation) or the confirmation is not completed.
+An auto top-up pauses, and says why on the Billing page and by email, when:
 
-If the card is removed while a charge waits on the bank, auto top-up stays paused for a new card even once that charge is confirmed or canceled.
+- the card is declined three times in a row, for example because it expired;
+- the card is removed on Stripe;
+- Stripe cannot prepare the charge, usually because the billing address is
+  incomplete;
+- the cardholder's bank asks to confirm a charge and it is not confirmed within
+  three days.
 
-The cardholder resumes it by changing the card, or by opening **Manage auto top-up** and saving it again. Until then, any owner or admin can keep the organization running with a one-off top-up.
+The cardholder resumes it by changing the card, or by opening
+**Manage auto top-up** and saving it again. Meanwhile, any owner or admin can
+add a one-off top-up.
 
 ## Being told before requests stop
 
-otari.ai emails every active owner and admin of the organization when the balance runs out, when auto top-ups pause or reach the monthly limit, and when the limit is getting close. Each email says what happened, why, and who can fix it. Members are not emailed, since billing is visible to owners and admins only. To have an on-call inbox or a shared alias receive them too, invite it to the organization as an admin.
+otari.ai emails every owner and admin when something needs attention. Each
+alert is sent once while its condition lasts, its subject starts with the
+organization's name, and an all-clear follows when it ends. To include an
+on-call inbox or shared alias, invite it to the organization as an admin.
 
-Each alert is sent once while its condition lasts, however many requests it affects. Every subject starts with the organization's name, so an inbox rule or an on-call tool can match on it. When an empty balance, a reached monthly limit or a pause ends, an all-clear follows, sent to the people who received the alert.
+| Alert | Sent when |
+| --- | --- |
+| **Requests are being refused** | The balance is used up. At most once an hour. All-clear: **Requests are being served again**. |
+| **Monthly limit reached** | An auto top-up would pass the monthly limit. |
+| **Auto top-up paused** | One of the pause reasons above. |
+| **Waiting on the bank** | The cardholder's bank asked for confirmation. The cardholder gets a separate email with the link. |
+| **Last auto top-up this month**, **One auto top-up left**, **On pace to reach the limit** | The monthly limit is getting close. At most once a month each. |
+| **Auto top-up turned off** | Someone other than the cardholder turned it off, or the cardholder no longer manages the organization. |
 
-If the balance runs out again within an hour of an empty balance you were told about being refilled, the alert waits for the rest of that hour, and is not sent at all if funds arrive first. A balance that each auto top-up refills and requests empty again a minute later therefore sends at most one alert an hour, not two emails a minute.
+Each email's button, such as **Add funds** or **Change the card**, opens the
+fix on the Billing page, switching to the right organization if needed. Only
+the cardholder's emails offer changes to the auto top-up; everyone else's offer
+**Add funds**.
 
-If an alert cannot be delivered, for example because the mail server is down, it is tried again after 10 minutes, then after longer gaps for about eight hours. Each retry goes only to the people who have not received it yet, and shows the balance and the other figures as they are when it is sent. An alert whose condition ends before it is delivered is not sent.
+## Subscription plans
 
-Each alert opens with how serious it is: **Outage** when requests are refused, **Action needed** when auto top-up has stopped, **Heads-up** when it will stop soon or was turned off, and **Resolved** for an all-clear. The fix and its button come right under the opening sentence. The limit warnings show this month's charges against the limit as a bar.
+Otari Go ($10 a month) and Otari Pro ($40 a month) are early-access plans. A plan includes a monthly usage allowance for the open-weight models otari.ai serves ($30 on Go, $120 on Pro), plus monthly allowances of web searches, web fetches and code runs. Every model counts as open-weight except the closed ones: Claude, GPT and o-series (but not gpt-oss), Gemini (but not Gemma) and Grok, whichever provider serves them, and any model served by Anthropic, OpenAI, Gemini, Vertex AI or xAI directly. The deployment's `closed_model_*` settings ([Configuration](configuration.md)) set these lists, which decide coverage on their own: a model's `open_weights` capability in the catalog does not. Plans are by invitation: an owner or admin redeems the invitation code on the **Billing** page and pays on Stripe.
 
-| Alert | When | Who receives it |
-| --- | --- | --- |
-| **Requests are being refused** | The balance is used up, so requests paid from it are refused. Says why no top-up refilled it. Requests that use your own provider keys are not affected. All-clear (**Requests are being served again**) when funds are added. At most one an hour. | Owners and admins |
-| **Monthly limit reached** | An auto top-up was due, but it would pass the monthly limit. Top-ups resume on the 1st (UTC), or sooner if the limit is raised. All-clear when the next top-up is paid. | Owners and admins |
-| **Auto top-up paused** | The card was declined three times in a row (including because it expired or Stripe would no longer charge it), the card was removed on Stripe, Stripe could not prepare the charge (usually an incomplete billing address), or a bank confirmation was not completed. All-clear when top-ups resume. | Owners and admins |
-| **Waiting on the bank** | The cardholder's bank asked them to confirm a top-up. The cardholder is emailed separately, with the link to confirm it. All-clear when it is confirmed. If it is not confirmed within three days, the charge is canceled and **Auto top-up paused** follows. | Owners and admins, except the cardholder |
-| **Last auto top-up this month**, **One auto top-up left** and **On pace to reach the limit** | After a top-up is paid: no further top-up fits in the monthly limit, only one more fits, or the pace of this month's earlier top-ups reaches the limit at least two days before it resets (so never after the month's first top-up). Each is sent at most once a month. | Owners and admins |
-| **Auto top-up turned off** | Someone other than the cardholder turned it off, the cardholder no longer manages the organization, or the Stripe customer holding the card was deleted. When the cardholder turns it off while an alert about it is open, the people who received that alert are told it ended. Sent once. | Owners and admins, except whoever turned it off |
+A plan is personal. It covers only requests made with the subscriber's own API keys. Requests from other members, and requests to closed models such as Claude, GPT and Gemini, are paid from the balance as usual.
 
-Only the cardholder can change the card or the terms of an auto top-up, because it charges their card. Their alerts link to the fix. Everyone else's say who can fix it and offer what they can do instead, usually **Add funds**, which any owner or admin can do.
+**Usage.** The Billing page shows what is left of this month's allowance. The subscriber is emailed at 80% and again when it is used up. Usage resets on the date the plan renews each month, and unused usage does not carry over. Up to 3 requests (Go) or 10 (Pro) that the plan covers can run at once; a request over that waits briefly, then gets a 429.
 
-Each button opens what it names on the Billing page: **Raise the limit**, **Change the card** and **Resume auto top-up** open the auto top-up's settings, **Add funds** opens a one-off top-up, and **Set up auto top-up** starts a new auto top-up. If you belong to more than one organization and the dashboard is showing another one, it switches to the organization the email is about and says so.
+**When the allowance runs out.** Requests the plan covered stop until it renews, and the error says why. To keep going, turn on **Pay as you go** on the Billing page, and further requests are paid from the balance at standard prices, or upgrade. Only the subscriber or the organization's owner can turn it on.
 
-Receipts are separate from these alerts: each one goes only to the person who paid.
+**Changing or cancelling.** An upgrade to Otari Pro starts a new month at once with Pro's full allowance, charged at Pro's price minus a credit for the unused days of Go. A downgrade takes effect at the next renewal. A cancelled plan stays active until the end of the paid month and is not refunded. Only the subscriber or the owner can change or cancel the plan.
+
+**Payments and leaving.** If a renewal payment fails, the plan covers nothing until Stripe collects it; pay as you go keeps requests going meanwhile. If the subscriber leaves the organization, the plan ends with its paid month and they are emailed.
 
 ## Budgets are a different control
 
-The balance limits what the organization can pay for. [Budgets](budgets.md) limit what is spent within the organization: by a workspace, a member, or a provider, over a period. A request has to fit both.
+The balance limits what the organization can pay for. [Budgets](budgets.md)
+limit what a workspace, a member or a provider spends over a period. A request has to fit
+both.

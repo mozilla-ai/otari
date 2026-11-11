@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from openai.types.responses.response_output_item_added_event import ResponseOutputItemAddedEvent
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
@@ -57,6 +58,8 @@ from gateway.services.tools import (
     is_capped_call,
     native_rendering,
     owning_backend,
+    provider_web_searches,
+    with_provider_web_searches,
 )
 from gateway.streaming import RESPONSES_TERMINAL_EVENTS
 
@@ -172,32 +175,61 @@ def _coerce_input_to_list(input_data: Any) -> list[Any]:
     return [input_data]
 
 
-def _fold_usage(result: Response, input_total: int, output_total: int, total_total: int) -> None:
-    """Replace ``result.usage`` token counts with the loop's running totals."""
-    if result.usage is None:
-        return
-    result.usage.input_tokens = input_total
-    result.usage.output_tokens = output_total
-    result.usage.total_tokens = total_total
+_USAGE_COUNTS = ("input_tokens", "cached_tokens", "output_tokens", "reasoning_tokens", "total_tokens")
 
 
-def _with_earlier_output_tokens(event: Any, acc_output_tokens: int) -> Any:
-    """Return a terminal event with the earlier rounds' output_tokens folded in.
+def _round_usage(usage: Any) -> dict[str, int]:
+    """The ``_USAGE_COUNTS`` one round's usage reports; a missing count is 0."""
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return {
+        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+        "cached_tokens": getattr(input_details, "cached_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
+        "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+    }
 
-    Pass-through when ``acc_output_tokens`` is zero. The Responses streaming
-    usage report is read off ``event.response.usage``; we ``model_copy`` the
-    Response with an updated Usage so consumers (``streaming_generator``) see
-    the full tool-loop output count instead of only the final iteration's.
+
+def _add_round_usage(acc: dict[str, Any], usage: Any) -> None:
+    """Add one round's counts to the loop's running totals."""
+    for name, count in _round_usage(usage).items():
+        acc[name] += count
+
+
+def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
+    """A copy of ``usage`` that reports ``counts``, its token details included."""
+    input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0)
+    output_details = usage.output_tokens_details or OutputTokensDetails(reasoning_tokens=0)
+    return usage.model_copy(
+        update={
+            "input_tokens": counts["input_tokens"],
+            "input_tokens_details": input_details.model_copy(update={"cached_tokens": counts["cached_tokens"]}),
+            "output_tokens": counts["output_tokens"],
+            "output_tokens_details": output_details.model_copy(update={"reasoning_tokens": counts["reasoning_tokens"]}),
+            "total_tokens": counts["total_tokens"],
+        }
+    )
+
+
+def _with_earlier_rounds_usage(event: Any, acc: dict[str, Any], final_searches: int) -> Any:
+    """Return a terminal event whose usage adds the rounds the loop hid to the final round's.
+
+    Pass-through when no round was hidden. ``streaming_generator`` reads the usage
+    row off ``event.response.usage``, so it is the only report that counts.
+    ``final_searches`` is the final round's own provider searches, counted before
+    its output was rewritten.
     """
-    if acc_output_tokens <= 0:
+    if not any(acc[name] for name in _USAGE_COUNTS):
         return event
     response_obj = getattr(event, "response", None)
     usage = getattr(response_obj, "usage", None) if response_obj is not None else None
     if usage is None or not hasattr(usage, "model_copy") or response_obj is None:
         return event
-    new_output = (getattr(usage, "output_tokens", 0) or 0) + acc_output_tokens
-    new_total = (getattr(usage, "total_tokens", 0) or 0) + acc_output_tokens
-    new_usage = usage.model_copy(update={"output_tokens": new_output, "total_tokens": new_total})
+    final = _round_usage(usage)
+    new_usage = _with_usage(usage, {name: final[name] + acc[name] for name in _USAGE_COUNTS})
+    if acc["provider_web_searches"]:
+        new_usage = with_provider_web_searches(new_usage, final_searches + acc["provider_web_searches"])
     new_response = response_obj.model_copy(update={"usage": new_usage})
     return event.model_copy(update={"response": new_response})
 
@@ -393,16 +425,24 @@ class _ResponsesToolLoopStrategy:
         # final response can announce them natively; ``compactions`` keeps replay
         # state produced by hidden iterations available to the caller. See
         # ``fold_usage``.
-        return {"input": 0, "output": 0, "total": 0, "native_items": [], "compactions": []}
+        return {
+            **dict.fromkeys(_USAGE_COUNTS, 0),
+            "provider_web_searches": 0,
+            "native_items": [],
+            "compactions": [],
+        }
 
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
-            acc["input"] += result.usage.input_tokens or 0
-            acc["output"] += result.usage.output_tokens or 0
-            acc["total"] += result.usage.total_tokens or 0
+            _add_round_usage(acc, result.usage)
+        acc["provider_web_searches"] += provider_web_searches(result)
 
     def fold_usage(self, result: Response, acc: dict[str, Any]) -> None:
-        _fold_usage(result, acc["input"], acc["output"], acc["total"])
+        if result.usage is not None:
+            result.usage = _with_usage(result.usage, acc)
+            # Each round reports its own searches, so the final one alone undercounts.
+            if acc["provider_web_searches"]:
+                result.usage = with_provider_web_searches(result.usage, acc["provider_web_searches"])
         # Prepend a native item per gateway-run search or execution. The loop
         # consumed the raw ``function_call`` items, so without this the caller has
         # no way to know the call happened; they come first because they did.
@@ -414,13 +454,14 @@ class _ResponsesToolLoopStrategy:
                 logger.warning("Could not add hidden tool-loop items to the response output")
 
     def exit_before_split(self, result: Response) -> bool:
-        return False
+        # The provider said why the round stopped short (the token limit, a content
+        # filter), so a call's arguments may be cut, even beside the caller's own calls.
+        # Not ``status``: any-llm's Gemini adapter reports a round that asks for a
+        # function call as ``incomplete`` too.
+        return result.incomplete_details is not None
 
     def split_owned(self, result: Response, pool: ToolBackend) -> tuple[list[Any], bool]:
         return _split_function_calls(list(result.output or []), pool)
-
-    def exit_after_split(self, result: Response) -> bool:
-        return False
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: dict[str, Any] | None = None
@@ -493,10 +534,7 @@ class _ResponsesToolLoopStrategy:
     def new_stream_accumulator(self) -> dict[str, Any]:
         # Each iteration's terminal event carries that iteration's usage on
         # ``event.response.usage``. When the loop continues, that event is
-        # dropped and its usage would be lost from streaming token reporting.
-        # Accumulate the per-iteration ``output_tokens`` and fold the running
-        # total into the final round's terminal event so downstream usage
-        # logging sees the full tool-loop output count.
+        # dropped, so its counts are kept here and added to the final round's.
         #
         # started / next_sequence: the client is shown ONE response even when the
         # loop consumed several upstream ones, so only the first
@@ -505,7 +543,9 @@ class _ResponsesToolLoopStrategy:
         # stream repeats ``response.created`` and restarts sequence numbers, which
         # the SDK's stream helper treats as a protocol error.
         return {
-            "output_tokens": 0,
+            **dict.fromkeys(_USAGE_COUNTS, 0),
+            # Searches the provider ran on hidden rounds, added to the final round's.
+            "provider_web_searches": 0,
             "started": 0,
             "next_sequence": 0,
             "next_output_index": 0,
@@ -657,6 +697,7 @@ class _ResponsesToolLoopStrategy:
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_terminal is None:
             return []
+        final_searches = provider_web_searches(getattr(state.deferred_terminal, "response", None))
         # The terminal event carries the whole response, whose ``output`` still lists
         # the gateway's own function_call items even though their item events were
         # hidden. Left in, ``get_final_response()`` would contradict the stream the
@@ -667,20 +708,20 @@ class _ResponsesToolLoopStrategy:
             folded = _with_output_as_shown(state.deferred_terminal, state, acc["shown_items"])
         else:
             folded = state.deferred_terminal
-        folded = _with_earlier_output_tokens(folded, acc["output_tokens"])
+        folded = _with_earlier_rounds_usage(folded, acc, final_searches)
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
 
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
-        # All-owned continuation: fold this iteration's output_tokens from the
-        # dropped terminal event into the running total.
+        # All-owned continuation: keep the counts of the terminal event the loop drops.
         acc["rewritten"] = True
         if state.deferred_terminal is not None:
             iter_response = getattr(state.deferred_terminal, "response", None)
             iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
             if iter_usage is not None:
-                acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
+                _add_round_usage(acc, iter_usage)
+            acc["provider_web_searches"] += provider_web_searches(iter_response)
 
     def synthetic_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.

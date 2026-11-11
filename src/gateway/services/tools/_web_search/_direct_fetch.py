@@ -24,6 +24,7 @@ rate-limit rules, the timeout, the usage row's names and the response's
 ``fetch_tool``.
 """
 
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -172,14 +173,19 @@ async def run_direct_fetch(
     ``url_invalid``. The message holds only the failure's safe fields, never the URL.
     """
     resolved = fetch.resolved
-    if resolved.provider == BUILTIN_FETCH_PROVIDER:
-        async with retrieval_client(trust_env_proxy=trust_env_proxy) as own:
-            fetched = await fetch_page(
-                resolved, fetch.url, client=own, policy=fetch.policy, allow_private=False, max_chars=fetch.max_chars
-            )
-    else:
+    on: AbstractAsyncContextManager[httpx.AsyncClient] = (
+        retrieval_client(trust_env_proxy=trust_env_proxy)
+        if resolved.provider == BUILTIN_FETCH_PROVIDER
+        else nullcontext(client)
+    )
+    async with on as fetch_client:
         fetched = await fetch_page(
-            resolved, fetch.url, client=client, policy=fetch.policy, allow_private=False, max_chars=fetch.max_chars
+            resolved,
+            fetch.url,
+            client=fetch_client,
+            policy=fetch.policy,
+            allow_private=False,
+            max_chars=fetch.max_chars,
         )
     if isinstance(fetched, FetchFailure):
         raise _failed(resolved, fetched)

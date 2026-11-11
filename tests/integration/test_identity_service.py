@@ -1,48 +1,91 @@
 """Sign-in through the identity service, and the core identity provider policy."""
 
 import functools
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import GatewayConfig
+from gateway.core.email_domains import blocklist_entry
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    OAuthEmailNotVerifiedError,
     OAuthIdentityLinkConflictError,
     OAuthIdentityUnknownError,
+    SignInBlockedError,
+    SsoIdentityNotAdmittedError,
     TermsNotAcceptedError,
 )
 from gateway.models.base import Base
-from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
-from gateway.models.tenancy import Organization, User
+from gateway.models.identity import (
+    BlockedEmail,
+    EmailAssertion,
+    OAuthIdentityLink,
+    OIDCConnection,
+    ProviderIdentity,
+    oidc_identity_provider,
+)
+from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
+    DashboardSession,
+    Organization,
+    OrganizationDomain,
+    OrganizationDomainRole,
+    User,
+    Workspace,
+)
+from gateway.models.users import User as BillingUser
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
-from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository
-from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
+from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository, OIDCConnectionRepository
+from gateway.repositories.tenancy import (
+    OrganizationDomainRepository,
+    OrganizationMemberRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
+)
 from gateway.services.identity import IdentityService
 from gateway.services.mail import Mailer
-from gateway.services.tenancy import DomainAutoJoinListener, OrganizationService, forget_unproven_access
+from gateway.services.tenancy import (
+    DomainAutoJoinListener,
+    OrganizationService,
+    VerifiedDomainLookup,
+    forget_unproven_access,
+)
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
-from .tenancy_helpers import create_member, create_organization, membership_writes
+from .tenancy_helpers import (
+    create_member,
+    create_organization,
+    create_workspace,
+    membership_listener_on,
+    membership_writes,
+)
 
 pytestmark = pytest.mark.asyncio
 
 TENANT_PROVIDER = "acme-oidc"
+SSO_ISSUER = "https://login.acme.example"
 
 
 def _service_with(
     db: AsyncSession, uow: UnitOfWork, policy: IdentityProviderPort, *, terms_url: str | None = None
 ) -> IdentityService:
     """Build the service as its request builder does, on ``policy``."""
+    organizations = OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow)
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=policy,
-        organizations=OrganizationService(db, membership_listener=None),
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
+        organizations=organizations,
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=1,
         terms_url=terms_url,
         mailer=Mailer(GatewayConfig(mail_transport="none")),
@@ -74,6 +117,475 @@ def _verified(provider: str, email: str) -> ProviderIdentity:
 
 async def _count(db: AsyncSession, model: type[SQLModel] | type[Base]) -> int:
     return (await db.execute(select(func.count()).select_from(model))).scalar_one()
+
+
+class _RefusesEverything:
+    """An identity provider policy that fails the test if an SSO sign-in ever reaches it."""
+
+    async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
+        raise AssertionError("An SSO identity reached the identity provider port")
+
+
+def _sso_service(db: AsyncSession, *, terms_url: str | None = None) -> IdentityService:
+    """Build the service for an SSO sign-in, on a policy an SSO identity must never reach."""
+    return _service_with(db, UnitOfWork(db), _RefusesEverything(), terms_url=terms_url)
+
+
+def _sso_identity(
+    *,
+    issuer: str = SSO_ISSUER,
+    subject: str = "sso-subject",
+    email: str | None,
+    full_name: str | None = "Ada Lovelace",
+    # Defaults to what a connection reports in practice. ``trust_email_verified`` is off for every
+    # connection, so apron-auth sends no claim at all and the assertion is unasserted.
+    email_verified: EmailAssertion = EmailAssertion.UNASSERTED,
+) -> ProviderIdentity:
+    return ProviderIdentity(
+        provider=oidc_identity_provider(issuer),
+        subject=subject,
+        email=email,
+        full_name=full_name,
+        email_verified=email_verified,
+    )
+
+
+async def _add_connection(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    *,
+    issuer: str = SSO_ISSUER,
+    default_role: OrganizationDomainRole = "member",
+) -> OIDCConnection:
+    uow = UnitOfWork(db)
+    async with uow:
+        return await OIDCConnectionRepository(uow).add(
+            organization_id=organization_id,
+            issuer=issuer,
+            resolved_issuer=issuer,
+            client_id="a-client-id",
+            encrypted_client_secret="encrypted-secret",
+            client_secret_last4="cret",
+            display_name="Example IdP",
+            discovery_document={"issuer": issuer},
+            discovered_at=datetime.now(UTC),
+            default_role=default_role,
+        )
+
+
+async def _add_claim(db: AsyncSession, organization_id: uuid.UUID, *, domain: str) -> OrganizationDomain:
+    row = await OrganizationDomainRepository(db).create_domain(
+        organization_id=organization_id,
+        domain=domain,
+        default_role="member",
+        enabled=True,
+        verification_token="tok" + uuid.uuid4().hex[:16],
+    )
+    row.verified_at = datetime.now(UTC)
+    db.add(row)
+    await db.commit()
+    return row
+
+
+async def _block_address(db: AsyncSession, value: str) -> None:
+    pattern = blocklist_entry(value)
+    assert pattern is not None
+    db.add(BlockedEmail(pattern=pattern, reason=None, created_by_user_id=None))
+    await db.commit()
+
+
+async def test_a_first_sso_sign_in_creates_an_account_with_no_email(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert signed_in.new_account is True
+    assert signed_in.account.email is None
+    assert signed_in.account.full_name == "Ada Lovelace"
+    assert signed_in.active_organization_id == organization.id
+
+
+async def test_a_first_sso_sign_in_is_refused_when_the_address_is_blocked(async_db: AsyncSession) -> None:
+    """The account the sign-in would mint holds no address, so only the asserted one can be checked."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    await _block_address(async_db, "ada@acme.example")
+
+    with pytest.raises(SignInBlockedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    accounts = await async_db.scalar(select(func.count()).select_from(OAuthIdentityLink))
+    assert accounts == 0
+
+
+async def test_a_linked_sso_sign_in_is_refused_when_the_address_is_blocked(async_db: AsyncSession) -> None:
+    """A block added after the link still refuses the sign-in it reaches."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert first.new_account is True
+
+    await _block_address(async_db, "ada@acme.example")
+
+    with pytest.raises(SignInBlockedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_domain_claim_is_disabled(async_db: AsyncSession) -> None:
+    """A link is a way in only while an organization still proves the domain it was admitted on."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    claim = await _add_claim(async_db, organization.id, domain="acme.example")
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert first.new_account is True
+
+    claim.enabled = False
+    async_db.add(claim)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_proof_has_expired(async_db: AsyncSession) -> None:
+    """The proof is current or it is not, and a link does not stand in for one."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    claim = await _add_claim(async_db, organization.id, domain="acme.example")
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    claim.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL - timedelta(days=1)
+    async_db.add(claim)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_linked_sso_sign_in_is_refused_once_the_connection_is_disabled(async_db: AsyncSession) -> None:
+    """A disabled connection admits nobody, the rule the break-glass check already applies."""
+    organization = await create_organization(async_db, slug="acme")
+    connection = await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    connection.enabled = False
+    async_db.add(connection)
+    await async_db.commit()
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+
+async def test_a_first_sso_sign_in_mints_the_account_that_can_own_a_key(async_db: AsyncSession) -> None:
+    """Keys, budgets and usage hang off a request-plane row that nothing joins to the membership."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    owner = await async_db.get(BillingUser, str(signed_in.account.id))
+    assert owner is not None
+    assert owner.alias == "Ada Lovelace"
+
+
+async def test_the_claimed_address_is_recorded_on_the_link_only(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(
+        _sso_identity(subject="sso-subject", email="ada@acme.example")
+    )
+
+    link = await async_db.get(OAuthIdentityLink, (oidc_identity_provider(SSO_ISSUER), "sso-subject"))
+    assert link is not None
+    assert link.asserted_email == "ada@acme.example"
+    assert signed_in.account.email is None
+
+
+async def test_an_sso_account_gets_no_personal_organization(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    organizations_before = await _count(async_db, Organization)
+    workspaces_before = await _count(async_db, Workspace)
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert await _count(async_db, Organization) == organizations_before
+    assert await _count(async_db, Workspace) == workspaces_before
+    membership = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(
+        organization.id, signed_in.account.id
+    )
+    assert membership is not None
+    assert membership.role == "member"
+
+
+async def test_a_first_sso_sign_in_joins_the_organizations_default_workspace(async_db: AsyncSession) -> None:
+    """Nothing else would give this account a workspace, and it cannot create one itself."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=owner)
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(
+        workspace.id, signed_in.account.id
+    )
+    assert member is not None
+    assert member.role == "member"
+
+
+async def test_a_connections_viewer_default_is_a_viewer_of_the_default_workspace(async_db: AsyncSession) -> None:
+    """A viewer of the organization is a viewer of its workspaces, as the invitation form has it."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=owner)
+    await _add_connection(async_db, organization.id, default_role="viewer")
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(
+        workspace.id, signed_in.account.id
+    )
+    assert member is not None
+    assert member.role == "viewer"
+
+
+async def test_a_first_sso_sign_in_grants_nothing_where_no_workspace_carries_the_default_name(
+    async_db: AsyncSession,
+) -> None:
+    """The cost of keying on the name: the sign-in still succeeds, with no workspace granted."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    await create_workspace(async_db, organization, name="Renamed", owner=owner)
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert signed_in.new_account is True
+    granted = await WorkspaceMemberRepository(async_db).get_workspace_ids_for_user(
+        user_id=signed_in.account.id, organization_id=organization.id
+    )
+    assert granted == []
+
+
+async def test_an_sso_sign_in_succeeds_with_open_signup_off(async_db: AsyncSession) -> None:
+    """A connection is its own authority over its own directory, so ``open_signup=False`` does not block it."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert signed_in.account.active_organization_id == organization.id
+
+
+async def test_an_sso_sign_in_succeeds_with_no_email_verified_claim(async_db: AsyncSession) -> None:
+    """A connection reports no assertion at all, and the DNS proof is what admits the identity.
+
+    ``trust_email_verified`` is off for every connection, so requiring an assertion here would
+    refuse every sign-in a real provider produces.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(
+        _sso_identity(email="ada@acme.example", email_verified=EmailAssertion.UNASSERTED)
+    )
+
+    assert signed_in.new_account is True
+
+
+async def test_an_sso_sign_in_is_refused_when_the_provider_denies_the_address(async_db: AsyncSession) -> None:
+    """An issuer that says outright the address is unverified is turned away, unlike one that is silent."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    accounts_before = await _count(async_db, User)
+
+    with pytest.raises(OAuthEmailNotVerifiedError):
+        await _sso_service(async_db).sign_in_with_oauth(
+            _sso_identity(email="ada@acme.example", email_verified=EmailAssertion.UNVERIFIED)
+        )
+
+    assert await _count(async_db, User) == accounts_before
+
+
+async def test_an_authenticated_person_matching_no_organization_is_refused(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    # No domain claim: nothing proves the identity's email domain, so the connection admits nobody.
+    accounts_before = await _count(async_db, User)
+
+    with pytest.raises(SsoIdentityNotAdmittedError):
+        await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert await _count(async_db, User) == accounts_before
+
+
+async def test_a_later_sign_in_takes_the_display_name_the_provider_now_reports(async_db: AsyncSession) -> None:
+    """Nothing here sets such an account's name, so the provider is where a change to it comes from."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    first = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example", full_name=None))
+    assert first.account.full_name is None
+
+    await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example", full_name="Ada Lovelace"))
+
+    refreshed = await async_db.get(User, first.account.id)
+    assert refreshed is not None
+    assert refreshed.full_name == "Ada Lovelace"
+
+
+async def test_one_issuer_shared_by_two_organizations_is_one_account_with_two_memberships(
+    async_db: AsyncSession,
+) -> None:
+    """Two organizations sharing one issuer each admit only their own proven domain.
+
+    The second membership comes from an ordinary admin grant, not from SSO. The one account SSO
+    provisioned is not confined to one organization, and tolerates holding both.
+    """
+    acme = await create_organization(async_db, slug="acme")
+    globex = await create_organization(async_db, slug="globex")
+    await _add_connection(async_db, acme.id)
+    await _add_connection(async_db, globex.id)
+    await _add_claim(async_db, acme.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=globex.id, user_id=signed_in.account.id, role="member"
+    )
+    await async_db.commit()
+
+    members = OrganizationMemberRepository(async_db)
+    assert await members.get_active_by_organization_and_user(acme.id, signed_in.account.id) is not None
+    assert await members.get_active_by_organization_and_user(globex.id, signed_in.account.id) is not None
+
+
+async def test_blocking_an_address_ends_a_session_reached_through_a_connection(
+    async_db: AsyncSession,
+) -> None:
+    """The account holds no address of its own, so only what its provider asserted can match it."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    assert signed_in.account.email is None
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    blocked = await _sso_service(async_db).block_email(actor=actor, value="ada@acme.example", reason=None)
+
+    assert blocked.blocked_account_count == 1
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
+
+
+async def test_blocking_the_address_a_provider_asserts_now_ends_the_session(
+    async_db: AsyncSession,
+) -> None:
+    """The address is taken again on each sign-in, so a block matches what the provider asserts now."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    service = _sso_service(async_db)
+    await service.sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    signed_in = await service.sign_in_with_oauth(_sso_identity(email="ada.lovelace@acme.example"))
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    blocked = await service.block_email(actor=actor, value="ada.lovelace@acme.example", reason=None)
+
+    assert blocked.blocked_account_count == 1
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
+
+
+async def test_blocking_a_domain_ends_a_session_reached_through_a_connection(
+    async_db: AsyncSession,
+) -> None:
+    """A domain entry covers the addresses under it, whichever column carries them."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+    actor = await create_member(async_db, organization, role="owner", full_name="The Operator")
+    actor.email = "ops@elsewhere.example"
+    async_db.add(actor)
+    await async_db.commit()
+
+    await _sso_service(async_db).block_email(actor=actor, value="acme.example", reason=None)
+
+    sessions = await async_db.scalar(
+        select(func.count()).select_from(DashboardSession).where(col(DashboardSession.user_id) == signed_in.account.id)
+    )
+    assert sessions == 0
+
+
+async def test_a_first_sso_sign_in_takes_the_terms_gate(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+    service = _sso_service(async_db, terms_url="https://example.com/terms")
+    identity = _sso_identity(email="ada@acme.example")
+
+    with pytest.raises(TermsNotAcceptedError):
+        await service.sign_in_with_oauth(identity)
+    assert await _count(async_db, User) == 0
+
+    signed_in = await service.sign_in_with_oauth(identity, terms_accepted=True)
+
+    assert signed_in.account.terms_accepted_at is not None
+
+
+async def test_an_sso_identity_never_reaches_the_identity_provider_port(async_db: AsyncSession) -> None:
+    """``_sso_service`` binds a policy that raises on any call, so a successful sign-in proves it unused."""
+    organization = await create_organization(async_db, slug="acme")
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert signed_in.account.email is None
+
+
+async def test_an_sso_account_is_told_apart_from_the_master_key_operator(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    operator = await UserRepository(async_db).create_local_identity(
+        full_name="Operator", active_organization_id=organization.id
+    )
+    await async_db.commit()
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert operator.email is None
+    assert operator.oauth_provider is None
+    assert signed_in.account.email is None
+    assert signed_in.account.oauth_provider is not None
 
 
 async def test_a_tenant_provider_cannot_claim_an_account_by_its_verified_address(async_db: AsyncSession) -> None:
@@ -119,7 +631,7 @@ async def test_starting_a_session_records_the_sign_in_on_the_account(async_db: A
     await async_db.commit()
     assert account.last_sign_in_at is None
 
-    await _service(async_db, open_signup=False).start_session(account)
+    await _service(async_db, open_signup=False).start_session(account, asserted_email=None)
 
     await async_db.refresh(account)
     assert account.last_sign_in_at is not None
@@ -334,4 +846,5 @@ async def test_a_proven_address_that_lost_its_last_membership_signs_in_to_no_org
     assert signed_in.active_organization_id is None
     assert await _count(async_db, Organization) == organizations_before
     assert signed_in.account.full_name == "Ada"
-    assert signed_in.account.active_organization_id == former.id
+    # The row says what the response says: the sign-in reached no organization, so it names none.
+    assert signed_in.account.active_organization_id is None

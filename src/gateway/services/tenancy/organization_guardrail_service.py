@@ -53,6 +53,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
+from fastapi import BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import and_, delete, func, or_, select
@@ -83,6 +84,7 @@ from gateway.models.guardrails import (
 )
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.secret_box import (
@@ -158,8 +160,8 @@ class OrganizationGuardrailCreate(BaseModel):
     # A body that would actually be accepted, which the derived one is not: the
     # generator fills every string with "string", and this schema refuses that
     # for `url` (`CreateSearchToolRequest` carries one for the same reason).
-    # Generated samples reach a reader through the OpenAPI spec and the Postman
-    # collection, so an example that fails validation teaches the wrong shape.
+    # Generated samples reach a reader through the OpenAPI spec, so an example
+    # that fails validation teaches the wrong shape.
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -203,7 +205,7 @@ class OrganizationGuardrailCreate(BaseModel):
     )
     on_unavailable: Literal["block", "monitor"] = Field(
         default="block",
-        description="What a block-mode entry does when the guardrails service cannot be reached at all",
+        description="What a block-mode entry does when the guardrails service cannot be reached or gives no verdict",
     )
     validate_kwargs: dict[str, Any] | None = Field(
         default=None,
@@ -422,10 +424,9 @@ class ResolvedOrganizationGuardrail:
     should ride into a streaming response that outlives the handler.
 
     The credential is carried beside the config rather than on it because
-    :class:`GuardrailConfig` is a *request body* model. A credential field there
-    would be one a caller could set, which would turn the guardrail list into a
-    way to make this gateway send a secret to an endpoint of the caller's
-    choosing.
+    :class:`GuardrailConfig` is a *request body* model, whose ``credential`` is
+    the caller's own. Keeping a stored secret off it means no merge can leave
+    one on an entry whose URL the caller chose.
 
     ``definition_id`` is set when this organization runs the guardrail itself,
     and it is the whole of what the request path needs: the runner holds the
@@ -519,8 +520,7 @@ def _require_url_for_credential(url: str | None, has_credential: bool) -> None:
     """Refuse a credential on an entry that names no endpoint of its own.
 
     The entry would then be sent to the deployment's ``guardrails_url``, which
-    this repository's own compose file makes ``http://anyguardrails:8000``, so
-    the bearer would cross the wire in clear. Naming the endpoint is what routes
+    may be plain ``http``, so the bearer could cross the wire in clear. Naming the endpoint is what routes
     it through :func:`_validate_url`, whose ``has_authorization_token`` arm
     refuses ``http`` outright; requiring one here is what makes the field's
     "sent over https" contract true rather than conditional on how the operator
@@ -727,9 +727,20 @@ class OrganizationGuardrailService:
         )
 
     async def create_guardrail(
-        self, *, user: User, request: OrganizationGuardrailCreate
+        self,
+        *,
+        user: User,
+        request: OrganizationGuardrailCreate,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> OrganizationGuardrailPublic:
-        """Mandate a guardrail, encrypting its credential before it is stored."""
+        """Mandate a guardrail, encrypting its credential before it is stored.
+
+        With ``growth``, the guardrail is reported as ``GUARDRAIL_CREATED``, and
+        the organization's first as ``FIRST_GUARDRAIL_CONFIGURED`` for ``user``
+        too, derived as the first key is: a read of current state, so deleting
+        every guardrail re-arms it.
+        """
         organization_id = await self._manageable_organization_id(user)
 
         existing = (
@@ -780,6 +791,21 @@ class OrganizationGuardrailService:
         await self._replace_scope(guardrail.id, workspace_ids)
         await self._commit()
         await self.db.refresh(guardrail)
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.GUARDRAIL_CREATED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=organization_id,
+            )
+        if existing == 0 and growth is not None and background_tasks is not None and user.email is not None:
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.FIRST_GUARDRAIL_CONFIGURED,
+                user_id=user.id,
+                email=user.email,
+            )
         return await self._public(guardrail)
 
     async def update_guardrail(
@@ -900,8 +926,9 @@ class OrganizationGuardrailService:
 
         The endpoint, credential and safety check a request would use, but run
         as ``block`` with ``on_unavailable="block"`` whatever is stored, so a
-        failure is reported rather than recorded as inconclusive. Works on a
-        paused mandate too: pausing stops it running, not being checked.
+        failure is reported rather than recorded as inconclusive. An answer with
+        no verdict comes back as it is. Works on a paused mandate too: pausing
+        stops it running, not being checked.
         """
         organization_id = await self._manageable_organization_id(user)
         guardrail = await self._get_or_404(organization_id, guardrail_id)
@@ -930,12 +957,11 @@ class OrganizationGuardrailService:
                 request.text,
                 default_url=default_url,
                 credentials={profile: credential} if credential else None,
+                allow_no_verdict=True,
             )
         except UnsafeURLError as exc:
             raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc
         except GuardrailsNotReachableError as exc:
-            # Not the message: it can quote the service's result, which may echo
-            # the text or the arguments sent, credentials included.
             reason = type(exc.__cause__ or exc).__name__
             logger.warning("Testing organization guardrail %s failed: %s", profile, reason)
             raise OrganizationGuardrailCheckFailedError() from exc

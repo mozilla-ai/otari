@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 
 import pytest
 from any_llm.types.completion import (
+    CacheCreationTokenDetails,
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
@@ -17,14 +18,18 @@ from any_llm.types.completion import (
     ChoiceDelta,
     ChoiceDeltaToolCall,
     ChunkChoice,
+    CompletionTokensDetails,
     CompletionUsage,
     Function,
     PromptTokensDetails,
+    ServerToolUsage,
 )
 from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
+from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
+from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.inference import EmptyCompletionError
@@ -500,6 +505,28 @@ async def test_loop_accumulates_cached_tokens_across_iterations(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A grounded round the loop hid still bills its searches, though the final round ran none."""
+    searched = _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=10, completion_tokens=2)
+    assert searched.usage is not None
+    searched.usage.server_tool_use = ServerToolUsage(web_search_requests=2)
+    responses = iter([searched, _completion(finish="stop", content="done", prompt=12, completion_tokens=3)])
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert provider_web_searches_of(out.usage) == 2
+
+
+@pytest.mark.asyncio
 async def test_loop_folds_usage_when_final_completion_has_empty_choices(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accumulated usage must survive a final completion that carries no choices."""
     empty = ChatCompletion(
@@ -675,6 +702,58 @@ async def test_loop_foreign_tool_returns_to_caller_without_execution(monkeypatch
     )
     assert out.choices[0].finish_reason == "tool_calls"
     assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_loop_hides_a_gateway_tool_call_cut_off_by_the_token_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round cut off mid-call returns the caller's own calls, without the gateway's, which it never declared."""
+
+    client_call = ChatCompletionMessageCustomToolCall(
+        id="u", type="custom", custom=Custom(name="apply_patch", input="x")
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        out = _completion(finish="length", tool_calls=[("c", CODE_EXECUTION_TOOL_NAME, '{"code": "prices = [19.1')])
+        out.choices[0].message.tool_calls = [client_call, *(out.choices[0].message.tool_calls or [])]
+        return out
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=[CODE_EXECUTION_TOOL_NAME])
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=3,
+    )
+    assert out.choices[0].finish_reason == "length"
+    assert out.choices[0].message.tool_calls == [client_call]
+    assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_loop_returns_a_custom_call_beside_a_gateway_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A custom call is the caller's, so a round that also calls a gateway tool runs it and returns the custom call."""
+
+    client_call = ChatCompletionMessageCustomToolCall(
+        id="u", type="custom", custom=Custom(name="apply_patch", input="x")
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        out = _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")])
+        out.choices[0].message.tool_calls = [client_call, *(out.choices[0].message.tool_calls or [])]
+        return out
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=3,
+    )
+    assert out.choices[0].finish_reason == "tool_calls"
+    assert out.choices[0].message.tool_calls == [client_call]
+    assert pool.calls == [("fetch_url", {})]
 
 
 @pytest.mark.asyncio
@@ -992,16 +1071,27 @@ def _round_end(finish: _FinishReason, usage: CompletionUsage, *, trailing: bool)
 async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.MonkeyPatch, trailing: bool) -> None:
     """Each round reports its own usage, but the client sees one report for the loop:
     the last chunk, carrying the sum across rounds, so a multi-round tool call is not
-    billed for the last round alone (otari#1772). OpenAI and any-llm's Anthropic
-    adapter report usage on a trailing chunk with no choices; some providers put it
-    on the finish chunk itself."""
+    billed for the last round alone (otari#1772), cache writes included. OpenAI and
+    any-llm's Anthropic adapter report usage on a trailing chunk with no choices;
+    some providers put it on the finish chunk itself."""
     round_one = CompletionUsage(
         prompt_tokens=100,
         completion_tokens=20,
         total_tokens=120,
-        prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
+        prompt_tokens_details=PromptTokensDetails(
+            cached_tokens=30,
+            cache_write_tokens=40,
+            cache_creation_token_details=CacheCreationTokenDetails(ephemeral_1h_input_tokens=40),
+        ),
+        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12),
+        server_tool_use=ServerToolUsage(web_search_requests=2),
     )
-    round_two = CompletionUsage(prompt_tokens=140, completion_tokens=5, total_tokens=145)
+    round_two = CompletionUsage(
+        prompt_tokens=140,
+        completion_tokens=5,
+        total_tokens=145,
+        server_tool_use=ServerToolUsage(web_search_requests=1),
+    )
     iter_streams = iter(
         [
             _async_iter(
@@ -1039,6 +1129,10 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
     assert usages[0].total_tokens == 265
     assert usages[0].prompt_tokens_details is not None
     assert usages[0].prompt_tokens_details.cached_tokens == 30
+    assert usages[0].prompt_tokens_details.cache_write_tokens == 40
+    assert cache_write_1h_tokens_of(usages[0]) == 40
+    assert reasoning_tokens_of(usages[0]) == 12
+    assert provider_web_searches_of(usages[0]) == 3
 
 
 @pytest.mark.asyncio
@@ -2021,3 +2115,15 @@ def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> N
 
     assert entry["status"] == "failed"
     assert "stdout" not in entry
+
+
+def test_a_code_execution_with_no_code_is_reported_failed() -> None:
+    from types import SimpleNamespace
+
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {"code": ""})
+    pool = SimpleNamespace(take_executions=lambda: [CodeExecution(code="", result=None, invalid_input=True)])
+
+    [entry] = CHAT_CODE_EXECUTION.ran(call, cast(Any, pool))
+
+    assert entry["status"] == "failed"
+    assert "exit_code" not in entry

@@ -38,3 +38,8 @@ export function tokenFromHash(hash: string): string | null {
 export function emailFromHash(hash: string): string | null {
   return paramFromHash(hash, "email")
 }
+
+/** The `invite` a build's invitation link carries, which proves the address it was mailed to. */
+export function inviteFromHash(hash: string): string | null {
+  return paramFromHash(hash, "invite")
+}

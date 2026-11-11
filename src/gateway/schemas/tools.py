@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import pydantic
 from sqlmodel import Field, SQLModel
@@ -198,7 +198,17 @@ class SearchProviderOptionSchema(SQLModel):
     description: str = ""
     operator_only: bool = Field(
         default=False,
-        description="True when only an instance or a credential may set it, never a workspace or a request.",
+        description=(
+            "True when only an instance or a credential may set it, never a workspace or a request: an option "
+            "the provider's library marks so, or a cost tier of a provider that reports no cost."
+        ),
+    )
+    cost_tier: bool = Field(
+        default=False,
+        description=(
+            "True when the option's values are the provider's cost tiers: the provider bills a call at a price "
+            "of its own for each value. enum lists the tiers, and default is the one used when the option is unset."
+        ),
     )
 
 
@@ -226,6 +236,10 @@ class SearchProviderSchema(SQLModel):
     )
     doc_url: str | None = Field(default=None, description="The provider's API documentation.")
     tier: str | None = Field(default=None, description="The library's tier for the provider.")
+    reports_cost: bool = Field(
+        default=False,
+        description="True when the provider's answer says what each call cost, which is then what the call is billed.",
+    )
     options: list[SearchProviderOptionSchema] | None = Field(
         default=None,
         description=(
@@ -296,9 +310,38 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         *,
         decryptable: bool = True,
         shadows_config: bool = False,
-    ) -> "StoredSearchToolSchema":
-        """The public view of a stored row: never the key, only its last four characters."""
-        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config)
+        **fields: Any,
+    ) -> Self:
+        """The public view of a stored row: never the key, only its last four characters.
+
+        ``fields`` sets those a subclass adds.
+        """
+        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config, **fields)
+
+
+# Where a listed tool's price comes from: its own price row, that row while its
+# config.yml entry sets ``price_per_call``, its old ``<provider>:<name>`` row,
+# or no row.
+ToolPriceSource = Literal["own", "config", "old_key", "none"]
+
+_PRICE_PER_CALL_DESCRIPTION = (
+    "USD for one call on the deployment's own account when the provider reports no cost of its own, from the "
+    "deployment's price list. An override the operator set for one organization prices that organization's "
+    "calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused."
+)
+_PRICE_SOURCE_DESCRIPTION = (
+    "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', "
+    "that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the "
+    "rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old "
+    "<provider>:<name> row, which prices it while it has no row of its own; 'none', no row."
+)
+
+
+class ListedSearchToolSchema(StoredSearchToolSchema):
+    """A stored instance as the listing shows it: with what one of its calls costs."""
+
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class CreatedSearchToolSchema(StoredSearchToolSchema):
@@ -335,12 +378,14 @@ class ConfigSearchToolSchema(pydantic.BaseModel):
         default=False,
         description="True when a stored instance of the same name and kind overrides this entry.",
     )
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class SearchToolsResponse(pydantic.BaseModel):
     """Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from."""
 
-    stored: list[StoredSearchToolSchema]
+    stored: list[ListedSearchToolSchema]
     config: list[ConfigSearchToolSchema]
 
 
@@ -667,6 +712,13 @@ class CodeExecuteRequest(pydantic.BaseModel):
     )
     user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
 
+    @pydantic.field_validator("code")
+    @classmethod
+    def _code_is_not_blank(cls, code: str) -> str:
+        if not code.strip():
+            raise ValueError("code must contain something to run")
+        return code
+
 
 class CodeExecutionOutputFile(pydantic.BaseModel):
     """A file the code wrote, stored in the Files API."""
@@ -723,7 +775,9 @@ class OtariToolCall(pydantic.BaseModel):
     sources: list[OtariToolCallSource] | None = pydantic.Field(
         default=None, description="A completed search's results; empty when it found none."
     )
-    code: str | None = pydantic.Field(default=None, description="The code a code execution ran.")
+    code: str | None = pydantic.Field(
+        default=None, description="The code the model sent a code execution; a failed one may not have run."
+    )
     stdout: str | None = pydantic.Field(default=None, description="What an ended code execution printed.")
     stderr: str | None = pydantic.Field(default=None, description="What an ended code execution wrote to stderr.")
     exit_code: int | None = pydantic.Field(default=None, description="An ended code execution's exit status.")

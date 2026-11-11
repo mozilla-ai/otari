@@ -1,7 +1,7 @@
 name: Otari Guardrails Judges
 
 # Runs the repository's judge gates (.otari/) against every pull request and
-# posts their advisory findings on it. See docs/agent-guardrails.md,
+# posts their advisory findings on it. See cli/docs/agent-guardrails.md,
 # "Checking a pull request in CI".
 #
 # pull_request_target runs this file as it is on the base branch, so a pull
@@ -192,13 +192,24 @@ jobs:
             gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
           fi
 
-      # The CLI's exit status ignores judge findings, so the job fails here to
-      # show them in the checks list. It is not a required check, so a finding
-      # still does not block the merge.
+      # A judge gate's enforcement can only ever be advisory
+      # (domain/policy.py rejects "required" for one at parse time), so an
+      # advisory finding warns here instead of failing the job: it stays
+      # visible in the pull request comment and the job summary, without a
+      # red X on an unrelated change. The required-gate branch below guards
+      # against that assumption changing. It is not a required check either
+      # way, so even a failure here does not block the merge.
       - name: Fail on a judge finding
         if: steps.judges.outcome == 'success'
         run: |
-          if grep -qE '^  fail ' "$RUNNER_TEMP/judges.txt"; then
-            echo "::error title=Judge gates::A judge gate did not pass. Its finding is advisory; see the job summary."
+          report="$RUNNER_TEMP/judges.txt"
+          required=$(grep -oE '^[0-9]+ required gate\(s\) did not pass' "$report" | grep -oE '^[0-9]+' || true)
+          if [ -z "$required" ]; then
+            echo "::warning title=Judge gates::Could not read the required/advisory gate summary; see the job summary."
+          elif [ "$required" != "0" ]; then
+            echo "::error title=Judge gates::A required gate did not pass. See the job summary."
             exit 1
+          fi
+          if grep -qE '^  fail ' "$report"; then
+            echo "::warning title=Judge gates::A judge gate did not pass. Its finding is advisory; see the job summary."
           fi

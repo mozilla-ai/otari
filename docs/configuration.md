@@ -24,13 +24,11 @@ default_pricing: true
 Providers are added as [hosted providers](hosted-providers.md), on the Hosted
 providers page or under `hosted_providers:`.
 
-String values support `${ENV_VAR}` interpolation. Keep credentials in the
-environment or a secret store rather than committing them to YAML. A
-reference to a variable that is not set fails the load. A variable that is
-set but empty leaves a `providers` entry with no credential, and Otari ignores
-such an entry with a warning that names the variable, so a credential stored
-for the same provider through the dashboard serves its requests instead of
-being shadowed by the empty one.
+String values support `${ENV_VAR}` interpolation; keep credentials in the
+environment or a secret store, not in YAML. A reference to an unset variable
+fails the load. A set but empty variable leaves a `providers` entry with no
+credential: Otari ignores the entry with a warning naming the variable, so a
+credential stored for the same provider through the dashboard serves instead.
 
 ## Environment variables
 
@@ -76,14 +74,16 @@ the corresponding startup value after the database is available.
 
 | Setting | Purpose |
 | --- | --- |
-| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. |
+| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. Unset, it is `sqlite:///./otari.db`, and in the container image `sqlite:////data/otari.db`, on the image's `/data` volume. |
 | `master_key` | Deployment-wide management credential. |
 | `host`, `port` | Server bind address. |
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
+| `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -93,8 +93,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
-| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_audiences` | The audiences this deployment answers to, one of which an identity token must name in its `aud` claim. Required once `federation_issuers` or `federation_member_rules` is set. See [How a token is checked](workload-identity.md#how-a-token-is-checked). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
@@ -102,15 +103,18 @@ the corresponding startup value after the database is available.
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
 | `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. When set, a country file stored from the Settings page is not read. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
+| `closed_model_providers` | Providers whose models are closed, so a plan for open-weight models does not cover them, except a model in `closed_model_open_families`. A model on any other provider is open-weight unless its name is in `closed_model_families`. Defaults to Anthropic, Gemini, Vertex AI, xAI and OpenAI, with their Azure and Vertex variants. |
+| `closed_model_families` | Model name prefixes that are closed on any provider, matched after the last `/` and any vendor prefix (OpenRouter's `anthropic/claude-sonnet-4` and Bedrock's `us.anthropic.claude-sonnet-4` are both `claude`). A prefix matches a whole word unless it ends in `-`: `o3` matches `o3-mini` but not `o3x`, and `gpt-` matches any name it starts. Defaults to `claude`, `gemini`, `grok`, `gpt-`, `chatgpt` and `o1` to `o9`. |
+| `closed_model_open_families` | Model name prefixes that are open-weight even on a closed provider or in a closed family, matched the same way. Defaults to `gpt-oss` and `gemma`. |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
-| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](sessions.md#keep-what-a-session-was-about). |
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
-| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
-| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
+| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -131,23 +135,18 @@ non-secret effective set through `GET /api/v1/settings`.
 | `db_statement_timeout_ms` | Server-side ceiling on one statement, the backstop for the setting above. Must exceed it; `0` disables. |
 | `db_log_pool_size` | Connections reserved for usage logging, separate from the pool above. |
 
-The pool sizes bound concurrent *database* work, not concurrent provider calls:
-a request hands its connection back before the upstream call. Raise them for a
-deployment whose dashboard and management traffic are heavy, not because
-inference is.
+The pool sizes bound concurrent database work, not provider calls: a request
+returns its connection before the upstream call. Raise them for heavy
+dashboard and management traffic, not for inference.
 
-Recycling and the two statement timeouts matter most behind a managed database
-or a NAT, which drop idle connections without closing them. The pool pings a
-connection that has sat idle for more than five seconds before handing it out,
-which would catch a closed one, but the ping is itself a statement and blocks
-on a socket that went away silently, so leaving these unset turns a dropped
-connection into a request that hangs for minutes.
+Set recycling and both statement timeouts behind a managed database or a NAT,
+which drop idle connections without closing them. Without them, a silently
+dropped connection makes a request hang for minutes (the pool's idle ping
+blocks on the dead socket too).
 
-`db_command_timeout` is enforced client-side and `db_statement_timeout_ms`
-server-side, so the second one still ends a statement when the client is the
-stuck half. Configure the server-side value above the client-side one, which
-the defaults do and startup validation requires: set equal, whichever fires
-first is a race.
+`db_statement_timeout_ms` (server-side) still ends a statement when the client
+is the stuck half. It must be above `db_command_timeout` (client-side); the
+defaults are, and startup validation requires it.
 
 ### Rate limits across replicas
 
@@ -163,14 +162,12 @@ rate_limit_redis_url: redis://redis:6379/0
 
 This needs the `redis` extra (`pip install gateway[redis]`), which the Docker
 image installs, and Redis 5 or later. Startup refuses `redis` without a URL or
-without the extra, because quietly counting per process would multiply the
-limit again.
+without the extra.
 
-Each request is checked and counted in one step, against Redis's own clock, so
-replicas never both take the last slot and their clock skew does not matter.
-If Redis cannot be reached, each replica counts on its own instead of refusing
-traffic, and tries Redis again a few seconds later; the gateway log says when
-that starts and stops.
+Each request is checked and counted atomically against Redis's clock, so
+replica clock skew does not matter. If Redis cannot be reached, each replica
+counts on its own and retries Redis a few seconds later; the log says when that
+starts and stops.
 
 ### Rate limit rules
 
@@ -203,68 +200,84 @@ rate_limits:
 - `rpm`: requests per minute.
 - `tpm`: tokens per minute, counted on what each request used. A request is
   admitted while the minute's tokens are under the limit and charged what it
-  used once it completes, as LiteLLM does, so the last request admitted in a
-  minute can take the count past the limit. A request that fails is charged the
-  tokens its provider reported before failing, usually none, and a request
-  refused after admission (by its budget, say) is charged nothing.
-  `tpm_admission: estimate` counts the way providers count their own quotas
-  instead: a request holds an estimate (its prompt plus `max_tokens`, or
+  used once it completes, so the last request admitted in a minute can take
+  the count past the limit. A failed request is charged the tokens its
+  provider reported (usually none); one refused after admission (by its
+  budget, say) is charged nothing.
+- `tpm_admission: estimate` counts the way providers count their own quotas:
+  a request holds an estimate (its prompt plus `max_tokens`, or
   `budget_estimate_default_output_tokens` when it sets none) while it runs, and
-  is refused when that does not fit. Use it for a limit meant to stay under a
-  provider's quota, such as a `per: model` rule that should move traffic to the
-  next model before the provider refuses it. Under it, a request whose estimate
-  alone exceeds the limit is always refused, with no `Retry-After`, since
-  waiting would not let it in.
+  is refused when that does not fit. Use it to stay under a provider's quota,
+  such as a `per: model` rule that should move traffic to the next model before
+  the provider refuses it. A request whose estimate alone exceeds the limit is
+  always refused, with no `Retry-After`.
 - `max_concurrent`: requests in flight at once. A slot is given back when the
   response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
   long a slot outlives a process that dies holding it.
 
-`per: key` does not limit a request made without an API key (the master key or
-a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
-that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
-and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
-across replicas. They apply to chat completions, messages, responses and search, after
-`rate_limit_rpm`.
+A request has to fit every rule that applies to it. One that does not is
+refused with a 429 naming the rule and limit, is counted by none of them, and
+holds no budget.
 
-`per: model` limits each model in `models`, written as `instance:model` (the
-provider instance it is called through, then the model). One count is kept per
-model and shared by every policy, alias and direct call that reaches it, so it
-can stand for a provider's quota. It is checked when an attempt is about to call
-the model, after any policy has picked its candidates, rather than at admission:
-a [routing policy](routing.md#spill-over-when-a-model-is-full-priority-routing)
-skips a full model and tries its next candidate, and a request is refused with a
-429 only when no candidate has room. A direct call to a full model is refused.
-A candidate that fails before responding gives back its tokens and its slot but
-keeps its request counted, since the provider was sent it.
-A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`).
+- Rules apply to chat completions, messages, responses and search, after
+  `rate_limit_rpm`.
+- They count in `rate_limit_store`, so with Redis they hold across replicas.
+- `per: key` does not limit a request without an API key (the master key or a
+  dashboard session), and `per: user` does not limit one billed to no user.
+
+A build that bills organizations can also limit how many of an organization's
+calls on the deployment's own provider credentials are in flight at once, which
+no rule here sets. A chat completion, message or response over that limit waits
+up to 10 seconds for a slot, then is refused with a 429 naming the rule
+`organization_concurrency`. Each server process lets at most that many requests
+wait at once; one more is refused straight away with the same 429. It counts in the same store.
+
+`per: model` limits each model in `models`, written as `instance:model`. One
+count is kept per model and shared by every policy, alias and direct call that
+reaches it, so it can stand for a provider's quota.
+
+- It is checked when an attempt is about to call the model, not at admission.
+  A [routing policy](routing.md#spill-over-when-a-model-is-full-priority-routing)
+  skips a full model and tries its next candidate; the request gets a 429 only
+  when no candidate has room. A direct call to a full model is refused.
+- A candidate that fails before responding gives back its tokens and slot but
+  keeps its request counted.
+- A search tool is limited the same way, named as `provider:tool`
+  (`exa:exa-search`).
 
 `per: budget` keeps one count for every user on the same budget, such as all of
 a service key's end users on one feature's budget, so it limits a feature as a
-whole where `per: user` limits each user in it. `budgets` narrows it to the
-budgets listed by `budget_id` (as `GET /api/v1/budgets` returns it), each still
-counted on its own; unset, it counts every budget. A user on no budget is not
-counted by it, and neither is a request from a key with `exclude_from_budget`
-or any request while `budget_strategy` is `disabled`. Like `per: deployment`, it is counted
-after the rules that count the caller alone, so a request over its own limit
-takes no place in a count other users share.
+whole.
 
-`mode: report` counts a rule the same way and refuses nothing: a request over it
-is served, routing still picks the same candidate, and the response carries
-`Otari-Rate-Limit-Exceeded` naming every report rule it was over (comma-separated).
-The gateway also logs it and counts it in `gateway_rate_limit_reported_total`
-by rule. A request something else refuses is not reported. A reported request is not counted in the window it was over, as a
-refused one is not, so the count is the one the rule would keep if it were
-enforced. Use it to watch a limit before enforcing it, or to see when traffic
-borrows beyond a share without refusing anyone; `mode: enforce` is the default.
+- `budgets` narrows it to the listed `budget_id`s (as `GET /api/v1/budgets`
+  returns them), each counted on its own; unset, it counts every budget.
+- Not counted: a user on no budget, a key with `exclude_from_budget`, and any
+  request while `budget_strategy` is `disabled`.
+- Like `per: deployment`, it is counted after the rules that count the caller
+  alone, so a request over its own limit takes no place in a shared count.
 
-Rules can also be added, changed and removed from the dashboard (Settings, Rate
-limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
-replica that served it and on every other replica within 30 seconds; a changed
-rule keeps the requests it already counted. Choose "Each model" to add a
-`per: model` rule and pick its models. `per: budget`, `budgets` and `mode` are
-set through the API. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
-whose name config.yml later declares is skipped with a warning at startup and
-left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it.
+`mode: report` counts a rule but refuses nothing; use it to watch a limit
+before enforcing it. `mode: enforce` is the default.
+
+- A request over the rule is served, and routing picks the same candidate.
+- The response carries `Otari-Rate-Limit-Exceeded` naming every report rule it
+  was over (comma-separated), and the gateway logs it and counts it in
+  `gateway_rate_limit_reported_total` by rule.
+- A reported request is not counted in the window it was over, so the count
+  matches what an enforced rule would keep. A request something else refuses
+  is not reported.
+
+Rules can also be managed from the dashboard (**Settings**, **Rate limit
+rules**) or through `/api/v1/rate-limits`:
+
+- A change applies at once on the replica that served it and within 30 seconds
+  on the others; a changed rule keeps what it already counted.
+- "Each model" adds a `per: model` rule. `per: budget`, `budgets` and `mode`
+  are set through the API.
+- Rules from `config.yml` are listed read-only, and a stored rule cannot take
+  one's name. A stored rule whose name `config.yml` later declares is skipped
+  with a warning at startup; `DELETE /api/v1/rate-limits/{name}` still removes
+  it.
 
 ### Trace context propagation
 
@@ -305,7 +318,7 @@ api_keys:
 ```
 
 A service key with end-user budgets is declared the same way; see
-[Or declare it in config.yml](end-users.md#or-declare-it-in-configyml).
+[Or declare it in config.yml](operator-service-keys.md#or-declare-it-in-configyml).
 
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
@@ -356,22 +369,23 @@ Config is the source of truth for what it declares, and a start writes an
 entry back whenever the entry changed:
 
 - A missing budget or key is created. An existing one gets the declared values
-  when its entry in config.yml differs from the one a start last wrote over it,
-  so a change made through the API or the dashboard, such as lowering a budget
-  or deactivating a key in an emergency, lasts across restarts and new replicas
-  until config.yml changes that entry. Changing any field of the entry writes
-  the whole entry back: a key that was deactivated is active again. Fields a
-  key does not declare (expiry, allowed models, metadata) are left as they are.
+  only when its entry differs from the one a start last wrote. So a change made
+  through the API or dashboard (lowering a budget, deactivating a key in an
+  emergency) lasts across restarts until `config.yml` changes that entry.
+- Changing any field writes the whole entry back: a deactivated key becomes
+  active again. Fields a key does not declare (expiry, allowed models,
+  metadata) are left alone.
 - Changing a key's secret in config, including through the environment
   variable it reads, changes its secret at the next start, and the old one
-  stops working.
-- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are part of the
-  key's entry and are reconciled with it. End users already created keep the budget they started on, as they
-  do when the key is changed through the API. A ceiling moved to another budget
-  restarts its period and keeps the spend it has recorded; a ceiling already on
-  the declared budget keeps its period, so a restart does not reset it. A key
-  with no `ceiling` keeps any ceiling it has, and an unchanged entry leaves a
-  ceiling changed or removed through the API as it is.
+  stops working. Regenerating a declared key from the dashboard or the API
+  lasts until config.yml changes the key's entry or its secret, which restores
+  the secret config.yml declares.
+- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are reconciled
+  with the key's entry. Existing end users keep the budget they started on. A
+  ceiling moved to another budget restarts its period and keeps its recorded
+  spend; one already on the declared budget keeps its period. A key with no
+  `ceiling` keeps any ceiling it has, and an unchanged entry leaves a ceiling
+  changed through the API alone.
 - Otari keeps a digest of each entry it wrote beside the budget or key, never
   the secret itself (the secret enters as its hash), to tell whether the entry
   changed.
@@ -393,7 +407,44 @@ declaration that cannot be applied, such as a key naming a budget that does not
 exist, stops the start and nothing is written.
 
 Declarations are applied before the first-run bootstrap key, so a fresh
-deployment that declares a key does not mint and print one.
+deployment that declares a key does not mint and print one. Neither does a
+deployment that generated its own master key: it starts from the setup link,
+and its operator creates the first key in the dashboard. Set
+`bootstrap_api_key: true` (`OTARI_BOOTSTRAP_API_KEY=true`) to have that
+deployment mint and print one anyway.
+
+### Mismatched `user` fields
+
+`reject_user_mismatch` (default `true`) is the deployment-wide answer to a request
+whose `user` field names someone other than an ordinary key's user (service
+keys and the master key name users by design); a key's own value
+overrides it, as [Mismatched `user` fields](api-keys.md#mismatched-user-fields)
+describes. It is a runtime setting, changed on the Settings page or with
+`PATCH /api/v1/settings`.
+
+### Search tools on a key's model list
+
+When neither a key nor its user has an `allowed_tools` list, the key still
+reaches search tools through its `allowed_models`; when either has one, even an
+empty one, that list decides. The model-list route is a deprecated form, described in
+[Model and search tool access](api-keys.md#model-and-search-tool-access). Startup
+counts the keys and users that still rely on it, and names the tools some reached
+only through a wildcard, which no longer grants them. Give those keys and users an
+`allowed_tools` list before a later release removes the form.
+
+## Budget enforcement
+
+These settings govern how [budgets](budgets.md) are enforced:
+
+| Setting | Purpose |
+| --- | --- |
+| `budget_strategy` | `for_update` (the default), `cas` (lock-free), or `disabled`, which bypasses budget enforcement for the whole deployment. |
+| `budget_reservation_ttl_sec` | How long a request's budget hold may stay in flight before it is treated as leaked and returned, as for a crashed request. Defaults to 900 (15 minutes); it must comfortably exceed the slowest request the deployment serves. |
+| `budget_estimate_default_output_tokens` | The output tokens a hold assumes for a request that sets no output limit. Defaults to 1024. |
+
+A budget's per-minute limits, `rpm_limit` and `tpm_limit`, are counted in
+`rate_limit_store`, so with Redis they hold across replicas; see
+[Rate limits across replicas](#rate-limits-across-replicas).
 
 ## Provider configuration
 
@@ -553,20 +604,19 @@ providers:
 ```
 
 This reaches models OpenAI serves only on the Responses API (the codex and pro
-variants), and it keeps a reasoning model's reasoning across turns: each
-reasoning item comes back as a `thinking` block whose signature carries the
-item's encrypted content, and when a client such as Claude Code sends that block
-back on the next turn, Otari hands the reasoning back to the provider. The
-reasoning is encrypted for the provider account that produced it, so the
-signature also names the instance that served it: only that instance gets the
-reasoning back, and any model it serves can use it. A thinking block signed this
-way is dropped before a call to any other instance or provider, and another
-provider's thinking blocks are dropped before a Responses call. When the block it
-drops opened an assistant turn whose tool calls the request answers, `thinking`
-is also left off that call, because Anthropic refuses a tool-use turn continued
-under thinking without one; a route that falls back from such an instance to an
-Anthropic model mid-loop therefore answers that one turn without extended
-thinking.
+variants), and keeps a reasoning model's reasoning across turns:
+
+- Each reasoning item comes back as a `thinking` block whose signature carries
+  its encrypted content. When a client such as Claude Code sends the block back,
+  Otari hands the reasoning back to the provider.
+- The signature names the instance that served it; only that instance gets the
+  reasoning back, for any model it serves. Such a block is dropped before a
+  call to any other instance or provider, and other providers' thinking blocks
+  are dropped before a Responses call.
+- When a dropped block opened an assistant turn whose tool calls the request
+  answers, `thinking` is left off that call (Anthropic refuses it otherwise).
+  A fallback from such an instance to an Anthropic model mid-loop therefore
+  answers that turn without extended thinking.
 
 Reasoning fields are sent only to a model whose name looks like a reasoning
 model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
@@ -576,20 +626,21 @@ OpenAI deployment is called by its deployment name, so name a reasoning
 deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
 is neither requested nor carried across turns.
 
-Every call is sent with `store: false`, so nothing is kept upstream. A Messages
-`thinking` budget becomes a Responses `reasoning.effort`: up to 2,048 tokens is
-`low`, up to 16,384 is `medium`, and more is `high`. An `output_config.effort`
-takes precedence (`max` becomes `high`). Reasoning summaries are requested unless
-thinking is disabled. `stop_sequences` is refused with a 400, because the
-Responses API has no equivalent; `top_k`, `cache_control` and `metadata` are
-dropped (OpenAI caches prompts on its own). When the caller sends no
-`prompt_cache_key`, the request's session keys the provider's prompt cache, so the
-turns of one conversation land on the same cache: `Otari-Conversation-Id`, or the
-session id Claude Code sends on every request. The key is scoped to the caller
-like any prompt cache key, so the session id itself never reaches the provider.
-Anthropic's server tools are not
-forwarded: Otari's own web search, web fetch and code execution serve them, as
-for every non-Anthropic model.
+How the request is translated:
+
+- Every call is sent with `store: false`, so nothing is kept upstream.
+- A Messages `thinking` budget becomes `reasoning.effort`: up to 2,048 tokens
+  is `low`, up to 16,384 `medium`, more `high`. `output_config.effort` takes
+  precedence (`max` becomes `high`). Reasoning summaries are requested unless
+  thinking is disabled.
+- `stop_sequences` is refused with a 400 (no Responses equivalent); `top_k`,
+  `cache_control` and `metadata` are dropped.
+- With no `prompt_cache_key`, the request's session (`Otari-Conversation-Id`,
+  or the session id Claude Code sends) keys the provider's prompt cache, scoped
+  to the caller, so the session id itself never reaches the provider.
+- Anthropic's server tools are not forwarded: Otari's own web search, web fetch
+  and code execution serve them where configured (see [Built-in tools](tools.md)),
+  and one Otari does not serve is dropped.
 
 The setting covers `/v1/messages` traffic only, and only where the instance's
 provider has a Responses API; an instance whose provider has none keeps the
@@ -619,8 +670,25 @@ Operators add provider credentials at runtime as
 `/api/v1/hosted-providers`. Config-file entries remain read-only in the
 dashboard.
 
-Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
-`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+Stored credentials are encrypted with a Fernet key, and where that key comes
+from depends on the database:
+
+- **PostgreSQL**: set `OTARI_SECRET_KEY` to a key generated with
+  `otari gen-secret-key`. Nothing is stored until it is set.
+- **SQLite**: when `OTARI_SECRET_KEY` is unset, Otari generates a key on first
+  start and keeps it in a file beside the database file, named after it with
+  `.secret-key` added (`/data/otari.db.secret-key` in the container image),
+  readable only by its owner. Later starts load it from there. A set
+  `OTARI_SECRET_KEY` always wins, and the file is then neither read nor written.
+
+A key beside the database protects against a leaked database file or dump. It
+does not protect against a stolen disk or volume, which holds both; set
+`OTARI_SECRET_KEY` from a secret store where that matters. Back the key file up
+with the database. If the database holds encrypted credentials and neither
+`OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
+than generate a key that could not decrypt them.
+
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
@@ -657,34 +725,30 @@ next time a request uses it.
 
 ### End-user identifiers
 
-Every request a deployment sends to a provider reaches it under one account. A
-provider that enforces its usage policy per end user needs an identifier for
-each one, or a block meant for one person lands on the account, and every user
-and workspace on the deployment loses that provider.
+Every request reaches a provider under the account of the credential that
+serves it, which many users usually share. A provider
+that enforces its usage policy per end user needs an identifier for each, or a
+block meant for one person lands on the whole account.
 
-So Otari sends each provider call a digest of the workspace and the resolved
-user, and of the user tag the caller sent Otari when there is one. On chat
-completions and Responses the tag is `safety_identifier`, or `user` when the
-request has none; on Messages it is `metadata.user_id`. A tag equal to the
-resolved user counts as none. The table below names the field each provider
-receives it in. The provider never sees the tag, which may be personal data, or
-an Otari id. The same tag from the same user in the same workspace always gets
-the same identifier, which is what a provider scopes enforcement by. Because the
-resolved user is always in the digest, a tag only tells apart the end users
-behind one user: tagging a request with another user's id never gives it that
-user's identifier. The dashboard's Playground ignores a `user` or
-`safety_identifier` sent in its request body, so the identifier its calls carry
-is always the signed-in member's.
+Otari sends each provider call a digest of the workspace, the resolved user,
+and the user tag the caller sent, if any:
 
-`user` has a second job: on a service key it names the billed end user, and on
-any other key it must match the key's user unless `reject_user_mismatch` is
-off. `safety_identifier` names nobody billed and nothing checks it, so one
-request can bill one user and tag another. Send it when one key serves several
-end users that `user` does not tell apart: a request with neither tag gets the
-key holder's identifier, so a block meant for one lands on all of them. The
-caller chooses the tag, so a caller that sends a new one on each request gets a
-new identifier each time and no block lands on anyone. Otari cannot detect
-that; the answer is to block that customer.
+- The tag is `safety_identifier` (else `user`) on chat completions and
+  Responses, and `metadata.user_id` on Messages. A tag equal to the resolved
+  user counts as none.
+- The provider never sees the tag or an Otari id.
+- The same tag from the same user in the same workspace always gets the same
+  identifier. Since the resolved user is always in the digest, tagging a
+  request with another user's id never gives it that user's identifier.
+- The Playground ignores `user` and `safety_identifier` in its request body, so
+  its calls carry the signed-in member's identifier.
+
+`user` also names the billed end user on a service key, and on any other key
+must match the key's user unless `reject_user_mismatch` is off.
+`safety_identifier` names nobody billed and nothing checks it. Send it when one
+key serves several end users that `user` does not tell apart; otherwise they
+all share the key holder's identifier. A caller that sends a new tag on each
+request evades provider blocks, which Otari cannot detect; block that customer.
 
 | Provider | Field |
 | --- | --- |
@@ -696,28 +760,22 @@ that; the answer is to block that customer.
 | Meta | `safety_identifier` on chat completions |
 | Any other provider with a native Messages API, on Messages | `metadata.user_id` |
 
-Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`,
-like the request body that carries `metadata.user_id`, lands in the account's
-invocation logs, which is where the prompt ids in an AWS abuse report are traced
-back to a user. Every other provider gets nothing: some have no such field
-(Vertex AI, whose labels are for billing only, and Mistral), some run your own
-models, and for the rest an unknown field can fail the call. A Responses or
-Messages request served as a chat completion gets that provider's chat field. The
-call that describes an image for a text-only model (`vision_describe_model`)
-carries the request's identifier too, in the field the vision model's provider
-reads.
+Bedrock's abuse detection reads no identifier, but `requestMetadata` lands in
+the account's invocation logs, where an AWS abuse report's prompt ids are
+traced back. Every other provider gets nothing (Vertex AI and Mistral have no
+such field; for others an unknown field can fail the call). A Responses or
+Messages request served as a chat completion gets the provider's chat field.
+The `vision_describe_model` call carries the identifier too.
 
-Nothing turns the identifier off. OpenAI's partner program for gateways requires
-one on every request, and a provider that cannot take one already gets nothing.
+The identifier cannot be turned off; OpenAI's partner program for gateways
+requires one on every request.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest
-is unkeyed, so the same workspace id and user give the same identifier on any
-deployment, and Otari logs a warning at startup. Otari refuses to start when the
-key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
-user a new identifier: a block a provider placed on an old identifier stops
-landing, and the provider's history for that user starts again. Rotate it only
-when the key has leaked.
+is unkeyed (the same ids give the same identifier on any deployment) and Otari
+logs a warning at startup. Otari refuses to start when the key equals the
+master key or an `OTARI_SECRET_KEY` key. Rotating it gives every user a new
+identifier and resets provider blocks and history, so rotate only after a leak.
 
 #### Tracing an identifier back
 
@@ -739,12 +797,11 @@ The rows keep an identifier after a key rotation, so an old one still traces.
 For a Gemini label, which is cut to 63 characters, match the prefix:
 `WHERE safety_identifier LIKE '<label>%'`.
 
-The rows hold the user behind the key, not the tag the caller sent. When the
-identifier came from a tag, the customer that owns the workspace maps it to their
-own end user. A row has no identifier where its request had none: usage imported
-from outside, the pass-through endpoints (embeddings, images, audio,
-moderations, batches), a request refused before Otari resolved its user, and
-every row written before Otari stored it.
+The rows hold the user behind the key, not the caller's tag; when the
+identifier came from a tag, the workspace's owner maps it to their own end
+user. Rows have no identifier for imported usage, the pass-through endpoints
+(embeddings, images, audio, moderations, batches), requests refused before the
+user was resolved, and rows written before Otari stored it.
 
 ### Supported countries
 
@@ -796,18 +853,22 @@ organization's own key for it. An instance declared `openai-compatible` is a
 server that speaks OpenAI's protocol, such as vLLM or Ollama, so the `openai`
 list does not apply to it.
 
-A hosted provider can also have a list of its own: its `supported_countries`,
-set in the dashboard's Add and Edit dialogs, through `/api/v1/hosted-providers`,
-or in its `hosted_providers:` entry. It is checked when a request would be
-served on that provider's credential, so it never blocks an organization's own
-key for the same provider. Both lists apply: with `openai: [US, DE]` above and
-`supported_countries: [DE]` on a hosted `openai`, only Germany is served on that
-hosted provider. A routing policy or a catalog id skips a hosted candidate its
-list leaves out, and a plain model, a pass-through call or a batch call is
-refused with a `403` and the `country_not_supported` code. Through the API,
-null serves every country and an empty list none; in the dashboard a blank
-field serves every country. A hosted provider's list needs one of the sources below too: without
-one, every request served on it is from an unknown country and is refused.
+A hosted provider can also have its own `supported_countries`, set in the
+dashboard's Add and Edit dialogs, through `/api/v1/hosted-providers`, or in its
+`hosted_providers:` entry:
+
+- It applies only on that provider's credential, never to an organization's
+  own key for the same provider.
+- Both lists apply: with `openai: [US, DE]` above and
+  `supported_countries: [DE]` on a hosted `openai`, only Germany is served on
+  that hosted provider.
+- A routing policy or catalog id skips a hosted candidate the list leaves out;
+  a plain model, pass-through call or batch call is refused with `403`
+  (`country_not_supported`).
+- Through the API, null serves every country and an empty list none; in the
+  dashboard, a blank field serves every country.
+- It also needs a country source (below); without one, every request on that
+  provider is refused as from an unknown country.
 
 The country comes from a header or from a country file. With both, the header
 is read first and the file only when the header is absent.
@@ -833,15 +894,12 @@ is read first and the file only when the header is absent.
   `https://db-ip.com` where the service names its data sources. Reading a file
   needs the `geoip` extra (`pip install gateway[geoip]`), which the Docker
   image installs. A file reaches Otari in one of two ways:
-  - Upload it on the dashboard's Settings page, in the Country file card, or
-    with `PUT /api/v1/settings/country-database`. Otari stores it in its
-    database, so every replica reads the same file and nothing is mounted.
-    The replica that took the upload reads the file at once, and every other
-    replica within 30 seconds. Only a country database is accepted, up to
-    32 MiB. A rejected file leaves the stored one in place, and a stored file
-    that a replica cannot open leaves that replica on the file it had. The card
-    shows the stored file's type and build date, so a stale file is plain to
-    see: DB-IP publishes a new one each month, and MaxMind twice a week.
+  - Upload it in the **Country file** card on the dashboard's Settings page, or
+    with `PUT /api/v1/settings/country-database` (a country database, up to
+    32 MiB). Otari stores it in the database; the uploading replica reads it at
+    once and the others within 30 seconds. A rejected file, or one a replica
+    cannot open, leaves the previous file in use. The card shows the file's
+    type and build date (DB-IP publishes monthly, MaxMind twice a week).
   - Mount it into the container and set `client_country_database` to its path,
     as [Deployment](deployment.md#a-mounted-country-file) shows. A replaced file
     is read again without a restart, and Otari refuses to start on a file it
@@ -869,8 +927,18 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
-precedence. Rates and settled costs use decimal arithmetic and costs are rounded
+Each start writes the config file's prices to the database. An entry with no
+`effective_at` adds a version only when its rates differ from the version in
+force, whoever set that version, so an unchanged file adds nothing, and a start
+puts the file's rate back over one set since through `/api/v1/pricing` or the
+dashboard. To keep a rate set there, remove the model's entry from this file or
+give it the same rate. An entry with `effective_at` adds its version once, and a
+version already stored at that instant is kept. An entry for a model of a
+[hosted provider](hosted-providers.md) is skipped with a warning, because this
+file prices only the `providers:` and `decision_providers:` instances and the
+tools it declares: price a hosted provider's model through the pricing API or
+the Hosted providers page.
+Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
 A stored price change, made through the API, the dashboard or a catalog update,
@@ -893,37 +961,43 @@ backend and Bedrock geo-prefixed ids. A bare id that providers list at different
 prices stays unpriced rather than guessing, so set a price for it or name the
 provider.
 
-Default pricing is off because provider catalogs and reseller rates change.
-With `require_pricing: true`, a budgeted request with no effective price is
-rejected instead of bypassing the budget. The 402 says what to do: with
-`default_pricing` on, a model the bundled list does not price is most often a
-misspelled name, so it points at `GET /api/v1/models` and at adding a price;
-with it off, it offers both adding a price and turning the fallback on. A model
-whose provider has no credential at all is refused as `provider_not_configured`
-instead, since pricing it would not make it servable, and a selector nothing
-resolves (no configured provider, alias, policy or catalog id) as `invalid_model`,
-since there is no model to price.
+Default pricing is off by default because provider catalogs and reseller rates
+change.
 
-With `require_pricing: false`, such a request is served, its model tokens carry
-no cost, and its response carries no inline `cost_usd`. The usage row records no
-cost unless the request also ran priced gateway tools, whose charges are still
-recorded. The same setting governs an organization's own provider keys: a model
-a key offers that nothing prices is switched on and served at no cost, where
-`require_pricing: true` keeps it switched off until it has a rate (see
-[Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
-hour per process, and the dashboard shows operators a banner naming the models
-that served unpriced traffic in the selected workspace in the last 24 hours
-and still have no stored price, linked to those requests on the Overview, where
-each can be priced.
+With `require_pricing: true`, a budgeted request with no effective price is
+refused with a 402 instead of bypassing the budget. With `default_pricing` on,
+the 402 points at `GET /api/v1/models` (an unpriced model is most often a
+misspelled name) and at adding a price; with it off, it offers adding a price
+or turning the fallback on. Two other refusals take precedence:
+
+- a model whose provider has no credential: `provider_not_configured`
+- a selector nothing resolves (no provider, alias, policy or catalog id):
+  `invalid_model`
+
+With `require_pricing: false`, such a request is served with no cost on its
+model tokens and no inline `cost_usd`; priced gateway tools it ran are still
+charged. On an organization's own provider keys, an unpriced model is then
+switched on and served free, where `require_pricing: true` keeps it off until
+priced (see [Who is shown which models](models.md#who-is-shown-which-models)).
+
+The gateway logs a warning per unpriced model at most once an hour per
+process. Operators see a dashboard banner naming the models that served
+unpriced traffic in the selected workspace in the last 24 hours, linked to
+those requests on the Overview, where each can be priced.
 
 ### Keeping the defaults current
 
-A catalog update does two things in order: it fetches the latest models.dev
-prices and applies them, then it asks every enabled hosted provider what it
-lists, offers what is new, and prices each model at the prices now in force. A
-model that was waiting for a price is served once it has one. Running the two in
-that order is what lets a model released after the bundled snapshot arrive
+A catalog update fetches the latest models.dev prices and applies them, then
+asks every enabled hosted provider what it lists, offers what is new, and
+prices each model at the prices now in force. A model waiting for a price is
+served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
+
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
 
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
@@ -948,8 +1022,15 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
-It refuses models.dev data the gateway cannot read: a document that lists
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+which publishes the same documents at the same paths, built from models.dev's
+catalog plus the models it does not list yet; each of those is also offered to
+models.dev, and leaves the fork once it lands there. `https://models.dev` reads
+models.dev itself, and a private mirror works when it serves the same paths.
+An update refuses models.dev data the gateway cannot read: a document that lists
 no models, or one with more than a quarter of its models damaged. When neither
 catalog can be read, the prices in force stay, and the update reports an error.
 
@@ -961,7 +1042,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 The bundled snapshot is the whole models.dev catalog, so it also carries the
 model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+saved v2 `api.json`, adding `--input-version v1` for a v1 one; `--base-url`
+fetches from somewhere other than the default) and commit
 `src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
@@ -977,11 +1059,24 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`token`, `request` or `image`, or
-one of the units under
-[Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
-and its `origin` (`config` or `api`), so a rate the config file re-seeds on
-every restart is distinguishable from one set in the dashboard.
+Each stored rate also carries its `unit` (one of the units under
+[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin`:
+`config` for a rate from this file, `api` for one set through the pricing API or
+the dashboard, `seed` for one a catalog update copied from models.dev for a
+model a hosted provider serves, and `migration` for one an upgrade wrote. It is
+null on a rate stored before origins were recorded. A catalog update moves only
+a `seed` rate.
+
+A `seed` rate and a models.dev default are one headline price per model, so a
+completion whose provider states what it charged is settled at that charge
+instead, and its usage row and inline `pricing_source` read `reported`. Only
+OpenRouter states one: its `usage.cost`, plus `cost_details.upstream_inference_cost`
+on a key in its BYOK mode, where `cost` is OpenRouter's fee alone. Its price
+depends on the upstream it routes a request to, which no single rate matches.
+A rate set in this file, through the pricing API or on the dashboard still
+prices the completion. The hold placed before the request is still estimated
+at the rate. With `require_pricing` off, a model no rate prices is settled at
+the stated charge too, rather than recorded with no cost.
 
 ### A public catalog
 
@@ -1053,60 +1148,159 @@ pricing:
         output: {price: 0.04, unit: image}
 ```
 
-That row stores `unit: image` and `input_price_per_million: 40000`, as the
-per-image section below says. Every row reads back with both: one set through
-the per-million fields shows them in `rates` too, in the slot its unit
-chooses. Billing reads the per-million fields in this release. The other
-prices a block holds are stored for the meters a later release gives them.
+That row stores `unit: image` and `input_price_per_million: 40000`. Every row
+reads back with both: one set through the per-million fields shows them in
+`rates` too, in the slot its unit chooses. Each endpoint reads the slot it
+bills under ([Each endpoint in its unit](#each-endpoint-in-its-unit)), so a
+per-megapixel image price, a per-minute audio price and a per-second video
+price are each read from their slot, and a `web_search` price prices the
+searches a model's provider runs itself
+([Searches a provider runs itself](tools.md#searches-a-provider-runs-itself)):
 
-### Per-request pricing (audio, moderations, rerank, and completion models)
+```yaml
+pricing:
+  gemini:veo-3.0-generate-001:
+    rates:
+      video:
+        output: {price: 0.4, unit: second}
+```
 
-A rate's `unit` decides what it bills. A rate in `token` bills the tokens the
-provider reports, a rate in `image` bills each image returned, and a rate in
-`request` bills each request (or each search unit, for rerank). The rate reuses
-`input_price_per_million`, always per million: USD per million tokens, requests
-or images. A $0.04 image is `input_price_per_million: 40000`. A rate never bills
-a count of another unit, so a per-request price is never read as a price per
-image.
+The `overrides` and `multipliers` a block holds apply to each request
+([Overrides and multipliers](#overrides-and-multipliers)).
 
-| Endpoint | What it reports | Rates that price it |
-|---|---|---|
-| Embeddings | Input tokens | `token`; `request` bills one request |
-| Rerank | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
-| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `request` per request, or `token` |
-| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `request`, or `token` |
-| Audio speech, moderations | One request | `request` |
+### Overrides and multipliers
+
+A price in a `rates` block can change with the request. An override on an
+`input`, an `output` or the `web_search` price replaces the prices it names
+when its condition holds. A multiplier beside the modalities scales the prices
+it names when its condition holds. Otari applies them in the order models.dev
+states, to every modality and to `web_search` alike:
+
+1. Each override whose condition the request meets merges over its price, in
+   order, field by field: an override that names only a cache read price keeps
+   the base cache write price, and a later override wins over an earlier one.
+2. Then each multiplier whose condition the request meets scales the prices it
+   names. A number `factor` scales every price of the block, the cache, the
+   reasoning and the `web_search` prices included. An object scales only the
+   prices on the paths it names: `{text: 2}` scales every text price, and
+   `{text: {output: 2}}` only the text output price.
+
+```yaml
+pricing:
+  openai:gpt-5:
+    rates:
+      text:
+        input:
+          price: 1.25
+          overrides:
+            - when: {context: {gt: 272000}}
+              price: 2.5
+        output: {price: 10}
+      multipliers:
+        - when: {service_tier: {equals: flex}}
+          factor: 0.5
+```
+
+A condition holds when the request's value for each key it names meets that
+key's operator: `equals`, `in`, `gt`, `gte`, `lt`, `lte` or `min_items`, and
+`all`, `any` and `not` combine conditions. `equals` and `in` compare text
+without regard to case. `gt` and the other comparisons order text as written,
+which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
+
+| Condition | Its value |
+|---|---|
+| `context` | The request's billable input in tokens: the estimate before the call, what the provider reports after it |
+| `service_tier` | The tier the request asks for, before the call. After it, the tier the provider reports serving the call at; a response that names no tier settles at the price that names none |
+| `resolution` | An image's `size`, or a video's `resolution`, else its `size` |
+| `region` | The region a Messages request names in `inference_geo`, before the call. After it, the region the provider reports running the call in; Anthropic reports it, including for a request that names none and runs in the workspace's default. Unknown where the provider reports none, so a rule on it is skipped |
+| `quality`, `style` | An image's `quality` and `style` |
+| `aspect_ratio` | A video's `aspect_ratio` |
+| `duration` | A video's length in seconds |
+| `date`, `utc_days`, `utc_hours` | When the request started, in UTC: a video job's start, a batch's creation, an imported event's own time |
+| `input_video` | Whether a video request names `reference_videos`. Unknown for an imported event or a video job started before Otari kept it, so a rule on it is skipped |
+| `generate_audio` | A video request's `generate_audio`. Unknown when the request leaves it to the provider's default, so a rule on it is skipped |
+| `websocket` | False: Otari sends nothing over a websocket. Unknown for an imported event, so a rule on it is skipped |
+
+A rule whose condition names any other key, such as `mode` or `thinking`, is
+skipped, as models.dev's schema says, and the base price applies. A key Otari
+answers that the request gives no value for is a condition that does not hold,
+so `{service_tier: {equals: priority}}` does not hold for a request that names
+no tier, and `{not: {service_tier: {equals: priority}}}` does. A models.dev
+override on context with `gt` starts above its bound. A tier given in
+`pricing_tiers` is written as an override with `gte`, so it starts at its
+`min_input_tokens`.
+
+This file and the pricing API refuse a rule whose condition names a key or an
+operator models.dev does not list, or gives an operator an operand it cannot
+take, so a typo is never a rule that silently never matches. A block read back
+from a row is shown as stored. Each charge line of a usage row names, under
+`rules`, the condition of each rule that changed the price it bills at, in the
+order they applied.
+
+### Each endpoint in its unit
+
+A rate's `unit` decides what it bills, and the slot of its `rates` block an
+endpoint bills under decides which price it reads. A rate in `token` bills the
+tokens the provider reports, a rate in `request` bills each request (or each
+search unit, for rerank), and a rate in a measured unit bills the quantity the
+endpoint measured in it. The per-million fields are always per million: USD
+per million tokens, requests or images, so a $0.04 image is
+`input_price_per_million: 40000`, which is what the dashboard stores when you
+enter $40 per 1,000 images. A `rates` price is per its unit as published. A
+rate never bills a count of another unit, so a per-request price is never read
+as a price per image, and a token price is never read as a price per request.
+
+| Endpoint | Slot | What it measures or reports | Rates that price it |
+|---|---|---|---|
+| Embeddings | none | Input tokens | `token`; `request` bills one request |
+| Rerank | none | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
+| Image generation and edits | `image` output | Images returned, their megapixels from the `size` asked for, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `megapixel` per megapixel, `request` per request, or `token` |
+| Audio transcription | `audio` input | The length the provider reports, else the length of the uploaded file, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
+| Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
+| Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
+| Videos | `video` output | The seconds the job reports, else the seconds asked for; a job neither gives a length is billed what the provider charged, else 8 seconds | `second` per second ([Videos](api-reference.md#videos)) |
+
+A rate that cannot price what an endpoint reports leaves the request unpriced:
+
+- A `token` rate on an endpoint that reports no tokens (a `dall-e-3` image, a
+  moderation): the row keeps no cost and the needs-pricing view lists it. A
+  rate priced at zero everywhere settles such a request free.
+- A measured unit the request cannot measure, such as a per-megapixel rate on
+  an image whose `size` is `auto` or unset.
+
+With `require_pricing` on, speech, image generation, embeddings, rerank and
+direct search refuse such a rate (an `image` rate on embeddings, a `token`
+rate on speech) rather than serve unpriced. Audio transcription and
+moderations are still served, with no cost on the row. A missing cost is
+unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
-`tokens`, `requests` and `images`, are still read for one release, in this file
-and on the pricing API, and read as `token`, `request` and `image`: a rate sent
-as `unit: requests` is stored and served as `unit: request`. The next release
-refuses the old names; see [Upgrading](#upgrading).
+`tokens`, `requests` and `images`, are still read, in this file and on the
+pricing API, as `token`, `request` and `image`: a rate sent as
+`unit: requests` is stored and served as `unit: request`. A later release will
+refuse the old names; see [Upgrading](#upgrading).
 
-A rate in `token` on image generation, audio or moderations is read in that
-endpoint's per-call unit (raw USD per image, or USD per million requests) and
-logs a warning once per model. Set `unit: image` or `unit: request` on those
-rates: a later release reads a `token` rate there strictly, as tokens. A
-token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can be priced in
-`token`, because its tokens are recorded on the usage row.
+The catalog prices each slot in its unit, so a catalog price reaches every
+endpoint: `whisper-1` is priced per minute of audio and `tts-1` per character
+of text, with no text token price at all, and a token-billed image or
+transcription model is priced on the tokens it reports.
 
-A flat per-image or per-request rate cannot follow what the caller chooses: an
-image's size and quality, or an audio file's length. Set it at the dearest
-option you allow.
+Image generation reserves the images asked for, at the `size` asked for,
+before dispatch, and settles on the images returned. Speech reserves the
+characters of its `input` and answers with its settled cost on response
+headers, since its body is audio (see
+[Request ID and inline cost](api-reference.md#request-id-and-inline-cost)).
+Moderations reserve one request. Transcription holds
+nothing before dispatch, so a priced transcription can exceed a budget by one
+request's price.
 
-A rate can also name `character`, `megapixel`, `second`, `minute` or
-`web_search`, the units models.dev prices some models in (a character or token
-price is per million, a search price per 1,000, and the rest per one). They are
-stored ahead of their meters: a rate in one of them prices nothing yet, so a
-budgeted request on such a rate is refused under `require_pricing` as any
-unpriced request is, and the refusal names the unit. With `require_pricing`
-off, the request is served and its usage row carries no cost. Such a rate is
-never billed as tokens. A later release gives each unit a meter.
-
-An unpriced request on audio or moderations is served at zero cost. Image
-generation, embeddings, rerank and direct search are subject to
-`require_pricing`, which also refuses a rate that cannot price the endpoint,
-such as an `image` rate on embeddings, rather than serving it unpriced.
+A transcription model that reports tokens and no length, such as
+`gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
+length Otari reads from the uploaded file. Otari reads the length of a WAV,
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
+not its name. A file it cannot read, such as a WebM upload, gives no length,
+so that request keeps no cost at a `minute` or `second` rate. A length the
+provider reports always wins over the length read from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1120,29 +1314,31 @@ search_tools:
 ```
 
 It is stored as a price row of kind `search` keyed by the tool's name, apart
-from every model price, so no provider entry under `providers:` is needed and a
-model price can never be read as the tool's. The same row can be set through
-`POST /api/v1/pricing` with `"kind": "search"` and the tool's name as
-`model_key`, which is how a tool stored from the dashboard, with no entry here,
-is priced; a `price_per_call` in the file adds a new version at startup only
-when it differs from the rate in force, so a rate set through the API for a tool
-that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
-without `effective_at` does for a model. A tool stored from the dashboard under
-the same name and kind replaces this entry, so its `price_per_call` is not
-written while the stored tool exists; a rate an earlier start wrote stays in
-force until a newer one, such as one set from the dashboard, replaces it. A
-start whose stored tools fail to load writes no `price_per_call` at all, and the
-next start that loads them does. That rate is what a search reserves
-against the caller's budget before it runs. A successful search settles at the
-provider's reported charge when it reports one, and at the rate otherwise. A
-search a workspace's organization search key served is priced under
-`otari:web_search` instead, since the deployment cannot price the
-organization's own provider account. A search tool's own rate prices the model's
-searches on it too. With `require_pricing` on, a request that would run a tool
-with no rate is refused with a 402 naming the price to add, even on a provider
-that reports its charge, unless the key is exempt from budgets; a zero rate is
-a valid price. With it off, such a search holds no dollars, though it still
-holds one request against a request-count budget.
+from every model price, so a model price is never read as the tool's.
+
+- The same row can be set through `POST /api/v1/pricing` with
+  `"kind": "search"` and the tool's name as `model_key`; that is how a tool
+  stored from the dashboard is priced.
+- A `price_per_call` in the file adds a new version at startup only when it
+  differs from the rate in force, so an API-set rate for such a tool lasts
+  until the next restart (as a `pricing:` entry without `effective_at` does).
+- A tool stored from the dashboard under the same name and kind replaces this
+  entry, and its `price_per_call` is not written while the stored tool exists;
+  a rate an earlier start wrote stays in force until a newer one replaces it.
+  A start whose stored tools fail to load writes no `price_per_call`.
+
+How a search is charged:
+
+- It reserves the rate against the caller's budget before it runs, and
+  settles at the provider's reported charge if any, else at the rate.
+- A search on a workspace's organization search key is priced under
+  `otari:web_search` instead.
+- A tool's own rate also prices the model's searches on it.
+- With `require_pricing` on, a request that would run an unpriced tool is
+  refused with a 402 naming the price to add (even if the provider reports its
+  charge), unless the key is exempt from budgets. A zero rate is a valid
+  price. With it off, such a search holds no dollars but still holds one
+  request against a request-count budget.
 
 A fetch instance's `price_per_call` is stored the same way, as kind `fetch`.
 The built-in fetcher cannot be declared, so its rate is set through the pricing
@@ -1187,27 +1383,17 @@ is refused beside an `input_price_per_million` that differs, an
 `output_price_per_million`, a cache price, `pricing_tiers` or another `unit`.
 Writing the rate in full as `unit: request` still works.
 
-Such a model is charged its price per request for each
-successful call, streamed or not, whatever tokens it reports. The token counts
-are still recorded on the usage row, and still count toward a token budget, but
-they are not priced. A failed call, including a stream that errors or that the
-client abandons, costs nothing. The budget reservation holds that flat amount
-rather than a token estimate. A stream that ends without usage data is charged
-the flat amount too, so `stream_missing_usage_policy` does not apply to it.
-`require_pricing` treats the model like any other completion model, and the
-default-pricing fallback never supplies a per-request rate, so a per-request
-model needs its own pricing row.
+Such a model is charged its price for each successful call, streamed or not:
 
-### Per-image pricing (image generation)
-
-An `image` rate is USD per million images, like a request rate: $0.04 an image
-is `input_price_per_million: 40000`, which is what the dashboard stores when you
-enter $40 per 1,000 images.
-
-Image generation reserves the requested image count before dispatch at an
-`image` rate, then settles on the images the provider returned. Audio holds
-nothing before dispatch, so a priced audio request can exceed a budget by one
-request's price.
+- Token counts are recorded and count toward a token budget, but are not
+  priced.
+- A failed call (including a stream that errors or is abandoned) costs
+  nothing.
+- The budget reservation holds the flat amount, not a token estimate.
+- A stream that ends without usage is charged the flat amount, so
+  `stream_missing_usage_policy` does not apply.
+- Default pricing never supplies a per-request rate, so the model needs its
+  own pricing row.
 
 ## Search tools
 
@@ -1217,8 +1403,10 @@ in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch 
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
 `?kind=fetch`, or from the dashboard's deployment Web search page, which also
-sets each one's price and the defaults. A stored instance wins over
-a configuration file entry of the same name and kind.
+sets each one's price and the defaults. The listing gives each instance's price
+per call and the row it comes from (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)). A stored
+instance wins over a configuration file entry of the same name and kind.
 
 ```yaml
 search_tools:
@@ -1313,8 +1501,80 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
+### The legacy SearXNG settings
+
+`web_search_url` and `web_search_engines` are deprecated, and a coming breaking
+release removes them. `web_search_url` is the SearXNG instance the in-loop tool
+searches when no search instance is its default and no `web_search_provider`
+with its key is set, with the engines in `web_search_engines`, else
+`duckduckgo`, `mojeek`, `qwant` and `wikipedia`. A `searxng` instance without an
+`api_base` of its own inherits `web_search_url`, and one without an `engines`
+option inherits `web_search_engines` when it is set, else searches its SearXNG
+instance's own defaults.
+
+That release converts a value stored from the dashboard when that is
+unambiguous. A stored `web_search_url` becomes a stored instance named
+`searxng`, with the stored engines, else the four above, and
+`web_search_default_tool` names it when no default is in effect. A stored
+instance that inherits a stored value gets its own copy, and a stored
+`web_search_engines` that neither a stored URL nor a stored instance uses is
+deleted. The release refuses to start:
+
+- while a value is set in the configuration file or the environment, which otari
+  cannot rewrite, even beside a stored one;
+- while an instance inherits a value it cannot copy: a stored instance one from
+  the configuration file or the environment, or an instance in the configuration
+  file a stored one;
+- when a stored `web_search_url` cannot be converted: another tool holds the
+  name `searxng` (a fetch tool, a stored tool otari cannot read, or a search tool
+  with another address or engines), or the new instance would move the unnamed
+  calls of `POST /api/v1/search` off the instance that serves them.
+
+Fix the stored values through the dashboard before upgrading: a refused start
+may already have migrated the database.
+
+Each start logs what that release does with the two settings in effect and with
+the `searxng` instances that inherit them, including deleting stored engines that
+neither a stored URL nor a stored instance uses. The warnings name settings and
+instances, never a value.
+
+Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
+unless the variable is set, even to an empty value. To move off it, declare the
+instance, with the engines `web_search_engines` names, else the four above:
+
+```yaml
+search_tools:
+  local:
+    provider: searxng
+    api_base: "http://searxng:8080"
+    options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+    price_per_call: 0   # USD; a SearXNG you run costs nothing
+web_search_default_tool: local
+```
+
+The tool is priced on its own, not under `otari:web_search`: with
+`require_pricing`, the default, a request that declares web search on a key that
+counts toward budgets gets a 402 until the tool has a price, so set
+`price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
+Each start writes `price_per_call` again, so keep the lasting rate there, or
+leave it out to keep one set through the API (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
+
+Leave `web_search_default_tool` out when the in-loop tool searches on
+`web_search_provider`, so it keeps doing so. Then turn the compose default off in
+`.env`, and remove `web_search_engines` wherever it is set:
+
+```bash
+OTARI_WEB_SEARCH_URL=
+```
+
+A variable exported in the shell that runs Docker Compose wins over `.env`, so
+unset an exported `OTARI_WEB_SEARCH_URL` there too.
+
+### The older in-loop backend
+
 The older in-loop backend still serves some requests until it is removed: a
-search on the legacy settings, or on a Tavily or Brave organization key, and a
+search on `web_search_provider`, or on a Tavily or Brave organization key, and a
 request that declares only the fetch tool. `web_fetch_default_tool` governs every
 fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
 search instance serves the request: the older backend keeps its fixed limit of 10
@@ -1395,20 +1655,36 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
-Invitation email is limited over any 24 hours. Both limits are counted in
-`rate_limit_store`, and `null` turns one off; see
-[Invitations](members.md#invitations) for why and what an invitation over
-a limit does:
+`mail_transport: console` writes complete messages to logs for local testing.
+Those messages can contain invitation or password-reset tokens, so never use it
+where logs are shared. Test delivery from Settings or
+`POST /api/v1/settings/mail/test`.
+
+### Invitations
+
+An invitation link expires after `invitation_expiry_hours` (default `168`, seven
+days). What an inviter and an invitee see is in
+[Invitations](members.md#invitations).
+
+Invitation email is limited over any 24 hours, because it carries text an
+organization chose (its name, the inviter's name) from the deployment's own
+sender, and on a deployment where anyone can create an organization that would
+otherwise make it an open relay. Both limits are counted in `rate_limit_store`,
+so with Redis they hold across replicas, and `null` turns one off:
 
 | Setting | Limits | Default |
 | --- | --- | --- |
 | `invitation_mail_limit_per_organization` | Invitation emails one organization sends | 250 |
 | `invitation_mail_limit_per_address` | Invitation emails one address receives, from every organization together | 5 |
 
-`mail_transport: console` writes complete messages to logs for local testing.
-Those messages can contain invitation or password-reset tokens, so never use it
-where logs are shared. Test delivery from Settings or
-`POST /api/v1/settings/mail/test`.
+An invitation over a limit is still created, and its link is returned to share
+by hand, as when mail is off: the link costs the deployment nothing, and
+refusing would stop a legitimate admin partway through a bulk invite.
+
+A member added directly through `POST /api/v1/organizations/me/members` gets
+no invitation link, so on a deployment with no mail and no provider sign-in a
+new address waits for an operator's password link. Invite it instead, since the
+invitation link can set its first password.
 
 ## Signup
 
@@ -1427,7 +1703,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
 - `code_execution_executor`
-- `web_search_url`
+- `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
 - `web_search_provider` and `web_search_provider_api_key`
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
@@ -1441,7 +1717,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](guardrails.md) for behavior and security boundaries.
+[Guardrails](guardrails-reference.md) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1479,11 +1755,12 @@ privacy_url: "https://example.com/privacy"
 ```
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
-Privacy row stays disabled. A deployment whose dashboard sits beside a site that
-owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
-addresses unauthenticated, so a credential in either is refused at startup. The
-same check covers `docs_url` and
-`site_url`.
+Privacy row stays disabled. Wherever a page asks for the terms (signup, an
+invitation, a first password, a provider sign-in), the box links the privacy
+policy beside them when `privacy_url` is set too.
+`GET /api/v1/bootstrap` publishes both addresses unauthenticated, so a URL
+carrying a credential is refused at startup; the same check covers `docs_url`
+and `site_url`.
 
 ## The public site
 
@@ -1508,23 +1785,23 @@ public_base_url: "https://api.example.com"
 ui_base_url: "https://app.example.com/dashboard"
 ```
 
-Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
-trailing slash; a relative one would survive the redirect and mean nothing in an
-inbox. Credentials and fragments are refused: this value travels in a redirect
-and into outgoing mail. A query string is kept and placed ahead of the hash
-route in every link (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`),
-for an edge that serves one interface for several deployments and needs each
-link to say which one built it.
+Unset, `public_base_url` is used.
+
+- Supply an absolute http(s) URL with no trailing slash.
+- Credentials and fragments are refused, since the value goes into redirects
+  and mail.
+- A query string is kept and placed ahead of the hash route in every link
+  (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`), for an
+  edge that serves one interface for several deployments.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is
 `SameSite=Strict`, and a same-site request from any origin not on that list is
 refused.
 
-Left unset on a split deployment, an OAuth callback lands the browser on an
-origin holding none of the sign-in state it started with, and the sign-in fails
-with the authorization code unspent. Passkeys need their own settings there; see
-[Set up passkeys](sign-in.md#set-up-passkeys).
+Left unset on a split deployment, OAuth sign-in fails: the callback lands on an
+origin with none of the sign-in state. Passkeys need their own settings there;
+see [Set up passkeys](sign-in.md#set-up-passkeys).
 
 ## Extending Otari with a bootstrap module
 
@@ -1537,37 +1814,42 @@ environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
 
-## Product feedback
+## Contacting the Otari team
 
-Signed-in dashboard users can choose **Feedback**, beside Documentation in the
-top bar (in the account menu on a phone), to send a message to the Otari team.
-The team receives it privately in Slack. By default only the message is sent:
-no email, screenshot, page URL, account identifier, deployment identifier, or
-usage history is attached. Someone whose account has an email also sees a box
-under the message, **Share _their address_ so the team can reply**. Ticked, the
-gateway adds the signed-in account's email, never an address from the request,
-and only when it is the address the form showed: a page left open while another
-tab signed in as someone else shares nothing. The Slack post shows it as the
-address to reply to. The box starts unticked every time the form opens, and an
-account without an email is not offered it. Opening the form, typing, and
-canceling make no outbound request.
+When `feedback_enabled` is on, signed-in dashboard users can choose **Contact**,
+beside Documentation in the top bar (in the account menu on a phone), to send a
+message to the Otari team. It is off by default, so a self-hosted deployment
+shows no Contact entry unless its operator turns it on. otari.ai turns it on.
 
-The gateway forwards the message to
-`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
-browser's cookies, authorization, referrer, or IP headers. Network peers still
-see connection metadata, so this is private feedback, not anonymous feedback.
-Keep request-body capture disabled for the feedback endpoint in any additional
-logging or tracing you configure.
+What is sent:
 
-Feedback is on by default. To turn it off, set `feedback_enabled: false` in
-YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. This setting is visible in Settings but
-cannot be changed there at runtime.
+- The message, and the signed-in account's own email if the team can reply to
+  it (the form says so). It is never an address from the request, and is sent
+  only if it matches the address the form showed; otherwise the page is asked
+  to reload.
+- No screenshot, page URL, deployment identifier or usage history.
+- Nothing until the person sends: opening, typing and canceling make no
+  outbound request.
+
+On a self-hosted deployment, the gateway forwards the message and that address
+to `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers, or the account's
+identifier. Network peers still see connection metadata, so this is private,
+not anonymous. Keep request-body capture disabled for the feedback endpoint in
+any additional logging or tracing you configure. On otari.ai, the message is
+emailed to the support team with the account's email as the address to reply
+to, and the team is notified in Slack with the message and the account's user
+ID, never its email.
+
+To turn Contact on, set `feedback_enabled: true` in YAML or
+`OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
+and the Contact entry is hidden. This setting is visible in Settings but cannot
+be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.
 
-Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+Message text accepts up to 4,000 Unicode code points. The gateway waits up to
 10 seconds for the receiver and does not retry automatically. An unconfirmed
 submission stays in the form until the person retries or explicitly discards
 it. Drafts are held only in memory and disappear on page reload. A manual retry
@@ -1576,11 +1858,11 @@ after an unconfirmed delivery can produce a duplicate.
 ## Upgrading
 
 - **Price unit names.** A stored rate's `unit` is singular (`token`, `request`,
-  `image`). The migration renames every stored rate on the first start of this
-  release, and the old names are still read for one release. Upgrade every
-  instance together: an instance still running the previous release reads a
-  renamed rate as a unit it does not know, so it refuses a priced request on it
-  under `require_pricing`.
+  `image`) since v0.38.0. Its migration renames every stored rate on the first
+  start, and the old names are still read. Upgrade every instance from an
+  earlier release together: an instance still running one reads a renamed rate
+  as a unit it does not know, so it refuses a priced request on it under
+  `require_pricing`.
 - **Image rates.** An `image` rate is USD per million images. A rate written in
   `config.yml` as raw USD per image (for example `0.04`) bills a millionth of
   what it meant; multiply it by 1,000,000.
@@ -1588,3 +1870,7 @@ after an unconfirmed delivery can produce a duplicate.
   digest of each declared entry writes every entry once, as if each had changed.
 - **`providers:` entries and the Deployment providers page.** See
   [Upgrading](hosted-providers.md#upgrading).
+- **Contact is off by default.** A deployment that left `feedback_enabled`
+  unset no longer shows the Feedback entry, now named Contact. Set
+  `feedback_enabled: true` to keep offering it; see
+  [Contacting the Otari team](#contacting-the-otari-team).

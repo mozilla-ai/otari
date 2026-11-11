@@ -52,8 +52,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
-    SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
@@ -63,6 +61,7 @@ from gateway.core.settings.tools import (
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
+    inherits_web_search_engines,
     option_problems,
     validate_search_tool_transport,
 )
@@ -80,6 +79,7 @@ from gateway.models.tools import (
     WebToolCredential,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 from gateway.services.tools._web_search._default import in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
@@ -90,8 +90,8 @@ from gateway.types.tool_charges import (
 )
 
 # What runs a resolved call: one of the libraries, or the old code, which in
-# the loop is the old backend and on the direct endpoint the old SearXNG client
-# or the organization key's own search.
+# the loop is the old backend and on the direct endpoint the organization key's
+# own search.
 Runner = Literal["library", "old"]
 
 # How long a call may take when its instance sets no timeout: 30 seconds on
@@ -105,6 +105,8 @@ IN_LOOP_TIMEOUT_S = 15.0
 _SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
 _FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
+# How a warning names the layer a credential's options come from.
+_CREDENTIAL_LAYER = "the organization's key"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -230,6 +232,19 @@ def resolve_search(
     return None
 
 
+def resolve_search_on_key(
+    credential: WebSearchCredential, *, name: str, request_options: Mapping[str, Any] | None
+) -> ResolvedSearch | None:
+    """A direct search no instance stands behind, on the organization's key alone, as ``name``.
+
+    ``None`` for a key whose provider this gateway cannot call. Raises what
+    :func:`resolve_search` raises for the request's options and the key.
+    """
+    return _search_on_credential(
+        credential, name=name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request_options or _NO_OPTIONS
+    )
+
+
 def search_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
     """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it.
 
@@ -300,16 +315,26 @@ def builtin_fetch_resolved() -> ResolvedFetch:
 
 
 def served_fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
-    """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing."""
+    """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing.
+
+    Any-fetch runs an instance when it serves the provider and the provider takes the value of its cost tier.
+    """
     served = set(any_fetch.AnyFetch.get_supported_providers())
     instances: dict[str, ToolInstance] = {}
     for name, instance in effective_fetch_instances(config).items():
-        if instance.provider in served:
-            instances[name] = instance
-        else:
+        if instance.provider not in served:
             _warn_once(
                 "Fetch instance '%s' is left out: any-fetch does not serve its provider %s", name, instance.provider
             )
+        elif (tier := refused_cost_tier(instance)) is not None:
+            _warn_once(
+                "Fetch instance '%s' is left out: %s does not take the value of its option '%s'",
+                name,
+                instance.provider,
+                tier,
+            )
+        else:
+            instances[name] = instance
     return instances
 
 
@@ -322,10 +347,13 @@ def _search_on_instance(
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
     """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
+    if refused_cost_tier(instance) is not None:
+        # Before the options are layered, which would drop the tier with a warning for a call that does not run.
+        raise SearchToolMisconfiguredError(instance.name)
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
-    if instance.provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and "engines" not in own and config.web_search_engines:
+    if inherits_web_search_engines(instance.provider, own) and config.web_search_engines:
         own["engines"] = config.web_search_engines
     options = _layered(
         "search",
@@ -337,8 +365,10 @@ def _search_on_instance(
         request=request,
     )
     api_base = _base(instance.api_base or default_api_base(config, instance.provider))
-    if runner == "old" and (instance.provider not in SEARCH_PROVIDERS_WITHOUT_ADAPTER or not api_base):
-        # A provider no code here serves any more, or a searxng instance with no address of its own or to inherit.
+    if runner == "old" or (
+        any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base and not api_base
+    ):
+        # A provider no code here serves, or one needing an address with none of its own or to inherit.
         raise SearchToolMisconfiguredError(instance.name)
     try:
         # Load checks the instance's own base; an inherited one is checked here.
@@ -408,16 +438,15 @@ def _search_on_credential(
         metadata = any_search.AnySearch.get_provider_metadata(provider)
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
-    elif provider in (*WEB_SEARCH_PROVIDERS, *SEARCH_PROVIDERS_WITHOUT_ADAPTER):
-        # Tavily, Brave and SearXNG until their adapters exist.
+    elif provider in WEB_SEARCH_PROVIDERS:
+        # Tavily and Brave, which any-search has no adapter for.
         runner = "old"
-        requires_key, default_base = provider in WEB_SEARCH_PROVIDERS, None
-        requires_base = provider in SEARCH_PROVIDERS_REQUIRING_API_BASE
+        requires_key, default_base, requires_base = True, None, False
     else:
         _ignore(credential, "search")
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
-    if runner == "old" and provider in WEB_SEARCH_PROVIDERS and _base(credential.api_base):
+    if runner == "old" and _base(credential.api_base):
         # The old code calls Tavily and Brave at their public endpoints, where the key would go instead.
         raise WebSearchCredentialRefusedError(
             provider, f"names a base URL, which this gateway's {provider} client cannot use"
@@ -427,7 +456,7 @@ def _search_on_credential(
         provider,
         checked=runner == "library",
         defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
-        credential=(_credential_layer(credential), credential.options),
+        credential=(_CREDENTIAL_LAYER, credential.options),
         workspace=workspace,
         request=request,
     )
@@ -522,7 +551,7 @@ def _fetch_on_credential(
         provider,
         checked=True,
         defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
-        credential=(_credential_layer(credential), credential.options),
+        credential=(_CREDENTIAL_LAYER, credential.options),
         request=request,
     )
     max_chars = _count(options, "max_chars")
@@ -546,7 +575,7 @@ def _fetch_on_credential(
 def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
     _warn_once(
         "Ignoring %s for %s, a provider this gateway cannot %s with",
-        _credential_layer(credential),
+        _CREDENTIAL_LAYER,
         credential.provider,
         kind,
     )
@@ -558,10 +587,6 @@ def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: 
         raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which the provider requires")
     if requires_base and not _base(credential.api_base):
         raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
-
-
-def _credential_layer(credential: WebToolCredential) -> str:
-    return "the organization's key"
 
 
 def _credential_billing(credential: WebToolCredential, rate_key: str) -> tuple[str | None, tuple[RateKey, ...]]:
@@ -591,7 +616,7 @@ def _layered(
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
     if not checked:
         return {**instance_options, **credential_options, **workspace, **request}
-    operator_only = _operator_only(kind, provider)
+    operator_only = configuration_only_options(_metadata(kind, provider))
     if refused := _tenant_problems(kind, provider, request, operator_only):
         key, problem = next(iter(refused.items()))
         raise WebSearchOptionRefusedError(key, problem)
@@ -614,13 +639,28 @@ def _layered(
     }
 
 
-def _operator_only(kind: ToolKind, provider: str) -> frozenset[str]:
-    metadata = (
+def _metadata(kind: ToolKind, provider: str) -> any_search.ProviderMetadata | any_fetch.ProviderMetadata:
+    return (
         any_search.AnySearch.get_provider_metadata(provider)
         if kind == "search"
         else any_fetch.AnyFetch.get_provider_metadata(provider)
     )
-    return frozenset(option.name for option in metadata.options if option.operator_only)
+
+
+def configuration_only_options(metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata) -> frozenset[str]:
+    """The provider's options that only a tool's configuration sets, never a workspace or a request.
+
+    They are the options its library marks operator-only, and its cost tier
+    when the provider does not report what a call cost: the tool is priced for
+    the tier its configuration picks, so a request that picked another would
+    be billed at the wrong price. A cost tier stays open where the provider
+    reports the cost, since that cost is what the call is billed.
+    """
+    return frozenset(
+        option.name
+        for option in metadata.options
+        if option.operator_only or (option.cost_tier and not metadata.reports_cost)
+    )
 
 
 def _tenant_problems(

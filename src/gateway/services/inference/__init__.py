@@ -1,5 +1,6 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
+from gateway.services.inference._audio_length import audio_seconds
 from gateway.services.inference._client_country import (
     CountryDatabaseError,
     client_country,
@@ -24,8 +25,13 @@ from gateway.services.inference._decisions import (
 )
 from gateway.services.inference._deployment_funding import (
     DeploymentCharge,
+    actor_user_id_for,
     admit_deployment_paid,
+    billed_model,
+    configure_closed_models,
+    deferred_charge,
     describe_port_error,
+    organization_slot_key,
 )
 from gateway.services.inference._idempotency import (
     Admission,
@@ -49,21 +55,27 @@ from gateway.services.inference._messages_responses_bridge import (
     usage_unreported,
     with_responses_instance,
 )
+from gateway.services.inference._passthrough_responses import speech_cost_headers
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
     IMAGES_BILLING,
     MODERATION_BILLING,
-    ONE_REQUEST_BILLING,
     RERANK_BILLING,
-    TRANSCRIPTION_BILLING,
+    VIDEO_BILLING,
     PassthroughBilling,
     ReportedUsage,
     embedding_usage,
+    image_billing,
+    image_megapixels,
+    image_quantities,
     image_usage,
     moderation_usage,
-    one_request_usage,
     rerank_usage,
+    speech_billing,
+    speech_usage,
+    transcription_billing,
     transcription_usage,
+    video_usage,
 )
 from gateway.services.inference._responses_bridge import (
     REASONING_ITEM_ID_PREFIX,
@@ -84,6 +96,7 @@ from gateway.services.inference._upstream_errors import (
     is_model_unavailable_error,
     is_provider_billing_error,
     is_provider_credential_rejection,
+    is_provider_cut,
     is_retry_futile,
     is_upstream_connect_failure,
     is_upstream_request_fault,
@@ -107,20 +120,32 @@ from gateway.services.inference._upstream_user import (
     upstream_user_identifier,
     with_upstream_user,
 )
+from gateway.services.inference._videos import (
+    ESTIMATED_VIDEO_SECONDS,
+    CompletedVideoUsage,
+    VideoJobService,
+    VideoRateLookup,
+)
 
 __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
+    "CompletedVideoUsage",
+    "ESTIMATED_VIDEO_SECONDS",
     "admit_deployment_paid",
+    "actor_user_id_for",
+    "billed_model",
+    "configure_closed_models",
+    "deferred_charge",
+    "organization_slot_key",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
     "IMAGES_BILLING",
     "MODERATION_BILLING",
-    "ONE_REQUEST_BILLING",
     "REASONING_ITEM_ID_PREFIX",
     "REASONING_SIGNATURE_PREFIX",
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
-    "TRANSCRIPTION_BILLING",
+    "VIDEO_BILLING",
     "PassthroughBilling",
     "Admission",
     "BlockedCaller",
@@ -140,6 +165,7 @@ __all__ = [
     "UnidentifiedEndUserError",
     "UnknownCaller",
     "aresponses_via_chat_completions",
+    "audio_seconds",
     "bind_upstream_user",
     "call_messages",
     "call_responses",
@@ -159,9 +185,14 @@ __all__ = [
     "request_decision",
     "responses_user_fields",
     "embedding_usage",
+    "image_billing",
+    "image_megapixels",
+    "image_quantities",
     "image_usage",
     "moderation_usage",
-    "one_request_usage",
+    "speech_billing",
+    "speech_cost_headers",
+    "speech_usage",
     "rerank_usage",
     "resolve_decision_provider",
     "run_idempotency_sweeper",
@@ -173,7 +204,9 @@ __all__ = [
     "strip_gateway_minted_items",
     "upstream_user_identifier",
     "usage_unreported",
+    "transcription_billing",
     "transcription_usage",
+    "video_usage",
     "uses_chat_completions_bridge",
     "with_responses_instance",
     "with_upstream_user",
@@ -184,6 +217,7 @@ __all__ = [
     "is_model_unavailable_error",
     "is_provider_billing_error",
     "is_provider_credential_rejection",
+    "is_provider_cut",
     "is_retry_futile",
     "is_upstream_connect_failure",
     "is_upstream_request_fault",
@@ -196,4 +230,6 @@ __all__ = [
     "upstream_exception_chain",
     "upstream_exception_shape",
     "upstream_retry_after",
+    "VideoJobService",
+    "VideoRateLookup",
 ]

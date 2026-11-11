@@ -318,10 +318,16 @@ function DataCardList<Row extends object>({
                   </div>
                 ) : null}
                 <div className="flex min-h-11 min-w-0 flex-1 items-center">
-                  <div className="min-w-0 flex-1">{title.cell(row)}</div>
+                  {/* A long unbroken name (a domain, an id) wraps rather than
+                      running under the actions beside it. */}
+                  <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                    {title.cell(row)}
+                  </div>
                 </div>
+                {/* The title's 44px line, so a 32px row action centers on
+                    the title. */}
                 {actions ? (
-                  <div className="flex shrink-0 items-center">
+                  <div className="flex min-h-11 shrink-0 items-center">
                     {actions.cell(row)}
                   </div>
                 ) : null}
@@ -334,7 +340,18 @@ function DataCardList<Row extends object>({
                       className="col-span-2 grid grid-cols-subgrid items-baseline"
                     >
                       <dt className="text-overline">{col.header}</dt>
-                      <dd className="min-w-0 text-sm">{col.cell(row)}</dd>
+                      <dd className="min-w-0 text-sm">
+                        {/* Shrunk to its content, so an end-aligned figure starts
+                            in the value lane with the others and keeps its own
+                            lines aligned to each other. */}
+                        {col.align === "end" ? (
+                          <div className="w-fit max-w-full">
+                            {col.cell(row)}
+                          </div>
+                        ) : (
+                          col.cell(row)
+                        )}
+                      </dd>
                     </div>
                   ))}
                 </dl>

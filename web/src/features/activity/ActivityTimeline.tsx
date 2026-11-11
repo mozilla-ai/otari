@@ -294,8 +294,14 @@ export function ActivityTimeline<B extends ChartBucket>({
             ))}
           </TabRow>
         )}
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-caption">Showing {label} · UTC</span>
+        {/* Full width on a phone, so the line starts on the column edge. */}
+        <div className="ml-auto flex items-center gap-3 max-md:ml-0 max-md:w-full max-md:justify-between">
+          {/* "· UTC" stays with the date before it and the lines balance, so a
+              narrow row never leaves "UTC" alone on a line. */}
+          <span className="text-caption text-balance">
+            Showing {label}
+            {"\u00a0·\u00a0"}UTC
+          </span>
           {action}
         </div>
       </div>

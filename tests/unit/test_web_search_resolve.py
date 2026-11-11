@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import any_search
 from gateway.core.config import GatewayConfig
 from gateway.core.settings import tools as settings_tools
 from gateway.exceptions.tools_exceptions import (
@@ -138,7 +139,14 @@ _SEARCH_CASES = [
     _SearchCase(
         "the legacy URL, with the four engines",
         {"web_search_url": "http://searxng:8080"},
-        {"name": "searxng", "provider": "searxng", "runner": "old", "api_base": "http://searxng:8080"},
+        {
+            "name": "searxng",
+            "provider": "searxng",
+            "runner": "library",
+            "api_base": "http://searxng:8080",
+            "label": "otari:web_search",
+            "rate_keys": ("otari:web_search",),
+        },
         options={"engines": "duckduckgo,mojeek,qwant,wikipedia"},
     ),
     _SearchCase(
@@ -148,7 +156,9 @@ _SEARCH_CASES = [
         options={"engines": "brave,wikipedia"},
     ),
     _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
-    _SearchCase("the one instance, any-search not serving it yet", {"search_tools": {"local": _SEARXNG}}, None),
+    _SearchCase(
+        "the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local", "runner": "library"}
+    ),
     _SearchCase("several instances and no default", {"search_tools": {"exa": _EXA, "test": _FAKE}}, None),
     _SearchCase("nothing configured", {}, None),
     # The policy's credential wins over the in-loop default.
@@ -201,7 +211,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
         {"web_search_url": "http://deployment-searxng:8080", "web_search_engines": "brave"},
-        {"provider": "searxng", "runner": "old", "api_key": "", "api_base": "https://org-searxng.example"},
+        {"provider": "searxng", "runner": "library", "api_key": "", "api_base": "https://org-searxng.example"},
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
@@ -270,7 +280,7 @@ _SEARCH_CASES = [
         {
             "name": "local",
             "provider": "searxng",
-            "runner": "old",
+            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "searxng:local",
         },
@@ -285,9 +295,9 @@ _SEARCH_CASES = [
         options={"engines": "qwant"},
     ),
     _SearchCase(
-        "a SearXNG instance opts into POST over otari's default",
+        "a SearXNG instance that sends its searches by POST",
         {"search_tools": {"local": {**_SEARXNG, "options": {"method": "post"}}}},
-        {"runner": "old"},
+        {"runner": "library"},
         requested="local",
         options={"method": "post"},
     ),
@@ -396,7 +406,7 @@ def test_a_searxng_instance_needs_no_key() -> None:
     resolved = _named(
         GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
     )
-    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("old", "", "http://searxng:8080")
+    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("library", "", "http://searxng:8080")
 
 
 @pytest.mark.parametrize(
@@ -699,10 +709,96 @@ def test_an_instances_options_that_broke_the_rules_at_load_are_dropped(caplog: p
     assert "secret-value" not in _warnings(caplog)
 
 
+def test_a_workspace_cannot_choose_searxngs_engines_or_method(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+
+    resolved = _in_loop(
+        GatewayConfig(search_tools={"local": {**_SEARXNG, "options": {"engines": "wikinews"}}}),
+        workspace={"engines": "google", "method": "post", "language": "de"},
+    )
+
+    assert dict(resolved.options) == {"engines": "wikinews", "language": "de"}
+    assert "'engines'" in _warnings(caplog)
+    assert "'method'" in _warnings(caplog)
+    assert "google" not in _warnings(caplog)
+
+
 def test_an_instance_sets_an_operator_only_option() -> None:
     config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"account": "a"}}})
 
     assert dict(_in_loop(config).options) == {"account": "a"}
+
+
+def test_a_cost_tier_is_set_only_by_the_tools_configuration_where_the_provider_reports_no_cost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"depth": "basic"}}})
+
+    with pytest.raises(WebSearchOptionRefusedError) as refused:
+        _in_loop(config, request={"depth": "advanced"})
+    assert refused.value.key == "depth"
+    assert "option 'depth' is set only by the deployment" in refused.value.message
+
+    assert dict(_in_loop(config, workspace={"depth": "advanced"}).options) == {"depth": "basic"}
+    assert "'depth'" in _warnings(caplog)
+
+
+def test_an_organization_key_sets_its_own_cost_tier() -> None:
+    credential = WebSearchCredential(provider="fake", source=_ORG, options={"depth": "advanced"})
+
+    assert dict(_in_loop(GatewayConfig(), credential=credential).options) == {"depth": "advanced"}
+    with pytest.raises(WebSearchOptionRefusedError):
+        _in_loop(GatewayConfig(), credential=credential, request={"depth": "basic"})
+
+
+def test_a_fetch_tools_cost_tier_is_set_only_by_its_configuration() -> None:
+    config = GatewayConfig(fetch_tools={"reader": {"provider": "fake", "options": {"depth": "advanced"}}})
+
+    assert dict(resolve_fetch(config, None, requested="reader", for_search=None).options) == {"depth": "advanced"}
+    with pytest.raises(WebSearchOptionRefusedError):
+        resolve_fetch(config, None, requested="reader", for_search=None, request_options={"depth": "basic"})
+
+
+def test_a_search_tool_whose_cost_tier_the_provider_refuses_does_not_run(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"depth": "Basic"}}})
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="test", request_options=None)
+    assert refused.value.message == "Search tool 'test' is not configured correctly."
+    assert "Dropping an option" not in _warnings(caplog)
+    # Nor is it the in-loop default, so in-loop search is off.
+    assert resolve_search(config, _policy(), requested=None, request_options=None) is None
+
+
+def test_a_fetch_tool_whose_cost_tier_the_provider_refuses_names_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(
+        fetch_tools={"reader": {"provider": "fake", "options": {"depth": "deep"}}}, web_fetch_default_tool="reader"
+    )
+
+    assert resolve_fetch(config, None, requested=None, for_search=None).name == "builtin_fetch"
+    assert "Fetch instance 'reader' is left out: fake does not take the value of its option 'depth'" in _warnings(
+        caplog
+    )
+    assert "deep" not in _warnings(caplog)
+    with pytest.raises(SearchToolNotFoundError):
+        resolve_fetch(config, None, requested="reader", for_search=None)
+
+
+def test_a_cost_tier_stays_open_where_the_provider_reports_the_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    reporting = any_search.AnySearch.get_provider_metadata("fake").model_copy(update={"reports_cost": True})
+    real = any_search.AnySearch.get_provider_metadata
+    monkeypatch.setattr(
+        any_search.AnySearch,
+        "get_provider_metadata",
+        lambda provider: reporting if provider == "fake" else real(provider),
+    )
+
+    assert _resolve.configuration_only_options(reporting) == {"account"}
+    config = GatewayConfig(search_tools={"test": _FAKE})
+    assert dict(_in_loop(config, request={"depth": "advanced"}).options) == {"depth": "advanced"}
 
 
 def test_the_direct_endpoint_leaves_the_workspace_layer_out() -> None:

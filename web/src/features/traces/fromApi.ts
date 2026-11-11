@@ -8,9 +8,13 @@ import type {
 import { contextWeightsOf, sessionRequests } from "./contextMap"
 import {
   explainSpan,
+  GATES_NO_INPUT,
   type GateTally,
   gateGroupExplanation,
   groupWords,
+  noInput,
+  PRIVATE_NO_INPUT,
+  TURN_NO_INPUT,
 } from "./explain"
 import {
   failureLabel,
@@ -153,13 +157,8 @@ function spanStatus(
 }
 
 // What the span was about, where the deployment keeps content: the one value on
-// its own, so a command or a prompt reads as text rather than as an object. A
-// span whose content the reader may not open says so rather than showing none.
-export const PRIVATE_CONTENT =
-  "Private to the person whose session this is. Anyone else reads it only through their share or a recorded break-glass opening."
-
+// its own, so a command or a prompt reads as text rather than as an object.
 function spanInput(span: TraceSpan): unknown {
-  if (span.content_private) return PRIVATE_CONTENT
   const { "tool.output": _output, ...input } = span.content
   const values = Object.values(input)
   if (values.length === 0) return undefined
@@ -281,10 +280,11 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           completionTokens: turn.output_tokens,
           cachedTokens: turn.cache_read_tokens,
           cost: turn.cost > 0 ? turn.cost : undefined,
+          noInput: TURN_NO_INPUT,
           isRollup: true,
           metadata: {
             State: turn.state,
-            "LLM calls": String(turn.llm_calls),
+            "Model requests": String(turn.llm_calls),
             "Tool calls": String(turn.tool_calls),
           },
         })
@@ -361,6 +361,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         : undefined
     }
     const adoptedBy = new Map<string, string | null>()
+    // The request whose row a lone call took, so the row says why that request shows nothing.
+    const foldedInto = new Map<string, TraceSpan>()
     // A span's gates go under one row of their own, so a tool call reads as one
     // line until it is opened, and its gates as one more until they are.
     const visit = (node: SpanNode, parentOverride?: string) => {
@@ -368,6 +370,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
       const call = loneCall(node)
       if (call) {
         adoptedBy.set(call.span.span_id, parentOf(span))
+        foldedInto.set(call.span.span_id, span)
         visit(call)
         return
       }
@@ -383,6 +386,9 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           : null
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
+      const input = spanInput(span)
+      const gate = gateCheck(span, gateSummaries, checkEvidence)
+      const folded = foldedInto.get(span.span_id)
       observations.push({
         id: span.span_id,
         parentObservationId:
@@ -392,12 +398,20 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           span.parent_span_id ? byId.get(span.parent_span_id) : undefined,
           blockedBy.get(span.span_id) ?? [],
           tally,
+          summary.api_key_id ?? null,
+          summary.workspace_id,
         ),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
-        input: spanInput(span),
+        input,
         output: spanOutput(span),
-        gate: gateCheck(span, gateSummaries, checkEvidence),
+        // A gate can read its evidence off a sibling gate of the same check.
+        noInput: span.content_private
+          ? PRIVATE_NO_INPUT
+          : input === undefined && !gate?.evidence
+            ? noInput(folded?.opens_turn ? folded : span)
+            : undefined,
+        gate,
         detail:
           span.operation === "tool.blocked_on_user" ||
           span.operation === "tool.execution" ||
@@ -457,12 +471,33 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
             span.kind === "step",
             gateNodes.length,
           ),
+          noInput: GATES_NO_INPUT,
         })
         for (const gate of gateNodes) visit(gate, groupId)
       }
     }
     for (const { steps } of tree.turns) for (const step of steps) visit(step)
     for (const root of tree.roots) visit(root)
+
+    // A turn costs what everything under it cost. The API's own figure counts
+    // only the requests directly under the turn's steps, which leaves out a
+    // subagent's requests and a judge gate's, so the turn's row would say
+    // less than the rows under it add up to.
+    const rows = new Map(observations.map((o) => [o.id, o]))
+    const costUnder = new Map<string, number>()
+    for (const o of observations) {
+      if (o.isRollup || !o.cost) continue
+      let above = rows.get(o.parentObservationId ?? "")
+      while (above) {
+        if (above.isRollup) {
+          costUnder.set(above.id, (costUnder.get(above.id) ?? 0) + o.cost)
+        }
+        above = rows.get(above.parentObservationId ?? "")
+      }
+    }
+    for (const o of observations) {
+      if (o.isRollup) o.cost = costUnder.get(o.id)
+    }
   }
 
   return {

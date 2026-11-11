@@ -71,13 +71,13 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INVALID_REQUEST, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, gateway_container_value
@@ -104,6 +104,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ProviderAccounts, apply_endpoint_defaults
 from gateway.services.providers import amessages
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
@@ -274,7 +275,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
@@ -544,6 +545,7 @@ _ERR_PERMISSION = "permission_error"
 _ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
+_ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
 # through ``error_kind_for_status``, so one status cannot be classified two ways.
@@ -554,6 +556,7 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.NOT_FOUND: _ERR_NOT_FOUND,
     ErrorKind.PERMISSION: _ERR_PERMISSION,
     ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
+    ErrorKind.REQUEST_TOO_LARGE: _ERR_REQUEST_TOO_LARGE,
 }
 
 
@@ -562,6 +565,7 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
 
     One already in the envelope is returned as it is. A string detail becomes the
     message; a dict detail gives its ``message``, and its other fields ride beside it.
+    A ``RefusalException``'s fields go at the top of the body, where ``code`` goes.
     """
     if isinstance(exc, BodyHTTPException):
         return exc
@@ -570,8 +574,11 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
         message = str(detail.get("message", HTTPStatus(exc.status_code).phrase))
-        return _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
-    return _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+        enveloped = _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
+    else:
+        enveloped = _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+    enveloped.body.update(body_fields_of(exc))
+    return enveloped
 
 
 _ERR_OVERLOADED = "overloaded_error"
@@ -651,6 +658,8 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
         provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
+        service_tier=_served_tier(usage),
+        inference_geo=_served_region(usage),
     )
 
 
@@ -671,8 +680,22 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 cache_write_tokens=cache_write,
                 cache_write_1h_tokens=_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
+                service_tier=_served_tier(usage),
+                inference_geo=_served_region(usage),
             )
     return None
+
+
+def _served_tier(usage: Any) -> str | None:
+    """The tier Anthropic says it served the call at, which it reports in ``usage``."""
+    tier = getattr(usage, "service_tier", None)
+    return tier if isinstance(tier, str) else None
+
+
+def _served_region(usage: Any) -> str | None:
+    """The region Anthropic says it ran the call in, which it reports in ``usage``."""
+    region = getattr(usage, "inference_geo", None)
+    return region if isinstance(region, str) else None
 
 
 def _cache_write_1h_tokens(usage: Any) -> int:
@@ -1000,6 +1023,7 @@ async def create_message(
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
+            price_facts=PriceFacts(service_tier=request.service_tier, region=request.inference_geo),
             raw_request=raw_request,
             response=response,
             db=db,
@@ -1149,6 +1173,7 @@ async def create_message(
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
+            response=response,
         )
 
     # ------------------------------------------------------------------

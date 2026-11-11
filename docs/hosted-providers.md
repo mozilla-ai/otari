@@ -1,13 +1,10 @@
 # Hosted providers and BYO credentials
 
-Every provider call is made on one credential. This page describes where that
-credential comes from: the deployment's own configuration, an organization's
-own provider key (bring your own key, BYO), or one of the deployment's
-**hosted providers**, a credential the deployment owns and pays for. The
-upstream bill follows the credential: an organization's own key bills that
-organization's provider account, while the deployment settles a hosted
-provider's bill, which is why a hosted model's rate belongs to the deployment
-price list rather than to any one organization.
+Every provider call is made on one credential: from the deployment's
+configuration, an organization's own provider key (bring your own key, BYO), or
+one of the deployment's **hosted providers**, which the deployment owns and
+pays for. The upstream bill follows the credential, so a hosted model's rate
+belongs to the deployment price list.
 
 ## The credential ladder
 
@@ -28,35 +25,38 @@ A request no rung serves is refused with `424` and the code
 
 ### Organization provider keys
 
-Where an organization holds several keys for one provider, a workspace uses
-the key it set to "Always use this key", otherwise the organization's default
-for the provider (the star on the Providers page; clicking a filled star
-removes it), otherwise the organization's oldest key. A key a workspace set to
-"Never use this key" is passed over at every step.
+Where an organization holds several keys for one provider, a workspace uses,
+in order, skipping keys it turned off:
 
-The models a key serves, its serving switches and what a refusal on that path
-returns are described in
+1. the key it set to "Always use this key"
+2. the organization's default for the provider (the star on the Providers
+   page; click a filled star to remove it)
+3. the organization's oldest key
+
+A key with its own API base URL is not in this list: requests name it by its
+own prefix (see
+[Add a key for your own endpoint](model-providers.md#add-a-key-for-your-own-endpoint)),
+and it serves every workspace that has not turned it off.
+
+The models a key serves and its serving switches are in
 [Who is shown which models](models.md#who-is-shown-which-models).
 
 ### Zero data retention
 
-A hosted provider and an organization's provider key can each be declared
-zero data retention (`zero_data_retention`): the account the key belongs to
-keeps no prompts or completions. Otari cannot check this. It records what the
-operator or the organization says about their agreement with the provider,
-and the Models page shows it beside each offering and filters on it (see
+A hosted provider or an organization's provider key can be declared zero data
+retention (`zero_data_retention`): its account keeps no prompts or completions.
+Otari cannot verify this; it records the declaration. The Models page shows it
+beside each offering and filters on it (see
 [Browsing the grouped catalog](models.md#browsing-the-grouped-catalog)). A
-workspace can require it, which refuses every undeclared source at the API;
-see [Control workspace access](provider-keys.md#control-workspace-access).
+workspace can require it, refusing every undeclared source; see
+[Control workspace access](model-providers.md#control-workspace-access).
 
 Whose declaration counts depends on whose key serves the offering:
 
 - A `hosted` offering takes the hosted provider's declaration.
-- An offering on the organization's own key counts as zero data retention
-  only while every usable key the organization holds for that provider is
-  declared. Which key a workspace calls on depends on its defaults and
-  overrides, so one undeclared key means a request may reach an account that
-  keeps data.
+- An offering on the organization's own key counts only while every usable
+  key the organization holds for that provider is declared, since any of them
+  may serve a request.
 - A `providers:` instance from `config.yml` is never declared.
 
 ### Hosted provider names
@@ -84,12 +84,10 @@ own.
 ## Who manages hosted providers
 
 Only a deployment operator manages hosted providers: the master key, the
-bootstrap operator's session, or the session of an account granted operator
-access. That covers every route under `/api/v1/hosted-providers`, reads
-included. Any other signed-in account, whatever its role in whichever
-organization, gets the same `404` that `/api/v1/admin` gives, and an API key
-gets `401`. Organization owners and admins manage their own organization's
-provider keys, never these.
+bootstrap operator's session, or an account granted operator access. That
+covers every route under `/api/v1/hosted-providers`, reads included. Any other
+signed-in account gets `404` (as on `/api/v1/admin`), and an API key gets
+`401`.
 
 A deployment configures hosted providers in three places:
 
@@ -101,11 +99,77 @@ A deployment configures hosted providers in three places:
 A provider stored through the page or the API wins over a `config.yml` entry of
 the same name.
 
-Storing a hosted provider's key requires `OTARI_SECRET_KEY`; see
-[Runtime provider management](configuration.md#runtime-provider-management)
-for generating and rotating it. The API never returns a hosted provider's key,
-only its last four characters, and it masks credentials in `client_args` and in
-the base URL.
+Storing a hosted provider's key requires an encryption key: `OTARI_SECRET_KEY`,
+or on SQLite the key Otari generates beside the database (see
+[Runtime provider management](configuration.md#runtime-provider-management)).
+The API returns only the key's last four characters, and masks credentials in
+`client_args` and the base URL.
+
+## Connecting otari.ai
+
+[otari.ai](https://otari.ai) is a hosted Otari: one key reaches models from many
+providers. It is a paid service, and a request served on it leaves this gateway
+for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
+the `otari` implementation.
+
+On the Hosted providers page, **Connect otari.ai** is offered beside adding a
+provider of your own:
+
+1. The gateway asks otari.ai for a code and opens its approval page in a new
+   tab. The page here shows the code and the link while it waits.
+2. Sign in to otari.ai (or create an account) and approve the code.
+3. The gateway stores the key otari.ai issues, lists its models and prices
+   them. With no other provider yet, the dashboard moves on to the setup guide.
+
+What a connection stores:
+
+- A hosted provider `otari-ai`, restricted to the organization of the operator
+  who connected. Lift or change the restriction through
+  `/api/v1/hosted-providers`.
+- Its models, under the names otari.ai gives them: `<vendor>/<model>`, such as
+  `openai/gpt-4o-mini`. A request names one as
+  `otari-ai:<vendor>/<model>` (`otari-ai:openai/gpt-4o-mini`), which always
+  reaches otari.ai. The catalog (`GET /api/v1/models`) and the setup guide list
+  the same model as `openai/gpt-4o-mini`, which a request may send too.
+- A rate for each model, so it arrives switched on and a request can be sent
+  at once:
+  - the price otari.ai lists for the model, which is what it charges. The page
+    marks it **Listed**, and a refresh moves it when otari.ai changes it;
+  - where otari.ai lists none, the rate of the vendor's models.dev entry, an
+    estimate of what otari.ai charges, marked **Estimate**.
+
+  Both are stored whether `default_pricing` is on or off, for a provider of the
+  `otari` implementation only. Set your own rate to replace either. A model
+  neither prices is offered switched off, as on any hosted provider.
+
+Connecting again replaces the key of the existing `otari-ai` provider. The
+earlier key stays valid on otari.ai until you revoke it on its
+[API keys page](https://otari.ai/dashboard/#/keys). A code
+that expires or is declined leaves nothing behind; choose **Try again**.
+
+To disconnect, remove the `otari-ai` provider. That deletes this gateway's copy
+of the key only, so also revoke the key on otari.ai's
+[API keys page](https://otari.ai/dashboard/#/keys).
+
+**Without the button.** Create a key on otari.ai's API keys page and add it as
+any hosted provider: choose the `otari` implementation, name it `otari-ai`,
+paste the key, and set the base URL to `https://api.otari.ai` (the origin,
+without `/api/v1`). The result is the same provider.
+
+otari.ai shows the gateway, on its approval page and on the key, under the host
+of `public_base_url`, or under the machine's hostname where that is not set.
+
+When trying this against an otari.ai running on the same machine, open one of
+the two dashboards on `127.0.0.1` and the other on `localhost`. Browsers keep
+one cookie jar per host whatever the port, so two dashboards on `localhost`
+share a session cookie and sign each other out.
+
+Nothing is sent to otari.ai until an operator presses **Connect otari.ai**. The
+address it asks is the `platform_url` setting (`OTARI_PLATFORM_URL`,
+`https://api.otari.ai` by default); set it to an empty string and the option,
+every mention of it and its routes (`/api/v1/platform/connect`) are gone. The
+exchange itself is specified in the
+[Platform connect protocol](platform-connect-protocol.md).
 
 ## Roster and serving
 
@@ -120,52 +184,51 @@ serving switch and the rate it is charged at on the deployment price list.
 | Model not on the roster, `serves_unlisted_models` on | Served, the way a `providers:` instance serves any model a request names |
 
 With `serves_unlisted_models` on, every model the provider offers is switched
-on whether or not something prices it, and a model the roster switches off is
-still refused.
+on, priced or not; a model the roster switches off is still refused.
 
-A provider can stop serving a model it still lists, as Together does with a
-model it moves to dedicated endpoints. The first request or
+A provider can stop serving a model it still lists (Together does this when it
+moves a model to dedicated endpoints). The first request or
 [health check](health-checks.md) the provider refuses that way on the hosted
-credential switches the model off, with
-`disabled_reason: unavailable`, and emails the Health page's alert list
-([Health checks](health-checks.md#email-alerts)); an operator switches it back
-on if the refusal was wrong. Only a refusal Otari recognizes as being about the
-model itself does this, never one an organization's own key met.
+credential switches the model off with `disabled_reason: unavailable` and
+emails the [alert list](health-checks.md#email-alerts). Switch it back on if
+the refusal was wrong. Only a refusal about the model itself, on the hosted
+credential, does this.
 
 Adding a provider offers every model its key lists:
 
 - A model the deployment price list already prices is switched on at that rate.
 - Otherwise, where `default_pricing` is on, the model is seeded with its
-  models.dev rate and switched on.
+  models.dev rate and switched on. A provider of the `otari` implementation is
+  priced whatever `default_pricing` says, at the price its own listing names
+  where it names one; see [Connecting otari.ai](#connecting-otariai).
 - Where `default_pricing` is off, or models.dev does not price the model, it is
   offered switched off until it is priced, by the operator or by a later
   refresh once models.dev prices it.
 
-Refreshing a provider's models moves a seeded rate nobody has changed to the
-current default, leaves a rate the operator set alone, and never switches on a
-model the operator switched off. A model switched on without a price on purpose
-stays on through a refresh: one a moved or copied provider lists, one an
-operator switched on while nothing priced it, and every model of a provider
-that serves models not on its list.
+Refreshing a provider's models:
+
+- moves an unchanged seeded rate to the current default, and leaves an
+  operator-set rate alone
+- never switches on a model the operator switched off
+- keeps on a model switched on without a price on purpose (one a moved or
+  copied provider lists, one an operator switched on unpriced, and every model
+  of a provider that serves unlisted models)
 
 ### Workspace access
 
-An organization that may use a hosted provider may still keep it from one of
-its workspaces. On the workspace's **Providers** tab (**Organization**, then
-**Workspaces**), an organization owner or admin, or an owner or admin of the
-workspace, can switch a hosted provider off for that workspace or narrow it to
-some of the models it serves. Members of the workspace can read what is set.
+On a workspace's **Providers** tab (**Organization**, then **Workspaces**),
+an organization or workspace owner or admin can switch a hosted provider off
+for that workspace or narrow it to some of its models. Workspace members can
+read the setting.
 
-A workspace can only take away: it never reaches a hosted provider its
-organization may not use, nor a model the roster does not serve. A request
-the workspace's rule refuses gets `403` with the same detail as a model an API
-key may not use, and the workspace's catalog leaves out what it refuses. Where
-the workspace calls the provider on the organization's own key, the hosted
-provider is never asked, so its row there has no effect.
-
-A change takes effect at once on the server that saved it and within 30
-seconds on every other one. The rows are served under
-`/api/v1/workspaces/{workspace_id}/hosted-providers`.
+- A workspace can only take away, never add a provider or model.
+- A refused request gets `403`, as for a model an API key may not use, and the
+  workspace's catalog leaves the model out.
+- Where the workspace uses the organization's own key for the provider, the
+  hosted provider is never asked, so the setting has no effect.
+- A change applies at once on the server that saved it and within 30 seconds
+  on the others. The API is
+  `/api/v1/workspaces/{workspace_id}/hosted-providers`.
 
 ## Pricing
 
@@ -177,56 +240,78 @@ Which price list meters a request depends on whose credential served it:
 | A `providers:` instance | The deployment price list (`/api/v1/pricing`) |
 | A hosted provider | The deployment price list, or a rate the operator set for this organization |
 
-An organization may set its own rate only for a model it supplies the provider
-key for. On a deployment-owned credential the deployment settles the upstream
-bill, so a request served there is never priced from a rate the organization
-wrote itself, even one written while its own key still covered the model. A
-rate the operator set for an organization is listed beside the organization's
-own on the Providers page, and only the operator may change or remove it. The
-deployment price list has no dashboard page of its own; the models.dev defaults
-are kept current by **Update catalog** on the Hosted providers page, or on a
-schedule under `pricing_refresh` (see
-[Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
+- An organization may set its own rate only for a model it supplies the key
+  for. A request served on a deployment credential is never priced from an
+  organization's own rate.
+- A rate the operator set for an organization is listed beside the
+  organization's own on the Providers page; only the operator can change it.
+- The deployment price list has no dashboard page. The models.dev defaults are
+  kept current by **Update catalog** on the Hosted providers page, or on a
+  schedule under `pricing_refresh` (see
+  [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
 
-On the Providers page a model nothing prices is offered and left unserved, a
-key's row counts how many of its offered models are serving, and a key serving
-none of them is marked, because every request through it is refused until a
-switch is on.
+On the Providers page, an unpriced model is offered but not served, each key's
+row counts its serving models, and a key serving none is marked.
+
+### Entering a rate
+
+The rate form asks for the unit first: tokens, requests, images, megapixels,
+characters, minutes of audio, seconds of video, or web searches. Enter each rate
+the way providers publish it:
+
+| Unit | Entered per |
+| --- | --- |
+| Tokens, characters | 1,000,000 |
+| Requests, images, searches | 1,000 |
+| Megapixels, minutes, seconds | 1 |
+
+A minute of audio has two rates, one for audio the model hears and one for audio
+it speaks. The model lists show each rate in its unit, for example "$0.002 per
+request" or "$0.06 per second". How each unit is stored and billed is in
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
+
+Some limits of the form:
+
+- An override that prices seconds of both audio and video shows its audio rates;
+  change its video price through the API.
+- An edit in the same unit keeps the override's context tiers and rules, which
+  the form does not show.
+- The hosted model form stores per-million fields only, so it does not offer
+  seconds of video and cannot reprice a per-second model.
+
+**Price this model** on a request in the Requests tab opens the same form, in the
+unit the request's endpoint bills. It is offered on a served request that carried
+no cost.
 
 ## Catalog and discovery
 
-What a hosted provider contributes to the catalog (`GET /api/v1/models`) is its
-roster: the models switched on under it, answered for the caller's
-organization, rather than everything its upstream lists.
+A hosted provider contributes its roster to the catalog (`GET /api/v1/models`):
+the models switched on under it for the caller's organization, not everything
+its upstream lists.
 
-It also takes part in the operator's views of the deployment's credentials,
-beside the configured instances:
+It also appears in the operator's credential views, beside configured
+instances:
 
 | View | Shows |
 | --- | --- |
 | `GET /api/v1/models/discoverable` | What each hosted provider's stored key can reach |
 | `GET /api/v1/providers/health` | Whether each hosted provider answers |
 
-Both list each hosted provider under its name, and both are the deployment's
-view: a provider restricted to one organization is included, one defined in
-`config.yml` is too, and one switched off is not. A hosted provider whose stored
-key cannot be decrypted with the configured `OTARI_SECRET_KEY` is reported
-unhealthy with that reason rather than dialed. A configured instance named like
-a hosted provider shadows it here as it does at dispatch, so only the instance
-is listed.
+Both list each hosted provider by name, including organization-restricted and
+`config.yml` ones, but not switched-off ones. A provider whose key the
+configured `OTARI_SECRET_KEY` cannot decrypt is reported unhealthy, not dialed.
+A configured instance with a hosted provider's name shadows it, so only the
+instance is listed.
 
-A hosted provider's model listing is dialed upstream on the deployment's stored
-key, at its `api_base` when one is set:
+The model listing is fetched on the stored key, at its `api_base` when set:
 
-- The background discovery refresher dials as the gateway starts and then on
-  every tick, every `model_cache_ttl_seconds`, or every
-  `model_discovery_negative_ttl_seconds` after a round with a failure, for as
-  long as `model_discovery` is on and `model_cache_ttl_seconds` is above 0.
-- A `refresh=true` read of either view dials at once.
-- Changing or deleting a hosted provider drops its cached listing, so the next
-  read dials the credential as it now stands.
-- A provider switched off, and one whose key cannot be decrypted, are never
-  dialed.
+- The discovery refresher fetches at startup and then every
+  `model_cache_ttl_seconds` (or `model_discovery_negative_ttl_seconds` after a
+  failed round), while `model_discovery` is on and `model_cache_ttl_seconds` is
+  above 0.
+- A `refresh=true` read of either view fetches at once.
+- Changing or deleting a hosted provider drops its cached listing.
+- Switched-off providers and undecryptable keys are never fetched.
 
 On a deployment that hosts at least one provider, an organization API key is
 shown a priced model only where something would serve it; see
@@ -234,9 +319,8 @@ shown a priced model only where something would serve it; see
 
 ## The `hosted_providers:` block
 
-A deployment can declare hosted providers in
-`config.yml`, keyed by name, with the fields the `/api/v1/hosted-providers`
-body takes:
+Declare hosted providers in `config.yml`, keyed by name, with the fields the
+`/api/v1/hosted-providers` body takes:
 
 ```yaml
 hosted_providers:
@@ -266,34 +350,35 @@ hosted_providers:
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
 | `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
 
-A key may be left out for the self-hosted backends `vllm`, `ollama`,
-`llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`; for `vertexai` and
-`vertexaianthropic`, which authenticate through the Google Cloud credentials in
-the gateway's own environment; and for any provider given an `api_base`, which
-is called with a placeholder key, as a self-hosted OpenAI-compatible server is.
-Every other provider, Bedrock included, needs `api_key`. The Hosted providers
-page and API follow the same rule.
+`api_key` may be left out for:
 
-Reference the key as `${VAR}` rather than writing it into the file, so it stays
-in your secret store. The whole block can instead be set as JSON through
-`OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves the same way:
+- the self-hosted backends `vllm`, `ollama`, `llamacpp`, `llamafile`,
+  `lmstudio`, `cascadia` and `otari`
+- `vertexai` and `vertexaianthropic`, which use the Google Cloud credentials in
+  the gateway's environment
+- any provider given an `api_base` (called with a placeholder key)
+
+Every other provider, Bedrock included, needs it. The page and API follow the
+same rule.
+
+Reference the key as `${VAR}` so it stays in your secret store. The whole block
+can instead be set as JSON in `OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves
+the same way:
 
 ```bash
 OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "${OPENAI_API_KEY}"}}'
 ```
 
-When it is set, it replaces the `hosted_providers:` block of the file (and of
-`OTARI_CONFIG_YAML`) whole: a provider only the file names is not served, and
-the two are never merged per provider. An empty value leaves the file's block
-in place.
+When set, it replaces the file's (and `OTARI_CONFIG_YAML`'s) block whole; the
+two are never merged per provider. An empty value leaves the file's block in
+place.
 
-The block is validated at load. An unknown implementation, a `provider_type`
-key (the implementation goes in `provider`), a name a hosted provider cannot
-take, an unknown field, or a missing `api_key` for a provider that needs one
-fails the start. With `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base`
-that resolves to a private address fails it too, as it is refused for a
-provider stored through the page; that check runs at boot, because it resolves
-the host. The block is never shown by `/api/v1/settings`.
+The block is validated at load. These fail the start: an unknown
+implementation, a `provider_type` key (use `provider`), a name a hosted
+provider cannot take, an unknown field, or a missing required `api_key`. With
+`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` resolving to a
+private address also fails it (checked at boot). `/api/v1/settings` never shows
+the block.
 
 A configured entry:
 
@@ -309,13 +394,12 @@ A configured entry:
   name, and the start logs each entry it shadows; deleting the stored provider
   serves the entry again on the same models.
 
-Taking an entry out of the configuration leaves its models in the database,
-serving nothing and offered in no catalog; they come back if the entry does.
-The next catalog update run with its cleanup (Update catalog on the page, or
+Removing an entry from the configuration leaves its models in the database,
+unserved; they come back if the entry does. A catalog update with cleanup
+(**Update catalog** on the page, or
 `POST /api/v1/hosted-providers/catalog-update` with `cleanup`) deletes them and
-their prices, naming the provider in `orphaned_rosters`. Where no hosted
-provider offers a model at all, the cleanup deletes those models and leaves
-every price in place.
+their prices, naming the provider in `orphaned_rosters`. Models no hosted
+provider offers at all are deleted, but their prices are kept.
 
 ## Copies of `providers:` entries
 
@@ -324,9 +408,9 @@ providers. At startup, each `providers:` entry a hosted provider can hold is
 copied onto a hosted provider of the same name, once:
 
 - Its `${VAR}` values are read at that start.
-- The start asks the provider for its models and switches on every one it
-  lists, priced or not, and a later refresh keeps them on. An entry whose provider lists no models is not copied,
-  keeps serving from `config.yml`, and is tried again at the next start.
+- The start switches on every model the provider lists, priced or not, and
+  later refreshes keep them on. An entry whose provider lists no models is not
+  copied, keeps serving from `config.yml`, and is retried at the next start.
 - From then on the hosted provider serves the name, and the entry is no longer
   read; the start logs that it can be taken out of `config.yml`.
 - An entry copied by an earlier start is not copied again, so removing the
@@ -369,21 +453,24 @@ menu, and is listed only for a deployment operator.
   provider declared so carries a badge saying it. The same box is on each
   key's dialog on the organization's Providers page. See
   [Zero data retention](#zero-data-retention).
-- **Models** carry a serving switch and a price, set per million tokens or per
-  1,000 requests or images; a model nothing prices arrives switched off.
+- **Models** carry a serving switch and a price, set in any unit on
+  [Entering a rate](#entering-a-rate) (a per-second video price
+  goes through `POST /api/v1/pricing` instead); an unpriced model arrives
+  switched off. Tabs show one kind of model at a time (the kind comes from
+  models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as
+  `type`). See [Who is shown which models](models.md#who-is-shown-which-models).
 - **Refresh models** asks one provider again. **Update catalog** fetches the
-  latest models.dev prices and then asks every provider what it lists, showing
-  the price changes and each provider's new models before applying them (see
+  latest models.dev prices and every provider's listing, and shows the price
+  changes and new models before applying them (see
   [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
-  Its optional cleanup also removes priced models nothing on the deployment
-  serves, along with the model lists of providers nothing configures any more,
-  listing them before anything is removed.
+  Its optional cleanup removes priced models nothing serves and the model
+  lists of providers no longer configured, listing them first.
 - A provider kept to one organization shows which. That restriction is set
   through `/api/v1/hosted-providers`.
-- The **Countries** column shows the countries a provider serves, set in the
-  add and edit dialogs as two-letter codes, typed or loaded from a JSON file
-  holding a list of them (or one under `supported_countries`), blank for every
-  country (see [Supported countries](configuration.md#supported-countries)).
+- The **Countries** column shows the countries a provider serves: two-letter
+  codes, typed in the dialogs or loaded from a JSON file (a list, or one under
+  `supported_countries`); blank serves every country (see
+  [Supported countries](configuration.md#supported-countries)).
 - A provider's name opens Models filtered to it. Above the table, a summary
   counts the providers reachable, with **Re-check all** to ask them again.
 - The table also lists the `providers:` instances of `config.yml`, marked
@@ -392,17 +479,18 @@ menu, and is listed only for a deployment operator.
   while its models can.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
+- **Connect otari.ai** is offered beside adding a provider, on the first-run
+  panel and above the table afterwards; see
+  [Connecting otari.ai](#connecting-otariai).
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).
 
 ## Deployment-paid credentials
 
-Once an organization's own key and `config.yml` have both missed, the core
-serves a model on one of the deployment's hosted providers, and a build may
-rebind `ModelProviderPort` through `OTARI_BOOTSTRAP` to decide differently. The
-deployment pays that upstream bill, so the request also goes through
-`BillingPort`:
+A request served on a hosted provider is paid by the deployment, so it goes
+through `BillingPort` (a build may also rebind `ModelProviderPort` through
+`OTARI_BOOTSTRAP` to choose the credential differently):
 
 - Before the provider call, the organization is granted any credit it is owed,
   and refused with `402` (`insufficient_funds`) when it has no funds paid in.
@@ -411,27 +499,27 @@ deployment pays that upstream bill, so the request also goes through
 - No funds are held while the request runs, so concurrent requests can take an
   organization below zero.
 
-A request on any other credential never reaches either port, unless it may run a
-gateway tool on the deployment's account: that tool's calls are gated and
-charged the same way, and the model call is not (see
-[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)). The core's billing
-adapter does nothing, so with no overlay a hosted-provider request is served and
-recorded as deployment-paid on its usage row, and no organization is charged.
+In the open-source build the billing adapter does nothing: a hosted-provider
+request is served and recorded as deployment-paid on its usage row, and no
+organization is charged.
 
-This covers every path that calls a provider: Chat Completions, Messages,
-Responses and the Playground, each candidate of a routing policy or a catalog id
-with fallbacks, the pass-through endpoints (embeddings, images, audio, rerank,
-moderations) and batches. A routing policy or a catalog id asks for each
-candidate as it reaches it, so the one that serves is the one that settles, and
-one the organization cannot fund is skipped. A batch is admitted when it is
-created and charged when its results are accounted.
+Requests on other credentials skip billing, except a gateway tool run on the
+deployment's account, whose calls are gated and charged the same way (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
+
+This covers every provider path: Chat Completions, Messages, Responses, the
+Playground, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches. Each routing or fallback candidate is checked as it
+is reached, so one the organization cannot fund is skipped. A batch is admitted
+when created and charged when its results are accounted.
 
 ## Upgrading
 
 ### From a `providers:` block in config.yml
 
-1. Set `OTARI_SECRET_KEY` first if it is not set (`otari gen-secret-key`): an
-   entry whose key cannot be encrypted is not copied. To keep serving every
+1. On PostgreSQL, set `OTARI_SECRET_KEY` first if it is not set
+   (`otari gen-secret-key`): an entry whose key cannot be encrypted is not
+   copied. A SQLite deployment generates its own key, so its entries are copied. To keep serving every
    entry from `config.yml` for now, set `import_configured_providers: false`
    instead.
 2. Start the upgraded gateway, and read its log: it names each entry it copied
@@ -449,20 +537,24 @@ asked before it.
 
 ### From the Deployment providers page
 
-The retired Deployment providers page (`/api/v1/provider-credentials`) is gone.
-At startup each provider it stored becomes a hosted provider of the same name,
-so a selector, routing policy or alias naming it keeps working. Every model the
-provider lists is switched on, priced or not, and stays on after a later
-**Update catalog**; "Serve models not on its list" starts off.
+The Deployment providers page (`/api/v1/provider-credentials`) is retired. At
+startup each provider it stored becomes a hosted provider of the same name, so
+selectors, routing policies and aliases keep working. Every model it lists is
+switched on, priced or not, and stays on after **Update catalog**; "Serve
+models not on its list" starts off.
 
-A provider the move cannot take is logged, listed in a banner on the Hosted
-providers page with the reason (`GET /api/v1/hosted-providers/migration`), and
-serves nothing until it is added again. The reasons: it lists no models, a
-hosted provider already holds the name, no configured `OTARI_SECRET_KEY` reads
-its key, it is named after another provider, or it is a keyless Bedrock or
-SageMaker provider on the server's own cloud role, which belongs under
-`providers:` in `config.yml`. Once the cause is fixed, move it from the banner,
-or Discard it.
+A provider that cannot be moved is logged, listed in a banner on the Hosted
+providers page (`GET /api/v1/hosted-providers/migration`), and serves nothing
+until fixed. It cannot be moved when:
+
+- it lists no models
+- a hosted provider already holds the name
+- no configured `OTARI_SECRET_KEY` decrypts its key
+- it is named after another provider
+- it is a keyless Bedrock or SageMaker provider on the server's own cloud role
+  (put that under `providers:` in `config.yml`)
+
+Once fixed, move it from the banner, or **Discard** it.
 
 A moved provider is asked after an organization's own key, where a stored
 provider was asked before it, and a `config.yml` provider of the same name now

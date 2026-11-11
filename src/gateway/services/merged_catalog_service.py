@@ -24,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceSource
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceRow, PriceSource, rates_of
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
@@ -70,6 +70,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
 )
 from gateway.types.models_dev import ModelsDevCatalog
+from gateway.types.price_rates import RatesDocument, stored_rates
 from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
@@ -112,10 +113,24 @@ class ModelPricingInfo(BaseModel):
     # catalog never lists one, but the field travels with the price so a caller
     # reading one model is told too.
     unit: PriceUnit = "token"
+    rates: RatesDocument | None = Field(
+        default=None,
+        description=(
+            "Every price of the row as a models.dev cost block: each modality's input and output price with its "
+            "unit, web_search, and the overrides and multipliers that change a price when a condition holds. "
+            "The fields above are its text view. Null where the stored block cannot be read."
+        ),
+    )
 
 
-def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
+def pricing_info(pricing: PriceRow) -> ModelPricingInfo:
     """The wire shape of one stored, default, or override price row."""
+    try:
+        rates: RatesDocument | None = stored_rates(rates_of(pricing))
+    except ValueError:
+        # One unreadable block costs its own detail, not the listing it is on.
+        logger.warning("The rates of %s cannot be read for the catalog", pricing.model_key)
+        rates = None
     return ModelPricingInfo(
         input_price_per_million=float(pricing.input_price_per_million),
         output_price_per_million=float(pricing.output_price_per_million),
@@ -125,6 +140,7 @@ def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
         # A transient row (a default, an override) is built without the column
         # default that an insert would apply, so it reads back None here.
         unit=pricing.unit or "token",
+        rates=rates,
     )
 
 
@@ -210,6 +226,7 @@ def alias_model(
     pricing_lookup: dict[str, ModelPricing],
     *,
     models_dev: ModelsDevCatalog | None,
+    organization_id: uuid.UUID | None = None,
 ) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
@@ -235,7 +252,14 @@ def alias_model(
     apply_default_pricing(obj, pricing_selector=canonical_target)
     # Limits and capabilities from the target too, for the same reason. Exposing them does not
     # reveal the target; its display name would, so the alias gets none.
-    apply_model_metadata(config, models_dev, obj, metadata_selector=canonical_target, with_name=False)
+    apply_model_metadata(
+        config,
+        models_dev,
+        obj,
+        metadata_selector=canonical_target,
+        with_name=False,
+        organization_id=organization_id,
+    )
     return obj
 
 
@@ -481,6 +505,9 @@ class CatalogScope:
     model and so sees it unflagged, but still does not hold its key.
     """
 
+    organization_id: uuid.UUID | None = None
+    """The organization whose ``offered_keys`` these are, whose own keys say how their servers serve each model."""
+
 
 def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:
     """Whether ``model_key`` names a model the caller reaches on a deployment-owned key.
@@ -659,6 +686,7 @@ async def catalog_scope(
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
                 offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
+                organization_id=organization_id,
                 hosted_models=hosted_models,
                 byo_providers=operator_byo_providers,
                 # The label's line is the member flag's, not the withhold's: a
@@ -677,6 +705,7 @@ async def catalog_scope(
             deployment_supplied_providers=scope.deployment_supplied_providers,
             offered_keys=scope.offered_keys if include_offered else frozenset(),
             hosted_keys=scope.hosted_keys,
+            organization_id=session_identity.active_organization_id,
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because its organization is
@@ -700,11 +729,16 @@ async def catalog_scope(
     # Only on a deployment that hosts something: one that hosts nothing keeps
     # listing its whole price list, as it always has.
     withhold_unserved = include_offered and bool(deployment_hosts)
+    default_workspace_id = await lookup_default_workspace_id(db) if is_master_key and include_offered else None
     if (hosted_models or withhold_unserved) and include_offered:
-        dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
+        dispatch_workspace_id = default_workspace_id if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
     deployment_key_models = _without(hosted_models, byo_providers)
+    if default_workspace_id is not None:
+        # The master key's offered keys are the default workspace's organization's.
+        organization_id = await organization_for_workspace_id(db, default_workspace_id)
     return CatalogScope(
+        organization_id=organization_id if include_offered else None,
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
         deployment_supplied_providers=frozenset(),
@@ -748,8 +782,6 @@ class MergedCatalog:
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
     alias_targets: set[str] = field(default_factory=set)
     """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
-    requires_zero_data_retention: bool = False
-    """The workspace this was built for refuses every offering not declared zero data retention."""
 
 
 async def build_merged_catalog(
@@ -953,7 +985,7 @@ async def build_merged_catalog(
     # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
-        apply_model_metadata(config, models_dev, obj)
+        apply_model_metadata(config, models_dev, obj, organization_id=scope.organization_id)
 
     # A hosted model phase 2b listed has no stored rate, and an organization's
     # override does not admit it past ``require_pricing`` either, so with the
@@ -969,7 +1001,9 @@ async def build_merged_catalog(
     # must not leak the alias mapping.
     if provider is None:
         for alias, target in aliases.items():
-            merged[alias] = alias_model(config, alias, target, pricing_lookup, models_dev=models_dev)
+            merged[alias] = alias_model(
+                config, alias, target, pricing_lookup, models_dev=models_dev, organization_id=scope.organization_id
+            )
         # Phase 5: policies whose candidate is decided per request. Listed last so
         # nothing else can price them, and excluded from a ``?provider=`` filter
         # for the same reason aliases are.
@@ -1016,6 +1050,16 @@ async def build_merged_catalog(
                 for target in named[mid]
             )
         }
+    # A workspace requiring zero data retention is refused every model on an
+    # undeclared provider, so none is listed, whichever reader built this.
+    if narrowing_workspace is not None and workspace_requires_zero_data_retention(narrowing_workspace):
+        merged = {
+            mid: obj
+            for mid, obj in merged.items()
+            if mid in aliases
+            or mid in dynamic_policies
+            or workspace_serves_target(config, narrowing_workspace, normalize_pricing_key(config, mid))
+        }
 
     for obj in merged.values():
         mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
@@ -1028,9 +1072,6 @@ async def build_merged_catalog(
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
         alias_targets=targets,
-        # Only a session naming a workspace asks for one workspace's view.
-        requires_zero_data_retention=session_identity is not None
-        and workspace_requires_zero_data_retention(workspace_id),
     )
 
 
@@ -1131,15 +1172,6 @@ class ZeroDataRetention:
         if served_on == "organization":
             return instance in self.organization
         return False
-
-
-def withholds_offering(merged: MergedCatalog, *, zero_data_retention: bool) -> bool:
-    """Whether an offering is left out of ``merged``'s grouped view for the workspace it was built for.
-
-    A workspace requiring zero data retention is shown no offering that is not
-    declared it, since dispatch refuses every one of them.
-    """
-    return merged.requires_zero_data_retention and not zero_data_retention
 
 
 async def viewer_zero_data_retention(

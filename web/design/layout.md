@@ -201,7 +201,9 @@ description with a `DocsLink`.
 
 The step is 4px and everything is a multiple. The two values worth knowing by heart:
 a page's column is padded `px-4 md:px-6` with `py-5 md:py-6`, and a KPI cell is
-`px-7 py-[1.125rem]`.
+`px-7 py-[1.125rem]`. On a phone the strip is two lanes: the left one starts
+flush with the page column and the right one 16px off the rule between them, and
+a band that borrows the cell's padding drops it the same way.
 
 Vary spacing deliberately: tighter to group, generous to separate. A uniform gap
 everywhere reads as a wireframe.

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AuthProvider } from "@/features/auth/AuthContext"
 import { SignupPage } from "@/features/auth/SignupPage"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { ApiError, apiFetch } from "@/shared/api/client"
@@ -29,7 +30,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 // `PublicAuthPage` passes the whole hash down, so the plain page is the one
 // reached from the sign-in screen and a `?email=` one is the accept page's
 // handoff (otari#835).
-// The page reads `open_signup` and `terms_url` off the bootstrap, so every
+// The page reads `open_signup`, `terms_url` and `privacy_url` off the bootstrap, so every
 // render goes through a DeploymentProvider. Closed signup and no published
 // terms is the default, matching a deployment that configured neither.
 function renderPage(
@@ -37,6 +38,7 @@ function renderPage(
   deployment: {
     openSignup?: boolean
     termsUrl?: string | null
+    privacyUrl?: string | null
     oauthProviders?: string[]
   } = {},
 ) {
@@ -49,11 +51,14 @@ function renderPage(
         value={bootstrap({
           open_signup: deployment.openSignup ?? false,
           terms_url: deployment.termsUrl ?? null,
+          privacy_url: deployment.privacyUrl ?? null,
           oauth_providers: deployment.oauthProviders ?? [],
         })}
       >
         <ThemeProvider>
-          <SignupPage hash={hash} />
+          <AuthProvider>
+            <SignupPage hash={hash} />
+          </AuthProvider>
         </ThemeProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -110,6 +115,64 @@ describe("SignupPage", () => {
     )
   })
 
+  it("signs an invited address straight in, with no verification email", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      message: "…",
+      verified: true,
+    } as never)
+    const session = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }))
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com&invite=tok")
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/")
+    })
+    const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      email: "ada@example.com",
+      invite: "tok",
+    })
+    expect(String(session.mock.calls[0]?.[0])).toContain("/auth/session")
+    session.mockRestore()
+  })
+
+  it("sends an invited address to sign in when the session cannot start", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      message: "…",
+      verified: true,
+    } as never)
+    const session = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("offline"))
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com&invite=tok")
+
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/")
+    })
+    expect(readSignInAddress()).toBe("ada@example.com")
+    expect(
+      recordEvent.mock.calls.filter(
+        ([name]) => name === TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+      ),
+    ).toEqual([
+      [
+        TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+        { authentication_method: "password", requires_verification: false },
+      ],
+    ])
+    session.mockRestore()
+  })
+
   // otari-ai#2100: the same form, reading as registration where the deployment
   // takes an address nobody added.
   it("reads as registration where signup is open", async () => {
@@ -136,6 +199,15 @@ describe("SignupPage", () => {
     expect(screen.queryByRole("checkbox")).toBeNull()
   })
 
+  it("links no privacy policy on a deployment that published only terms", () => {
+    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+
+    expect(
+      screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull()
+  })
+
   it("requires the published terms, and records the acceptance", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()
@@ -147,7 +219,7 @@ describe("SignupPage", () => {
     expect(submit).toBeDisabled()
 
     expect(
-      screen.getByRole("link", { name: "terms of service" }),
+      screen.getByRole("link", { name: "Terms of Service" }),
     ).toHaveAttribute("href", "https://otari.example.com/terms")
     await user.click(screen.getByRole("checkbox"))
     await user.click(submit)
@@ -160,6 +232,29 @@ describe("SignupPage", () => {
     })
   })
 
+  it("links the privacy policy beside the terms where both are published", async () => {
+    const opened = vi.spyOn(window, "open").mockReturnValue(null)
+    const user = userEvent.setup()
+    renderPage("#/signup", {
+      termsUrl: "https://otari.example.com/terms",
+      privacyUrl: "https://otari.example.com/privacy",
+    })
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "I accept the Terms of Service and the Privacy Policy",
+    })
+    expect(
+      screen.getByRole("link", { name: "Terms of Service" }),
+    ).toHaveAttribute("href", "https://otari.example.com/terms")
+    const privacy = screen.getByRole("link", { name: "Privacy Policy" })
+    expect(privacy).toHaveAttribute("href", "https://otari.example.com/privacy")
+    expect(privacy).toHaveAttribute("target", "_blank")
+
+    await user.click(privacy)
+    expect(checkbox).not.toBeChecked()
+    opened.mockRestore()
+  })
+
   it("opens the terms without ticking the box that links to them", async () => {
     // The link sits inside the checkbox's label, which react-aria makes
     // pressable: without the guard on the anchor, reading the terms accepted
@@ -168,7 +263,7 @@ describe("SignupPage", () => {
     const user = userEvent.setup()
     renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
 
-    await user.click(screen.getByRole("link", { name: "terms of service" }))
+    await user.click(screen.getByRole("link", { name: "Terms of Service" }))
 
     expect(screen.getByRole("checkbox")).not.toBeChecked()
     // The half of the sentence that stayed in the label still toggles it.
@@ -496,7 +591,7 @@ describe("OAuth first", () => {
       screen.getByRole("button", { name: "Sign up with GitHub" }),
     ).toBeDisabled()
     expect(
-      screen.getByRole("link", { name: "terms of service" }),
+      screen.getByRole("link", { name: "Terms of Service" }),
     ).toHaveAttribute("href", "https://otari.example.com/terms")
     await user.click(google)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -521,7 +616,7 @@ describe("OAuth first", () => {
     })
 
     await user.click(
-      screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+      screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
     )
     await user.click(
       screen.getByRole("button", { name: "Sign up with Google" }),

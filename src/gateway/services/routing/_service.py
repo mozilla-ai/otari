@@ -7,8 +7,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.repositories.routing import RoutingPolicyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import catalog_models, offering_input_rate
+from gateway.services.model_access import workspace_serves_target
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tools import provider_tools
 from gateway.services.usage_and_telemetry import ServedTraffic, UsageService
 
@@ -77,13 +82,33 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 class RoutingService:
     """What routing gives an organization's callers."""
 
-    def __init__(self, config: GatewayConfig, usage: UsageService, keys: ApiKeyService) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        usage: UsageService,
+        keys: ApiKeyService,
+        *,
+        uow: UnitOfWork,
+        organizations: OrganizationService,
+    ) -> None:
         self._config = config
         self._usage = usage
         self._keys = keys
+        self._uow = uow
+        self._organizations = organizations
+
+    async def is_first_policy_in_organization(self, organization_id: uuid.UUID) -> bool:
+        """Whether the policy just stored is the only one in any of the organization's workspaces."""
+        workspace_ids = await self._organizations.get_workspace_ids_in_organization(organization_id)
+        async with self._uow:
+            return await RoutingPolicyRepository(self._uow).count_in_workspaces(workspace_ids) == 1
 
     async def automatic_fallbacks(
-        self, *, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_ids: Collection[uuid.UUID],
+        serving_workspace_id: uuid.UUID | None = None,
     ) -> list[AutomaticFallback]:
         """Every model these workspaces sent requests to in the window, most requested first.
 
@@ -95,7 +120,16 @@ class RoutingService:
         reached, so traffic on an offering the catalog no longer serves is left
         out. The order is the catalog's, before a key's allow-list or a missing
         credential drops an offering, or automatic selection reorders it.
+
+        ``serving_workspace_id`` keeps only the offerings a request billed to
+        that workspace may call, and the models left with one.
+
+        Raises:
+            WorkspaceNotFoundError: ``serving_workspace_id`` is not one of
+                ``workspace_ids``, the workspaces the caller may see.
         """
+        if serving_workspace_id is not None and serving_workspace_id not in workspace_ids:
+            raise WorkspaceNotFoundError(serving_workspace_id)
         traffic = await self._usage.served_traffic(
             workspace_ids=workspace_ids, since=datetime.now(UTC) - FALLBACK_WINDOW
         )
@@ -144,11 +178,19 @@ class RoutingService:
             ]
             return tuple(sorted(entries, key=lambda entry: (-entry.requests, entry.key_name or "", entry.provider)))
 
+        served = {
+            model_id: [
+                selector
+                for selector in models[model_id].offerings
+                if serving_workspace_id is None or workspace_serves_target(self._config, serving_workspace_id, selector)
+            ]
+            for model_id in tallies
+        }
         fallbacks = [
             AutomaticFallback(
                 id=model_id,
                 name=models[model_id].name,
-                offerings=tuple(offering(selector) for selector in models[model_id].offerings),
+                offerings=tuple(offering(selector) for selector in served[model_id]),
                 requests=tally.requests,
                 fell_back=tally.fell_back,
                 pinned=sum(tally.pinned.values()),
@@ -156,6 +198,6 @@ class RoutingService:
                 pinned_keys=pinned_keys(tally),
             )
             for model_id, tally in tallies.items()
-            if tally.requests > 0
+            if tally.requests > 0 and served[model_id]
         ]
         return sorted(fallbacks, key=lambda fallback: (-fallback.requests, fallback.id))

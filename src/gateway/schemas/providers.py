@@ -21,10 +21,17 @@ from sqlmodel import Field, SQLModel
 
 from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import HostedPriceSource, ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import (
+    HostedModelDisabledReason,
+    HostedProvider,
+    HostedProviderModel,
+    PlatformConnectState,
+    ProviderEndpoint,
+)
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
 
@@ -38,6 +45,14 @@ class OrgProviderKeyCreateRequest(SQLModel):
 
     provider: str = Field(max_length=255)
     name: str = Field(max_length=255)
+    slug: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "The name requests reach a key with a custom base URL by, as in `<slug>:<model>`. Only such a key "
+            "has one, and once set it never changes. Left out, it is made from the key's name."
+        ),
+    )
     api_key: str | None = Field(default=None)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
@@ -67,6 +82,13 @@ class OrgProviderKeyPublic(SQLModel):
     organization_id: uuid.UUID
     provider: str
     name: str
+    slug: str | None = Field(
+        default=None,
+        description=(
+            "What requests name this key by, as in `<slug>:<model>`, for a key with a custom base URL. "
+            "Absent for a key reached as `<provider>:<model>`."
+        ),
+    )
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     last4: str | None = None
@@ -122,6 +144,7 @@ class OrgProviderKeyPublic(SQLModel):
             organization_id=key.organization_id,
             provider=key.provider,
             name=key.name,
+            slug=key.slug,
             api_base=key.api_base,
             client_args=redact_secret_like_values(key.client_args),
             last4=key.last4,
@@ -220,12 +243,14 @@ class OrgProviderKeyModelPublic(SQLModel):
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
     ``unit`` says what the rates are per, as on a pricing row: token, request
-    or image, so a per-request rate is not read as a per-token one.
+    or image, so a per-request rate is not read as a per-token one. ``type``
+    is the kind of model, from models.dev, and None when it does not know.
     """
 
     id: uuid.UUID
     org_provider_key_id: uuid.UUID
     model: str
+    type: ModelType | None = None
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
@@ -239,10 +264,15 @@ class OrgProviderKeyModelPublic(SQLModel):
 
 
 class OrgProviderKeyModelsPublic(SQLModel):
-    """One page of a key's offered models, and how many there are in total."""
+    """One page of a key's offered models, and how many there are in total.
+
+    ``count`` is the total of the kind asked for, and ``type_counts`` how many
+    of each kind the key offers, ``unknown`` for a model of no known kind.
+    """
 
     data: list[OrgProviderKeyModelPublic]
     count: int
+    type_counts: dict[OfferedModelType, int] = Field(default_factory=dict)
 
 
 class OrgProviderModelsRefreshPublic(SQLModel):
@@ -740,7 +770,7 @@ class HostedModelUpdateRequest(SQLModel):
 class HostedModelRates(SQLModel):
     """The rates a hosted model is currently served at, and which rung of the deployment's ladder said so."""
 
-    source: PriceSource
+    source: HostedPriceSource
     input_price_per_million: float
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
@@ -748,7 +778,7 @@ class HostedModelRates(SQLModel):
     unit: str = "token"
 
     @classmethod
-    def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
+    def from_version(cls, version: ModelPricing, source: HostedPriceSource) -> HostedModelRates:
         """Read one pricing version, stored or transient, into the display shape."""
         return cls(
             source=source,
@@ -764,37 +794,43 @@ class HostedModelPublic(SQLModel):
     """One offered model, with the price the deployment currently serves it at.
 
     ``price_source`` says which rung of the deployment's ladder answered:
-    ``deployment`` for a rate an operator set, ``defaults`` for the
-    community-maintained rate, whether this surface stored it or the fallback
-    supplies it, and None when nothing prices the model yet. ``unit`` says what
+    ``deployment`` for a rate an operator set, ``provider`` for the rate the
+    provider's own listing named, ``defaults`` for the community-maintained
+    rate, whether this surface stored it or the fallback supplies it, and None
+    when nothing prices the model yet. ``unit`` says what
     the rates are per, so a per-request rate is not read as a per-token one.
     ``enabled`` is the serving switch; a model offered without a discoverable
     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
     while it waits for a rate, ``operator`` when an operator switched it off,
-    ``unavailable`` when its provider refused to serve it.
+    ``unavailable`` when its provider refused to serve it. ``type`` is the
+    kind of model, from models.dev, and None when it does not know.
     """
 
     id: uuid.UUID
     provider: str
     model: str
+    type: ModelType | None = None
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     unit: str | None = None
-    price_source: PriceSource | None = None
+    price_source: HostedPriceSource | None = None
     enabled: bool
     disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: HostedProviderModel, *, rates: HostedModelRates | None) -> HostedModelPublic:
+    def from_row(
+        cls, row: HostedProviderModel, *, rates: HostedModelRates | None, model_type: ModelType | None = None
+    ) -> HostedModelPublic:
         """Read one offered row for the API, with whatever currently prices it."""
         return cls(
             id=row.id,
             provider=row.provider,
             model=row.model,
+            type=model_type,
             input_price_per_million=rates.input_price_per_million if rates else None,
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
@@ -809,10 +845,15 @@ class HostedModelPublic(SQLModel):
 
 
 class HostedModelsPublic(SQLModel):
-    """A page of one hosted provider's offered models, and how many there are in total."""
+    """A page of one hosted provider's offered models, and how many there are in total.
+
+    ``count`` is the total of the kind asked for, and ``type_counts`` how many
+    of each kind the provider offers, ``unknown`` for a model of no known kind.
+    """
 
     data: list[HostedModelPublic]
     count: int
+    type_counts: dict[OfferedModelType, int] = Field(default_factory=dict)
 
 
 class HostedModelsRefreshPublic(SQLModel):
@@ -1068,3 +1109,29 @@ __all__ = [
     "WorkspaceProviderModelRestrictionRequest",
     "WorkspaceProviderModelRestrictionsPublic",
 ]
+
+
+class PlatformConnectStartPublic(SQLModel):
+    """What an operator needs to approve a connection on otari.ai.
+
+    ``user_code`` is what the approval page shows back, ``verification_uri_complete``
+    the page to open, and ``expires_in`` the seconds left to approve.
+    """
+
+    user_code: str
+    verification_uri_complete: str
+    expires_in: int
+
+
+class PlatformConnectStatusPublic(SQLModel):
+    """Where the deployment's connection to otari.ai stands.
+
+    ``idle`` means no attempt. The code, the link and the seconds left are set
+    while ``pending`` and null otherwise. ``connected`` means the ``otari-ai``
+    hosted provider holds the key otari.ai issued.
+    """
+
+    status: Literal["idle"] | PlatformConnectState
+    user_code: str | None = None
+    verification_uri_complete: str | None = None
+    expires_in: int | None = None

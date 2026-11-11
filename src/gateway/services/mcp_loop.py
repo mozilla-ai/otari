@@ -24,9 +24,24 @@ from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, PromptTokensDetails
+from any_llm.types.completion import (
+    CacheCreationTokenDetails,
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    ServerToolUsage,
+)
 
 from gateway.core.env import otari_env
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+    provider_web_searches_of,
+    reasoning_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
@@ -342,6 +357,11 @@ class _ChatTotals:
     prompt: int = 0
     completion: int = 0
     cache_read: int = 0
+    cache_write: int = 0
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+    reasoning: int = 0
+    web_searches: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -351,33 +371,44 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
         return
     acc.prompt += usage.prompt_tokens or 0
     acc.completion += usage.completion_tokens or 0
-    details = usage.prompt_tokens_details
-    if details is not None:
-        acc.cache_read += details.cached_tokens or 0
+    acc.cache_read += cache_read_tokens_of(usage)
+    acc.cache_write += cache_write_tokens_of(usage)
+    ttl = getattr(usage.prompt_tokens_details, "cache_creation_token_details", None)
+    acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
+    acc.cache_write_1h += cache_write_1h_tokens_of(usage)
+    acc.reasoning += reasoning_tokens_of(usage)
+    acc.web_searches += provider_web_searches_of(usage)
 
 
-def _fold_usage(
-    completion: ChatCompletion | ChatCompletionChunk,
-    prompt_total: int,
-    completion_total: int,
-    cache_read_total: int = 0,
-) -> None:
-    if completion.usage is None:
+def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatTotals) -> None:
+    """Report the loop's totals on ``completion.usage``, the one usage the request is billed on."""
+    usage = completion.usage
+    if usage is None:
         return
-    completion.usage.prompt_tokens = prompt_total
-    completion.usage.completion_tokens = completion_total
-    completion.usage.total_tokens = prompt_total + completion_total
-    # OpenAI chat reports cached tokens as a subset of prompt_tokens. Fold the
-    # accumulated read count back into prompt_tokens_details so the downstream
-    # GatewayUsage wrapper forwards the loop-wide total, not just the last
-    # iteration's slice. (Chat has no cache-write concept.)
-    details = completion.usage.prompt_tokens_details
+    usage.prompt_tokens = totals.prompt
+    usage.completion_tokens = totals.completion
+    usage.total_tokens = totals.prompt + totals.completion
+    # Chat counts cache reads and writes inside prompt_tokens and breaks them out in
+    # the details, which are created here when only an earlier round reported them.
+    details = usage.prompt_tokens_details
+    if details is None and (totals.cache_read or totals.cache_write):
+        details = usage.prompt_tokens_details = PromptTokensDetails()
     if details is not None:
-        details.cached_tokens = cache_read_total
-    elif cache_read_total > 0:
-        # The final iteration carried no prompt_tokens_details, but an earlier
-        # one did; create the sub-object so the accumulated count is not lost.
-        completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
+        details.cached_tokens = totals.cache_read
+        if totals.cache_write or details.cache_write_tokens is not None:
+            details.cache_write_tokens = totals.cache_write
+        if totals.cache_write_5m or totals.cache_write_1h or details.cache_creation_token_details is not None:
+            details.cache_creation_token_details = CacheCreationTokenDetails(
+                ephemeral_5m_input_tokens=totals.cache_write_5m,
+                ephemeral_1h_input_tokens=totals.cache_write_1h,
+            )
+    reasoning = usage.completion_tokens_details
+    if reasoning is None and totals.reasoning:
+        reasoning = usage.completion_tokens_details = CompletionTokensDetails()
+    if reasoning is not None:
+        reasoning.reasoning_tokens = totals.reasoning
+    if totals.web_searches:
+        usage.server_tool_use = ServerToolUsage(web_search_requests=totals.web_searches)
 
 
 # The field a tool activity chunk carries. The Chat wire has no vocabulary for a
@@ -498,7 +529,7 @@ class _ChatToolLoopStrategy:
         _add_usage(acc, result.usage)
 
     def fold_usage(self, result: ChatCompletion, acc: _ChatTotals) -> None:
-        _fold_usage(result, acc.prompt, acc.completion, acc.cache_read)
+        _fold_usage(result, acc)
         # Every return path folds, so this is where the answer gains the report of
         # the calls the loop ran and the client never saw.
         if acc.tool_calls:
@@ -508,16 +539,18 @@ class _ChatToolLoopStrategy:
         return not result.choices or result.choices[0].finish_reason != "tool_calls"
 
     def split_owned(self, result: ChatCompletion, pool: ToolBackend) -> tuple[list[Any], bool]:
+        """The gateway's calls in the first choice, and whether the caller's own calls sit beside them."""
+        if not result.choices:
+            return [], False
         sdk_calls = result.choices[0].message.tool_calls or []
         # Duck-type the SDK tool-call: any object with a `.function` attribute is a
         # function tool-call. We avoid `isinstance` here because `acompletion`'s
         # return type uses the OpenAI SDK's class, while any_llm exposes a
         # same-named but distinct class alias.
         tool_calls = [_tool_call_dict(tc) for tc in sdk_calls if hasattr(tc, "function")]
-        return _execute_split(tool_calls, pool)
-
-    def exit_after_split(self, result: ChatCompletion) -> bool:
-        return False
+        owned, has_foreign = _execute_split(tool_calls, pool)
+        # A custom tool call is always the caller's: the gateway's tools are functions.
+        return owned, has_foreign or len(tool_calls) < len(sdk_calls)
 
     async def _run_into(self, pool: ToolBackend, owned: list[Any], acc: _ChatTotals | None) -> list[dict[str, Any]]:
         """Run ``owned``, adding each ended ``otari_tool_calls`` entry to ``acc`` for the answer to carry."""
@@ -531,15 +564,12 @@ class _ChatToolLoopStrategy:
         return await self._run_into(pool, owned, acc)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:
-        # Mixed batch: the MCP-owned subset was executed internally so its
-        # work isn't wasted; filter those calls out of the returned completion
-        # so the caller only sees tool_calls it can itself dispatch. The
-        # conversation continues client-side; if the caller wants to keep
-        # using the gateway's MCP tools they'll send the foreign-tool results
-        # back on the next request.
+        """Drop the gateway's calls from the answer, so the caller only sees calls it can dispatch."""
         choice = result.choices[0]
         sdk_calls = choice.message.tool_calls or []
-        foreign_sdk_calls = [tc for tc in sdk_calls if hasattr(tc, "function") and not pool.owns_tool(tc.function.name)]
+        foreign_sdk_calls = [
+            tc for tc in sdk_calls if not (hasattr(tc, "function") and pool.owns_tool(tc.function.name))
+        ]
         try:
             choice.message.tool_calls = foreign_sdk_calls or None
         except (AttributeError, TypeError):
@@ -697,7 +727,7 @@ class _ChatToolLoopStrategy:
         if carrier is not None:
             totals = replace(acc, tool_calls=[])
             _add_usage(totals, carrier.usage)
-            _fold_usage(carrier, totals.prompt, totals.completion, totals.cache_read)
+            _fold_usage(carrier, totals)
         return state.deferred_terminal()
 
     def accumulate_stream_usage(self, acc: _ChatTotals, state: _ChatStreamState) -> None:

@@ -31,11 +31,15 @@ services:
       # Managed Web Fetch is opt-in because it permits model-directed outbound
       # requests to public web destinations. An unset override defers to config.yml.
       - OTARI_WEB_FETCH_ENABLED=${OTARI_WEB_FETCH_ENABLED:-}
-      # In-network URL of the web-search backend — any HTTP service exposing
-      # a SearXNG-compatible /search?format=json endpoint. The bundled
-      # `searxng` profile container is the default; swap by changing this URL
-      # to point at any other backend.
-      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL:-http://searxng:8080}
+      # Deprecated, with OTARI_WEB_SEARCH_ENGINES below: the SearXNG instance
+      # the model searches when no search tool is its default, the bundled
+      # `searxng` container (the `web-search` profile) unless set. To move
+      # off them, add a `searxng` search tool to config.yml with api_base
+      # http://searxng:8080, an engines option and a price_per_call, name it
+      # in web_search_default_tool, then set OTARI_WEB_SEARCH_URL= to an empty
+      # value in .env, which turns this default off. See
+      # docs/configuration.md.
+      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL-http://searxng:8080}
       # A licensed search API Otari calls itself, which needs no container and
       # wins over the URL above when both are set. `tavily` or `brave`; the key
       # stays in this process and is never handed to a caller.
@@ -51,12 +55,10 @@ services:
       # so a client that only speaks a provider's vocabulary (Claude Code, the
       # Anthropic SDK) reaches it. Off unless set — see docs/tools.md.
       - OTARI_WEB_SEARCH_INTERCEPT=${OTARI_WEB_SEARCH_INTERCEPT:-}
-      # In-network URL of the guardrails service — the otari-anyguardrails
-      # container, which exposes POST /validate over `any-guardrail`. Callers
-      # opt a request in per-request via the top-level `guardrails` field; the
-      # Otari runs the configured profile(s) against this URL before calling
-      # the provider. Brought up by the `guardrails` compose profile below.
-      - OTARI_GUARDRAILS_URL=${OTARI_GUARDRAILS_URL:-http://anyguardrails:8000}
+      # URL of a guardrails service that speaks the contract in
+      # docs/guardrails-reference.md. Off unless set; organization guardrails
+      # built from a definition run in-process and need none.
+      - OTARI_GUARDRAILS_URL=${OTARI_GUARDRAILS_URL:-}
       # Optional operator-level header for the per-tool hint block in the system
       # message. Falls back to "You have access to the following tools:" if unset.
       # Useful for tone/translation/deployment-wide preferences. Not per-request:
@@ -74,6 +76,9 @@ services:
       # DeepSeek's key serves `fetch_tools:` as well.
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - SERPLY_API_KEY=${SERPLY_API_KEY:-}
+      - SYNTHETIC_API_KEY=${SYNTHETIC_API_KEY:-}
+      # Perplexity's key serves its models too, under `providers:`.
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       # And for fetch providers, under `fetch_tools:` as
       # `api_key: ${TABSTACK_API_KEY}`.
       - TABSTACK_API_KEY=${TABSTACK_API_KEY:-}
@@ -172,29 +177,29 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # Web-search backend — a SearXNG instance Otari dispatches `web_search`
-  # tool calls to. SearXNG is a metasearch front-end over many upstream
-  # engines; Otari's default engine list deliberately excludes Google,
-  # Bing, Yahoo and Brave (which forbid automated querying or sell a paid
-  # API) and uses duckduckgo/mojeek/qwant/wikipedia — the most defensible
-  # OSS combination. Operators who enable scraping-of-major-engines do so
-  # consciously and should review the upstream engines' Terms of Service.
+  # Web-search backend: a SearXNG instance for a `searxng` search tool, or
+  # for the deprecated OTARI_WEB_SEARCH_URL above. SearXNG is a metasearch
+  # front-end over many upstream engines. Otari's default engine list
+  # deliberately excludes Google, Bing, Yahoo and Brave (which forbid
+  # automated querying or sell a paid API) and uses
+  # duckduckgo/mojeek/qwant/wikipedia, the most defensible OSS combination.
+  # Operators who enable scraping-of-major-engines do so consciously and
+  # should review the upstream engines' Terms of Service.
   #
   # For commercial / production use, run a licensed API instead. Tavily and
   # Brave need no container at all: set OTARI_WEB_SEARCH_PROVIDER and
   # OTARI_WEB_SEARCH_PROVIDER_API_KEY and Otari calls them directly, leaving
-  # OTARI_WEB_SEARCH_URL unset. Any other HTTP service exposing a
-  # SearXNG-compatible /search?format=json shape is still a drop-in
-  # replacement via OTARI_WEB_SEARCH_URL.
+  # OTARI_WEB_SEARCH_URL empty. Any other service that answers SearXNG's
+  # search API (/search?format=json) can be a `searxng` search tool's api_base.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
   # `docker compose --profile web-search up`. When the searxng container is
-  # not running, Otari returns a clean 502 to any request that tries
-  # to dispatch `web_search`.
+  # not running, a search on it fails: the model gets a tool error, and
+  # POST /api/v1/search answers 502.
   searxng:
     profiles: ["web-search"]
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng:2026.11.2-cccbc9e15
     ports:
       # Bound to localhost only — like sandbox, this is internal infra. The
       # Otari reaches it via the Docker network at `searxng:8080`; the
@@ -213,73 +218,6 @@ services:
       # below is fine for a single-tenant Otari-internal deployment; rotate
       # via $SEARXNG_SECRET for multi-tenant or public-facing setups.
       - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-local-dev-secret}
-    restart: unless-stopped
-
-  # Guardrails service — the otari-anyguardrails container, a stateless FastAPI
-  # service that wraps `any-guardrail` (https://github.com/mozilla-ai/any-guardrail)
-  # behind `POST /validate`. Otari calls it whenever a request carries the
-  # top-level `guardrails` field (see services/guardrails.py). Source lives at
-  # https://github.com/mozilla-ai/otari-anyguardrails-container.
-  #
-  # The published image is multi-arch (linux/amd64 + linux/arm64). Override the
-  # tag via $OTARI_ANYGUARDRAILS_IMAGE. (If the pull 401s, the Docker Hub repo
-  # may still be private — it must be public for external users.)
-  #
-  # Opt-in via the `guardrails` compose profile — which also includes the
-  # `encoderfile` container below, so `docker compose --profile guardrails up`
-  # brings up the whole PIGuard-via-encoderfile guardrail with no extra flags.
-  # When this container is not running, Otari returns a clean 502 to any
-  # request that uses `guardrails`. The mounted service config defaults to the
-  # encoderfile profile; `./start.sh --in-process` swaps in the
-  # InjecGuard/HuggingFace config and skips the encoderfile container.
-  anyguardrails:
-    profiles: ["guardrails"]
-    image: ${OTARI_ANYGUARDRAILS_IMAGE:-docker.io/mzdotai/otari-any-guardrail-container:latest}
-    ports:
-      # Localhost-only, like the other internal backends. Otari reaches it
-      # over the Docker network at `anyguardrails:8000`; this mapping is for
-      # ad-hoc curl/debugging (e.g. GET /profiles, POST /validate).
-      - "127.0.0.1:8183:8000"
-    volumes:
-      # Guardrail config. Defaults to the encoderfile (PIGuard) profile; override
-      # with GUARDRAILS_CONFIG_PATH (start.sh --in-process points it at the
-      # InjecGuard/HF config). Mount path matches ANY_GUARDRAILS_CONFIG_PATHS.
-      - ${GUARDRAILS_CONFIG_PATH:-./demo/guardrails/guardrails-encoderfile-service.yaml}:/app/config/service.yaml:ro
-      # Cache HuggingFace model downloads across restarts (the first /validate
-      # for a HF-backed profile pulls the model).
-      - anyguardrails_hf_cache:/app/hf_cache
-    environment:
-      - ANY_GUARDRAILS_CONFIG_PATHS=/app/config/service.yaml
-      - HF_HUB_CACHE=/app/hf_cache
-      # HuggingFace token — required for gated models; harmless if unset for
-      # public ones. Passed from host env so it stays out of the config file.
-      - HF_TOKEN=${HF_TOKEN:-}
-    restart: unless-stopped
-
-  # Encoderfile backend — a single self-contained binary (Mozilla `encoderfile`,
-  # https://github.com/mozilla-ai/encoderfile) that serves a transformer encoder
-  # over HTTP. The anyguardrails container's `prompt-injection` profile reaches
-  # it via the EncoderfileProvider at http://encoderfile:8080 (see
-  # demo/guardrails/guardrails-encoderfile-service.yaml). The published image
-  # bakes in the PIGuard prompt-injection model.
-  #
-  # Part of the `guardrails` profile, so `docker compose --profile guardrails up`
-  # brings up the full prompt-injection guardrail (anyguardrails + encoderfile)
-  # with no extra flags. (`./start.sh --in-process` runs only Otari/postgres/
-  # anyguardrails with the HuggingFace config instead.)
-  #
-  # The encoderfile binary is architecture-specific, so the images are published
-  # per-arch (the arch is in the tag name, e.g. `.aarch64-linux-gnu` /
-  # `.x86_64-linux-gnu`) rather than as one multi-arch tag. The default below is
-  # the arm64 build; on x86 set OTARI_ENCODERFILE_IMAGE to the `.x86_64-linux-gnu`
-  # tag (the demo's start.sh picks the right one automatically via `uname -m`).
-  encoderfile:
-    profiles: ["guardrails"]
-    image: ${OTARI_ENCODERFILE_IMAGE:-docker.io/mzdotai/piguard.aarch64-linux-gnu-encoderfile:v0.6.2}
-    ports:
-      # Localhost-only debug port; the anyguardrails container reaches it over
-      # the Docker network at `encoderfile:8080`.
-      - "127.0.0.1:8184:8080"
     restart: unless-stopped
 
   # SeaweedFS is an S3-compatible store for the `s3` and `fsspec` files backends.
@@ -315,7 +253,6 @@ services:
 
 volumes:
   postgres_data:
-  anyguardrails_hf_cache:
   seaweedfs_data:
 
 networks:

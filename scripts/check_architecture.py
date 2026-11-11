@@ -1337,9 +1337,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/overview/overview_repository.py",
             "gateway/repositories/users_repository.py",
@@ -1350,6 +1348,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.api_keys.APIKeyFederationRule": {
         "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.catalog.ServedModel": {
+        "repository": "gateway/repositories/catalog/served_model_repository.py",
         "baseline": (),
     },
     "gateway.models.budgets.Budget": {
@@ -1429,6 +1431,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.OIDCConnection": {
+        "repository": "gateway/repositories/identity/oidc_connection_repository.py",
+        "baseline": (),
+    },
     "gateway.models.inference.BatchRecord": {
         "repository": None,
         "baseline": ("gateway/services/batch_service.py",),
@@ -1439,6 +1445,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.StoredCountryDatabase": {
         "repository": "gateway/repositories/inference/country_database_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.inference.VideoJobRecord": {
+        "repository": "gateway/repositories/inference/video_job_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {
@@ -1531,6 +1541,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),
     },
+    "gateway.models.providers.PlatformConnectAttempt": {
+        "repository": "gateway/repositories/providers/platform_connect_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.ModelAlias": {
         "repository": None,
         "baseline": (
@@ -1580,7 +1594,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.routing.RoutingPolicy": {
-        "repository": None,
+        "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (
             "gateway/api/routes/organization_routing.py",
             "gateway/api/routes/routing.py",
@@ -1596,8 +1610,8 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tenancy.OAuthPendingState": {
-        "repository": None,
-        "baseline": ("gateway/services/oauth_service.py",),
+        "repository": "gateway/repositories/identity/oauth_pending_state_repository.py",
+        "baseline": (),
     },
     "gateway.models.tenancy.Organization": {
         "repository": "gateway/repositories/tenancy/organization_repository.py",
@@ -1695,11 +1709,15 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.tools.WorkspaceMcpServer": {
-        "repository": None,
+        "repository": "gateway/repositories/tools/workspace_mcp_server_repository.py",
         "baseline": (
             "gateway/services/playground_service.py",
             "gateway/services/tenancy/workspace_mcp_server_service.py",
         ),
+    },
+    "gateway.models.tools.WorkspaceMcpServerGrant": {
+        "repository": "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceWebSearchConfig": {
         "repository": None,
@@ -1757,8 +1775,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/code_execution.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/users_repository.py",
             "gateway/services/external_usage_service.py",
@@ -1772,8 +1788,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/budgets.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/budgets/budget_repository.py",
             "gateway/repositories/budgets/end_user_repository.py",

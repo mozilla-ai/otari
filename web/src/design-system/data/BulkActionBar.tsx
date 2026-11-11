@@ -66,16 +66,25 @@ export function BulkActionBar({
       <span role="status" aria-live="polite" className="text-body">
         {label}
       </span>
+      {/* Clear sits with the count it clears, ahead of the actions, so the
+          order the Tab key and a screen reader take is the order drawn at
+          every width. On a phone it ends the count's line and the actions
+          take the next, their first label under the count. */}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="max-sm:ml-auto max-sm:-me-[0.6875rem]"
+        onPress={onClear}
+      >
+        Clear
+      </Button>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
         <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {formatNumber(matchingTotal)} matching this filter
         </Button>
       ) : null}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0 max-sm:basis-full max-sm:[&>.button--ghost:first-child]:-ms-[0.6875rem]">
         {children}
-        <Button size="sm" variant="ghost" onPress={onClear}>
-          Clear
-        </Button>
       </div>
     </div>
   )

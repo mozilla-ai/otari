@@ -27,6 +27,8 @@ otari-smoke.db
 # SQLite WAL sidecars, which sit next to any of the *.db files above.
 *.db-shm
 *.db-wal
+# The generated secret key a SQLite deployment keeps beside its database file.
+*.secret-key
 
 .DS_Store
 
@@ -65,3 +67,6 @@ node_modules
 
 # What Claude Code lays into a plugin folder it loads in place (editor typings).
 plugins/*/.claude-plugin/types/
+
+# The local files backend's default root, written by any run that stores a file.
+/otari-files/

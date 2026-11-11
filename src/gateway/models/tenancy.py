@@ -111,6 +111,10 @@ MAX_BULK_INVITATIONS = 100
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
 MANAGEMENT_ROLES = frozenset({"owner", "admin"})
+# The role that owns an organization, as distinct from managing it.
+OWNER_ROLE = "owner"
+# The status a membership holds while it grants anything.
+ACTIVE_MEMBERSHIP_STATUS = "active"
 
 
 def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
@@ -131,6 +135,11 @@ def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
 # matching.
 MAX_FULL_NAME_LENGTH = 255
 
+# How many preset avatar faces the dashboard draws (`FACE_COUNT` in
+# `web/src/features/account/avatar/faces.ts`, whose test pins the same number).
+# A face is its index, so this is the bound on a stored pick.
+AVATAR_FACE_COUNT = 203_896
+
 
 class UserBase(SQLModel):
     """Fields an identity carries on the wire."""
@@ -144,12 +153,10 @@ class UserBase(SQLModel):
 class UserCreate(UserBase):
     """Everything an identity needs to exist: its wire fields plus its scope.
 
-    Separate from ``UserBase`` because ``active_organization_id`` is NOT NULL
-    and has no wire representation, so a create schema without it describes a
-    row the database will refuse.
+    Separate from ``UserBase`` because ``active_organization_id`` has no wire representation.
     """
 
-    active_organization_id: uuid.UUID
+    active_organization_id: uuid.UUID | None
 
 
 class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -194,7 +201,7 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ``add_column`` while rendering as VARCHAR plus a CHECK on SQLite, which the
     # OSS edition ships by default. This matches how the tenancy tables already
     # store their own vocabularies (``role``, ``status``).
-    oauth_provider: str | None = Field(default=None, max_length=50)
+    oauth_provider: str | None = Field(default=None, max_length=255)
     # Unique, like the platform's: two identities holding one verification token
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
@@ -219,10 +226,12 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     email_verification_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     password_reset_token_hash: str | None = Field(default=None, unique=True, index=True, max_length=64)
     password_reset_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
-    # NOT NULL: every identity is always looking at exactly one organization,
-    # which is what lets the tenancy routes resolve a scope from the caller
-    # alone. Provisioning therefore creates the organization first.
-    active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
+    # Null where no organization the identity belongs to admits it, which is a state the sign-in
+    # response and the wire contract already answer. Whatever writes this column applies that rule,
+    # so a reader may trust the value it finds.
+    active_organization_id: uuid.UUID | None = Field(
+        default=None, foreign_key="organization.id", index=True, nullable=True
+    )
     # The organization provisioned for this identity, which never moves when the
     # active one does. Nothing in this edition reads it, and it is written when
     # the identity is created: switching (mozilla-ai/otari#715) moves
@@ -257,6 +266,10 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ago" to "never signed in" with nothing to distinguish the two. NULL here
     # means never, and keeps meaning it.
     last_sign_in_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # The preset face this identity picked on the Account page, by index. NULL
+    # until they pick one, and the dashboard then draws the face their id hashes
+    # to, so nobody needs a row written to have an avatar.
+    avatar_face: int | None = Field(default=None)
 
 
 class DeploymentUserOrganizationPublic(SQLModel):
@@ -395,6 +408,29 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
         ),
     )
 
+    sso_required: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # Null until an admin names a break-glass exception. Enabling enforcement requires this or an
+    # explicit waiver to be set, so a half-configured organization cannot exist.
+    #
+    # A second foreign key to user.id, needing the same explicit, named, altered column to stay
+    # droppable.
+    sso_break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            "sso_break_glass_user_id",
+            Uuid(),
+            ForeignKey(
+                "user.id",
+                name="fk_organization_sso_break_glass_user_id",
+                ondelete="SET NULL",
+                use_alter=True,
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
+    sso_break_glass_waived: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+
 
 class CallerWorkspaceMembershipPublic(SQLModel):
     """One workspace the caller belongs to, and their role in it.
@@ -437,6 +473,10 @@ class CallerIdentityPublic(SQLModel):
     user_id: uuid.UUID
     email: str | None = None
     full_name: str | None = None
+    avatar_face: int | None = Field(
+        default=None,
+        description="The preset avatar face this identity picked, or null when it has picked none.",
+    )
     # Whether a password exists, never anything derived from its value. It is
     # here rather than left to the deployment-wide ``sign_in_methods``, which
     # answers what this gateway accepts and not what the caller holds: somebody
@@ -688,6 +728,10 @@ class ActiveOrganizationMemberPublic(SQLModel):
     )
     email: str | None = None
     full_name: str | None = None
+    avatar_face: int | None = Field(
+        default=None,
+        description="The preset avatar face this member picked, or null when they have picked none.",
+    )
     role: str
     status: str
     created_at: datetime
@@ -947,6 +991,13 @@ class WorkspaceUpdate(SQLModel):
             "output. Turning it off keeps none from the next request on, whatever the deployment allows."
         ),
     )
+    request_mcp_servers_allowed: bool | None = Field(
+        default=None,
+        description=(
+            "Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers "
+            "whose access lists the workspace controls."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
@@ -962,6 +1013,9 @@ class WorkspacePublic(WorkspaceBase):
             "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment "
             "keeps tool output."
         ),
+    )
+    request_mcp_servers_allowed: bool = Field(
+        default=False, description="Whether this workspace's keys may name MCP servers by URL in a request."
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -1000,11 +1054,38 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
     trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
+    # Off for a new workspace, so its stored servers' access lists cannot be stepped
+    # around by naming a server by URL. The migration that added it kept existing
+    # workspaces on, as they were before the access lists.
+    request_mcp_servers_allowed: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+
+
+# ``WorkspaceMemberRepository.add`` matches this name on a refused insert to
+# tell a vanished workspace (404) from a duplicate membership (409), so it is
+# declared rather than left to PostgreSQL to generate.
+WORKSPACE_MEMBER_WORKSPACE_FK = "fk_workspace_member_workspace_id"
 
 
 class WorkspaceMemberBase(SQLModel):
-    workspace_id: uuid.UUID = Field(foreign_key="workspace.id", ondelete="CASCADE", index=True)
-    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    # Explicit columns because ``Field(foreign_key=...)`` cannot name a constraint.
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            "workspace_id",
+            Uuid(),
+            ForeignKey("workspace.id", name=WORKSPACE_MEMBER_WORKSPACE_FK, ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            "user_id",
+            Uuid(),
+            ForeignKey("user.id", name="fk_workspace_member_user_id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
     role: str = Field(default="member", max_length=32)
     status: str = Field(default="active", max_length=32)
 
@@ -1572,6 +1653,10 @@ class OAuthPendingState(SQLModel, table=True):
     it that way for providers that cannot do PKCE. Both providers this
     deployment offers can, so in practice every row carries one.
 
+    The row carries nothing binding it to a browser. The ``state`` it is keyed
+    by is derived from a token only that browser holds, so the binding is in
+    the key rather than in a column (RFC 9700, section 4.7.1).
+
     The row is deleted as it is consumed, so a replayed state matches nothing.
     """
 
@@ -1582,15 +1667,15 @@ class OAuthPendingState(SQLModel, table=True):
     # the way ``WebAuthnChallenge.ceremony`` is: a state minted for Google and
     # returned to GitHub's callback is a refusal that should say so, not one
     # that collapses into "unknown state".
-    provider: str = Field(max_length=32)
-    # SHA-256 of the flow secret the browser holds in its cookie, so a row
-    # answers only to the browser that started it (RFC 9700, section 4.7.1).
-    # Hashed for the reason ``state_hash`` is.
-    flow_hash: str = Field(max_length=64)
+    provider: str = Field(max_length=255)
     code_verifier: str | None = Field(default=None, max_length=128)
     # The OpenID nonce the authorization request sent, which the exchange
     # checks the ID token against. Null for GitHub, which is not OpenID.
     nonce: str | None = Field(default=None, max_length=128)
+    # Recorded rather than re-derived at exchange time, because the library's
+    # state store contract requires every saved field back and because what the
+    # request asked for is not what configuration says minutes later.
+    openid_requested: bool
     # Kept rather than re-derived at exchange time so the URI sent with the
     # exchange is the one the authorization request was actually built with,
     # even across a ``public_base_url`` change mid-flight.

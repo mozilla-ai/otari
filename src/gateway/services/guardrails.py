@@ -6,16 +6,13 @@ own is answered by a guardrail this worker already built and holds, handed in as
 ``in_process`` and declared here as :class:`InProcessGuardrail`; nothing about it
 leaves the process, and nothing in this module knows how one is built.
 
-The guardrails service (``otari-anyguardrails-container``) wraps
-`any-guardrail <https://github.com/mozilla-ai/any-guardrail>`_ behind a small
-HTTP API. The only endpoint we call is::
+The guardrails service is any HTTP service the operator points
+``guardrails_url`` at. The only endpoint we call is::
 
     POST /validate  {profile, input_text, validate_kwargs}
         → {profile, result: {valid, explanation, score}}
 
-``result.valid is False`` means the guardrail flagged the input (e.g. the
-``prompt-injection`` profile — Deepset in-process, or DuoGuard via an
-encoderfile — detected a prompt injection).
+``result.valid is False`` means the guardrail flagged the input.
 
 Unlike the sandbox / web-search backends, this does **not** duck-type the MCP
 tool-loop ``pool`` protocol: guardrails never enter the tool loop. It is a flat
@@ -77,6 +74,10 @@ class GuardrailsNotReachableError(RuntimeError):
     public error response covers exactly that. The one message that stays whole
     is the no-URL-configured case: it names an environment variable rather than
     an address, and it is the only one a reader can actually act on.
+
+    Neither message quotes what the endpoint sent back, because an answer can
+    echo the prompt. A bad answer is named by its HTTP status, its exception
+    class, or the type of the bad value.
     """
 
     def __init__(
@@ -114,8 +115,8 @@ class GuardrailResult:
     def flagged(self) -> bool:
         """A guardrail flags the input when it explicitly reports ``valid=False``.
 
-        ``valid is None`` (guardrail returned no verdict) is treated as *not
-        flagged* — we don't block on an inconclusive result.
+        ``valid is None`` is no verdict rather than a flag; ``on_unavailable``
+        decides whether the request may go on without one.
         """
         return self.valid is False
 
@@ -183,8 +184,9 @@ async def _validate_one(
     payload: dict[str, object] = {"profile": cfg.profile, "input_text": input_text}
     if cfg.validate_kwargs:
         payload["validate_kwargs"] = cfg.validate_kwargs
-    # An organization guardrail may carry a credential for the endpoint it names
-    # (otari#654). It goes in the header rather than the body: `/validate` forbids
+    # An organization guardrail, or a caller's entry with its own `url`, may
+    # carry a credential for the endpoint it names. It goes in the header rather
+    # than the body: `/validate` forbids
     # unknown body fields, and a guardrail's *vendor* key is not this in any case;
     # the guardrails service constructs its guardrails from the operator's own
     # config and holds those itself. Never logged, here or by the caller.
@@ -192,11 +194,26 @@ async def _validate_one(
     try:
         response = await client.post(f"{base_url}/validate", json=payload, headers=headers)
         response.raise_for_status()
-        body = response.json()
-        result = body["result"]
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
+    except httpx.HTTPStatusError as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: HTTP {exc.response.status_code}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.ProtocolError, httpx.DecodingError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: {type(exc).__name__}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.HTTPError, ValueError) as exc:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    try:
+        result = response.json()["result"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} returned no readable 'result': {type(exc).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         ) from exc
 
@@ -206,7 +223,7 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {type(result).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -216,13 +233,13 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned no 'valid' field",
             public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {type(valid).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -283,6 +300,7 @@ async def run_input_guardrails(
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
     in_process: Mapping[str, InProcessGuardrail | None] | None = None,
+    allow_no_verdict: bool = False,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
 
@@ -299,12 +317,12 @@ async def run_input_guardrails(
     configured to fail open.
 
     ``credentials`` maps a profile name to the bearer credential its entry
-    carries, and is populated only for guardrails an organization mandates
-    (`services/tenancy/organization_guardrail_service.py`). It is a separate
-    argument rather than a field on :class:`GuardrailConfig` because that model
-    is parsed from the request body: a credential field there would be one a
-    caller could set, which would turn the guardrail list into a way to make
-    this gateway send a secret to an endpoint of the caller's choosing.
+    carries: an organization's stored one
+    (`services/tenancy/organization_guardrail_service.py`), or the caller's own
+    for a profile no layer mandates. It is a separate argument rather than read
+    off :class:`GuardrailConfig` because the merge decides which credential
+    belongs to the URL that survived it, and no stored secret may follow a
+    caller's entry.
 
     ``in_process`` maps a profile to a guardrail this worker already holds,
     built from the organization's own definition
@@ -347,6 +365,10 @@ async def run_input_guardrails(
       evaluation error is logged and recorded as an inconclusive result
       (``valid=None``) and the request proceeds; we don't 502 a request the
       caller explicitly asked us not to enforce.
+
+    A check that runs and answers no verdict (``valid=None``) was not evaluated
+    either, so it takes the same paths. ``allow_no_verdict`` returns that answer
+    instead, for a caller that runs a check only to show what the service says.
 
     Returns:
         A :class:`GuardrailVerdict` aggregating every input guardrail's result.
@@ -406,6 +428,7 @@ async def run_input_guardrails(
     results: list[GuardrailResult] = []
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
         for cfg in input_guardrails:
+            fails_closed = cfg.mode == "block" and cfg.on_unavailable == "block"
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
                 if (unsafe_url := unsafe.get(cfg.profile)) is not None:
@@ -432,7 +455,7 @@ async def run_input_guardrails(
                         credential=credentials.get(cfg.profile),
                     )
             except GuardrailsNotReachableError as exc:
-                if cfg.mode == "block" and cfg.on_unavailable == "block":
+                if fails_closed:
                     raise  # fail closed: an enforcing guardrail must not be skipped
                 # The reason belongs here and nowhere else: the fail-closed arm
                 # above hands its message to `apply_input_guardrails`, which logs
@@ -457,6 +480,11 @@ async def run_input_guardrails(
                     )
                 )
                 continue
+            if result.valid is None and fails_closed and not allow_no_verdict:
+                raise GuardrailsNotReachableError(
+                    f"guardrail profile {cfg.profile!r} returned no verdict",
+                    public_detail=_unevaluated_detail(cfg.profile),
+                )
             if result.flagged:
                 logger.info(
                     "guardrail flagged input: profile=%s mode=%s score=%s",

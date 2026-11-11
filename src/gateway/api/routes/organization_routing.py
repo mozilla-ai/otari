@@ -58,7 +58,7 @@ traffic used, and the fallback a catalog ID gives each with no policy.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import Select, false, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +66,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     CurrentIdentity,
+    PersonGrowthSignalPortDep,
     RequestSessionModelProviderPortDep,
     RoutingServiceDep,
     VisibleWorkspacesDep,
@@ -80,9 +81,12 @@ from gateway.api.routes.aliases import (
     upsert_alias_in_workspace,
 )
 from gateway.api.routes.routing import (
+    ExplainRequest,
+    ExplainResponse,
     PolicyRequest,
     PolicyResponse,
     delete_policy_in_workspace,
+    explain_in_workspace,
     upsert_policy_in_workspace,
     validated_spec,
 )
@@ -92,16 +96,18 @@ from gateway.models.providers import ModelAlias
 from gateway.models.routing import PolicySpec, RoutingPolicy
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.routing import AutomaticFallbackPublic, AutomaticFallbacksResponse
 from gateway.services.alias_service import all_alias_names
-from gateway.services.model_access import is_model_allowed
+from gateway.services.model_access import intersect_allowlists, is_model_allowed
 from gateway.services.policy_store import all_policy_names
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.routing import FALLBACK_WINDOW
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     VisibleWorkspaceScope,
+    resolve_visible_workspace,
     resolve_visible_workspace_scope,
     resolve_workspace_in_organization,
 )
@@ -135,7 +141,7 @@ fallbacks_router = APIRouter(
 _MAX_ROWS = 1000
 
 
-async def _writable_workspace_id(
+async def _writable_workspace(
     db: AsyncSession,
     config: GatewayConfig,
     *,
@@ -143,7 +149,7 @@ async def _writable_workspace_id(
     workspace_id: uuid.UUID | None,
     targets: list[str],
     model_provider: ModelProviderPort | None,
-) -> uuid.UUID:
+) -> Workspace:
     """Resolve the workspace a tenant write lands in, refusing what it may not do.
 
     Three refusals, in the order that keeps each one from leaking what the next
@@ -168,6 +174,22 @@ async def _writable_workspace_id(
         organizations=organizations,
     )
     await _require_reachable_targets(db, config, user=user, targets=targets, model_provider=model_provider)
+    return workspace
+
+
+async def _writable_workspace_id(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    user: TenancyUser,
+    workspace_id: uuid.UUID | None,
+    targets: list[str],
+    model_provider: ModelProviderPort | None,
+) -> uuid.UUID:
+    """The id of :func:`_writable_workspace`, for a write that needs nothing else of it."""
+    workspace = await _writable_workspace(
+        db, config, user=user, workspace_id=workspace_id, targets=targets, model_provider=model_provider
+    )
     return workspace.id
 
 
@@ -320,6 +342,9 @@ async def set_organization_routing_policy(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     model_provider: RequestSessionModelProviderPortDep,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
+    routing: RoutingServiceDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -328,7 +353,7 @@ async def set_organization_routing_policy(
     accepted here.
     """
     _reject_user_scope(request.user_id)
-    workspace_id = await _writable_workspace_id(
+    workspace = await _writable_workspace(
         db,
         config,
         user=current_identity,
@@ -336,7 +361,25 @@ async def set_organization_routing_policy(
         targets=validated_spec(request.name, request.spec).static_selectors(),
         model_provider=model_provider,
     )
-    return await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id)
+    policy, created = await upsert_policy_in_workspace(request, db, config, workspace_id=workspace.id)
+    if created and growth is not None:
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.ROUTING_POLICY_CREATED,
+            user_id=current_identity.id,
+            email=current_identity.email,
+            organization_id=workspace.organization_id,
+        )
+        if current_identity.email is not None and await routing.is_first_policy_in_organization(
+            workspace.organization_id
+        ):
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.FIRST_ROUTE_CONFIGURED,
+                user_id=current_identity.id,
+                email=current_identity.email,
+            )
+    return policy
 
 
 @policies_router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
@@ -360,6 +403,42 @@ async def delete_organization_routing_policy(
         model_provider=None,
     )
     await delete_policy_in_workspace(name, db, config, workspace_id=resolved, user_id=None)
+
+
+@policies_router.post("/explain")
+async def explain_organization_routing_policy(
+    request: ExplainRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    current_identity: CurrentIdentity,
+    model_provider: RequestSessionModelProviderPortDep,
+) -> ExplainResponse:
+    """Compile a policy in one of the organization's workspaces and return the plan, without dispatching anything.
+
+    The tenant reading of ``POST /api/v1/routing/policies/explain``: any member
+    who may see the workspace, which is who may already read its policies here.
+    ``workspace_id`` is required; ``user_id`` is not accepted, as on the writes.
+    Every candidate, from a draft or a stored policy, is held to what the
+    organization reaches, narrowed further by ``allowed_models`` when sent: one
+    outside it is listed as dropped, so a draft cannot show where a model the
+    organization lacks would resolve, and a stored policy whose target the
+    organization lost still explains.
+    """
+    _reject_user_scope(request.user_id)
+    if request.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="workspace_id is required: an organization's routing entries belong to one of its workspaces.",
+        )
+    workspace = await resolve_visible_workspace(
+        db,
+        user=current_identity,
+        workspace_id=request.workspace_id,
+        organizations=OrganizationService(db, membership_listener=None),
+    )
+    reach = await resolve_session_model_allowlist(db, config, user=current_identity, model_provider=model_provider)
+    narrowed = request.model_copy(update={"allowed_models": intersect_allowlists(reach, request.allowed_models)})
+    return explain_in_workspace(narrowed, config, workspace_id=workspace.id)
 
 
 @aliases_router.get("")
@@ -448,7 +527,12 @@ async def delete_organization_alias(
 
 @fallbacks_router.get("")
 async def list_automatic_fallbacks(
-    visible: VisibleWorkspacesDep, routing: RoutingServiceDep
+    visible: VisibleWorkspacesDep,
+    routing: RoutingServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Only the offerings a request billed to this workspace may call."),
+    ] = None,
 ) -> AutomaticFallbacksResponse:
     """The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
 
@@ -462,7 +546,9 @@ async def list_automatic_fallbacks(
     organization's usage reads use.
     """
     fallbacks = await routing.automatic_fallbacks(
-        organization_id=visible.organization_id, workspace_ids=visible.workspace_ids
+        organization_id=visible.organization_id,
+        workspace_ids=visible.workspace_ids,
+        serving_workspace_id=workspace_id,
     )
     return AutomaticFallbacksResponse(
         window_days=FALLBACK_WINDOW.days,

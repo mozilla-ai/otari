@@ -4,8 +4,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useSetPricing } from "@/shared/api/pricing"
-
-import { parsePerCallPrice, type ToolRateRow, toPerCall } from "./toolRates"
+import { parsePerCallPrice, perCallText, type ToolRateRow } from "./toolRates"
 
 const PRICE_ERROR = "An amount in dollars, such as 0.01."
 
@@ -19,13 +18,13 @@ export function ToolRateForm({
   onClose,
 }: {
   row: ToolRateRow
-  /** The stored per-million rate in force, or `undefined` while unpriced. */
+  /** The rate in force in dollars per call, or `undefined` while unpriced. */
   current: number | undefined
   onClose: () => void
 }) {
   const setPricing = useSetPricing()
   const [price, setPrice] = useState(() =>
-    current === undefined ? "" : String(toPerCall(current)),
+    current === undefined ? "" : perCallText(current),
   )
   const { isDirty } = useDirtySnapshot(price)
   const stored = parsePerCallPrice(price)

@@ -380,7 +380,9 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
-    padding: 0.75rem 1rem 1rem;
+    /* The sheet's own 24px inset, the one its header and body keep at this
+       width, so the stacked buttons share the fields' edges. */
+    padding: 0.75rem 1.5rem 1rem;
   }
   .otari-form-dialog__actions,
   .otari-dialog__actions {
@@ -492,9 +494,14 @@
    This said `--color-border` and all sixteen per-table classes overrode it to
    `--color-border-subtle`, so the base was simply the wrong value: sixteen
    consumers and no exceptions is not a default worth keeping. Moved here, and
-   the copies are gone. Must stay in step with the row rule below. */
+   the copies are gone. Must stay in step with the row rule below.
+
+   No fill either, data.md's rest state. HeroUI paints every cell
+   `bg-surface`, and a pinned column sets the page ground so scrolled cells
+   pass under it, so with that fill one row read as two colors. */
 .otari-table .table__row .table__cell {
   border-color: var(--color-border-subtle);
+  background-color: transparent;
 }
 
 /* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
@@ -507,8 +514,23 @@
   border-color: var(--color-border-subtle);
 }
 
-.otari-table .table__row:hover .table__cell {
-  background-color: var(--color-surface-muted);
+/* Behind a hover-capable pointer only: a tap fakes `:hover` and holds it on
+   the row until the next tap elsewhere, which reads as a selection. */
+@media (hover: hover) {
+  .otari-table .table__row:hover .table__cell {
+    background-color: var(--color-surface-muted);
+  }
+}
+
+/* data.md's selected ground, the one a phone card takes. An image rather than
+   a color, so the translucent tint layers over the hover fill instead of
+   replacing it. HeroUI's own (`bg-surface/10`) does not show on the page
+   ground. */
+.otari-table .table__row[data-selected="true"] .table__cell {
+  background-image: linear-gradient(
+    var(--color-primary-subtle),
+    var(--color-primary-subtle)
+  );
 }
 
 /* Let the text in a row be highlighted with the mouse (issue #478). Two things
@@ -588,6 +610,28 @@
      504px pane). The call site's `max-w-3xl` still caps it. */
   left: calc(50% + var(--rail-width, 0px) / 2);
   width: calc(100% - var(--rail-width, 0px) - 2rem);
+}
+/* A KPI figure that would overrun its cell shrinks to fit it, and one that
+ * fits keeps the role's 30px. Fira Code's figures advance 0.6em, so
+ * `--figure-chars` of them fill the cell's content width (the cell is the
+ * container) at the size below; `KpiCell` sets the count from the value. */
+.otari-kpi-figure {
+  font-size: min(1.875rem, calc(100cqi / (var(--figure-chars, 1) * 0.6)));
+}
+
+/* While the bar is up, the end of the page scrolls clear of it: the bar is
+ * fixed to the viewport, so nothing in flow makes room for it. The space goes
+ * after the content rather than before it, so no row moves when a selection
+ * starts, and is sized to the bar and its 16px offset at each width. */
+main:has(.otari-bulk-bar)::after {
+  content: "";
+  display: block;
+  height: 4.5rem;
+}
+@media (max-width: 639px) {
+  main:has(.otari-bulk-bar)::after {
+    height: 8.5rem;
+  }
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and

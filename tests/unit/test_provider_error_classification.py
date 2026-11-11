@@ -46,6 +46,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_ERROR_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
+    PROVIDER_REQUEST_TOO_LARGE_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_error_message,
@@ -68,7 +69,11 @@ from gateway.services.inference import (
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
-from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
+from gateway.services.upstream_redaction import (
+    MAX_EXPOSED_DETAIL_CHARS,
+    redact_upstream_message,
+    redacted_upstream_detail,
+)
 from gateway.streaming import OPENAI_STREAM_FORMAT, IncompleteStreamError, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -207,6 +212,41 @@ def test_rate_limit_message_is_still_redacted() -> None:
     assert "Quota exceeded" in mapping.detail
     assert "proj-a1b2c3d4" not in mapping.detail
     assert "internal.upstream" not in mapping.detail
+
+
+def test_request_too_large_carries_the_upstream_message() -> None:
+    """A 413 refuses the request for its size and fails the same way on every
+    retry, so it is the caller's 413 with the provider's sentence (the limit and
+    the size requested) rather than a retryable 502."""
+    exc = _ParamError(413, None, "Request too large: Limit 8000, Requested 10974, please reduce your message size")
+    assert classify_provider_error(exc) == (
+        413,
+        "Request too large: Limit 8000, Requested 10974, please reduce your message size",
+    )
+
+
+def test_request_too_large_message_is_still_redacted() -> None:
+    exc = _ParamError(413, None, "Request too large in organization org_01abc23 via https://internal.upstream/v1")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 413
+    assert "Request too large" in mapping.detail
+    assert "org_01abc23" not in mapping.detail
+    assert "internal.upstream" not in mapping.detail
+
+
+def test_request_too_large_carries_a_code_and_no_retry_after() -> None:
+    exc = _rate_limited_with("23")
+    exc.status_code = 413  # type: ignore[attr-defined]
+    assert provider_error_headers(exc, 413) == {"Otari-Error-Code": "request_too_large"}
+    assert refusal_code(exc) == "request_too_large"
+
+
+def test_request_too_large_falls_back_to_a_fixed_detail() -> None:
+    mapping = classify_provider_error(_ParamError(413, None, "413"))
+    assert mapping is not None
+    assert mapping.status_code == 413
+    assert mapping.detail == PROVIDER_REQUEST_TOO_LARGE_DETAIL
 
 
 @pytest.mark.parametrize(
@@ -652,6 +692,46 @@ def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     assert failure_status_code(exc) == 400
 
 
+def test_unsupported_parameter_carries_its_code() -> None:
+    exc = UnsupportedParameterError("response_format", "bedrock")
+
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_parameter"}
+    assert refusal_code(exc) == "unsupported_parameter"
+
+
+def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> None:
+    """#2881: a policy whose every candidate cannot express a parameter says which one."""
+    errors = [
+        UnsupportedParameterError("reasoning_effort", "bedrock"),
+        UnsupportedParameterError("response_format", "bedrock"),
+        UnsupportedParameterError("response_format", "anthropic"),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == "None of the models tried accepts reasoning_effort, response_format (3 attempts)."
+    assert rejection.headers == {"Otari-Error-Code": "unsupported_parameter"}
+
+
+def test_a_refusal_naming_no_parameter_carries_no_code() -> None:
+    """An operation or feature a provider lacks (rerank, context_management) is no parameter to name."""
+    exc = NotImplementedError(_CONTEXT_MANAGEMENT_MSG)
+
+    assert classify_provider_error(exc) is not None
+    assert provider_error_headers(exc, 400) is None
+
+
+def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -> None:
+    other = _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG))
+
+    rejection = get_shared_rejection([UnsupportedParameterError("response_format", "bedrock"), other])
+
+    assert rejection is not None
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
 def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
     """A capability error that echoes the payload never returns an empty detail."""
     exc = UnsupportedParameterError(
@@ -796,6 +876,29 @@ def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
     assert "max_tokens" in redacted
     assert "8192" in redacted
     assert "claude-opus-5" in redacted
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("sk-ant-abcdefghijklmnopqrstuvwxyz0123456789", id="only a credential"),
+        pytest.param("https://proxy.internal.example/v1 123456789012", id="only a url and an account id"),
+        pytest.param("messages: please summarize this", id="a payload echo"),
+    ],
+)
+def test_redacted_detail_falls_back_when_nothing_explanatory_survives(raw: str) -> None:
+    """A message that redaction empties, or leaves as placeholders alone, tells
+    the caller nothing, so the fixed detail is returned in its place."""
+    assert redacted_upstream_detail(raw, "fallback detail") == "fallback detail"
+
+
+def test_redacted_detail_keeps_the_redacted_explanation() -> None:
+    raw = "Invalid key sk-ant-abcdefghijklmnopqrstuvwxyz0123456789: max_tokens too large"
+    detail = redacted_upstream_detail(raw, "fallback detail")
+    assert detail == redact_upstream_message(raw)
+    assert "max_tokens too large" in detail
+    assert "abcdefghijklmnopqrstuvwxyz" not in detail
 
 
 def test_exposed_detail_is_length_capped() -> None:
@@ -1760,3 +1863,52 @@ def test_a_stream_error_event_carries_the_providers_failure() -> None:
         "tag": "SERVICE_OVERLOADED",
         "retryable": True,
     }
+
+
+# What Groq answered, verbatim, when a strict ``json_schema`` generation failed.
+_GROQ_JSON_FAILED_MSG = "Failed to generate JSON. Please adjust your prompt. See 'failed_generation' for more details."
+_GROQ_SCHEMA_MISMATCH_MSG = (
+    "Generated JSON does not match the expected schema. Please adjust your prompt. "
+    "See 'failed_generation' for more details."
+)
+
+
+def _groq_json_validate_failed(message: str) -> openai.APIStatusError:
+    error = _openai_error(message, code="json_validate_failed") | {"failed_generation": '{"summary": "Fixes a'}
+    return _openai_status_error(400, error)
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (_GROQ_JSON_FAILED_MSG, "Failed to generate JSON. Please adjust your prompt."),
+        (_GROQ_SCHEMA_MISMATCH_MSG, "Generated JSON does not match the expected schema. Please adjust your prompt."),
+    ],
+    ids=["failed-to-generate", "schema-mismatch"],
+)
+def test_a_structured_output_failure_carries_its_code_and_drops_the_failed_generation_pointer(
+    message: str, expected: str, unified: bool
+) -> None:
+    upstream = _groq_json_validate_failed(message)
+    exc = convert_exception(upstream, "groq") if unified else upstream
+
+    assert classify_provider_error(exc) == (400, expected)
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
+    assert stream_error_code(exc) == "structured_output_failed"
+    assert stream_error_message(exc) == expected
+
+
+def test_a_structured_output_failure_never_relays_the_partial_generation() -> None:
+    exc = _groq_json_validate_failed(_GROQ_JSON_FAILED_MSG)
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert "Fixes a" not in mapping.detail
+
+
+def test_a_400_with_another_provider_code_carries_no_structured_output_code() -> None:
+    exc = _openai_status_error(400, _openai_error(_GROQ_JSON_FAILED_MSG, code="invalid_value"))
+
+    assert classify_provider_error(exc) == (400, _GROQ_JSON_FAILED_MSG)
+    assert provider_error_headers(exc, 400) is None

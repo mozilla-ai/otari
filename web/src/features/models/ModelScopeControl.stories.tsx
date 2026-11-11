@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 import { API_ROOT } from "@/shared/api/client"
+import { orgProviderKey } from "@/tests/fixtures"
 import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
 
 /**
@@ -10,10 +11,11 @@ import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
  * which is why the copy is configurable and the value is `string[] | null`, where
  * `null` means "any" rather than "none".
  *
- * It reads two queries (the caller's model catalog and aliases) to suggest
- * targets, so these stories declare both. `onChange` reports validity
- * alongside the value, so the page can hold its submit while an entry is
- * incomplete.
+ * It reads the caller's model catalog, aliases and, for an owner or admin, the
+ * organization's provider keys to suggest targets, so these stories declare
+ * them.
+ * `onChange` reports validity alongside the value, so the page can hold its
+ * submit while an entry is incomplete.
  */
 const MODELS = {
   object: "list",
@@ -34,6 +36,10 @@ const ALIASES = [
 const API = {
   [`${API_ROOT}/models`]: MODELS,
   [`${API_ROOT}/aliases`]: ALIASES,
+  [`${API_ROOT}/organizations/me/provider-keys`]: {
+    data: [orgProviderKey({ provider: "mistral" })],
+    count: 1,
+  },
 }
 
 const meta = {

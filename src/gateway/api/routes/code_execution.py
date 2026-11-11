@@ -62,7 +62,7 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.ports.code_execution_port import (
     SandboxNotReachableError,
     SandboxSessionGoneError,
@@ -70,6 +70,7 @@ from gateway.ports.code_execution_port import (
 )
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.schemas.tools import CodeExecuteRequest, CodeExecuteResponse, CodeExecutionOutputFile
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.api_keys import names_end_user
 from gateway.services.budgets import (
     BudgetScopeRequest,
@@ -84,7 +85,6 @@ from gateway.services.inference import DeploymentCharge, admit_deployment_paid, 
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.tools import CONTAINER_GONE_DETAIL_TEMPLATE, declare_code_execution, unpriced_tool_detail
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
@@ -276,10 +276,12 @@ async def execute_code(
         funding = await admit_deployment_paid(
             billing,
             deployment_paid=True,
+            billed=None,
             organization_id=organization_id,
             api_key_id=api_key_id,
             user_id=user_id,
             request_id=request_id,
+            tools=frozenset({_PRICING_KEY}),
         )
     except InsufficientFundsError as exc:
         raise await refused_after_reservation(
@@ -387,6 +389,7 @@ async def execute_code(
     if funding is not None:
         await funding.settle(
             cost,
+            tools={_PRICING_KEY: ToolUse(calls=1, amount=cost)},
             model=CODE_EXECUTION_TOOL_NAME,
             description=_PRICING_KEY,
             expects_cost=False,

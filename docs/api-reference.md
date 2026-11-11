@@ -2,9 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](public/openapi.json) and
-[Postman collection](public/otari.postman_collection.json). Those generated
-artifacts are the source of truth for paths, parameters, and schemas.
+[OpenAPI specification](public/openapi.json), the source of truth for paths,
+parameters, and schemas.
 
 ## Base URL
 
@@ -24,12 +23,14 @@ URL in the form it expects:
 | OpenAI SDKs and OpenAI-compatible tools | the base URL plus `/v1`, for example `https://api.otari.ai/api/v1` |
 | Anthropic SDKs and Claude Code | the base URL itself, for example `https://api.otari.ai/api`, since they append `/v1/messages` |
 
-Leaving `/api` off is the most common mistake. On otari.ai, a request to
-`https://api.otari.ai/v1/...` never reaches Otari: a small one answers `404 Not
-Found`, and a large one, such as any Claude Code request, answers `403
-Forbidden`, which Claude Code reports as "Failed to authenticate". Your own
-gateway answers a request under `/v1` with a 404 whose detail names the same
-path under `/api/v1`.
+Leaving `/api` off is the most common mistake:
+
+- On otari.ai, a request to `https://api.otari.ai/v1/...` never reaches Otari.
+  A small one answers `404 Not Found`; a large one, such as any Claude Code
+  request, answers `403 Forbidden`, which Claude Code reports as "Failed to
+  authenticate".
+- Your own gateway answers a request under `/v1` with a 404 whose detail names
+  the same path under `/api/v1`.
 
 An otari.ai key belongs to one region. Sent to the other region's URL, it
 answers `421` naming the host it belongs to.
@@ -56,6 +57,23 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
+An API key reaches:
+
+- the inference routes;
+- `GET /api/v1/usage/requests/{request_id}` for its own requests;
+- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
+- the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
+  `/providers/catalog`, `/tool-settings/guardrails/catalog`,
+  `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
+- for a [service key](end-users.md), the end-user routes.
+
+The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
+and everything under `/api/v1/organizations/me`, takes the master key or a
+dashboard session cookie. A request that carries an API key is never read as a
+session, so those routes answer it `401` with
+`{"detail": "Invalid master key"}`, on otari.ai too (where a tenant has no
+master key and manages that part in the dashboard).
+
 ## Core inference APIs
 
 Otari implements three completion surfaces:
@@ -64,7 +82,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
 - `POST /api/v1/responses`, OpenAI Responses
 
-Otari also serves embeddings, images, audio, files, batches,
+Otari also serves embeddings, images, audio, files, batches, videos,
 moderations, rerank, search, fetch, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
@@ -116,39 +134,62 @@ no way to send them back.
 
 Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
 streaming or not, and so do the responses of the embeddings, rerank, images,
-audio, moderations, decisions and search endpoints. The exception is a request
-rejected before the gateway handles it: a failed authentication (`401`) or a
-body that does not validate (`422`) carries none. The gateway mints it, sends
-it on its own refusals as well, and records it on the request's usage rows, so
+audio, moderations, decisions and search endpoints. A request rejected before
+the gateway handles it (a failed authentication `401`, or a body that does not
+validate, `422`) carries none. The gateway mints the id, sends it on its own
+refusals as well, and records it on the request's usage rows, so
 [`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
-finds the request's cost by it. The gateway also names the
-provider instance and model that served the request, whether a fallback did, and
-how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
-`Otari-Fallback` and `Otari-Response-Duration-Ms`, and splits that duration into
-its own time and the provider's in `Server-Timing`; see
+finds the request's cost by it.
+
+The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
+`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
+request and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-[rerank](#rerank) and embeddings endpoints carry the same two fields
-on their `usage`. On a stream the fields ride the terminal usage event: for Chat
-Completions, the last chunk that reports usage and either has no choices (OpenAI's
-`stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
-and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for
-Messages; and `response.completed` for Responses. The two fields always appear
-together, and an unpriced or unreported request carries neither.
+two fields always appear together, and an unpriced or unreported request
+carries neither.
+
+- The [rerank](#rerank), embeddings and images (`/images/generations` and
+  `/images/edits`) endpoints carry the same two fields on their `usage`. An
+  image model whose provider sends no `usage` (OpenAI's DALL-E models) gets one
+  holding just the two fields; one that sends token counts keeps them beside
+  the fields.
+- On a stream the fields ride the terminal usage event:
+  - Chat Completions: the last chunk that reports usage and either has no
+    choices (OpenAI's `stream_options.include_usage` chunk) or finishes a
+    choice (providers such as Cohere and Gemini report usage on the chunk
+    carrying `finish_reason`);
+  - Messages: `message_delta`;
+  - Responses: `response.completed`.
 
 The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
-`deployment` (a rate stored on this gateway), or `defaults` (the bundled or
-accepted models.dev snapshot).
+`deployment` (a rate stored on this gateway), `defaults` (the bundled or
+accepted models.dev snapshot), or `reported` (the charge the provider stated,
+which settles a completion in place of a rate nobody set; see
+[Configuration](configuration.md#keeping-the-defaults-current)).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
 model, is recorded, debited and reported as `"0.000000"`. The usage row and
 the inline field always agree, and `pricing_source` still says the request was
 priced.
+
+Speech (`/audio/speech`) answers with audio bytes, so its cost rides the
+response headers instead:
+
+| Header | Value |
+| --- | --- |
+| `Otari-Cost-USD`, `Otari-Pricing-Source` | The same two values, under the same rule (both when the request was priced, neither when it was not). |
+| `Otari-Usage-Unit`, `Otari-Usage-Units` | The meter the request was billed on and the count billed: the characters of `input` at a rate priced per character, or one request at a rate priced per request. Absent when nothing was billed, as with a zero rate. |
+
+A speech model with no rate is refused with `402` `pricing_required` under
+`require_pricing`; see
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit) for
+which rates price it.
 
 ### Who runs a built-in tool
 
@@ -174,11 +215,11 @@ apply to its type is left out:
 |---|---|
 | `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
 | `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
-| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, and an MCP call that returned a tool error, are `failed`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code (which never reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
-| `code` | The code a code execution ran. |
+| `code` | The code the model sent a code execution. A `failed` one may never have run. |
 | `stdout`, `stderr`, `exit_code` | What an ended code execution printed and its exit status, absent when the run never reached the sandbox. |
 | `file_ids` | The [Files API](files.md) IDs of the files a code execution produced. |
 | `server`, `name` | The MCP server and the tool the model called on it. |
@@ -264,17 +305,20 @@ the same tags in an `Otari-Tags` header, on the same three surfaces:
 Otari-Tags: agent=bug-fix,run=1234
 ```
 
-The value is comma-separated `key=value` pairs. Whitespace around a pair is
-ignored, everything after a pair's first `=` is its value, and keys and values
-are percent-decoded, so `note=a%2Cb` records `a,b`. A non-ASCII character must
-be percent-encoded as UTF-8 (`caf%C3%A9`), and a header sent more than once is
-read as one comma-joined list. Header tags are the base and the body's tags
-override them on the same key; the bounds apply to the merged set. A raw
-non-ASCII character, a pair without `=`, a `%` that does not start a two-digit
-hex escape, a key given twice, a value that does not decode to UTF-8, or tags
-past the bounds are refused with a 422 whose `detail` locates the error at
-`["header", "Otari-Tags"]`, as a malformed `metadata` is refused. The header is
-never forwarded to the provider.
+The value is comma-separated `key=value` pairs:
+
+- Whitespace around a pair is ignored, and everything after a pair's first `=`
+  is its value.
+- Keys and values are percent-decoded, so `note=a%2Cb` records `a,b`. A
+  non-ASCII character must be percent-encoded as UTF-8 (`caf%C3%A9`).
+- A header sent more than once is read as one comma-joined list.
+- Header tags are the base and the body's tags override them on the same key;
+  the bounds apply to the merged set.
+- A raw non-ASCII character, a pair without `=`, a `%` that does not start a
+  two-digit hex escape, a key given twice, a value that does not decode to
+  UTF-8, or tags past the bounds are refused with a 422 whose `detail` locates
+  the error at `["header", "Otari-Tags"]`.
+- The header is never forwarded to the provider.
 
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
@@ -283,8 +327,9 @@ billed user and is not a tag; the provider gets an
 its place. Responses forwards `metadata`, minus
 `spend_logs_metadata`, because the Responses API stores it.
 
-The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
-their `/api/v1/organizations/me/usage` counterparts) filter by tag with a
+The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, their
+`/api/v1/organizations/me/usage` counterparts, and an API key's own
+`/api/v1/key/usage/summary` and `/series`) filter by tag with a
 repeatable `tag=key:value`. Values for the same key match any of them, and
 different keys must all match. `/summary` also takes `group_by_tag=<key>` and
 returns spend by that tag's values as `by_tag`, with untagged rows under a null
@@ -328,6 +373,21 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
   estimate from the request and the text streamed so far: tokens only, with
   no per-request charge.
+- A stream the provider cut after it started answering, with no usage
+  reported or only the input tokens (an Anthropic stream), is billed the same
+  way under `estimate`: the reported input tokens, or an estimate of the
+  request, plus an estimate of the text already streamed, never a projected
+  full answer. The row stays an `error` with its error message, so it counts
+  in the error totals, and its estimated cost counts in spend. A stream the
+  client abandoned after the provider reported only its input tokens is
+  topped up the same way, so leaving early never costs less than the output
+  already received.
+- When a usage row is written for a stream cut before it completed,
+  `stream_cut_by` records who ended it: `provider` when the upstream dropped
+  it or failed after it started answering, `client` when the caller
+  disconnected. A provider failure before the first chunk is an ordinary
+  error, and a client disconnect that writes no row (above) records nothing.
+  The field is null on any row whose stream was not cut.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -350,6 +410,56 @@ looked up by its `Otari-Request-ID`:
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
+
+### A key's own budget and usage
+
+These routes answer for the API key a request authenticates with, and take no
+parameter that names a user, a key or a workspace. The master key and a dashboard
+session get `401`: neither has a key of its own.
+
+| Route | Returns |
+|---|---|
+| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. |
+| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
+| `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
+
+```json
+{
+  "budgets_enforced": true,
+  "remaining_usd": 0.19,
+  "limits": [
+    {
+      "scope": "user",
+      "provider": null,
+      "resets_at": "2026-12-01T00:00:00Z",
+      "limit_usd": 0.5,
+      "used_usd": 0.31,
+      "remaining_usd": 0.19,
+      "limit_tokens": null,
+      "used_tokens": null,
+      "remaining_tokens": null,
+      "limit_requests": null,
+      "used_requests": null,
+      "remaining_requests": null
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request the key bills to its own user has to pass all of them. A [service key](end-users.md) request that names an end user checks that end user's budget in place of the `scope: user` entry, and that budget is not in this report; the key and member ceilings still apply. |
+| `used_*` | What the budget gate counts: recorded use plus the holds of requests still in flight. A period that has ended reads as the fresh one the next request starts. |
+| `workspace` and `organization` caps | Shared with the rest of the workspace or organization, so `limit_*` and `used_*` are `null` and only `remaining_*` is reported. `remaining_*` still falls as the others spend, so a key that reads it over time can tell how fast the team is spending. |
+| `remaining_usd` (top level) | The fewest dollars any dollar cap on every provider leaves: how much the key can spend before one of those refuses a request with `403 budget_exceeded`. A token cap, a request cap or a cap narrowed to one provider (each listed in `limits`) can refuse sooner. `null` when no dollar cap on every provider applies. |
+| `budgets_enforced` | `false`, with no limits, when the key is budget-exempt or the deployment runs with `budget_strategy: disabled`; `true` otherwise, even when no cap applies. |
+
+To read what each kind of request cost, tag requests with
+[`metadata`](#request-tags) and group the summary by that tag:
+
+```
+GET /api/v1/key/usage/summary?group_by_tag=role&dimensions=none
+```
 
 ### Retrying safely
 
@@ -429,7 +539,90 @@ in `usage` what the gateway metered and what it charged:
   the request was not priced.
 
 How a rerank model is priced, per search unit or per input token, is described in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
+
+## Videos
+
+A video takes minutes to render, so the Videos API is asynchronous, in the
+shape of OpenAI's. `POST /api/v1/videos` starts a job and returns it at once,
+`GET /api/v1/videos/{video_id}` reads its status from the provider that runs
+it, `GET /api/v1/videos/{video_id}/content` serves the finished video's bytes
+in the provider's media type, and `GET /api/v1/videos` lists the caller's own
+jobs from Otari's records, newest first. There is no delete and no remix.
+
+```json
+{"model": "gemini:veo-3.0-generate-001", "prompt": "a cat on a skateboard", "seconds": 8}
+```
+
+The request takes `model`, `prompt` and the optional `seconds`, `size`,
+`resolution`, `aspect_ratio`, `seed`, `negative_prompt`, `reference_images`,
+`reference_audios`, `first_frame` and `last_frame`, which reach the provider
+as any-llm names them. `user` is Otari's own and is never forwarded: it names
+the billed user under the rules of [The `user` field](#the-user-field). The
+job comes back as:
+
+```json
+{
+  "id": "…",
+  "object": "video",
+  "model": "veo-3.0-generate-001",
+  "provider": "gemini",
+  "status": "queued",
+  "created_at": 1700000000,
+  "completed_at": null,
+  "progress": null,
+  "seconds": null,
+  "size": null,
+  "error": null
+}
+```
+
+- `status` is `queued`, `in_progress`, `completed` or `failed`. `error` carries
+  the provider's message and code when the job failed.
+- `seconds` is the length the provider reports, once it does.
+- `provider` is the instance that runs the job, which every later call on the
+  job uses.
+
+How a video is billed:
+
+- The model must have a per-second video price, from the catalog or a `rates`
+  block set through the pricing API
+  ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)).
+  A model with none is refused with 402 and the `pricing_required` error code,
+  whatever `require_pricing` says: a video is never started without a
+  per-second price.
+- Starting a job reserves the length asked for at that price, or 8 seconds
+  when the request names none, so a caller over budget is refused before the
+  job starts. The hold is released once the provider accepts the job, and the
+  start writes a usage row with no cost under the `/v1/videos` label.
+- A provider that renders inside the start call, as DeepInfra does, returns
+  the job already `completed`: it is billed then, and what it reported is
+  kept on Otari's record, so a later read of the job or its content answers
+  from the record without asking the provider.
+- The first `GET` that finds the job `completed`, on the job or on its content,
+  prices the seconds the provider reports, else the seconds asked for, and
+  writes one usage row under the `/v1/videos/completed` label with the cost,
+  its `seconds` meter and the charge line. The cost folds into the owner's
+  spend in dollars, except for a job started on a key exempt from budgets,
+  whose row carries the cost and whose spend stays as it was.
+- A job whose length neither the provider nor the request gives is billed
+  what the provider charged for it, where the provider says (DeepInfra does).
+  That row has the cost and no meter, charge line or pricing source, because
+  no rate priced it. Where the provider gives no charge either, the job is
+  billed 8 seconds, the length the start reserved, at the per-second price.
+- A completed job whose model has lost its per-second price stays
+  unbilled, and the first read after the price is back bills it. Later reads
+  bill nothing, a failed job is never billed, and a job nobody reads is never
+  billed.
+- A job the gateway could not record after the provider accepted it answers
+  500, and the server log names the provider's job id.
+- A key reads only the jobs its user started in its workspace. Another user's
+  job, and an unknown id, are 404. The master key reads any job, and is the
+  only key that reads a job whose workspace was deleted since.
+
+Which providers serve video is any-llm's to say: Gemini, Together and DeepInfra
+in the release Otari pins. A provider without it is refused with 422 before it
+is called.
 
 ## Search
 
@@ -442,18 +635,25 @@ The request and the response follow LiteLLM's `/v1/search`, so a client written
 for it works against Otari with its base URL changed. `include_raw` and
 `provider_options` are Otari's own.
 
-**Which tool.** The path names the tool. On `POST /api/v1/search`, the body's
-`search_tool_name` does, else the deployment's `web_search_default_tool`, else
-the only configured tool. A call that names no tool runs on the workspace's
-[organization search key](tools.md#organization-search-keys) when it has a usable
-one; a named call runs on that tool with its own key. Either way the tool decides
-the access check, the `rate_limits` rules, the timeout and the usage row's model
-and provider. The access check reads the key's `allowed_tools`, else its user's,
-for the tool's name or `*`. With neither set, it follows the key's model access,
-or its user's when the key has none: unrestricted model access runs every search
-tool, and restricted model access runs only a tool named by its deprecated
-`<provider>:<tool>` entry in `allowed_models`
-([Model and search tool access](api-keys.md#model-and-search-tool-access)).
+**Which tool.**
+
+- The path names the tool. On `POST /api/v1/search`, the body's
+  `search_tool_name` does, else the deployment's `web_search_default_tool`,
+  else the only configured tool.
+- A call that names no tool runs on the workspace's
+  [organization search key](tools.md#organization-search-keys) when it has a
+  usable one; a named call runs on that tool with its own key. Either way the
+  tool decides the access check, the `rate_limits` rules, the timeout and the
+  usage row's model and provider.
+- Where there is no tool to pick (none configured, or several and no default),
+  a call that names none still runs on the organization key, as the tool
+  `web_search` on the key's provider, with a 30 second timeout.
+- The access check reads the key's `allowed_tools`, else its user's, for the
+  tool's name or `*`. With neither set, it follows the key's model access, or
+  its user's when the key has none: unrestricted model access runs every search
+  tool, and restricted model access runs only a tool named by its deprecated
+  `<provider>:<tool>` entry in `allowed_models`
+  ([Model and search tool access](api-keys.md#model-and-search-tool-access)).
 
 **Request.**
 
@@ -470,8 +670,7 @@ tool, and restricted model access runs only a tool named by its deprecated
 | `user` | string | Who the search is billed to; see below. |
 
 Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
-`false` and `{}` pass.
+400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
 
 **Response.**
 
@@ -515,13 +714,13 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | Situation | Status | `Otari-Error-Code` |
 |---|---|---|
 | No credentials, or a key that is not valid | 401 | |
-| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool named is not configured, or the call names none and there is no tool to pick (none configured, or several with no default) nor an organization search key to stand in | 400 | |
 | The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
 | A `provider_options` key the provider does not take from a request | 400 | |
 | `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
-| The workspace turned web search off | 403 | |
+| The workspace turned web search off | 403 | `web_access_disabled` |
 | The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
@@ -532,10 +731,10 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | The provider failed the search, or could not be reached | 502 | |
 | The workspace's stored web-access policy cannot be read | 503 | |
 
-Every provider failure is a 502 whose `detail` names no upstream detail, whatever
-the provider answered, unlike the completion routes, which classify a provider's
-failure. The 502 carries what is safe to show of the failure as headers instead,
-never a body, a URL or the query:
+Every provider failure is a 502 whose `detail` names no upstream detail (the
+completion routes, by contrast, classify a provider's failure). The 502 carries
+what is safe to show of the failure as headers, never a body, a URL or the
+query:
 
 | Header | Value |
 |---|---|
@@ -558,9 +757,7 @@ document describes the supported providers, filters, and management schemas.
 `POST /api/v1/fetch` and `POST /api/v1/fetch/{fetch_tool_name}` read one page
 through a configured fetch tool, as [Search](#search) runs a search tool. This is
 separate from `otari_web_fetch`, which lets a model fetch pages during a
-completion; both are described in [Built-in tools](tools.md#direct-fetch). A
-client that runs its own agent loop reads pages this way, with the gateway's URL
-checks, prices and budgets, without a completion for each page.
+completion; both are described in [Built-in tools](tools.md#direct-fetch).
 
 `web_fetch_enabled` governs this endpoint as it governs the `otari_web_fetch`
 tool, read on every request: while it is off, a call is refused with `400`.
@@ -644,7 +841,7 @@ A fetch the workspace's organization fetch key served is priced under
 | A `provider_options` key the provider does not take from a request | 400 | |
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as a `max_chars` below 1 | 422 | `invalid_request` |
-| The workspace turned web access off | 403 | |
+| The workspace turned web access off | 403 | `web_access_disabled` |
 | The workspace's domain lists disallow the URL, asked for or found after a redirect | 403 | |
 | The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
@@ -677,7 +874,7 @@ output, with no model involved. It is admitted, priced and budgeted as an
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. |
+| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. Code that is empty or only whitespace is a `422`. |
 | `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
 | `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
 | `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
@@ -841,23 +1038,24 @@ parameter. Credentials, URLs, account identifiers, and reflected payloads are
 removed.
 
 The diagnostic is the provider's own sentence, taken from the error body it
-sent, and not the provider SDK's rendering of that error. An OpenAI 400 for a
+sent, not the provider SDK's rendering of that error. An OpenAI 400 for a
 model that only accepts its default temperature answers:
 
 ```json
 {"detail": "Unsupported value: 'temperature' does not support 0.5 with this model. Only the default (1) value is supported."}
 ```
 
-rather than a detail that begins `Error code: 400 - {'error': {...}}`. The same
-holds for Anthropic, Cohere and the other providers whose SDKs keep the parsed
-body: only the body's message can reach the caller, never a status prefix, the
-body's other fields, or the response headers. When that body has no message, or
-its message is redacted away, the caller gets the fixed detail for the status
-instead (for a 400,
-`The provider rejected the request as invalid (check the model name and parameters)`).
-The provider's `param` and `code` fields are not copied into the response. When
-the request named a model alias, a provider message that names the alias's
-target names the alias instead.
+rather than a detail that begins `Error code: 400 - {'error': {...}}`.
+
+- The same holds for Anthropic, Cohere and the other providers whose SDKs keep
+  the parsed body: only the body's message can reach the caller, never a status
+  prefix, the body's other fields, or the response headers.
+- When that body has no message, or its message is redacted away, the caller
+  gets the fixed detail for the status instead (for a 400,
+  `The provider rejected the request as invalid (check the model name and parameters)`).
+- The provider's `param` and `code` fields are not copied into the response.
+- When the request named a model alias, a provider message that names the
+  alias's target names the alias instead.
 
 The completion routes and the pass-through routes (embeddings, images, audio,
 moderations, rerank) classify a provider failure the same way:
@@ -866,8 +1064,10 @@ moderations, rerank) classify a provider failure the same way:
 |---|---|---|---|---|
 | Rejects the request (its own 400 or 422) | 400 | | The provider's sentence | No |
 | OpenAI's 403 with error type `invalid_request_error` (logprobs requested from a model that does not return them, an embedding model sent to chat) | 400 | | OpenAI's sentence | No |
+| The model's output did not match the requested JSON schema (Groq's `json_validate_failed`) | 400 | `structured_output_failed` | The provider's sentence, without its pointer to `failed_generation`, which Otari does not relay | Yes: the failure is stochastic, and the same request usually succeeds |
 | Unknown model | 404 | | | No |
 | The provider has no such operation for the model (rerank on a chat model), or its SDK has no parameter for a field the caller sent | 400 | | Names the operation or the field | No |
+| Refuses the request for its size (its own 413, such as a prompt over a tokens-per-minute limit) | 413 | `request_too_large` | The provider's sentence | No |
 | Rate limit | 429 | `upstream_rate_limited`; the provider's `Retry-After` when it sent one | | After waiting |
 | Refuses the gateway's own credential (its 401, or a 403 that is not a rejection of the request) | 424 | `provider_credential_rejected` | | No |
 | Timeout | 504 | | | Yes |
@@ -887,18 +1087,19 @@ were already billed. Messages and Responses are not checked, since an empty
 
 A 5xx that resending the same request cannot fix also carries
 `x-should-retry: false`, the header the OpenAI and Anthropic SDKs read before
-their own retry rule, so such a client stops after one attempt instead of
-retrying with backoff. Two failures qualify: a provider account out of credit
-or over its billing limit, and a fault in the code making the provider call,
-such as a provider adapter that cannot convert the request, which raises before
-anything is sent and has no upstream status. A timeout, a dropped connection, a
-provider's own 5xx or 429, and any failure Otari cannot place carry no such
-header, so a client retries those. A streamed request that
-fails before its first chunk carries it too, since that is answered with an
-ordinary HTTP error (see [Error codes](#error-codes)). A routing policy still
-moves on to its next candidate on either failure: the header describes only the
-answer the caller receives, and a policy that tried several candidates and saw
-every one fail answers without it.
+their own retry rule, so such a client stops after one attempt:
+
+- Two failures qualify: a provider account out of credit or over its billing
+  limit, and a fault in the code making the provider call (such as a provider
+  adapter that cannot convert the request), which raises before anything is
+  sent.
+- A timeout, a dropped connection, a provider's own 5xx or 429, and any
+  failure Otari cannot place carry no such header.
+- A streamed request that fails before its first chunk carries it too, since
+  that is answered with an ordinary HTTP error (see [Error codes](#error-codes)).
+- A routing policy still moves on to its next candidate on either failure. A
+  policy that tried several candidates and saw every one fail answers without
+  the header.
 
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
@@ -918,12 +1119,16 @@ read: `{"type": "error", "error": {"type": "rate_limit_error", "message": "..."}
 A body that fails validation there is a 400 `invalid_request_error`, as
 Anthropic answers it, whose message names each failing field.
 
+A field the table lists as "in the body" sits beside `code` in either shape,
+at the top level of the body.
+
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one |
-| `user_blocked` | 403 | The billed user is blocked | |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](end-users.md#how-end-users-are-billed-and-capped) |
+| `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
+| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |
-| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
@@ -931,7 +1136,10 @@ Anthropic answers it, whose message names each failing field.
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](configuration.md#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `request_too_large` | 413 | The provider refused the request for its size, such as a prompt over a tokens-per-minute limit | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
+| `unsupported_parameter` | 400 | The provider cannot express a parameter the request carries for the model, such as `response_format` on a model with no JSON mode. Sent only when Otari's provider library refuses the parameter and names it; a provider's own 400 for it carries the provider's message and no code. A routing policy moves on to its next candidate first, and answers with this code, `detail` naming the parameters, when every candidate refused one | |
+| `structured_output_failed` | 400 | The model failed to produce output matching the request's JSON schema (`response_format` or `text.format`), which the provider reported with its own code (Groq's `json_validate_failed`). Unlike other 400s, resending the same request may succeed, so a client can retry it or send it to another model. The partial output the provider returns is not relayed. A routing policy moves on to its next candidate first, and answers with this code when every candidate failed this way | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
@@ -943,14 +1151,14 @@ Anthropic answers it, whose message names each failing field.
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
-| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
+| `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions, and Responses translated from a chat completion) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](budgets.md#what-a-budget-limits). Its `Retry-After` is
+cost of $Y`); see [Refusals](budget-enforcement.md#refusals). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](budgets.md#refusals-and-retry-after).
+[`Retry-After`](budget-enforcement.md#retry-after).
 
 ### Provider failures
 
@@ -974,57 +1182,65 @@ already carries `upstream_rate_limited`.
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
-`502` for a provider outage. Otari holds the response until the provider's first
-chunk to make that possible. The gateway holds it for at most
-`streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
-and commits the `200` as soon as the stream opens). For a stream running the
-gateway's tools, opening their backends (connecting to MCP servers, leasing a
-sandbox) counts toward that window too. A stream running the
-gateway's tools (MCP servers, sandbox, web search) locks onto its candidate
-once the first round of that loop ends instead, which can happen before
-anything is sent: a failure past that point cannot fall over either, even
-though no output has reached the client yet. A provider slower than that to start still streams, and a
-failure after that point is reported as below.
+`502` for a provider outage. To make that possible, Otari holds the response
+until the provider's first chunk, for at most `streaming_first_chunk_hold_ms`
+(15 seconds by default; `0` turns the hold off and commits the `200` as soon as
+the stream opens).
 
-A failure after a stream has started arrives as an error event, which carries
-the code as `error.code` on Chat Completions and Responses:
+- For a stream running the gateway's tools, opening their backends (connecting
+  to MCP servers, leasing a sandbox) counts toward that window.
+- Such a stream (MCP servers, sandbox, web search) locks onto its candidate
+  once the first round of the tool loop ends, which can happen before anything
+  is sent; a failure past that point cannot fall over either.
+- A provider slower than the window to start still streams, and a failure
+  after that point is reported as below.
+
+A failure after a stream has started arrives as an error event; the `200`
+status line has already gone out. On Chat Completions and Responses it carries
+the code as `error.code`:
 `{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
-The status line has already gone out as `200` by then, so the event is the only
-place the failure is named. It carries the code from the table above when one
-applies (`upstream_rate_limited`, `context_length_exceeded`),
-`provider_stream_interrupted` when the provider's stream ended before it
-finished, otherwise `provider_error` when the provider failed the stream. On
-Chat Completions and Responses, a failure on the provider's own side also
-carries the [provider failure](#provider-failures)'s fields as
-`error.provider_failure`: `{"provider": "exa", "status": 503, "tag":
-"SERVICE_OVERLOADED", "retryable": true}`, with `status` `null` when the provider
-gave none. On
-Chat Completions a stream is finished once a choice reports its
-`finish_reason`; one that closes without any, even after sending content, ends
-in this error event rather than in a bare `data: [DONE]`. On Responses from a
-provider with its own Responses API, a stream is finished once the provider sends
-`response.completed`, `response.incomplete` or `response.failed`, and one that
-closes before them ends the same way. A Responses stream Otari
-[translates from a chat completion](#responses-on-providers-without-a-responses-api)
-always ends in `response.completed`, or in `response.incomplete` when the
-provider stopped for length or a content filter, so one the provider cut short
-is not caught and closes as a success. The error event's message is the `detail` the same failure would carry as an HTTP
-error where that names a cause (a rejected parameter, the provider's own
-explanation of a rejected request, redacted as described above, or what
-happened upstream, such as the provider's error status), and a fixed
-`An error occurred during streaming` otherwise. An event with no `code` is a
-failure inside the gateway. Either way, the gateway records the
-request's usage row with status `error`.
-On Messages, a stream the provider ends without `message_stop`, including one
-that sent no events at all, also ends in an `api_error` event rather than
-closing as if it had succeeded, and the request is settled as failed. A Messages
-error event's `error.type` says whether a retry makes sense:
-`overloaded_error` and `rate_limit_error` when the provider failed the stream
-that way, `timeout_error` when it stopped responding (a read timeout, such as
-Bedrock's, or an upstream `504`), and `api_error` otherwise.
+
+- **Code**: the code from the table above when one applies
+  (`upstream_rate_limited`, `context_length_exceeded`),
+  `provider_stream_interrupted` when the provider's stream ended before it
+  finished, otherwise `provider_error` when the provider failed the stream. An
+  event with no `code` is a failure inside the gateway.
+- **Provider failure fields**: on Chat Completions and Responses, a failure on
+  the provider's own side also carries the
+  [provider failure](#provider-failures)'s fields as `error.provider_failure`:
+  `{"provider": "exa", "status": 503, "tag": "SERVICE_OVERLOADED", "retryable": true}`,
+  with `status` `null` when the provider gave none.
+- **Message**: the `detail` the same failure would carry as an HTTP error where
+  that names a cause (a rejected parameter, the provider's own explanation of a
+  rejected request, redacted as described above, or what happened upstream,
+  such as the provider's error status), and a fixed
+  `An error occurred during streaming` otherwise.
+- The gateway records the request's usage row with status `error`.
+
+When a stream counts as finished:
+
+- **Chat Completions**: once a choice reports its `finish_reason`. One that
+  closes without any, even after sending content, ends in the error event
+  rather than in a bare `data: [DONE]`.
+- **Responses, from a provider with its own Responses API**: once the provider
+  sends `response.completed`, `response.incomplete` or `response.failed`. One
+  that closes before them ends in the error event.
+- **Responses
+  [translated from a chat completion](#responses-on-providers-without-a-responses-api)**:
+  once a chunk reports its `finish_reason`, ending in `response.completed`, or
+  `response.incomplete` when the provider stopped for length or a content
+  filter. One that closes without any ends in the error event.
+- **Messages**: a stream the provider ends without `message_stop`, including
+  one that sent no events at all, ends in an `api_error` event, and the request
+  is settled as failed. A Messages error event's `error.type` says whether a
+  retry makes sense: `overloaded_error` and `rate_limit_error` when the
+  provider failed the stream that way, `timeout_error` when it stopped
+  responding (a read timeout, such as Bedrock's, or an upstream `504`), and
+  `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
+`GET /api/v1/mcp/servers` lists the enabled stored servers the key can reach,
 `GET /api/v1/mcp/servers/{mcp_server_id}/tools` lists the tools a stored MCP
 server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
 runs one exact caller-authorized call and returns the server's native MCP
@@ -1032,3 +1248,31 @@ result. Never retry `POST /api/v1/mcp/execute` automatically, including from a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
 already have run. The request shapes, the error and execution-state contract,
 and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
+
+## Agent traces
+
+The sessions [Sessions](sessions.md) describes are read on these routes.
+
+| Endpoint | Who |
+| --- | --- |
+| `GET /api/v1/organizations/me/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to; also the master key in the `Otari-Key` header, as the deployment operator in their active organization |
+| `GET /api/v1/traces`, and the same four | the deployment operator, every workspace of their active organization |
+
+`/series` counts the sessions active in each bucket of a window: a session is
+active from its start to its last activity, so a long one counts in every bucket
+it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+The list, count and series reads take the window the same way: `start` and
+`end` keep the sessions active between them (last active at or after `start`,
+started before `end`), so a session still running past `end` is listed in the
+window it was counted in.
+
+The list, count and series reads narrow to one workspace with `workspace_id`,
+inside the caller's scope and never beyond it. `q` matches any part of a session's trace id, name,
+agent or user, in any case, inside the same scope. A trace is keyed by its
+workspace and its id, so a detail read takes the `workspace_id` its list entry
+names; without it, an id in more than one of the caller's workspaces answers 409
+rather than a guess.
+`/requests/{request_id}` answers the session a gateway request was traced into,
+by the `Otari-Request-ID` it was sent (a usage row's `request_group_id`), and 404
+where the scope holds no trace of it. A trace outside the caller's scope answers
+404.

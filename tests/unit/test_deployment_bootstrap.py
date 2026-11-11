@@ -89,7 +89,8 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "passkeys_enabled": True,
         "passkeys_ready": False,
         "oauth_providers": [],
-        "feedback_enabled": True,
+        "feedback_enabled": False,
+        "platform_connect": True,
         "federation_member_rules": False,
         "mail_ready": False,
         "public_catalog": False,
@@ -216,6 +217,7 @@ def test_member_federation_rules_are_published_when_the_setting_is_on(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     on = _gateway_config(tmp_path)
     on.federation_member_rules = True
+    on.federation_audiences = ["https://otari.example.com"]
 
     with TestClient(create_app(on)) as client:
         assert client.get(f"{API_ROOT}/bootstrap").json()["federation_member_rules"] is True

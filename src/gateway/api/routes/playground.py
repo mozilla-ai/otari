@@ -248,6 +248,7 @@ async def read_playground_tools(
         offer=offer,
         code_execution_policies=code_execution_policies,
         workspace_id=resolved,
+        user_id=str(identity.id),
     )
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),

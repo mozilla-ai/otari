@@ -151,6 +151,51 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("draws no notice band on a session with nothing to say about its content", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await within(peek).findByRole("button", { name: /^Tool, Bash/ })
+
+    // The band carries the notice and draws a rule under it, so it belongs to
+    // whatever has something to say. Wrapped by the peek instead, it is drawn
+    // for every session whether the notice renders anything or not.
+    expect(
+      within(peek).queryByRole("region", {
+        name: "About this session's content",
+      }),
+    ).toBeNull()
+  })
+
+  it("keeps the session's privacy notice out of the pane a phone hides", async () => {
+    const privateDetail = traceDetail({
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: {}, content_private: true }
+          : span,
+      ),
+    })
+    mockApi({ traces: [traceSummary()], traceDetail: privateDetail })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const control = await within(peek).findByRole("button", {
+      name: "Open by break-glass",
+    })
+
+    // Opened from the list no span is picked, so below md the detail pane is
+    // hidden. The notice is the session's, not the picked span's, so neither it
+    // nor the controls in it may sit inside that pane.
+    expect(control.closest(".hidden")).toBeNull()
+    // Capped and scrolled, so a long share list cannot take the panes' height.
+    expect(
+      within(peek).getByRole("region", {
+        name: "About this session's content",
+      }),
+    ).toHaveClass("overflow-y-auto")
+  })
+
   it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
     const user = userEvent.setup()
     const privateDetail = traceDetail({
@@ -222,6 +267,182 @@ describe("SessionsPage", () => {
       await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
     ).toBeInTheDocument()
     expect(within(peek).getAllByText("gpt-5").length).toBeGreaterThan(0)
+  })
+
+  it("says why a span has no input, and links how to keep it where it could be kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // Exported by Claude Code, so its command could have been kept.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, origin: "otlp" as const, operation: "tool" }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a model request sent or got back.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("link", { name: /How to keep it/ }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    await user.click(
+      within(peek).getByRole("button", { name: /Request \(req-1\)/ }),
+    )
+
+    expect(
+      within(peek).getByText("Its prompt is not shown."),
+    ).toBeInTheDocument()
+    expect(within(peek).queryByText("No input or output")).toBeNull()
+  })
+
+  it("says why an explained span has no input, beside why it was blocked", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? {
+                ...span,
+                origin: "otlp" as const,
+                operation: "tool",
+                outcome: "blocked" as const,
+              }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a model request sent or got back.",
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Blocked before it ran."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("says why a tool shows no input beside the output it kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // A routed call whose output was kept and whose arguments were not.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { "tool.output": "3 files changed" } }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=call-toolu_1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("Output")).toBeInTheDocument()
+    expect(within(peek).getAllByText(/3 files changed/).length).toBeGreaterThan(
+      0,
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    await user.click(within(peek).getByRole("button", { name: /\(call-too\)/ }))
+
+    expect(
+      within(peek).getByText("Its arguments are not shown."),
+    ).toBeInTheDocument()
+  })
+
+  it("says what a gate checked is not shown, and links how to keep it", async () => {
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(/What the gate checked is not shown\./),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/sessions.md#keep-what-a-session-was-about",
+    )
   })
 
   it("reads an opened session in the workspace its list entry names", async () => {
@@ -324,7 +545,7 @@ describe("SessionsPage", () => {
     expect(await screen.findByText("Cached")).toBeInTheDocument()
     expect(screen.getByText("86.9%")).toBeInTheDocument()
     await userEvent.click(
-      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+      within(peek).getAllByRole("button", { name: /^Model request, gpt-5/ })[0],
     )
     await userEvent.click(
       await within(peek).findByRole("button", { name: "Attributes" }),
@@ -423,7 +644,7 @@ describe("SessionsPage", () => {
       ),
     ).toBeInTheDocument()
     await userEvent.click(
-      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+      within(peek).getAllByRole("button", { name: /^Model request, gpt-5/ })[0],
     )
     expect(
       await within(peek).findByRole("button", { name: "Attributes" }),
@@ -676,7 +897,7 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("says what a judge gate's model calls used and cost", async () => {
+  it("says what a judge gate's model requests used and cost", async () => {
     const detail = traceDetail()
     mockApi({
       traces: [traceSummary()],
@@ -714,7 +935,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /^Judge gates made 1 model call, for \$0\.01\d*\.$/,
+        /^Judge gates made 1 model request, for \$0\.01\d*\.$/,
       ),
     ).toBeInTheDocument()
     await userEvent.click(
@@ -723,7 +944,9 @@ describe("SessionsPage", () => {
     await userEvent.click(
       await within(peek).findByRole("button", { name: /^writing-style/ }),
     )
-    expect(await within(peek).findByText("Its model calls")).toBeInTheDocument()
+    expect(
+      await within(peek).findByText("Its model requests"),
+    ).toBeInTheDocument()
     expect(
       within(peek).getByText(
         "6,693 input (6,684 written to the cache), 111 output",
@@ -774,6 +997,46 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$0.02")
+  })
+
+  it("heads an open session with the total At a glance gives it", async () => {
+    // The spans on screen sum to $0.0123; the session recorded $1.9711.
+    const summary = traceSummary({ cost: 1.9711 })
+    mockApi({
+      traces: [summary],
+      traceDetail: traceDetail({
+        summary,
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "llm-1" ? { ...span, cost: 0.0123 } : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await costTotal(peek)).toBe("$1.97")
+    const heading = within(peek).getByRole("heading", { name: "claude-code" })
+    const header = heading.parentElement?.parentElement as HTMLElement
+    expect(within(header).getByText("$1.97")).toBeInTheDocument()
+    // The session's own row in the tree says the same, where a span's row
+    // keeps the four places of its own cost.
+    const tree = within(peek).getByRole("list", { name: "Spans" })
+    const [session] = within(tree).getAllByRole("button")
+    expect(within(session).getByText("$1.97")).toBeInTheDocument()
+    expect(within(tree).getByText("$0.0123")).toBeInTheDocument()
+  })
+
+  it("reads an open session's totals from its own read, not the list's snapshot", async () => {
+    mockApi({
+      traces: [traceSummary({ cost: 0.5 })],
+      traceDetail: traceDetail({ summary: traceSummary({ cost: 2 }) }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await costTotal(peek)).toBe("$2.00")
   })
 
   it("says what a gate is and what its check read when it is opened", async () => {
@@ -922,7 +1185,7 @@ describe("SessionsPage", () => {
       ),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByText("1 could not decide, held"),
+      within(peek).getByText("1 could not decide, blocked"),
     ).toBeInTheDocument()
   })
 
@@ -998,6 +1261,32 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("says a withheld span is private in the Log tab too, not that it has no input", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: {}, content_private: true }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    await user.click(
+      await within(peek).findByRole("button", { name: "Log view" }),
+    )
+    await user.click(await within(peek).findByRole("button", { name: /Bash/ }))
+
+    expect(
+      await within(peek).findByText(/^Private to the person/),
+    ).toBeInTheDocument()
+    expect(within(peek).queryByText("No input or output")).toBeNull()
+  })
+
   it("has no Gates tab for a session no hook reported to", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
@@ -1005,7 +1294,7 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
 
     expect(
-      await within(peek).findByRole("button", { name: "Log View" }),
+      await within(peek).findByRole("button", { name: "Log view" }),
     ).toBeInTheDocument()
     expect(
       within(peek).queryByRole("button", { name: /^Gates/ }),
@@ -1406,7 +1695,7 @@ describe("SessionsPage", () => {
 
       expect(search).toHaveValue("")
       expect(
-        within(peek).getByRole("list", { name: "Observations" }),
+        within(peek).getByRole("list", { name: "Spans" }),
       ).toBeInTheDocument()
       expect(
         screen.getByRole("complementary", { name: "Trace claude-code" }),
@@ -1422,7 +1711,7 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession(user)
-    const tree = await within(peek).findByRole("list", { name: "Observations" })
+    const tree = await within(peek).findByRole("list", { name: "Spans" })
     expect(
       within(tree).getByRole("button", { name: /^Tool, Bash/ }),
     ).toBeInTheDocument()
@@ -1446,7 +1735,7 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession(user)
-    const tree = await within(peek).findByRole("list", { name: "Observations" })
+    const tree = await within(peek).findByRole("list", { name: "Spans" })
     const [request] = within(tree).getAllByRole("button", {
       name: /^Span, Request/,
     })
@@ -1473,8 +1762,9 @@ describe("SessionsPage", () => {
     )
 
     const timeline = within(peek).getByRole("list", { name: "Timeline" })
+    // The duration the tree gives the same session, not seconds past a minute.
     expect(within(timeline).getAllByRole("button")[0]).toHaveAccessibleName(
-      /^Trace, claude-code,/,
+      "Trace, claude-code, 1m 10s",
     )
     const zoomOut = within(peek).getByRole("button", { name: "Zoom out" })
     expect(zoomOut).toBeDisabled()
@@ -1482,6 +1772,117 @@ describe("SessionsPage", () => {
     await user.click(within(peek).getByRole("button", { name: "Zoom in" }))
 
     expect(zoomOut).toBeEnabled()
+  })
+
+  it("offers Formatted and Raw only where stored content reads differently in each", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { "tool.output": '{"files": 3}' } }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    const format = () =>
+      within(peek).queryByRole("radiogroup", { name: "Format" })
+
+    // A model request keeps no content, so there is nothing to reformat.
+    const [call] = await within(peek).findAllByRole("button", {
+      name: /^Model request, gpt-5/,
+    })
+    await user.click(call)
+    expect(format()).not.toBeInTheDocument()
+
+    // What the tool returned is JSON kept as a string.
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+    expect(format()).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Attributes" }))
+    expect(format()).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    expect(format()).toBeInTheDocument()
+  })
+
+  it("offers no switch for content that reads the same either way", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: { command: "pytest -x" } }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+
+    await user.click(
+      await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
+    )
+    expect(within(peek).getByText('"pytest -x"')).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("radiogroup", { name: "Format" }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Log view" }))
+    expect(
+      within(peek).queryByRole("radiogroup", { name: "Format" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says when the log's search matches no span", async () => {
+    const user = userEvent.setup()
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    await user.click(
+      await within(peek).findByRole("button", { name: "Log view" }),
+    )
+    await user.type(
+      within(peek).getByRole("searchbox", { name: "Search spans" }),
+      "zzzz",
+    )
+
+    expect(
+      within(peek).getByText("No spans match this search."),
+    ).toBeInTheDocument()
+  })
+
+  it("names a model request's model once, and a session's models by count", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "llm-2" ? { ...span, model: "claude-opus" } : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+
+    expect(
+      await within(peek).findByRole("button", { name: "2 models" }),
+    ).toBeInTheDocument()
+
+    await user.click(
+      within(peek).getByRole("button", { name: /^Model request, gpt-5/ }),
+    )
+    const heading = within(peek).getByRole("heading", { name: "gpt-5" })
+    const header = heading.parentElement?.parentElement as HTMLElement
+    expect(within(header).getAllByText("gpt-5")).toHaveLength(1)
   })
 
   it("says when no span matches the search", async () => {

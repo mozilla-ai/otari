@@ -36,9 +36,13 @@ import {
   catalogRequest,
   catalogUrlChanges,
   EMPTY_FILTERS,
+  listedPrices,
+  listedRate,
   MODALITIES,
   MODALITY_LABELS,
+  MODEL_TYPE_LABELS,
   makerKeyOf,
+  modelTypeOptions,
   PRICE_OPTIONS,
   PRICING_OPTIONS,
   providerOptions,
@@ -59,7 +63,6 @@ import {
 import {
   formatContext,
   formatNumber,
-  formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import type { DashboardSearch } from "@/shared/helpers/search"
@@ -108,10 +111,6 @@ function SearchInput({
       className={`w-full min-w-0 ${INPUT_CLASS}`}
     />
   )
-}
-
-function fromRate(value: number | null | undefined): string {
-  return value == null ? "—" : `from ${formatRate(value)}`
 }
 
 /** A group in the rail: a heading that folds its choices away. */
@@ -211,8 +210,28 @@ function FilterRail({
   const vendorsMarked = anyMakerMark(
     vendors.flatMap((option) => (option.markKey ? [option.markKey] : [])),
   )
+  const types = modelTypeOptions(facets?.types ?? [])
   return (
     <div className="flex flex-col">
+      {types.length > 0 ? (
+        <FilterGroup
+          label="Model kind"
+          count={filters.types.length}
+          defaultOpen
+        >
+          {types.map((option) => (
+            <Checkbox
+              key={option.value}
+              isSelected={filters.types.includes(option.value)}
+              onChange={(isOn) =>
+                set("types", toggle(filters.types, option.value, isOn))
+              }
+            >
+              {option.label}
+            </Checkbox>
+          ))}
+        </FilterGroup>
+      ) : null}
       <FilterGroup
         label="Input modalities"
         count={filters.inputModalities.length}
@@ -385,11 +404,24 @@ function hasZeroDataRetention(model: CatalogModelSummary): boolean {
   return (model.zero_data_retention_providers?.length ?? 0) > 0
 }
 
-/** A separator between the facts on a card's last line. */
-function Sep() {
+/**
+ * One fact on a card's last line, carrying the separator in front of it.
+ *
+ * The line wraps on a phone. Each fact owns the rule before it, the row is
+ * pulled left by one separator's width, and the paragraph clips, so a fact
+ * that opens a line has its separator cut off at the edge and every other one
+ * keeps it in the gap.
+ */
+function Fact({ children }: { children: ReactNode }) {
   return (
-    <span aria-hidden="true" className="text-subtle">
-      |
+    <span className="flex items-center">
+      <span
+        aria-hidden="true"
+        className="w-[1.0625rem] shrink-0 text-center text-subtle"
+      >
+        |
+      </span>
+      {children}
     </span>
   )
 }
@@ -413,7 +445,7 @@ function ModelCard({
       : `${model.provider_count} providers`
   const content = (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className={titleClass}>{title}</span>
           {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
@@ -427,39 +459,29 @@ function ModelCard({
       {model.description ? (
         <p className="line-clamp-2 text-sm text-muted">{model.description}</p>
       ) : null}
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
-        <span className="flex items-center gap-1.5">
-          {makerKey ? (
-            <MakerMark vendorSlug={makerKey} label={model.vendor ?? ""} />
-          ) : null}
-          by {model.vendor ?? "unknown vendor"}
-        </span>
-        {model.release_date ? (
-          <>
-            <Sep />
-            <span>{formatReleaseDate(model.release_date)}</span>
-          </>
-        ) : null}
-        {model.context_window != null ? (
-          <>
-            <Sep />
-            <span>{formatContext(model.context_window)} context</span>
-          </>
-        ) : null}
-        <Sep />
-        <span className="tabular-nums">
-          {model.min_input_price_per_million == null
-            ? "unpriced"
-            : `${formatRate(model.min_input_price_per_million)}/M input tokens`}
-        </span>
-        {model.min_output_price_per_million != null ? (
-          <>
-            <Sep />
-            <span className="tabular-nums">
-              {formatRate(model.min_output_price_per_million)}/M output tokens
+      <p className="overflow-hidden text-caption">
+        <span className="-ml-[1.0625rem] flex flex-wrap items-center gap-y-1">
+          <Fact>
+            <span className="flex items-center gap-1.5">
+              {makerKey ? (
+                <MakerMark vendorSlug={makerKey} label={model.vendor ?? ""} />
+              ) : null}
+              by {model.vendor ?? "unknown vendor"}
             </span>
-          </>
-        ) : null}
+          </Fact>
+          {model.type ? <Fact>{MODEL_TYPE_LABELS[model.type]}</Fact> : null}
+          {model.release_date ? (
+            <Fact>{formatReleaseDate(model.release_date)}</Fact>
+          ) : null}
+          {model.context_window != null ? (
+            <Fact>{formatContext(model.context_window)} context</Fact>
+          ) : null}
+          {listedPrices(model).map((price) => (
+            <Fact key={price}>
+              <span className="tabular-nums">{price}</span>
+            </Fact>
+          ))}
+        </span>
       </p>
     </>
   )
@@ -510,6 +532,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
             )}
             <span>
               {row.vendor ?? "Unknown vendor"} ·{" "}
+              {row.type ? `${MODEL_TYPE_LABELS[row.type]} · ` : ""}
               {row.provider_count === 1
                 ? "1 provider"
                 : `${row.provider_count} providers`}
@@ -544,24 +567,20 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
   },
   {
     id: "input",
-    header: "Input / 1M",
+    header: "Input",
     align: "end",
     allowsSorting: true,
     cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_input_price_per_million)}
-      </span>
+      <span className="text-mono-caption">{listedRate(row, "input")}</span>
     ),
   },
   {
     id: "output",
-    header: "Output / 1M",
+    header: "Output",
     align: "end",
     allowsSorting: true,
     cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_output_price_per_million)}
-      </span>
+      <span className="text-mono-caption">{listedRate(row, "output")}</span>
     ),
   },
 ]
@@ -744,7 +763,9 @@ export function ModelCatalogView({
           aria-busy={catalog.isFetching}
         >
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
-            <div className="min-w-[12rem] flex-1">
+            {/* The search takes the first line to itself on a phone, so the
+                view controls share the second in either view. */}
+            <div className="min-w-[12rem] flex-1 max-sm:basis-full">
               <SearchInput
                 value={filters.query}
                 onChange={(query) => updateFilters({ ...filters, query })}

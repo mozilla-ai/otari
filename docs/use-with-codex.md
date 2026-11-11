@@ -1,101 +1,96 @@
 # Use with Codex
 
-Codex can call Otari as a custom model provider over the Responses API. Otari
-serves `POST /api/v1/responses`.
+Codex can use Otari as a custom model provider over the Responses API.
 
 ## Route Codex through Otari
 
-Create an Otari API key, then add a provider to `~/.codex/config.toml`:
+1. Create a key on the dashboard's **API keys** page.
+2. Add a provider to `~/.codex/config.toml`:
 
-```toml
-model_provider = "otari"
-model = "openai:gpt-5.4"
+   ```toml
+   model_provider = "otari"
+   model = "openai:gpt-5.4"
 
-[model_providers.otari]
-name = "Otari"
-base_url = "http://localhost:8000/api/v1"
-wire_api = "responses"
-env_key = "OTARI_API_KEY"
-```
+   [model_providers.otari]
+   name = "Otari"
+   base_url = "https://api.otari.ai/api/v1"
+   wire_api = "responses"
+   env_key = "OTARI_API_KEY"
+   ```
 
-```bash
-export OTARI_API_KEY="tk-your-otari-key"
-codex
-```
+3. Export the key and start Codex:
 
-Codex appends `/responses`, so `base_url` must include `/api/v1`.
-`model_provider` must select the custom provider; otherwise Codex continues
-using its built-in OpenAI provider.
+   ```bash
+   export OTARI_API_KEY="<your-otari-key>"
+   codex
+   ```
 
-For otari.ai, set `base_url = "https://api.otari.ai/api/v1"` and export an API
-key from otari.ai as `OTARI_API_KEY`; the rest of the block is the same. Accounts in otari.ai's EU region use
-`base_url = "https://eu.api.otari.ai/api/v1"` instead: `api.otari.ai` answers an
-EU key with `421 Misdirected Request`, naming the host to use.
+- `base_url` must end in `/api/v1`, because Codex adds `/responses`. EU accounts
+  use `https://eu.api.otari.ai/api/v1`, and a gateway you run uses its URL plus
+  `/api/v1`. See [Base URL](api-reference.md#base-url).
+- `model_provider` must select the custom provider, or Codex keeps using its
+  built-in OpenAI provider.
 
-The official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
-is the source of truth for custom-provider keys and supported options.
+The [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+lists every custom-provider option.
 
 ## Choosing a model
 
-Codex sends the configured `model` string unchanged, so write it as Otari spells
-it, such as `openai:gpt-5.4` ([Model format](models.md#model-format)).
-[Listing available models](models.md#listing-available-models) shows which ones
-your key can use.
+Codex sends `model` unchanged, so write it as Otari spells it, such as
+`openai:gpt-5.4` ([Model format](models.md#model-format)).
+[Listing available models](models.md#listing-available-models) shows which
+models your key can use.
 
-A provider with its own Responses API is called natively. Any other provider is
-served by translating each request into a chat completion, which refuses a few
-Responses features Codex may use, such as tool types other than `function`; see
+Codex works best on a provider with its own Responses API. Other providers are
+served by translating each request to a chat completion, which refuses some
+features Codex may use, such as tool types other than `function`; see
 [Responses on providers without a Responses API](api-reference.md#responses-on-providers-without-a-responses-api).
-Codex works best on a provider with a native Responses API.
 
-## Model metadata
+To list only the open-weight models, ask the catalog for
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
 
-Codex associates context windows, reasoning options, and tool support with exact
-model slugs. An Otari-prefixed selector may not match Codex's bundled metadata,
-in which case Codex uses fallback metadata.
-
-If exact metadata matters, configure `model_catalog_json` with a catalog built
-for the same Codex version that consumes it. The schema is owned by Codex and can
-change between releases; avoid copying a version-specific schema into Otari
-documentation. See the official configuration reference above.
+Codex looks up context windows, reasoning options and tool support by exact model
+name. An Otari model name may not match, and then Codex uses fallback values. If
+that matters, set `model_catalog_json` as the Codex configuration reference
+describes, built for your Codex version.
 
 ## Troubleshooting
 
-- Confirm `model_provider = "otari"` is set at user level. Codex ignores custom
-  provider selection in project-local configuration.
+- Set `model_provider = "otari"` in your user-level config. Codex ignores it in a
+  project-level config.
 - Include `/api/v1` in `base_url`.
-- Start a new Codex session after changing provider configuration.
-- Configure provider credentials and pricing in Otari, not in Codex.
-- If a request fails with a `400` naming a Responses field, the selected
-  provider is being served through Chat Completions; choose a provider with a
-  native Responses API.
+- Start a new Codex session after changing the provider.
+- Set provider credentials and pricing in Otari, not in Codex.
+- A `400` naming a Responses field means the provider is served through Chat
+  Completions. Choose a provider with its own Responses API.
 
 ## Import Codex usage without routing
 
-Codex can export direct OpenAI usage to Otari over OTLP. This is for sessions
-that do not already route through Otari, and any Otari deployment accepts
-it.
+Codex can export the usage of sessions that go straight to OpenAI. This needs a
+budget-exempt key, which only a deployment's operator can create, so it works on
+a gateway you run, not on otari.ai today. See
+[Enforcement boundary](external-usage-reference.md#enforcement-boundary).
 
-Create a dedicated API key with `exclude_from_budget: true`, then configure the
-HTTP logs exporter with the full Otari logs path:
+Add the logs exporter to `~/.codex/config.toml`, with your gateway's URL and the
+full logs path:
 
 ```toml
 [otel]
 environment = "otari"
 log_user_prompt = false
-exporter = { otlp-http = { endpoint = "https://otari.example.com/otlp/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer tk-your-import-key" } } }
+exporter = { otlp-http = { endpoint = "http://localhost:8000/otlp/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer tk-your-import-key" } } }
 ```
 
-`binary` sends protobuf; `json` also works. Otari does not accept OTLP over
-gRPC. Keeping `log_user_prompt = false` avoids exporting prompt content; Otari
-does not persist it in either case.
+- `binary` sends protobuf; `json` also works. gRPC does not.
+- `log_user_prompt = false` keeps prompts out of the export. Otari does not
+  store them either way.
 
-Imported events are priced for analytics and never count toward budgets. Do not
-both route and export one session, or its cost will appear twice. See
-[Importing external usage](external-usage.md).
+Imported usage never counts toward budgets. Do not export a session you also
+route, or its cost appears twice. See
+[Import usage from outside Otari](external-usage.md).
 
-## Related documentation
+## See also
 
 - [Models](models.md)
 - [Use with a ChatGPT subscription](chatgpt-subscription.md)
-- [API reference](api-reference.md)

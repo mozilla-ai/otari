@@ -22,11 +22,12 @@ import uuid
 from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, rates_of
+from gateway.models.pricing import API_ORIGIN, LISTED_ORIGIN, SEED_ORIGIN, ModelPricing, rates_of
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.types.price_unit import PriceUnit
 
@@ -50,6 +51,17 @@ def _resolve_defaults(
         if default is not None:
             resolved[model] = default
     return resolved
+
+
+def _listed_rate(value: object) -> Decimal | None:
+    """A rate read off another server's listing: a non-negative number, or nothing."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        rate = to_usd(value)
+    except (ArithmeticError, ValueError):
+        return None
+    return rate if rate.is_finite() and rate >= 0 else None
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:
@@ -97,12 +109,45 @@ class DeploymentPricingService:
             return {}
         return await asyncio.to_thread(_resolve_defaults, provider, wanted, datetime.now(UTC), implementation)
 
-    async def store_defaults(self, defaults: Mapping[str, ModelPricing], effective_at: datetime) -> None:
-        """Store community defaults as versions carrying ``SEED_ORIGIN``, one per ``model_key``.
+    def listed_rates(self, provider: str, listings: Mapping[str, Mapping[str, Any]]) -> dict[str, ModelPricing]:
+        """The rates a provider's own model listing names, keyed by model, as versions carrying ``LISTED_ORIGIN``.
 
-        ``SEED_ORIGIN`` is what lets a refresh move such a version with the
-        dataset, where a version somebody chose is left alone. Flushed so a
-        read in the same block sees them.
+        ``listings`` maps a model to the ``pricing`` block its listing carried,
+        in the shape this gateway's own model listing publishes. A block
+        without both a readable input and output rate prices nothing. Transient
+        rows, never added to a session.
+        """
+        now = datetime.now(UTC)
+        rates: dict[str, ModelPricing] = {}
+        for model, block in listings.items():
+            input_rate = _listed_rate(block.get("input_price_per_million"))
+            output_rate = _listed_rate(block.get("output_price_per_million"))
+            tiers = block.get("pricing_tiers")
+            unit = block.get("unit")
+            if input_rate is None or output_rate is None:
+                continue
+            rates[model] = self.pricing.transient_version(
+                f"{provider}:{model}",
+                now,
+                input_price_per_million=input_rate,
+                output_price_per_million=output_rate,
+                cache_read_price_per_million=_listed_rate(block.get("cache_read_price_per_million")),
+                cache_write_price_per_million=_listed_rate(block.get("cache_write_price_per_million")),
+                pricing_tiers=[dict(tier) for tier in tiers if isinstance(tier, Mapping)]
+                if isinstance(tiers, list)
+                else [],
+                unit=unit if isinstance(unit, str) and unit else "token",
+                origin=LISTED_ORIGIN,
+            )
+        return rates
+
+    async def store_defaults(self, defaults: Mapping[str, ModelPricing], effective_at: datetime) -> None:
+        """Store rates nobody chose as versions a refresh may move, one per ``model_key``.
+
+        Each keeps the origin it came with, ``SEED_ORIGIN`` for a community
+        default unless it says otherwise. That origin is what lets a refresh
+        move such a version, where a version somebody chose is left alone.
+        Flushed so a read in the same block sees them.
         """
         if not defaults:
             return
@@ -117,14 +162,14 @@ class DeploymentPricingService:
                     cache_write_price_per_million=default.cache_write_price_per_million,
                     pricing_tiers=default.pricing_tiers or [],
                     unit=default.unit or "token",
-                    origin=SEED_ORIGIN,
+                    origin=default.origin or SEED_ORIGIN,
                     rates=rates_of(default),
                 )
             await self.pricing.flush()
 
     @staticmethod
     def rates_match(stored: ModelPricing, default: ModelPricing) -> bool:
-        """Whether a stored version already holds a default's rates.
+        """Whether a stored version already holds a default's rates, per the same unit.
 
         Compared at the rate column's own scale, because the stored value has
         been through it and the freshly resolved one has not, so an exact
@@ -134,6 +179,8 @@ class DeploymentPricingService:
         for field in _RATE_FIELDS:
             if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
                 return False
+        if (stored.unit or "token") != (default.unit or "token"):
+            return False
         return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
     async def write_rate(

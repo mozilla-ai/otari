@@ -41,6 +41,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
+from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.exc import IntegrityError
@@ -58,6 +59,7 @@ from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -193,10 +195,8 @@ class WorkspaceActivationPublic(BaseModel):
 class ActivationApiKeyPublic(BaseModel):
     """The API key the guide hands out, with its plaintext.
 
-    Returned once per call and never stored in plaintext, like every other key
-    this gateway mints: a page reload issues a new one and rotates the same row,
-    which is what makes the guide able to show a working key without keeping a
-    readable secret anywhere.
+    Returned once, on the press that asked for it, and never stored in
+    plaintext, like every other key this gateway mints.
     """
 
     key: str
@@ -260,17 +260,26 @@ class WorkspaceActivationService:
     # Writes
     # ------------------------------------------------------------------
 
-    async def issue_api_key(self, *, user: User, workspace_id: uuid.UUID) -> ActivationApiKeyPublic:
+    async def issue_api_key(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> ActivationApiKeyPublic:
         """Mint the workspace's setup key, rotating the one the guide already issued.
 
-        One row per workspace, rotated in place, so a guide reopened five times
-        leaves one key on the Keys page rather than five. Rotation invalidates
-        the previous plaintext, which is the same trade the platform's guide
-        makes and the reason the modal says a reload issues a new key.
+        One row per workspace, rotated in place, so a second press or a second
+        manager leaves one key on the Keys page rather than two.
 
         Refuses once the workspace has activated or the guide was dismissed: a
         retired flow does not get to keep handing out credentials, and a stale
         browser tab is the caller most likely to try.
+
+        With ``growth``, a key this call inserted is reported as
+        ``API_KEY_CREATED`` once it commits. A rotation creates no key, so it
+        reports nothing.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         state = await self._state_for_update(workspace.id)
@@ -298,6 +307,7 @@ class WorkspaceActivationService:
             alias=user.full_name or user.email,
         )
         record = await self._existing_key(state)
+        inserted = record is None
         if record is None:
             record = APIKey(
                 id=str(uuid.uuid4()),
@@ -328,6 +338,14 @@ class WorkspaceActivationService:
         state.last_presented_at = now
         state.api_key_id = record.id
         await self.db.commit()
+        if inserted and growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.API_KEY_CREATED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=workspace.organization_id,
+            )
         return ActivationApiKeyPublic(
             key=plaintext,
             key_id=record.id,
@@ -339,16 +357,10 @@ class WorkspaceActivationService:
     async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
         """Retire the guide for this workspace. Permanent, and idempotent.
 
-        Dismissing means "stop offering me this card" and nothing more: the key
-        the guide issued is left exactly as it is. An earlier version of this
-        deactivated an unused one, on the reasoning that a credential nobody
-        asked for is a liability, and that reasoning did not survive the
-        decision to mint on a press: every key here was explicitly requested and
-        shown once, so an unused one means "not used *yet*". Revoking it would
-        break the likeliest sequence in the whole flow, which is copy the key,
-        paste it into your app, press Skip to clear the card, and have the first
-        request answer 401. A key's lifecycle belongs to the Keys page, which is
-        where the operator can see and revoke it.
+        The key the guide issued is left as it is. It is minted only on a press,
+        so an unused one means "not used *yet*": revoking it would break the
+        likeliest sequence in the flow, which is copy the key, Skip, and have the
+        first request answer 401. A key's lifecycle belongs to the Keys page.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         state = await self._state_for_update(workspace.id)

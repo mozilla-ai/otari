@@ -242,6 +242,17 @@ test("reset password", async ({ page }) => {
   await captureScreenshot(page, "reset-password")
 })
 
+test("first-run setup", async ({ page }) => {
+  // Where the link in the gateway's first-run log lands. The key is only spent
+  // on submit, so any value renders the form on this unclaimed deployment.
+  await page.goto("/#/setup?key=not-a-real-key")
+  await expect(
+    page.getByRole("heading", { name: "Set up Otari" }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/#\/setup$/)
+  await captureScreenshot(page, "setup")
+})
+
 test("sign-in screen offering OAuth", async ({ page }) => {
   // The buttons are absent on the unstubbed fixture, which is what the plain
   // "sign-in" capture above already shows. This is the other state.
@@ -281,12 +292,15 @@ test("signup offering OAuth behind published terms", async ({ page }) => {
         open_signup: true,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })
   await page.goto("/#/signup")
   await expect(
-    page.getByRole("checkbox", { name: "I accept the terms of service" }),
+    page.getByRole("checkbox", {
+      name: "I accept the Terms of Service and the Privacy Policy",
+    }),
   ).toBeVisible()
   await captureScreenshot(page, "signup-oauth-terms")
 })
@@ -306,6 +320,7 @@ test("OAuth callback asking for the terms a new account needs", async ({
         ...bootstrap,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })

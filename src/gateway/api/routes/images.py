@@ -20,16 +20,19 @@ from gateway.api.deps import (
     verify_api_key_or_master_key_for_upload,
 )
 from gateway.api.routes._helpers import bounded_body
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import PassthroughOutcome, run_passthrough
+from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import ImageEditForm
-from gateway.services.budgets import count_estimate
-from gateway.services.inference import IMAGES_BILLING
+from gateway.services.budgets import report_estimate
+from gateway.services.inference import InferenceService, image_billing, image_quantities
 from gateway.services.log_writer import LogWriter
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["images"])
@@ -77,13 +80,27 @@ async def create_image(
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
+
+    A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+    USD string) and `pricing_source`, as a chat completion does; a provider that
+    sends no `usage` gets one holding just those two fields. An unpriced
+    response carries neither.
     """
-    # Reserve for the requested image count; reconciled to the actual count below.
-    # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
+    # Reserve for the requested image count at the size asked for; reconciled to
+    # the images returned below. `is None` (not `or`) so an explicit n=0 isn't
+    # silently treated as 1.
     requested_images = request.n if request.n is not None else 1
+    billing = image_billing(request.size)
+    facts = PriceFacts(resolution=request.size, quality=request.quality, style=request.style)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return count_estimate(pricing, meter="images", count=requested_images)
+        return report_estimate(
+            pricing,
+            slot=billing.slot,
+            quantities=image_quantities(request.size, requested_images),
+            units={"images": requested_images},
+            facts=facts,
+        )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Forward every field the schema accepts (it is derived from
@@ -100,12 +117,6 @@ async def create_image(
         }
         return await aimage_generation(**image_kwargs)
 
-    # Only an explicitly configured rate counts (pricing_use_defaults=False), for
-    # the same unit mismatch audio, moderations, and search avoid: a token rate is
-    # still read per image here for now (see ``price_usage``'s legacy reading)
-    # while models.dev quotes USD per million tokens. gpt-image-1 is in that
-    # dataset at 5.0, which would bill $5.00 for one image and, because this route
-    # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
@@ -118,13 +129,27 @@ async def create_image(
         user=request.user,
         call_provider=call_provider,
         request_params=request.model_fields_set,
-        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
-        billing=IMAGES_BILLING,
+        billing=billing,
         relabel=False,
+        price_facts=facts,
     )
-    return outcome.result.model_dump()
+    return _priced_body(outcome)
+
+
+def _priced_body(outcome: PassthroughOutcome[ImagesResponse]) -> dict[str, Any]:
+    """The provider's body with the settled cost on ``usage``, never failing a served image over the cost."""
+    if outcome.cost is None or outcome.pricing is None:
+        return InferenceService.images_response(outcome.result, pricing=None, cost=None)
+    try:
+        body = InferenceService.images_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    except Exception as exc:  # noqa: BLE001 - the image is served and paid for; never fail it over the cost
+        logger.warning("Failed to attach inline cost: %s", exc, exc_info=True)
+        record_inline_cost_settlement("unattached")
+        return InferenceService.images_response(outcome.result, pricing=None, cost=None)
+    record_inline_cost_settlement("attached")
+    return body
 
 
 # ``image[]`` is how OpenAI's SDKs send several images.
@@ -234,6 +259,11 @@ async def edit_image(
     - Master key: the ``user`` field is required and names an existing user.
     - API key: usage and spend go to the key's own user. A ``user`` naming a
       different user is refused with 403, or ignored when mismatch rejection is off.
+
+    A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+    USD string) and `pricing_source`, as a chat completion does; a provider that
+    sends no `usage` gets one holding just those two fields. An unpriced
+    response carries neither.
     """
     # Read here rather than as File parameters, which FastAPI parses before the
     # auth check runs, and through a capped body, so nobody can make the gateway
@@ -263,9 +293,17 @@ async def _run_edit(
     forward = _strip_gateway_fields(dict(set_fields))
     request_params = {*set_fields, *(("mask",) if mask is not None else ())}
     requested_images = fields.n if fields.n is not None else 1
+    billing = image_billing(fields.size)
+    facts = PriceFacts(resolution=fields.size, quality=fields.quality)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return count_estimate(pricing, meter="images", count=requested_images)
+        return report_estimate(
+            pricing,
+            slot=billing.slot,
+            quantities=image_quantities(fields.size, requested_images),
+            units={"images": requested_images},
+            facts=facts,
+        )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Read here, after the rate limit, budget and pricing gates, so a refused
@@ -284,8 +322,7 @@ async def _run_edit(
         }
         return await aimage_edit(**edit_kwargs)
 
-    # Billed exactly as generation is, per image returned; see create_image for
-    # why only an explicitly configured rate counts.
+    # Billed exactly as generation is.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT_EDITS,
         raw_request=raw_request,
@@ -298,10 +335,10 @@ async def _run_edit(
         user=fields.user,
         call_provider=call_provider,
         request_params=request_params,
-        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
-        billing=IMAGES_BILLING,
+        billing=billing,
         relabel=False,
+        price_facts=facts,
     )
-    return outcome.result.model_dump()
+    return _priced_body(outcome)

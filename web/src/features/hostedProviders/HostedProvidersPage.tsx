@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import {
   FiActivity,
@@ -31,6 +31,11 @@ import { ConnectionTestRowResult } from "@/features/providers/ConnectionTest"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { HealthSummary } from "@/features/providers/HealthSummary"
 import { OnboardingPanel } from "@/features/providers/OnboardingPanel"
+import {
+  PLATFORM_KEYS_URL,
+  PLATFORM_PROVIDER_NAME,
+  PlatformConnect,
+} from "@/features/providers/PlatformConnect"
 import { SecretKeyMissingBanner } from "@/features/providers/SecretKeyMissingBanner"
 import { ApiError } from "@/shared/api/client"
 import { useDeploymentAdminAccess } from "@/shared/api/deployment"
@@ -39,12 +44,14 @@ import {
   useHostedCatalogUpdate,
   useHostedCatalogUpdatePreview,
   useHostedProviders,
+  usePlatformConnectStatus,
   useTestHostedProvider,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
@@ -317,6 +324,12 @@ export function HostedProvidersPage() {
     context.data?.provider_key_encryption_available === false
   const settings = useSettings(isGranted)
   const updateSettings = useUpdateSettings()
+  const navigate = useNavigate()
+  const { platform_connect: isConnectOffered } = useDeployment()
+  // Read here as well as in the card, so a code still waiting for approval is
+  // shown on a page that was reloaded, without the operator asking for it.
+  const connectStatus = usePlatformConnectStatus(isGranted && isConnectOffered)
+  const [isConnectOpen, setIsConnectOpen] = useState(false)
   const update = useUpdateHostedProvider()
   const remove = useDeleteHostedProvider()
   const catalogUpdate = useHostedCatalogUpdate()
@@ -605,6 +618,15 @@ export function HostedProvidersPage() {
               <FiRefreshCw aria-hidden className="size-4" />
               Update catalog
             </Button>
+            {isConnectOffered && tableRows.length > 0 ? (
+              <Button
+                className="min-h-11 md:min-h-9"
+                isDisabled={isKeyEncryptionMissing}
+                onPress={() => setIsConnectOpen((open) => !open)}
+              >
+                Connect otari.ai
+              </Button>
+            ) : null}
             <Button
               variant="primary"
               className="min-h-11 md:min-h-9"
@@ -657,9 +679,23 @@ export function HostedProvidersPage() {
           }
           isEnabling={updateSettings.isPending}
           secretKeyConfigured={!isKeyEncryptionMissing}
+          // On to the Overview, whose setup guide hands out a key and the
+          // first request to send now that a provider can serve it.
+          onConnected={() => void navigate({ to: "/" })}
         />
       ) : (
         <>
+          {isConnectOffered &&
+          tableRows.length > 0 &&
+          !isKeyEncryptionMissing &&
+          (isConnectOpen || connectStatus.data?.status === "pending") ? (
+            <section
+              aria-label="Connect otari.ai"
+              className="mb-4 border border-border p-4"
+            >
+              <PlatformConnect />
+            </section>
+          ) : null}
           {tableRows.length > 0 && health.data && health.data.total > 0 ? (
             <HealthSummary
               healthy={health.data.healthy}
@@ -671,6 +707,7 @@ export function HostedProvidersPage() {
           <TableScrollFrame className="otari-hosted-providers-table">
             <DataTable
               ariaLabel="Hosted providers"
+              mobileLayout="cards"
               columns={columns}
               rows={tableRows}
               // The kind and the name, not the id: a configured provider has no
@@ -750,9 +787,26 @@ export function HostedProvidersPage() {
         }}
         heading="Remove this hosted provider?"
         body={
-          deleting?.shadows_config
-            ? `The stored key for ${pendingDelete} is deleted, and the provider defined in config.yml serves again, on the same models.`
-            : `${pendingDelete} will stop being served, and its stored key is deleted. There is no way to recover the key; adding the provider again means entering it fresh.`
+          <>
+            {deleting?.shadows_config
+              ? `The stored key for ${pendingDelete} is deleted, and the provider defined in config.yml serves again, on the same models.`
+              : `${pendingDelete} will stop being served, and its stored key is deleted. There is no way to recover the key; adding the provider again means entering it fresh.`}
+            {isConnectOffered && pendingDelete === PLATFORM_PROVIDER_NAME ? (
+              <>
+                {" "}
+                The key stays valid on otari.ai until you revoke it on its{" "}
+                <a
+                  href={PLATFORM_KEYS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-link hover:text-link-hover"
+                >
+                  API keys page
+                </a>
+                .
+              </>
+            ) : null}
+          </>
         }
         confirmLabel="Remove provider"
         isPending={remove.isPending}

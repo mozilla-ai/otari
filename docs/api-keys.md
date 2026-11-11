@@ -1,177 +1,157 @@
 # API keys
 
-An API key is the credential an application sends to Otari. It belongs to one
-workspace and one user, so it decides where a request's usage and spend land.
-What a key can carry, and who may manage which keys, is under
-[How it works](#how-it-works).
+An API key is the credential an application sends to Otari. Each key belongs to
+one workspace and one user, and that decides where its usage and spend land.
 
-Send the key as a bearer token (`Authorization: Bearer <key>`); the other
-accepted headers are in [Authentication](api-reference.md#authentication). The
-base URL to send it to, and the form each SDK expects, are in
-[Base URL](api-reference.md#base-url).
+Applications send the key as a bearer token. The base URL to use and the other
+accepted headers are in [Base URL](api-reference.md#base-url) and
+[Authentication](api-reference.md#authentication).
 
 ## Create a key
 
 1. Open the workspace's **API keys** page and click **Create key**.
 2. Enter a **Name** and, optionally, an expiry under **Expires (optional)**.
-3. Optionally, click **Advanced** to narrow the models the key can use. By
-   default a key inherits your model access, and it can never exceed it; see
-   [Model and search tool access](#model-and-search-tool-access).
+3. Optionally, click **Advanced** to narrow the models and tools the key can
+   use. By default a key inherits your model access, and it can never exceed
+   it.
 4. Click **Create key**, then copy the key. It is shown once, so store it
    before you close the dialog.
 
+![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
+
 ## Cap a key's spend
 
-An operator, or an organization owner or admin, can give a key a budget of its
-own: in the key's create or edit form, pick an existing budget under
-**Budget (optional)**, or set a **Limit (USD)** and how often it **Resets**. The
-key's owner's budget still applies beside it. The page's Budget column shows
-each key's spend this period against its limit. For budgets in general, see
-[Budgets](budgets.md).
+An organization owner or admin, or a deployment operator, can give a key a
+budget of its own. In the key's create or edit form, either:
 
-## Accept or reject mismatched `user` fields
+- pick an existing budget under **Budget (optional)**, or
+- set a **Limit (USD)** and how often it **Resets**.
 
-When the client behind a key puts something other than the key's own user in
-the request's `user` field (Claude Code does), choose what the key does with it:
-use the deployment setting, always reject, or always accept. What each choice
-does is in [Mismatched `user` fields](#mismatched-user-fields).
+The key's owner's budget still applies too. The page's **Budget** column shows
+each key's spend this period against its limit. See [Budgets](budgets.md).
 
-Set the value in the dashboard's key form (under **Advanced** when creating a
-key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
-`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
-config.yml. The deployment-wide default is a runtime setting, changed on the
-Settings page or with `PATCH /api/v1/settings`.
+## Mismatched `user` fields
 
-## Regenerate or delete a key
+A request can name a user (`user` on most routes, `metadata.user_id` on
+Messages). By default, an API key only accepts its own user there and refuses
+anything else with `403`.
 
-- **Regenerate** on a key's row issues a new secret and keeps the key record.
-  The current secret stops working immediately, with no grace period. The new
-  plaintext is shown once, as on creation.
-- **Delete** on a key's row removes the key permanently.
+Some clients fill that field with a value of their own: Claude Code and Junie
+do, and so do applications that pass their customers' ids. For those keys, set
+**Mismatched `user` field** under **Advanced** in the key form, or on the edit
+form:
 
-A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back whenever its entry changes; see
+| Choice | A request naming another user |
+| --- | --- |
+| **Use the deployment setting (default)** | Follows the deployment-wide setting, which rejects unless an operator changed it |
+| **Always reject (403)** | Rejected, even where the deployment accepts |
+| **Always accept** | Accepted, and billed to the key's own user |
+
+On an ordinary key, spend always stays with the key's user, so accepting a
+mismatch never lets a key charge someone else.
+
+An application that passes its own customer ids has two options:
+
+- **Always accept**: every request bills the key's user, under one budget.
+- Make the key a [service key](end-users.md): each id becomes an end user with
+  its own spend and budget.
+
+Through the API, this is the key's `reject_user_mismatch` field (`null`,
+`true` or `false`). Self-hosted deployments can also set it in config.yml; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Regenerating a declared key lasts until config.yml changes the key's entry or
-its secret, which restores the secret config.yml declares.
+
+## Regenerate, disable or delete a key
+
+Each key's row has an actions menu:
+
+- **Regenerate…** issues a new secret and keeps the key. The old secret stops
+  working immediately. The new one is shown once.
+- **Disable** switches the key off; callers get `401` until you enable it again.
+- **Delete…** removes the key permanently.
+
+A key declared in a self-hosted deployment's config.yml behaves differently;
+see [What config.yml owns](configuration.md#what-configyml-owns).
 
 ## How it works
 
 ### What a key carries
 
-Each key has a fixed user and workspace and may also define:
+Besides its user and workspace, a key can have:
 
-- expiration and active status
-- allowed models (see [Model and search tool access](#model-and-search-tool-access))
-- budget exemption
-- a budget of its own: a spend ceiling on the key, which its owner's budget does
-  not replace (both apply)
-- whether mismatched client `user` fields are accepted (see
-  [Mismatched `user` fields](#mismatched-user-fields))
+- an expiry, and an on/off state
+- a list of allowed models and tools (see
+  [Model and search tool access](#model-and-search-tool-access))
+- a budget of its own, which applies alongside its owner's
+- a budget exemption, set only by an operator
+- a choice on [mismatched `user` fields](#mismatched-user-fields)
 - whether content-free agent telemetry is captured
-- whether it is a service key, which may name end users (see
-  [Track spend per end user](end-users.md))
+- whether it is a [service key](end-users.md), which can bill end users
 - application metadata
 
-A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
-usage import or other intentional observability-only traffic.
+A budget-exempt key is also exempt from `require_pricing`. Use such keys only
+for usage import or other traffic you mean to observe without enforcing.
 
 A backend on Google Cloud, or behind another OpenID Connect issuer, can
-authenticate as a key with its platform identity token instead of the key's
-secret, once the operator trusts the issuer and gives the key a federation
-rule. With `federation_member_rules` on, an organization owner or admin can give
-their own key one instead; see [Workload identity](workload-identity.md).
+authenticate as a key with its platform identity token instead of the secret.
+See [Workload identity](workload-identity.md).
 
 ### Who manages which keys
 
-`/api/v1/keys` manages every key in the caller's organization and requires the
-deployment operator's standing; an operator also chooses each key's owner. A
-signed-in member without it manages their own keys at
-`/api/v1/organizations/me/keys`, which derives the owner rather than accepting
-one, so a member's keys are always their own and billed to them. That route
-mints only into a workspace the caller may see, and never issues a
-budget-exempt key. It refuses a field it does not take, such as `user_id` or
-`exclude_from_budget`, with `422` rather than ignoring it.
+- **Owners, admins and members** create and manage their own keys on the
+  **API keys** page. A key made there is always billed to whoever made it, and
+  is never budget-exempt.
+- **Owners and admins** also create the organization's own
+  [service keys](end-users.md#2-create-the-service-key).
+- **Viewers** can list their keys but cannot create, edit, regenerate or delete
+  one. An operator can issue a key to a viewer.
+- **Deployment operators** manage every key and choose each key's owner; see
+  [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration).
 
-A viewer may list their keys there and is refused (`403`) every write:
-creating, editing, rotating or deleting a key takes organization owner or
-admin, or a caller who is a viewer neither of the organization nor of the key's
-workspace. To give a viewer a key, an operator issues it on `/api/v1/keys` and
-owns its changes. An organization owner or admin also makes the organization's
-own service keys on this route; see
-[An organization's own service keys](end-users.md#an-organizations-own-service-keys).
+Membership changes switch keys off:
 
-A key records whether its owner minted it on the member surface or an operator
-issued it. Membership changes act on that:
+- Removing someone from a workspace or the organization switches off every key
+  billed to them there. Only an operator can switch those back on.
+- Making someone a viewer switches off the keys they made for themselves, and
+  leaves alone keys an operator issued them. Promoted again, they can switch
+  their own keys back on.
+- Keys made before Otari recorded who made them are left alone on a demotion.
+  When you demote someone to viewer, check the keys billed to them.
 
-- Removing someone from a workspace, or from the organization, switches off every
-  key billed to them there. So does an operator switching a key off on
-  `/api/v1/keys`. Its owner may then delete it or keep it off, but only an
-  operator can switch it back on.
-- Making someone a viewer, of a workspace or of the organization, switches off
-  the keys they minted for themselves there, and leaves the keys an operator
-  issued them alone. Promoted again, they may switch their own keys back on.
-- A key minted before this was recorded has no origin on file and is left alone
-  by a demotion. An operator who demotes someone to viewer should check the keys
-  billed to them.
+The key routes are in the [OpenAPI specification](public/openapi.json).
 
 ### Model and search tool access
 
-A user's `allowed_models` is inherited by newly created keys unless the key
-defines its own list. A missing list allows any model, an empty list allows none,
-and entries may use provider wildcards such as `openai:*`.
+**Models.** A new key inherits its user's `allowed_models` unless it sets its
+own list. No list allows any model, an empty list allows none, and entries may
+use provider wildcards such as `openai:*`. A key can narrow its user's access,
+never widen it.
 
-Search and fetch tools have a list of their own, `allowed_tools`, which governs
-`POST /api/v1/search` and `POST /api/v1/fetch`; the in-loop `otari_web_search` and
-`otari_web_fetch` tools, which run on the same tools, do not read it. Its entries
-are search or fetch tool names, as `search_tools`, `fetch_tools` or the dashboard
-names them, `builtin_fetch` for the gateway's own fetcher, or `*` for every tool,
-and no wildcard in `allowed_models` reaches a tool: a search provider can share
-its name with a model provider, as DeepSeek does, and `deepseek:*` is for
-DeepSeek's models. A key's own `allowed_tools` wins over its user's, and a key may
-narrow its user's list but never broaden it. An empty list allows no tool.
+**Search and fetch tools.** These have their own list, `allowed_tools`, which
+governs `POST /api/v1/search` and `POST /api/v1/fetch`:
 
-With no `allowed_tools` on the key or its user, the search tools are read off the
-model list: a key unrestricted for models may run any search or fetch tool, and a
-key restricted for models may run only the search tools its `allowed_models`
-names whole as `<provider>:<tool>`, such as `exa:exa-search`, and that its user's
-model list grants too; no model list grants a fetch tool. That form is deprecated: startup counts the keys and users that still
-rely on it, names the tools some reached only through a wildcard, which no longer
-grants them, and a later release removes it. A model list no longer takes a
-wildcard or another name under a provider that serves only search tools, such as
-`exa:*`; it takes that provider's exact `<provider>:<tool>` keys alone.
+- Entries are search or fetch tool names as the dashboard shows them,
+  `builtin_fetch` for Otari's own fetcher, or `*` for every tool.
+- A key's list wins over its user's, and may narrow it but never widen it.
+- An empty list allows no tool.
+- A model wildcard never grants a tool. A search provider can share its name
+  with a model provider (DeepSeek does), and `deepseek:*` covers only
+  DeepSeek's models.
+- The in-loop `otari_web_search` and `otari_web_fetch` tools do not read this
+  list.
 
-When a user is first given `allowed_tools`, each of their keys that has a model
-list of its own and no `allowed_tools` is set to the tools it could run before
-that are also on the user's new list, so moving a user off the deprecated form
-never widens a key that had narrowed its search away. A list sent back unchanged,
-as the dashboard's edit forms do, is not checked again, so a key or user naming
-a tool deleted since still saves an unrelated change. No search tool may be
-named `*`.
+**Deprecated: tools through the model list.** With no `allowed_tools` on the
+key or its user, search access follows the model list instead:
 
-### Mismatched `user` fields
+- A key with unrestricted models may run any search or fetch tool.
+- A key with a model list may run only the search tools named there in full as
+  `<provider>:<tool>` (such as `exa:exa-search`) that its user's list also
+  grants. No model list grants a fetch tool.
+- Wildcards no longer grant a search tool, and a model list rejects a wildcard
+  or partial name under a search-only provider such as `exa:*`.
 
-A request can name a user: `user` on Chat Completions, Responses and the
-pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
-value may only be the key's own user; anything else is refused with `403`. A
-key's `reject_user_mismatch` changes that for the key alone:
-
-| Value | Dashboard choice | A request naming another user |
-| --- | --- | --- |
-| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
-| `true` | Always reject (403) | Rejected, even where the deployment accepts |
-| `false` | Always accept | Accepted, and billed to the key's user |
-
-Spend binds to the key's own user whichever value applies, so accepting a
-mismatch never lets a key charge someone else.
-
-Accept mismatches on a key whose client puts something other than an Otari
-user ID in that field. Claude Code sends a telemetry value there (see
-[Use with Claude Code](use-with-claude-code.md)). So does an application that
-sends every request on one key and passes its own end user's ID. That
-application has two choices:
-
-- Accept mismatches, and every request bills the key's user: one budget for
-  the whole application.
-- Make the key a [service key](end-users.md), and each ID becomes an end user
-  with spend and a budget of its own.
+A later release removes this form, so give keys and users an `allowed_tools`
+list. When a user first gets one, each of their keys that has its own model list
+and no `allowed_tools` gets the tools it could already run that are also on the
+user's new list, so the switch never widens a key. A list sent back unchanged is
+not checked again, so a key naming a since-deleted tool can still save an
+unrelated change. No search tool may be named `*`.

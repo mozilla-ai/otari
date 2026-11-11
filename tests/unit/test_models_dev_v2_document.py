@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from gateway.services.pricing.models_dev_index import ModelsDevPriceIndex
 from gateway.types.models_dev import (
     MODELS_DEV_SOURCES,
     ModelsDevApi,
@@ -332,11 +333,32 @@ def test_conditions_and_factors_are_read_only(catalog: ModelsDevCatalog) -> None
 
 
 def test_a_snapshot_cut_from_v2_reads_back_as_the_same_prices(catalog: ModelsDevCatalog) -> None:
-    """The bundled snapshot is cut from v2 and stored in the v1 shape, which every gateway reads."""
+    """A snapshot is cut from v2 into the v1 shape plus each model's price block, which every gateway reads."""
     again = parse_catalog(snapshot_document(catalog))
-    assert [(p.id, m.id, m.cost, m.context_window) for p, m in again.models()] == [
-        (p.id, m.id, m.cost, m.context_window) for p, m in catalog.models()
+    assert [(p.id, m.id, m.cost, m.context_window, m.pricing) for p, m in again.models()] == [
+        (p.id, m.id, m.cost, m.context_window, m.pricing) for p, m in catalog.models()
     ]
+    assert any(m.pricing is not None for _, m in again.models())
+
+
+def test_a_snapshot_keeps_a_per_unit_price(catalog: ModelsDevCatalog) -> None:
+    """A per-image price has no v1 field, so only the kept price block makes the model priced after a store."""
+    snapshot = json.loads(json.dumps(snapshot_document(catalog)))
+    assert snapshot["openrouter"]["models"]["qwen/qwen-image-3-pro"]["pricing"]["modalities"]["image"]["output"] == {
+        "price": 0.04,
+        "unit": "image",
+        "overrides": [{"when": {"resolution": {"equals": "2K"}}, "price": 0.075}],
+    }
+    entry = ModelsDevPriceIndex.from_document(snapshot).resolve("openrouter", "qwen/qwen-image-3-pro")
+    assert entry is not None and entry.priced and entry.slot_columns is not None
+    assert entry.slot_columns.unit == "image"
+
+
+def test_a_damaged_price_block_in_a_snapshot_is_an_issue_not_a_crash() -> None:
+    catalog = parse_catalog({"p": {"models": {"m": {"cost": {"input": 1, "output": 2}, "pricing": {"modalities": 3}}}}})
+    model = catalog.model_for("p", "m")
+    assert model is not None and model.pricing is None and model.cost is not None
+    assert catalog.issues.count == 1 and "p.models.m.pricing" in catalog.issues.examples[0]
 
 
 def test_v2_is_tried_before_v1() -> None:
@@ -345,5 +367,29 @@ def test_v2_is_tried_before_v1() -> None:
         ("v1", parse_catalog),
     ]
     v2, v1 = (source.url for source in MODELS_DEV_SOURCES)
+    assert v2 == "https://mozilla-ai.github.io/models.dev/experimental/v2.0/api.json?type=all"
+    assert v1 == "https://mozilla-ai.github.io/models.dev/api.json"
+
+
+def test_the_documents_follow_the_configured_base() -> None:
+    v2, v1 = (source.url_for("https://models.dev/") for source in MODELS_DEV_SOURCES)
     assert v2 == "https://models.dev/experimental/v2.0/api.json?type=all"
     assert v1 == "https://models.dev/api.json"
+
+
+def test_a_rule_on_a_condition_not_known_here_is_kept_named_once_and_is_not_damage() -> None:
+    """A condition key models.dev adds is reported; the rule is kept, and skipped when a price is read."""
+    lunar = {"when": {"all": [{"moon_phase": {"equals": "full"}}, {"service_tier": {"equals": "flex"}}]}, "price": 9}
+    cost = {
+        "text": {"input": {"price": 1, "overrides": [lunar]}},
+        "multipliers": [{"when": {"tide": {"gt": 1}}, "factor": 2}],
+    }
+    catalog = parse_catalog_v2({"p": {"models": {"a": {"cost": cost}, "b": {"cost": cost}}}})
+
+    assert catalog.issues == ModelsDevIssues(models=2, unknown_conditions=("moon_phase", "tide"))
+    assert catalog.refusal() is None
+    assert catalog.issues.describe().endswith("price rule conditions not known here: moon_phase, tide")
+    pricing = catalog.providers["p"].models["a"].pricing
+    assert pricing is not None
+    assert len(pricing.modalities["text"].input.overrides) == 1  # type: ignore[union-attr]
+    assert len(pricing.multipliers) == 1

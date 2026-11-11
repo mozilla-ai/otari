@@ -209,6 +209,7 @@ export function SpendCeilingsCard({
         <Card.Content className="p-0">
           <DataTable
             ariaLabel="Organization spend ceilings"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}

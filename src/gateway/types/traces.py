@@ -111,6 +111,7 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.guardrail.profile": str,
     "otari.guardrail.mode": str,
     "otari.mcp.server": str,
+    "otari.mcp.server_id": str,
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
@@ -397,8 +398,18 @@ class SessionOwners(Protocol):
         """What ``workspace_id`` keeps of ``user_id``'s sessions: nothing unless content is on and :meth:`is_member`."""
         ...
 
-    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
-        """Which of these (workspace, user) pairs :meth:`is_member` holds for, asked at once."""
+    async def content_kept_for(
+        self, pairs: Collection[tuple[uuid.UUID, str | None]]
+    ) -> set[tuple[uuid.UUID, str | None]]:
+        """Which of these (workspace, user) pairs may have content kept, asked at once.
+
+        A pair qualifies where :meth:`is_member` holds for it and the workspace
+        still keeps what its sessions were about.
+        """
+        ...
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization ``workspace_id`` belongs to, whose own provider keys its sessions may have run on."""
         ...
 
 

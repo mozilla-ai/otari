@@ -63,6 +63,7 @@ const GLM: CatalogModelSummary = {
   price_sources: ["defaults", "deployment"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
@@ -86,6 +87,7 @@ const KIMI: CatalogModelSummary = {
   price_sources: ["defaults"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.6,
   min_output_price_per_million: 2.4,
 }
@@ -202,7 +204,8 @@ function mockApi(
         models = [GLM]
       if (
         params.get("search") === "moonshot" ||
-        params.get("output_modality") === "image"
+        params.get("output_modality") === "image" ||
+        params.get("type") === "image"
       )
         models = [KIMI]
       return jsonResponse({
@@ -339,6 +342,40 @@ describe("ModelCatalogPage", () => {
     expect(within(card).getByText("200K context")).toBeInTheDocument()
     expect(within(card).getByText("Z.ai's flagship.")).toBeInTheDocument()
     expect(screen.getByText(/2 models across 2 providers/)).toBeInTheDocument()
+  })
+
+  it("names a price in the unit it bills, and no number for mixed units", async () => {
+    mockApi({
+      catalog: {
+        ...CATALOG,
+        models: [
+          {
+            ...KIMI,
+            price_unit: "image",
+            min_input_price_per_million: 40_000,
+            min_output_price_per_million: 0,
+          },
+          {
+            ...GLM,
+            price_unit: null,
+            min_input_price_per_million: null,
+            min_output_price_per_million: null,
+          },
+        ],
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    const kimi = within(list)
+      .getByRole("link", { name: /Kimi K2.6/ })
+      .closest("article") as HTMLElement
+    expect(within(kimi).getByText("$0.04 per image")).toBeInTheDocument()
+    expect(within(kimi).queryByText(/tokens/)).toBeNull()
+    const glm = within(list)
+      .getByRole("link", { name: "Z.ai: GLM-5.3" })
+      .closest("article") as HTMLElement
+    expect(within(glm).getByText("priced in several units")).toBeInTheDocument()
   })
 
   it("marks the maker on a card and in the table", async () => {
@@ -529,7 +566,7 @@ describe("ModelCatalogPage", () => {
     renderPage(
       <ModelCatalogPage />,
       "/models?q=glm&input=image&output=text&provider=fireworks&vendor=Z.ai" +
-        "&capability=reasoning&context=128000&max_input=3&pricing=priced" +
+        "&type=video&capability=reasoning&context=128000&max_input=3&pricing=priced" +
         "&source=discovered&released=365&sort=name&page=1&size=50",
     )
 
@@ -542,6 +579,7 @@ describe("ModelCatalogPage", () => {
     expect(request.getAll("output_modality")).toEqual(["text"])
     expect(request.getAll("provider")).toEqual(["fireworks"])
     expect(request.getAll("vendor")).toEqual(["Z.ai"])
+    expect(request.getAll("type")).toEqual(["video"])
     expect(request.getAll("capability")).toEqual(["reasoning"])
     expect(request.get("min_context")).toBe("128000")
     expect(request.get("max_input")).toBe("3")
@@ -712,6 +750,32 @@ describe("ModelCatalogPage", () => {
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
   })
 
+  it("narrows by the kind of model, and names each row's kind", async () => {
+    mockApi({
+      catalog: {
+        ...CATALOG,
+        models: [
+          { ...GLM, type: "chat" },
+          { ...KIMI, type: "image" },
+        ],
+        facets: { ...CATALOG.facets!, types: ["chat", "image"] },
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(within(list).getByText("Chat")).toBeInTheDocument()
+    // The kind group is open from the start: it is the first question asked of a catalog.
+    await user.click(screen.getByRole("checkbox", { name: "Image generation" }))
+
+    await waitFor(() => expect(within(list).queryByText(/GLM-5.3/)).toBeNull())
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /^Model kind\s*1$/ }),
+    ).toBeInTheDocument()
+  })
+
   it("narrows to models a zero data retention provider offers, and marks them", async () => {
     const asked: URLSearchParams[] = []
     const glm = { ...GLM, zero_data_retention_providers: ["fireworks"] }
@@ -770,7 +834,7 @@ describe("ModelCatalogPage", () => {
 
     const grid = await screen.findByRole("grid", { name: "Models" })
     expect(within(grid).getByText("GLM-5.3")).toBeInTheDocument()
-    expect(within(grid).getByText("from $0.50")).toBeInTheDocument()
+    expect(within(grid).getByText("from $0.50 / 1M")).toBeInTheDocument()
     const row = within(grid).getByRole("row", { name: /GLM-5.3/ })
     await user.click(within(row).getByRole("gridcell", { name: "200K" }))
     expect(await screen.findByText("opened a model")).toBeInTheDocument()

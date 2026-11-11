@@ -10,9 +10,15 @@ import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
-import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
+import {
+  formatCost,
+  formatNumber,
+  formatPct,
+  formatSpend,
+} from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
+import type { NoInput } from "./explain"
 import {
   formatDuration,
   formatRelativeTime,
@@ -22,10 +28,11 @@ import { GateCard, VERDICT } from "./GateCard"
 import { GatesView, stoppedBy } from "./GatesView"
 import { GatewayCall } from "./GatewayCall"
 import { GatewayPanel } from "./GatewayPanel"
-import { type Format, IOBlock } from "./IOBlock"
+import { type Format, hasFormattedForm, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
-import { TypeMark } from "./observationTypes"
+import { NoInputNote } from "./NoInputNote"
+import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
@@ -37,7 +44,7 @@ type PeekTab = "preview" | "attributes" | "log" | "gates"
 const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
-  { id: "log", label: "Log View" },
+  { id: "log", label: "Log view" },
   { id: "gates", label: "Gates" },
 ]
 
@@ -91,19 +98,20 @@ const STATUS_TONE: Record<Observation["level"], string> = {
 function PreviewBody({
   input,
   output,
+  noInput,
   statusMessage,
   level,
   format,
 }: {
   input: unknown
   output: unknown
+  noInput?: NoInput
   statusMessage?: string
   level: Observation["level"]
   format: Format
 }) {
-  if (input == null && output == null && !statusMessage) {
-    return <span className="text-caption text-subtle">No input or output</span>
-  }
+  const empty = input == null && output == null
+  if (empty && !statusMessage && !noInput) return null
   return (
     <>
       {statusMessage ? (
@@ -115,6 +123,9 @@ function PreviewBody({
             {statusMessage}
           </p>
         </section>
+      ) : null}
+      {input == null && noInput ? (
+        <NoInputNote noInput={noInput} className="text-subtle" />
       ) : null}
       <IOBlock label="Input" value={input} format={format} />
       <IOBlock label="Output" value={output} format={format} />
@@ -130,13 +141,19 @@ function Attributes({
   observation: Observation
 }) {
   const rows: [string, string | undefined][] = [
-    ["Type", observation.type],
-    ["Level", observation.level],
+    ["Type", OBSERVATION_TYPES[observation.type].label],
+    // The usual level says nothing, as in the tree, where only the others earn a chip.
+    [
+      "Level",
+      observation.level === "DEFAULT"
+        ? undefined
+        : STATUS_TITLE[observation.level],
+    ],
     ["Status message", observation.statusMessage],
     ["Model", observation.model],
     ["Provider", observation.provider],
     [
-      "Prompt tokens",
+      "Input tokens",
       observation.promptTokens != null
         ? formatNumber(observation.promptTokens) +
           (observation.cachedTokens
@@ -151,7 +168,7 @@ function Attributes({
         : undefined,
     ],
     [
-      "Completion tokens",
+      "Output tokens",
       observation.completionTokens != null
         ? formatNumber(observation.completionTokens)
         : undefined,
@@ -422,20 +439,20 @@ export function TracePeek({
         cacheWriteTokens: observation.cacheWriteTokens ?? 0,
         totalTokens:
           (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
-        model: observation.model,
       }
     : {
         name: trace.name,
         type: "TRACE" as const,
         timestamp: trace.timestamp,
         latencyMs: summary.latencyMs,
-        totalCost: summary.totalCost,
+        // The total the session recorded, which At a glance heads its Cost
+        // band with, rather than a sum of the spans on screen.
+        totalCost: trace.gateway?.cost ?? 0,
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
         cachedTokens: summary.cachedTokens,
         cacheWriteTokens: summary.cacheWriteTokens,
         totalTokens: summary.totalTokens,
-        model: summary.models[0],
       }
 
   // A panel opened on a span opens the rows above it and brings it into view
@@ -463,7 +480,29 @@ export function TracePeek({
   const clampNav = (fraction: number) =>
     Math.min(NAV_MAX_FRACTION, Math.max(NAV_MIN_FRACTION, fraction))
 
-  const model = shown.model
+  // A span's model, unless it is named for it, and the session's: the one it
+  // ran on, or how many, each named on hover.
+  const models = !observation
+    ? summary.models
+    : observation.model && observation.model !== observation.name
+      ? [observation.model]
+      : []
+  // Formatted or Raw changes only stored content that has a formatted form, so
+  // the switch shows where some is on screen: the picked span's, or any span's
+  // on the log, which opens them all.
+  const isFormatShown =
+    activeTab === "log"
+      ? trace.observations.some(
+          (o) =>
+            hasFormattedForm(o.input) ||
+            hasFormattedForm(o.output) ||
+            hasFormattedForm(o.gate?.evidence),
+        )
+      : activeTab === "preview" &&
+        observation !== null &&
+        !observation.gate &&
+        (hasFormattedForm(observation.input) ||
+          hasFormattedForm(observation.output))
   const navWidth = navCollapsed
     ? NAV_COLLAPSED
     : navView === "timeline"
@@ -509,7 +548,13 @@ export function TracePeek({
           {/* Until the spans arrive there is nothing to measure. */}
           {loaded ? <span>{formatDuration(shown.latencyMs)}</span> : null}
           {shown.totalCost > 0 ? (
-            <span>{formatCost(shown.totalCost)}</span>
+            // A session's spend reads in cents, as At a glance says it; a
+            // span's own cost keeps the four places its row shows.
+            <span>
+              {observation
+                ? formatCost(shown.totalCost)
+                : formatSpend(shown.totalCost)}
+            </span>
           ) : null}
           {shown.totalTokens > 0 ? (
             <Tooltip
@@ -541,7 +586,24 @@ export function TracePeek({
               )}
             </Tooltip>
           ) : null}
-          {model ? <span>{model}</span> : null}
+          {models.length === 1 ? <span>{models[0]}</span> : null}
+          {models.length > 1 ? (
+            <Tooltip
+              content={
+                <ul className="flex flex-col gap-0.5 text-mono-caption">
+                  {models.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              }
+            >
+              {(props) => (
+                <button type="button" {...props} className={DOTTED}>
+                  {formatNumber(models.length)} models
+                </button>
+              )}
+            </Tooltip>
+          ) : null}
           {!observation && trace.gateway ? (
             <SessionCounts stats={trace.gateway.stats} />
           ) : null}
@@ -568,17 +630,29 @@ export function TracePeek({
         </TabRow>
         <div className="flex shrink-0 items-center gap-2">
           {actions}
-          {observation || activeTab === "log" ? (
-            <Segmented
-              size="sm"
-              label="Format"
-              options={FORMAT_OPTIONS}
-              value={format}
-              onChange={(next) => setFormat(next as Format)}
-            />
+          {isFormatShown ? (
+            // Below md the tree takes the pane until a row is picked again,
+            // and the span the switch is about is not on screen.
+            <span
+              className={
+                activeTab === "preview" && !isDetailShown
+                  ? "max-md:hidden"
+                  : undefined
+              }
+            >
+              <Segmented
+                size="sm"
+                label="Format"
+                options={FORMAT_OPTIONS}
+                value={format}
+                onChange={(next) => setFormat(next as Format)}
+              />
+            </span>
           ) : null}
         </div>
       </div>
+
+      {notice}
 
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
         {error ? (
@@ -671,7 +745,6 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
-              {observation ? null : notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
@@ -704,18 +777,14 @@ export function TracePeek({
                   {observation.estimate ? (
                     <CostCard cost={observation.estimate} />
                   ) : null}
-                  {observation.explain &&
-                  observation.input == null &&
-                  observation.output == null &&
-                  !observation.statusMessage ? null : (
-                    <PreviewBody
-                      input={observation.input}
-                      output={observation.output}
-                      statusMessage={observation.statusMessage}
-                      level={observation.level}
-                      format={format}
-                    />
-                  )}
+                  <PreviewBody
+                    input={observation.input}
+                    output={observation.output}
+                    noInput={observation.noInput}
+                    statusMessage={observation.statusMessage}
+                    level={observation.level}
+                    format={format}
+                  />
                 </>
               ) : null}
             </div>

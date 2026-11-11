@@ -10,6 +10,8 @@ import ast
 import logging
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
+from email import message_from_string, policy
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -338,15 +340,77 @@ def test_build_mime_puts_no_newline_in_any_header() -> None:
         sender_email="otari@example.com\r\nBcc: attacker@evil.example",
         sender_name="Otari\r\nBcc: attacker@evil.example",
         message=MESSAGE,
+        reply_to="grace@example.com\r\nBcc: attacker@evil.example",
     )
 
     assembled = build_mime(envelope)
 
-    for header in ("From", "To", "Subject"):
+    for header in ("From", "To", "Subject", "Reply-To"):
         assert "\r" not in assembled[header], header
         assert "\n" not in assembled[header], header
     # And it serializes, which is what a raw newline would have prevented.
     assert assembled.as_string()
+
+
+def test_reply_to_is_a_header_only_when_given() -> None:
+    envelope = MailEnvelope(
+        to="support@example.com", sender_email="otari@example.com", sender_name="Otari", message=MESSAGE
+    )
+
+    assert build_mime(envelope)["Reply-To"] is None
+    assert build_mime(replace(envelope, reply_to="grace@example.com"))["Reply-To"] == "grace@example.com"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "grace@example.com via Otari",
+        "Zoë via Otari",
+        'Otari "Support"',
+        "=?utf-8?q?Otari_Security?=@evil.example via Otari",
+    ],
+)
+def test_a_mail_client_reads_the_sender_name_as_a_name(name: str) -> None:
+    """Unquoted, a name holding an address is read as the From address; unencoded, "=?" as other text."""
+    envelope = MailEnvelope(
+        to="support@example.com", sender_email="otari@example.com", sender_name=name, message=MESSAGE
+    )
+
+    wire = build_mime(envelope).as_string()
+
+    wire.encode("ascii")
+    (sender,) = message_from_string(wire, policy=policy.default)["From"].addresses
+    assert (sender.display_name, sender.addr_spec) == (name, "otari@example.com")
+
+
+@pytest.mark.asyncio
+async def test_send_names_the_sender_for_one_message_only() -> None:
+    mailer = Mailer(_ready(mail_from_name="Otari"))
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        await mailer.send(to="support@example.com", message=MESSAGE, sender_name="grace@example.com via Otari")
+        relayed = client.sendmail.call_args.args
+        await mailer.send(to="support@example.com", message=MESSAGE)
+        ordinary = client.sendmail.call_args.args
+
+    from_address = SMTP_CONFIGURED["mail_from_email"]
+    assert relayed[0] == ordinary[0] == from_address
+    assert f'\nFrom: "grace@example.com via Otari" <{from_address}>\n' in relayed[2]
+    assert f"\nFrom: Otari <{from_address}>\n" in ordinary[2]
+
+
+@pytest.mark.asyncio
+async def test_send_puts_the_reply_address_on_the_wire() -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        delivery = await Mailer(_ready()).send(to="support@example.com", message=MESSAGE, reply_to="grace@example.com")
+
+    assert delivery.delivered is True
+    _sender, recipients, body = client.sendmail.call_args.args
+    assert recipients == ["support@example.com"]
+    assert "\nReply-To: grace@example.com\n" in body
 
 
 @pytest.mark.asyncio

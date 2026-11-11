@@ -159,6 +159,40 @@ class OrganizationMemberRepository(
         result = await self.db.execute(statement)
         return result.scalars().first()
 
+    async def active_with_roles(
+        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], roles: Collection[str]
+    ) -> set[uuid.UUID]:
+        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query."""
+        if not user_ids or not roles:
+            return set()
+        result = await self.db.execute(
+            select(col(OrganizationMember.user_id)).where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+                col(OrganizationMember.status) == "active",
+                col(OrganizationMember.role).in_(list(roles)),
+            )
+        )
+        return set(result.scalars().all())
+
+    async def get_active_by_user_with_organizations(
+        self, user_id: uuid.UUID
+    ) -> list[tuple[OrganizationMember, Organization]]:
+        """Return every active membership of a user, joined to its organization, oldest first.
+
+        Unpaginated, for choosing among a caller's own memberships rather than rendering a page.
+        """
+        result = await self.db.execute(
+            select(OrganizationMember, Organization)
+            .join(Organization, col(OrganizationMember.organization_id) == col(Organization.id))
+            .where(
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "active",
+            )
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+        )
+        return [(member, organization) for member, organization in result.all()]
+
     async def first_active_organization_ids(
         self,
         user_ids: Collection[uuid.UUID],
@@ -248,6 +282,18 @@ class OrganizationMemberRepository(
         await self.db.refresh(member)
         return member
 
+    async def count_active(self, organization_id: uuid.UUID) -> int:
+        """Count an organization's active memberships."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrganizationMember)
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return result.scalar_one()
+
     async def count_active_owners(self, organization_id: uuid.UUID) -> int:
         """Count an organization's active owners.
 
@@ -324,6 +370,23 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, user) for member, user in result.all()], count
+
+    async def get_active_by_organization_with_users(
+        self, organization_id: uuid.UUID
+    ) -> list[tuple[OrganizationMember, User]]:
+        """Return every active member of an organization, joined to its identity.
+
+        Unpaginated, for a sweep over every active membership rather than a page to render.
+        """
+        result = await self.db.execute(
+            select(OrganizationMember, User)
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return [(member, user) for member, user in result.all()]
 
     async def get_by_users_with_organizations(
         self,

@@ -35,7 +35,6 @@ from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
@@ -318,6 +317,119 @@ _INHERITED_URL = "http://searxng.internal:8080"
 
 
 @pytest.fixture
+def priced_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """Four config-file search tools: one priced by its price_per_call, three with no price in the file."""
+    tools = {
+        "file-priced": {"provider": "fake", "price_per_call": 0.003},
+        "file-own": {"provider": "fake"},
+        "file-old": {"provider": "fake"},
+        "file-none": {"provider": "fake"},
+    }
+    yield from build_test_client(test_config.model_copy(update={"search_tools": tools}))
+
+
+def _price(client: TestClient, headers: dict[str, str], *, kind: str, model_key: str, per_call: float) -> None:
+    body = {
+        "kind": kind,
+        "model_key": model_key,
+        "input_price_per_million": per_call * 1_000_000,
+        "output_price_per_million": 0,
+        "unit": "request",
+    }
+    resp = client.post(f"{API_ROOT}/pricing", json=body, headers=headers)
+    assert resp.status_code in (200, 201), resp.text
+
+
+def _prices(client: TestClient, headers: dict[str, str], kind: str = "search") -> dict[str, tuple[Any, Any]]:
+    listed = client.get(f"{API_ROOT}/search-tools", params={"kind": kind}, headers=headers).json()
+    return {
+        f"{where}:{tool['name']}": (tool["price_per_call"], tool["price_source"])
+        for where in ("config", "stored")
+        for tool in listed[where]
+    }
+
+
+def test_the_listing_gives_each_tool_the_rate_its_calls_settle_at_and_its_row(
+    priced_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client, headers = priced_client, master_key_header
+    _price(client, headers, kind="search", model_key="file-own", per_call=0.004)
+    _price(client, headers, kind="model", model_key="fake:file-old", per_call=0.002)
+    # An override the operator set for one organization prices only that organization's calls.
+    override = {
+        "kind": "search",
+        "model_key": "file-own",
+        "input_price_per_million": 1_000,
+        "output_price_per_million": 0,
+        "unit": "request",
+    }
+    resp = client.post(f"{API_ROOT}/organizations/me/pricing", json=override, headers=headers)
+    assert resp.status_code == 201, resp.text
+
+    assert _prices(client, headers) == {
+        "config:file-none": (None, "none"),
+        "config:file-old": (0.002, "old_key"),
+        "config:file-own": (0.004, "own"),
+        "config:file-priced": (0.003, "config"),
+    }
+
+    # A rate written through the API stays config.yml's to set: the next start writes price_per_call again.
+    _price(client, headers, kind="search", model_key="file-priced", per_call=0.006)
+    assert _prices(client, headers)["config:file-priced"] == (0.006, "config")
+
+    # A stored tool shadowing the entry takes its name's row, and no start writes the entry's price.
+    created = _create(client, headers, name="file-priced", provider="fake", api_base=None)
+    assert created.status_code == 201, created.text
+    assert "price_source" not in created.json()
+    shadowed = _prices(client, headers)
+    assert shadowed["stored:file-priced"] == (0.006, "own")
+    assert shadowed["config:file-priced"] == (0.006, "own")
+
+    # A tool's own row wins over its old key.
+    _price(client, headers, kind="search", model_key="file-old", per_call=0.005)
+    assert _prices(client, headers)["config:file-old"] == (0.005, "own")
+
+
+@pytest.fixture
+def priced_fetch_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """Two config-file fetch tools priced by their price_per_call, one of them free."""
+    tools = {
+        "file-fetch": {"provider": "fake", "price_per_call": 0.002},
+        "free-fetch": {"provider": "fake", "price_per_call": 0},
+    }
+    yield from build_test_client(test_config.model_copy(update={"fetch_tools": tools}))
+
+
+def test_the_fetch_listing_gives_a_config_file_fetch_tool_its_price_per_call(
+    priced_fetch_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _prices(priced_fetch_client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0, "own"),
+        "config:file-fetch": (0.002, "config"),
+        "config:free-fetch": (0.0, "config"),
+    }
+
+
+def test_the_fetch_listing_prices_builtin_fetch_and_stored_fetch_tools(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = _create(client, master_key_header, name="fake-fetch", kind="fetch", provider="fake", api_base=None)
+    assert created.status_code == 201, created.text
+    # A migration prices builtin_fetch at $0 on a database where nothing did.
+    assert _prices(client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0, "own"),
+        "stored:fake-fetch": (None, "none"),
+    }
+
+    _price(client, master_key_header, kind="fetch", model_key="builtin_fetch", per_call=0.0002)
+    _price(client, master_key_header, kind="fetch", model_key="fake-fetch", per_call=0.001)
+    assert _prices(client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0002, "own"),
+        "stored:fake-fetch": (0.001, "own"),
+    }
+
+
+@pytest.fixture
 def catalog_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
     """The shared config, plus a URL a searxng tool inherits and one fetch tool."""
     config = test_config.model_copy(
@@ -341,7 +453,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "perplexity", "searxng", "serply", "synthetic"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -350,6 +462,7 @@ def test_search_catalog_serves_the_library_metadata(
     assert exa["max_results"] == metadata.max_results
     assert exa["query_in_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
+    assert exa["reports_cost"] is True
     assert exa["instances"] == ["from-file"]
     # Fetch's own fields stay null on a search entry, and no environment key is reported.
     assert exa["max_urls_per_call"] is None
@@ -363,15 +476,29 @@ def test_search_catalog_serves_the_library_metadata(
     assert (serply["max_results"], serply["query_in_url"], serply["key_in_url"]) == (10, True, False)
 
 
-def test_searxng_keeps_its_entry_without_a_schema(
+def test_a_cost_tier_the_provider_reports_no_cost_for_is_set_only_by_a_tools_configuration(
     catalog_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
+    perplexity = _catalog(catalog_client, headers=master_key_header)["perplexity"]
+    assert perplexity["reports_cost"] is False
+    (tier,) = [option for option in perplexity["options"] if option["cost_tier"]]
+    assert (tier["name"], tier["enum"], tier["default"], tier["operator_only"]) == (
+        "search_type",
+        ["web", "fast"],
+        "web",
+        True,
+    )
+    assert not any(option["operator_only"] for option in perplexity["options"] if not option["cost_tier"])
+
+
+def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     searxng = _catalog(catalog_client, headers=master_key_header)["searxng"]
     assert searxng["requires_api_key"] is False
     assert searxng["requires_api_base"] is True
     assert searxng["default_api_base"] == _INHERITED_URL
-    # Null, not empty: its options are passed unchecked, not refused.
-    assert searxng["options"] is None
+    assert searxng["tier"] == "production"
+    operator_only = {option["name"] for option in searxng["options"] if option["operator_only"]}
+    assert operator_only == {"engines", "method"}
     assert searxng["instances"] == []
 
     assert _create(catalog_client, master_key_header).status_code == 201
@@ -500,16 +627,12 @@ def test_stored_tool_is_immediately_dispatchable(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
     """The whole point of issue #601: a dashboard-added tool serves /api/v1/search."""
-    assert _create(client, master_key_header).status_code == 201
-    outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
-    mock = AsyncMock(return_value=outcome)
-    with patch("gateway.services.search_backend.run_search", mock):
-        resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
+    hits = {"hits": [{"url": "https://example.com", "title": "Example"}]}
+    assert _create(client, master_key_header, provider="fake", api_base=None, options=hits).status_code == 201
+    resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "local"
-    dispatched = mock.call_args.args[0]
-    assert dispatched.provider == "searxng"
-    assert dispatched.api_base == "http://searxng:8080"
+    assert [result["url"] for result in resp.json()["results"]] == ["https://example.com"]
 
 
 @pytest.fixture
@@ -629,8 +752,10 @@ def test_options_are_checked_against_the_providers_schema(
     )
     assert refused.status_code == 422
     assert "option 'type' has a value the provider refuses" in refused.json()["detail"]
-    # Until any-search has its SearXNG adapter, a searxng instance's options are passed as today.
-    assert _create(client, master_key_header, options={"engines": "brave", "anything": 1}).status_code == 201
+    searxng = _create(client, master_key_header, options={"engines": "brave", "anything": 1})
+    assert searxng.status_code == 422
+    assert "option 'anything' is not one the provider knows" in searxng.json()["detail"]
+    assert _create(client, master_key_header, options={"engines": "brave"}).status_code == 201
     # Each tool's shared parameters pass for every provider, and only that tool's.
     shared = _create(client, master_key_header, name="g", provider="fake", api_base=None, options={"max_results": 3})
     assert shared.status_code == 201, shared.text
@@ -839,6 +964,26 @@ def test_a_stored_instance_is_tested_by_name(client: TestClient, master_key_head
     assert resp.json() == {"ok": False, "error": "timeout", "hits": None, "characters": None}
 
 
+@pytest.fixture
+def refused_tier_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A client whose config-file search tool sets a cost tier value the ``fake`` provider refuses."""
+    file_tool = {"provider": "fake", "options": {"depth": "Basic"}}
+    yield from build_test_client(test_config.model_copy(update={"search_tools": {"from-file": file_tool}}))
+
+
+def test_a_tool_whose_cost_tier_the_provider_refuses_is_refused_a_test(
+    refused_tier_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    resp = refused_tier_client.post(
+        f"{API_ROOT}/search-tools/from-file/test", json={"query": "q"}, headers=master_key_header
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Search tool 'from-file' does not run: fake does not take the value of its option 'depth', "
+        "which sets the price of each call."
+    )
+
+
 @pytest.mark.parametrize("trusted", [False, True])
 def test_builtin_fetch_is_tested_with_one_fetch_as_a_fetch_tool_call_makes(
     client: TestClient,
@@ -926,7 +1071,7 @@ def test_a_library_instance_is_tested_through_the_apps_web_provider_client(
     assert [str(request.url) for request in requests] == ["https://api.exa.ai/search"]
 
 
-def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
+def test_a_searxng_instance_is_tested_through_its_adapter(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     requests: list[httpx.Request] = []
@@ -937,7 +1082,8 @@ def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
             raise httpx.ReadTimeout("slow", request=request)
         if request.url.params["q"] == "broken":
             return httpx.Response(502, text="bad gateway")
-        return httpx.Response(200, json={"results": [{"url": "https://a.example"}, {"url": "https://b.example"}]})
+        results = [{"url": f"https://{host}.example", "title": host, "content": ""} for host in ("a", "b")]
+        return httpx.Response(200, json={"results": results, "unresponsive_engines": []})
 
     _answer_provider_calls(client, answer)
     searxng = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -948,6 +1094,8 @@ def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
         "characters": None,
     }
     assert str(requests[0].url).startswith("http://searxng:8080/search")
+    capped = {**searxng, "options": {"max_results": 1}}
+    assert _test(client, master_key_header, query="otari", **capped).json()["hits"] == 1
     assert _test(client, master_key_header, query="broken", **searxng).json()["error"] == "http_error"
     assert _test(client, master_key_header, query="slow", **searxng).json()["error"] == "timeout"
     # A port that does not parse passes the shape check, and fails the call, not the route.

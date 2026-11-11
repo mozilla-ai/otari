@@ -16,9 +16,11 @@ dependency footprint stays as it is.
 
 import smtplib
 import ssl
+from email.charset import Charset
 from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 from typing import Protocol
 
 from gateway.core.addresses import normalized_address
@@ -52,6 +54,22 @@ def redact_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def _from_header(name: str, address: str) -> str:
+    """The From header, with the name always read back as the text it is.
+
+    formataddr quotes a name holding "@" or ".", which unquoted a mail client
+    reads as the address, and encodes one outside ASCII. It leaves an ASCII
+    name holding "=?" as it is, which a client would decode as an encoded word
+    into other text, so that name is encoded here.
+    """
+    if "=?" in name:
+        # Raises for an address outside ASCII, as formataddr does; the SMTP
+        # transport reports that UnicodeError as a delivery failure.
+        address.encode("ascii")
+        return f"{Charset('utf-8').header_encode(name)} <{address}>"
+    return formataddr((name, address))
+
+
 def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     """Assemble the multipart/alternative message a transport puts on the wire.
 
@@ -61,12 +79,16 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     """
     message = MIMEMultipart("alternative")
     message["Subject"] = sanitize_header_value(envelope.message.subject)
-    # sender_name is operator config, not a caller-supplied value a caller would
-    # already have sanitized (unlike the subject): a stray CR/LF in it would
-    # raise HeaderParseError on every send, silently and from then on, with one
-    # warning line that never points at the From name as the cause.
-    message["From"] = f"{sanitize_header_value(envelope.sender_name)} <{sanitize_header_value(envelope.sender_email)}>"
+    # sender_name is not a value a caller would already have sanitized (unlike
+    # the subject): a stray CR/LF in it would raise HeaderParseError on every
+    # send, silently and from then on, with one warning line that never points
+    # at the From name as the cause.
+    message["From"] = _from_header(
+        sanitize_header_value(envelope.sender_name), sanitize_header_value(envelope.sender_email)
+    )
     message["To"] = sanitize_header_value(envelope.to)
+    if envelope.reply_to:
+        message["Reply-To"] = sanitize_header_value(envelope.reply_to)
     # Plain text first, then HTML: per RFC 2046, a mail client renders the last
     # alternative it understands, so this is the order that prefers HTML.
     message.attach(MIMEText(envelope.message.text, "plain"))

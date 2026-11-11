@@ -8,6 +8,8 @@ carries it as ``error.code``. A code, once sent, keeps its meaning.
 
 from collections.abc import Mapping
 
+from fastapi import HTTPException
+
 ERROR_CODE_HEADER = "Otari-Error-Code"
 # Which budget refused: ``user`` for the billed user's own budget, otherwise the
 # scope of the ceiling (one of ``models.budgets.ScopeType``).
@@ -38,8 +40,14 @@ MODEL_NOT_FOUND = "model_not_found"
 # ``provider_supported_countries`` closes the model's provider to the country the request comes from.
 COUNTRY_NOT_SUPPORTED = "country_not_supported"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+# The provider refused the request for its size (an upstream 413), such as a prompt over a tokens-per-minute limit.
+REQUEST_TOO_LARGE = "request_too_large"
 # The model the request reached does not accept a kind of content the request carries, such as an image.
 UNSUPPORTED_CONTENT = "unsupported_content"
+# The provider cannot express a request parameter for the model, such as ``response_format`` on one with no JSON mode.
+UNSUPPORTED_PARAMETER = "unsupported_parameter"
+# The model failed to produce output matching the requested JSON schema; resending the request may succeed.
+STRUCTURED_OUTPUT_FAILED = "structured_output_failed"
 # The model is a kind the endpoint cannot serve, such as an embedding model sent a chat completion.
 WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
@@ -63,6 +71,8 @@ PROVIDER_ERROR = "provider_error"
 PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 # Creating or first claiming an account needs the terms of service the deployment publishes.
 TERMS_NOT_ACCEPTED = "terms_not_accepted"
+# A workspace with web access (fetch or search) turned off refused a request that declared a web tool.
+WEB_ACCESS_DISABLED = "web_access_disabled"
 
 
 def error_headers(
@@ -86,3 +96,27 @@ def error_headers(
 def error_code_of(headers: Mapping[str, str] | None) -> str | None:
     """The code a refusal's headers carry, or None."""
     return (headers or {}).get(ERROR_CODE_HEADER)
+
+
+class RefusalException(HTTPException):
+    """A refusal whose error body carries ``fields`` beside ``detail`` and ``code``.
+
+    A field goes in the body only, never in a header: its value may be caller
+    text, such as an end user's id, that a header cannot encode.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        fields: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code=status_code, detail=detail, headers=dict(headers) if headers else None)
+        self.fields = dict(fields or {})
+
+
+def body_fields_of(exc: BaseException) -> dict[str, str]:
+    """The fields ``exc`` adds to its error body, empty for anything but a :class:`RefusalException`."""
+    return exc.fields if isinstance(exc, RefusalException) else {}

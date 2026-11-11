@@ -22,6 +22,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
   ORGANIZATIONS,
@@ -36,6 +37,22 @@ export function useWorkspaces(enabled = true) {
     queryFn: () => fetchAllPaged<Workspace>("/workspaces"),
     staleTime: 60_000,
     enabled,
+  })
+}
+
+// One workspace's row, for a page about that workspace alone, which would
+// otherwise walk every page of the list to find it. Nested under the workspaces
+// key, so the writes that invalidate the list refresh it too.
+export function useWorkspace(workspaceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<Workspace>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}`,
+      ),
+    enabled: enabled && workspaceId !== null,
+    staleTime: 60_000,
   })
 }
 
@@ -374,6 +391,7 @@ function invalidateWorkspaceProviderKeys(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 export function useSetWorkspaceProviderKeyOverride() {
@@ -495,6 +513,7 @@ function invalidateWorkspaceHostedProviders(
   })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
 }
 
 /** What the workspace requires of every provider serving it. */
@@ -537,6 +556,7 @@ export function useSetWorkspaceProviderPolicy() {
       })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
     },
   })
 }
@@ -631,6 +651,29 @@ export function useSetWorkspaceTraceContent() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+// Whether the workspace's keys may name MCP servers by URL in a request, beside
+// the stored servers whose access lists the workspace controls. A switch, like
+// the one above: it takes effect when flipped.
+export function useSetWorkspaceRequestMcpServers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, allowed }: { id: string; allowed: boolean }) =>
+      apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ request_mcp_servers_allowed: allowed }),
+      }),
+    // Exact, so the workspace's members, budget defaults and provider keys
+    // nested under it are not refetched for a switch that moves none of them.
+    onSuccess: (workspace) => {
+      queryClient.setQueryData([WORKSPACES, workspace.id], workspace)
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES],
+        exact: true,
+      })
     },
   })
 }

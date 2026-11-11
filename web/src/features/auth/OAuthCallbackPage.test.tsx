@@ -107,6 +107,35 @@ describe("OAuthCallbackPage", () => {
     )
   })
 
+  it("records a sign-in that created the account as a signup, then as the login it also is", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: true }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(recordEvent.mock.calls).toEqual([
+      [TELEMETRY_EVENTS.SIGNUP_SUCCESS, { authentication_method: "google" }],
+      [TELEMETRY_EVENTS.LOGIN_SUCCESS, { authentication_method: "google" }],
+    ])
+  })
+
+  it("records a sign-in to an account that already existed as a login only", async () => {
+    window.sessionStorage.setItem(STATE_KEY, "the-state")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: false }),
+    )
+
+    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+
+    await screen.findByText("SIGNED IN")
+    expect(recordEvent.mock.calls).toEqual([
+      [TELEMETRY_EVENTS.LOGIN_SUCCESS, { authentication_method: "google" }],
+    ])
+  })
+
   it("clears the stored state, so one value answers exactly one callback", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -371,7 +400,7 @@ describe("OAuthCallbackPage", () => {
         }),
       ).toBeInTheDocument()
       expect(
-        screen.getByRole("link", { name: "terms of service" }),
+        screen.getByRole("link", { name: "Terms of Service" }),
       ).toHaveAttribute("href", "https://otari.example.com/terms")
       // Either way on keeps the page the refused sign-in started from.
       expect(
@@ -381,7 +410,7 @@ describe("OAuthCallbackPage", () => {
       expect(again).toBeDisabled()
 
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(again)
 

@@ -55,6 +55,7 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
 )
+from gateway.services.pricing_service import is_estimated_rate, resolve_model_pricing
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
@@ -65,6 +66,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.models_dev import parse_catalog_v2
 
 pytestmark = pytest.mark.asyncio
 
@@ -436,6 +438,11 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     [stored] = await _organization_rates(async_db)
     assert stored.input_price_per_million == Decimal("3.0")
     assert stored.origin == SEED_ORIGIN
+    # So settlement takes a charge the provider states over it (mozilla-ai/otari#3029).
+    resolved = await resolve_model_pricing(
+        async_db, "openai", "gpt-4o", as_of=stored.effective_from, organization_id=organization.id
+    )
+    assert resolved is not None and is_estimated_rate(resolved)
 
     # An admin chooses a rate, and the dataset stops reaching it.
     stored.input_price_per_million = Decimal("1.0")
@@ -447,6 +454,10 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     assert result.repriced == []
     [stored] = await _organization_rates(async_db)
     assert stored.input_price_per_million == Decimal("1.0")
+    resolved = await resolve_model_pricing(
+        async_db, "openai", "gpt-4o", as_of=stored.effective_from, organization_id=organization.id
+    )
+    assert resolved is not None and not is_estimated_rate(resolved)
 
 
 async def test_an_offered_model_says_what_its_rate_is_per(
@@ -473,6 +484,36 @@ async def test_an_offered_model_says_what_its_rate_is_per(
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     assert listed.data[0].unit == "request"
     assert listed.data[0].input_price_per_million == 2000.0
+
+
+async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """models.dev names the kind; a model it does not know is ``unknown``, a kind of its own."""
+    models_dev = parse_catalog_v2({"openai": {"models": {"gpt-4o": {"type": "chat"}, "dall-e-3": {"type": "image"}}}})
+    monkeypatch.setattr(
+        "gateway.services.providers._org_provider_model_service.cached_models_dev_catalog", lambda: models_dev
+    )
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-4o", "dall-e-3", "mystery")
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert {model.model: model.type for model in listed.data} == {
+        "dall-e-3": "image",
+        "gpt-4o": "chat",
+        "mystery": None,
+    }
+    assert listed.type_counts == {"image": 1, "chat": 1, "unknown": 1}
+
+    images = await _service(async_db).list_models(user=owner, key_id=key_id, model_type="image")
+    assert ([model.model for model in images.data], images.count) == (["dall-e-3"], 1)
+    assert images.type_counts == listed.type_counts
+
+    unknown = await _service(async_db).list_models(user=owner, key_id=key_id, model_type="unknown")
+    assert [model.model for model in unknown.data] == ["mystery"]
 
 
 async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_it(

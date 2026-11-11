@@ -24,6 +24,7 @@ from gateway.core.settings.pricing import (
     PRICE_UNIT_DESCRIPTION,
     price_per_request_shorthand,
     rates_shorthand,
+    token_prices_not_required,
 )
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -58,7 +59,7 @@ from gateway.services.pricing_service import (
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
-from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument, stored_rates
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Two routers under one prefix, one per authorization rule, so that adding a
@@ -112,25 +113,16 @@ def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozens
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
-def _token_prices_not_required(schema: dict[str, Any]) -> None:
-    # The before-validator fills both from price_per_request; a body with neither is still refused.
-    schema["required"] = [
-        name
-        for name in schema.get("required", [])
-        if name not in ("input_price_per_million", "output_price_per_million")
-    ]
-
-
 class SetPricingRequest(PricedKind):
     """Create a versioned per-model price, with optional cache and context tiers."""
 
-    model_config = ConfigDict(json_schema_extra=_token_prices_not_required)
+    model_config = ConfigDict(json_schema_extra=token_prices_not_required)
 
     model_key: str = Field(
         description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"
     )
     input_price_per_million: float = Field(
-        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests, images or characters"
     )
     output_price_per_million: float = Field(
         ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
@@ -181,14 +173,14 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(
-        description="What the rates are per: token for a model, request or image for a non-token endpoint."
+        description="What the rates are per: token for a model, request, image or character for a non-token endpoint."
     )
     price_per_request: float | None = Field(
         default=None, description="USD for each request, for a rate per request; null for any other unit."
     )
     rates: RatesDocument = Field(description=RATES_DESCRIPTION)
     origin: str | None = Field(
-        description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+        description="Which writer set this row: config, api, seed or migration. Null before origins were recorded.",
     )
     created_at: str
     updated_at: str
@@ -209,7 +201,7 @@ class PricingResponse(BaseModel):
             price_per_request=(
                 float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "request" else None
             ),
-            rates=RatesDocument.model_validate(rates_of(pricing)),
+            rates=stored_rates(rates_of(pricing)),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),

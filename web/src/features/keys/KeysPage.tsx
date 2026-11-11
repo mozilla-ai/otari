@@ -51,6 +51,7 @@ import {
   canContributeToWorkspace,
   canManage,
 } from "@/features/organization/roles"
+import { KeyMcpAccess } from "@/features/tools/KeyMcpAccess"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
@@ -76,9 +77,13 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import {
+  useNarrowingWorkspace,
+  useSelectedWorkspace,
+} from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
+import { EndUsersDialog } from "./EndUsersDialog"
 import { ExpiryFields } from "./ExpiryFields"
 import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
@@ -442,6 +447,7 @@ function CreateKeyDialog({
   )
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
+  const narrowingWorkspace = useNarrowingWorkspace()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -736,6 +742,7 @@ function CreateKeyDialog({
             <OwnerAccessNote userId={userId} users={ownerOptions} />
           ) : null}
           <ModelScopeControl
+            workspaceId={narrowingWorkspace}
             title="Restrict this key's models"
             description={
               isDeploymentWide
@@ -1028,6 +1035,7 @@ function EditKeyForm({
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}
       <ModelScopeControl
+        workspaceId={apiKey.workspace_id ?? undefined}
         title="Restrict this key's models"
         description={
           isDeploymentWide
@@ -1059,6 +1067,7 @@ function EditKeyForm({
           setToolScopeValid(isValid)
         }}
       />
+      <KeyMcpAccess workspaceId={apiKey.workspace_id} apiKeyId={apiKey.id} />
       {/* Operator-only, as on the create form: a member editing their own key
           must not be able to take it out of their own budget. */}
       {isDeploymentWide ? (
@@ -1328,6 +1337,7 @@ export function KeysPage() {
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [federating, setFederating] = useState<ApiKey>()
+  const [listingEndUsers, setListingEndUsers] = useState<ApiKey>()
   const organizationContext = useOrganizationContext().data
   const role = organizationContext?.role
   // A viewer of this workspace reads their keys and changes none: the server
@@ -1349,7 +1359,13 @@ export function KeysPage() {
   // react-aria's own restore has no target left. Measured, not assumed: dropping
   // this strands focus in both the regenerate-cancel and edit-close tests.
   const { triggerRef: actionTriggerRef } = useConfirmationFocus(
-    !!(pendingRegenerate || pendingDelete || editing || regenerated),
+    !!(
+      pendingRegenerate ||
+      pendingDelete ||
+      editing ||
+      regenerated ||
+      listingEndUsers
+    ),
   )
   const tableRegion = useRef<HTMLDivElement>(null)
   // Seeded from the viewport rather than defaulting to "wide": the observer only
@@ -1413,6 +1429,9 @@ export function KeysPage() {
         onDelete={() => setPendingDelete(apiKey)}
         onWorkloadIdentity={
           canFederate ? () => setFederating(apiKey) : undefined
+        }
+        onEndUsers={
+          apiKey.is_service_key ? () => setListingEndUsers(apiKey) : undefined
         }
         isReadOnly={isReadOnly}
         isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
@@ -1692,6 +1711,18 @@ export function KeysPage() {
         <FederationRulesDialog
           apiKey={federating}
           onClose={() => setFederating(undefined)}
+        />
+      ) : null}
+
+      {listingEndUsers ? (
+        <EndUsersDialog
+          apiKey={listingEndUsers}
+          // An organization's service key reaches only its owners and admins,
+          // who read its budgets; a member's operator-made key shows ids.
+          canReadBudgets={
+            isDeploymentWide || listingEndUsers.is_organization_service_key
+          }
+          onClose={() => setListingEndUsers(undefined)}
         />
       ) : null}
 

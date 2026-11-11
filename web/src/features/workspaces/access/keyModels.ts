@@ -5,7 +5,12 @@ import type { OrgProviderKey } from "@/client"
 // that key serves. It is what `services/tenancy/organization_model_access.py`
 // reads when it builds a session's catalog scope.
 
-/** How a key is named on screen: its provider and the name the organization gave it. */
+/** What a model name starts with to reach this key: its own prefix, or its provider. */
+export function keyPrefix(key: OrgProviderKey): string {
+  return key.slug ?? key.provider
+}
+
+/** How a key is named on screen: its prefix and the name the organization gave it. */
 export function keyLabel(
   key: OrgProviderKey | undefined,
   keyId: string,
@@ -16,7 +21,7 @@ export function keyLabel(
   // one: a bare UUID named nothing a person could act on, where "Unknown key"
   // plus a fragment is both readable and enough to find the row again (#2106).
   if (!key) return `Unknown key ${keyId.slice(0, 8)}`
-  return `${key.provider} / ${key.name}`
+  return `${keyPrefix(key)} / ${key.name}`
 }
 
 /**

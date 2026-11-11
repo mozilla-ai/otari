@@ -48,10 +48,10 @@ export function PublicAuthLayout({
  * rendered by `DeploymentRoot` *ahead* of `RouterProvider` (see `App.tsx`), so
  * there is no router context to link through; and a hash change is not the
  * full page reload that rule exists to prevent, because `App`'s `useHashPath`
- * picks it up and swaps the page in place. The `/welcome` link on `AuthHelp`
- * is a HeroUI `Link` of its own rather than this, and stays that way:
- * `/welcome` is a path the gateway serves, so it is the one link down here that
- * *is* a page load.
+ * picks it up and swaps the page in place. The guide link on `AuthHelp`
+ * is a HeroUI `Link` of its own rather than this, and stays that way: it is a
+ * path the gateway serves (`/welcome`) or the deployment's documentation on
+ * another origin, so it is the one link down here that *is* a page load.
  *
  * Sized to the 44px touch target the phone viewport asks for, which `text-sm`
  * alone is about half of, and these stack several deep in a card's footer.

@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -20,7 +20,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, MetaData, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -45,8 +45,14 @@ from gateway.main import create_app, install_rate_limits
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
+from gateway.services.providers import new_platform_connect_rate_limiter
+from gateway.services.tools import WebSearchBackend
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+# The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
+# enrich its hits through.
+FAKE_SEARCH = "fake-search"
+FAKE_FETCH = "fake-fetch"
 
 
 @contextmanager
@@ -100,9 +106,16 @@ def _reset_engine(database_url: str) -> Engine:
 
 
 def _build_reset_plan(database_url: str) -> _ResetPlan:
-    """Record the schema's tables, and whatever the migrations seeded into them."""
+    """Record the schema's tables, in an order safe to reinsert, and whatever the migrations seeded."""
     with _reset_engine(database_url).connect() as conn:
-        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        metadata = MetaData()
+        metadata.reflect(conn)
+        # A seeded row in a child table can reference a seeded row in a parent table, so
+        # reinsertion needs that same order. Table-name order gives no such guarantee.
+        # NOTE: ``organization`` and ``user`` reference each other, so no foreign-key order exists
+        # for that pair and SQLAlchemy warns and orders them by name, which seeds them in the
+        # direction they need.
+        tables = [table.name for table in metadata.sorted_tables if table.name != "alembic_version"]
         seeds = tuple(
             (table, rows)
             for table in tables
@@ -422,6 +435,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    app.state.platform_connect_rate_limiter = new_platform_connect_rate_limiter()
     # Built on first use and caching each issuer's signing keys, so a test's stub must not serve the next test.
     app.state.federated_token_verifier = None
     app.state.container = build_container(
@@ -443,7 +457,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig, *, base_url: str = "http://testserver") -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -452,6 +466,9 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
+
+    ``base_url`` is the address requests are sent to, which sets the scheme the
+    server sees.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
@@ -467,7 +484,7 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     app.dependency_overrides = {get_db: override_get_db}
 
     try:
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url=base_url) as test_client:
             yield test_client
     finally:
         dispose_async_engine(async_engine)
@@ -483,6 +500,64 @@ def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestCl
     outlives the test unless ``_refresh_process_state`` redoes it.
     """
     yield from build_test_client(test_config)
+
+
+@pytest.fixture
+def serve_search_on_fake(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Serve the in-loop search on the ``fake`` search instance ``FAKE_SEARCH``, named in ``web_search_default_tool``.
+
+    Call it with the instance's options; with ``fetch``, the options of the
+    ``fake`` fetch instance ``FAKE_FETCH`` that enriches its hits; and with
+    ``extract=False`` for a search that reads no pages.
+
+    It sets the instances once the client has booted, on the config its app
+    reads, and sets them as that config's baseline too. The overlay rebuilds
+    the maps from the baseline at each boot and each refresh, and the worker's
+    shared ``test_config`` keeps the baseline it first boots with, so an
+    instance set before the boot would reach every later test, and one set only
+    in the maps would be dropped by a refresh during the test.
+    """
+    config: GatewayConfig = cast(FastAPI, client.app).state.config
+
+    def serve(
+        options: dict[str, Any] | None = None, *, fetch: dict[str, Any] | None = None, extract: bool = True
+    ) -> None:
+        search: dict[str, Any] = {"provider": "fake", "options": options or {}}
+        if fetch is not None:
+            search["fetch_tool"] = FAKE_FETCH
+            fetch_tools = {FAKE_FETCH: {"provider": "fake", "options": fetch}}
+            monkeypatch.setattr(config, "fetch_tools", fetch_tools)
+            monkeypatch.setattr(config, "_fetch_tool_baseline", fetch_tools)
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+        monkeypatch.setattr(config, "search_tools", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "_search_tool_baseline", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "web_search_default_tool", FAKE_SEARCH)
+        if not extract:
+            monkeypatch.setattr(config, "web_search_extract", False)
+
+    return serve
+
+
+def price_fake_search(client: TestClient, headers: dict[str, str], *, per_million: float) -> dict[str, Any]:
+    """Price calls to ``FAKE_SEARCH`` at its own row, at ``per_million`` USD per million calls."""
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": "search",
+            "model_key": FAKE_SEARCH,
+            "input_price_per_million": per_million,
+            "output_price_per_million": 0.0,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    priced: dict[str, Any] = response.json()
+    return priced
+
+
+def admitted_search_spy() -> Any:
+    """A spy on each search the library backend runs once its call cap and the request's budget admitted it."""
+    return patch.object(WebSearchBackend, "_call", autospec=True, side_effect=WebSearchBackend._call)
 
 
 @pytest.fixture

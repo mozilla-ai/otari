@@ -1,0 +1,71 @@
+"""What a video costs: the per-second price its model's rates give video output.
+
+A video is a job billed when it completes, so settlement prices the seconds the
+provider reports at the rate found for the model. The rate is the ``video``
+slot of the row's ``rates`` block, read through the reader every rate goes
+through, so an operator's price and a catalog price read alike. A model whose
+block prices video in another unit, or not at all, has no video rate.
+
+A job whose length nobody states is billed at what the provider charged for it,
+where the provider says.
+"""
+
+from dataclasses import replace
+from decimal import Decimal
+
+from gateway.core.metered_pricing import UnitRate, quantize_cost
+from gateway.models.money import MAX_USD_COST
+from gateway.models.pricing import ModelPricing
+from gateway.services.pricing._charge import UsageCharge
+from gateway.services.pricing._price_rules import NO_FACTS, PriceFacts, apply_rules
+from gateway.services.pricing._slot_pricing import UNIT_METER, estimate_slot_cost, price_slot, slot_rate
+
+# The meter a video's length is reported under on its usage row.
+VIDEO_SECONDS = UNIT_METER["second"]
+
+
+def video_rate(rate: ModelPricing | None) -> UnitRate | None:
+    """The per-second price ``rate`` gives video output, or ``None`` when it gives none."""
+    found = slot_rate(rate, "video", "output")
+    return found if found is not None and found.unit == "second" else None
+
+
+def estimate_video_cost(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = NO_FACTS) -> Decimal:
+    """What to reserve for a video of ``seconds``: its length at the per-second price, or zero when unpriced."""
+    return estimate_slot_cost(_applied(rate, facts), "video", "output", {"second": seconds})
+
+
+def price_video(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = NO_FACTS) -> UsageCharge | None:
+    """What a completed video of ``seconds`` costs at ``rate``, or ``None`` when it gives no video rate."""
+    if rate is None:
+        return None
+    applied = apply_rules(rate, facts)
+    charge = price_slot(applied.rate, "video", "output", {"second": seconds})
+    return None if charge is None else replace(charge, lines=applied.explain(charge.lines, path="video.output"))
+
+
+def charged_as_reported(cost: float | None) -> UsageCharge | None:
+    """A call billed at the provider's own ``cost`` in USD, or ``None`` when it states no usable one.
+
+    No meter and no line: no rate priced it, so there is nothing to explain.
+    """
+    amount = reported_video_cost(cost)
+    return None if amount is None else UsageCharge(cost=amount, meters={}, lines=[])
+
+
+def _applied(rate: ModelPricing | None, facts: PriceFacts) -> ModelPricing | None:
+    return None if rate is None else apply_rules(rate, facts).rate
+
+
+def reported_video_cost(cost: float | None) -> Decimal | None:
+    """The provider's own ``cost`` for a video in USD, to the micro-dollar, or ``None`` when it is not a usable one.
+
+    A negative or non-finite amount, or one past the largest a cost column
+    holds, is neither kept nor billed.
+    """
+    if cost is None:
+        return None
+    amount = Decimal(str(cost))
+    if not amount.is_finite() or not 0 <= amount <= MAX_USD_COST:
+        return None
+    return quantize_cost(amount)

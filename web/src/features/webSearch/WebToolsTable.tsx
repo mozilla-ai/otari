@@ -16,13 +16,13 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { toPerCall } from "@/features/toolPricing/toolRates"
 import { useTestSearchTool } from "@/shared/api/tools"
 import { formatUnitRate } from "@/shared/helpers/format"
 
 import {
   BUILTIN_FETCH,
   describeOptions,
+  type ListedWebTool,
   ORGANIZATION_KEY_ROW,
   servesTheModel,
   TEST_INPUT,
@@ -39,7 +39,7 @@ import {
 
 /** A tool's row, or the organization keys' rate. */
 export type WebToolTableRow =
-  | { type: "tool"; tool: WebToolRow; price: ToolPrice }
+  | { type: "tool"; tool: ListedWebTool; price: ToolPrice }
   | { type: "organization"; price: ToolPrice }
 
 const COPY: Readonly<
@@ -108,9 +108,7 @@ export function PriceCell({ price }: { price: ToolPrice }) {
     case "own":
       return (
         <span className="flex flex-col gap-0.5">
-          <span className="tabular-nums">
-            {formatUnitRate(toPerCall(price.perMillion))}
-          </span>
+          <span className="tabular-nums">{formatUnitRate(price.perCall)}</span>
           {price.fromConfig ? (
             <span className="text-caption">From config.yml</span>
           ) : null}
@@ -328,10 +326,10 @@ export function WebToolsTable({
   isLoading: boolean
   error: unknown
   onAdd: () => void
-  onEdit: (tool: WebToolRow) => void
-  onEditPrice: (tool: WebToolRow) => void
+  onEdit: (tool: ListedWebTool) => void
+  onEditPrice: (tool: ListedWebTool) => void
   onEditOrganizationKeyPrice: () => void
-  onRemove: (tool: WebToolRow) => void
+  onRemove: (tool: ListedWebTool) => void
   /** Names the default tool, or clears the setting with `null`. */
   onSetDefault: (name: string | null) => void
   isSettingDefault: boolean

@@ -8,8 +8,8 @@ it. So it lives in its own top-level ``guardrails`` field — modelled like
 ``mcp_servers`` (see :mod:`gateway.models.mcp`) — rather than inside ``tools``.
 
 The gateway extracts this field, runs the configured checks against the
-operator-controlled guardrails service (``otari-anyguardrails-container``,
-which exposes ``POST /validate``), and strips the field before forwarding the
+operator-controlled guardrails service (which exposes ``POST /validate``),
+and strips the field before forwarding the
 request upstream. Omit the field entirely → no guardrail runs.
 
 Also holds the organization guardrail tables.
@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, SecretStr, model_validator
 from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,7 +64,8 @@ class GuardrailConfig(BaseModel):
     with a 403 and never call the provider when the guardrail flags it."""
 
     on_unavailable: Literal["block", "monitor"] = "block"
-    """What to do when the guardrails service cannot be reached at all, as
+    """What to do when the check cannot be evaluated: the guardrails service
+    cannot be reached, or it answers with no verdict (``valid: null``), as
     opposed to reachable-and-flagging. Only meaningful with ``mode="block"``,
     since a ``monitor`` guardrail already fails open.
 
@@ -81,6 +82,45 @@ class GuardrailConfig(BaseModel):
     ``/validate`` call, where they merge on top of the profile's own
     ``validate_kwargs`` server-side, or handed to a guardrail this gateway holds
     when an organization's definition serves the profile."""
+
+    # The caller's own. Mandates reuse this model and never set it: theirs travels
+    # beside the config (``ResolvedOrganizationGuardrail``), and the merge drops a
+    # caller's credential for any profile a mandate claims.
+    credential: SecretStr | None = Field(default=None, min_length=1, exclude=True)
+    """Sent to ``url`` as ``Authorization: Bearer``. Requires ``url``, which must
+    then be ``https``, so it never reaches the deployment's guardrails service."""
+
+    @model_validator(mode="after")
+    def _credential_needs_url(self) -> GuardrailConfig:
+        if self.credential is not None and self.url is None:
+            msg = "guardrail 'credential' requires 'url': it is sent only to an endpoint the entry names"
+            raise ValueError(msg)
+        return self
+
+
+def _one_entry_per_credentialed_profile(guardrails: list[GuardrailConfig]) -> list[GuardrailConfig]:
+    """Refuse a profile named twice when either entry carries a credential.
+
+    Credentials reach the runner keyed by profile, so with two entries of one
+    profile a token would go to both entries' endpoints, including one that
+    falls back to the deployment's service.
+    """
+    seen: set[str] = set()
+    credentialed: set[str] = set()
+    for guardrail in guardrails:
+        if guardrail.profile in seen and (guardrail.credential is not None or guardrail.profile in credentialed):
+            msg = f"guardrail profile {guardrail.profile!r} appears more than once alongside a 'credential'"
+            raise ValueError(msg)
+        seen.add(guardrail.profile)
+        if guardrail.credential is not None:
+            credentialed.add(guardrail.profile)
+    return guardrails
+
+
+RequestedGuardrails = Annotated[
+    list[GuardrailConfig], Field(max_length=8), AfterValidator(_one_entry_per_credentialed_profile)
+]
+"""The ``guardrails`` field of a completion request body."""
 
 
 class OrganizationGuardrailDefinition(Base):

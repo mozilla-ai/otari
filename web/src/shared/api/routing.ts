@@ -9,6 +9,8 @@ import type {
   AliasResponse,
   AutomaticFallbacksResponse,
   CreateAliasRequest,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
 } from "@/client"
@@ -19,6 +21,7 @@ import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
+  ROUTING_EXPLAIN,
   ROUTING_POLICIES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
@@ -97,17 +100,42 @@ export function useRoutingPolicies(workspaceId?: string) {
   })
 }
 
+// What a policy compiles to, without dispatching anything. A read, though it is
+// a POST, so it is a query: the body is the whole key, and a changed spec or
+// simulated budget compiles again.
+export function useExplainPolicy(body: ExplainPolicyRequest, enabled: boolean) {
+  const scope = useRoutingScope()
+  const path = `${scope.policies}/explain`
+  return useQuery({
+    queryKey: [ROUTING_EXPLAIN, path, body],
+    meta: workspaceMeta(body.workspace_id),
+    queryFn: () =>
+      apiFetch<ExplainPolicyResponse>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    placeholderData: (previous) => previous,
+    enabled: enabled && scope.isReady,
+  })
+}
+
 // The models the caller's organization used in the last 30 days, each with the
 // offerings its catalog ID tries in order. One endpoint for every caller: the
-// server scopes the traffic to the workspaces the caller may see.
-export function useAutomaticFallbacks() {
+// server scopes the traffic to the workspaces the caller may see, and
+// `workspaceId` keeps only the offerings that workspace may call, and `null`
+// holds the read until the workspace is known (`useNarrowingWorkspace`).
+export function useAutomaticFallbacks(workspaceId: string | null = "") {
   return useQuery({
-    queryKey: [AUTOMATIC_FALLBACKS],
+    queryKey: [AUTOMATIC_FALLBACKS, workspaceId ?? ""],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<AutomaticFallbacksResponse>(
-        "/organizations/me/automatic-fallbacks",
+        workspaceId
+          ? `/organizations/me/automatic-fallbacks?workspace_id=${encodeURIComponent(workspaceId)}`
+          : "/organizations/me/automatic-fallbacks",
       ),
     staleTime: 60_000,
+    enabled: workspaceId !== null,
   })
 }
 

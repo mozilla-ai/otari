@@ -1,18 +1,23 @@
 import { Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 
-import type { OrganizationPricingOverride } from "@/client"
+import type { OrganizationPricingOverride, RatesDocument } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { isValidModelKey } from "@/features/models/modelKey"
 import {
+  hasOutputRate,
+  PRICING_UNIT_DESCRIPTION,
   PRICING_UNIT_OPTIONS,
   type PricingUnit,
+  pricesAudio,
   pricingUnitOf,
+  ratesForUnit,
   toEnteredRate,
   toStoredRate,
+  unitOutputRateLabel,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
 import { useModels } from "@/shared/api/models"
@@ -21,9 +26,9 @@ import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
-
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import {
-  deploymentManagedPrefixes,
+  deploymentManagedSelectors,
   findOverlapping,
   managedModelReason,
   parseRate,
@@ -44,6 +49,18 @@ export interface PricingOverrideDraft {
   effective_from: string | null
   effective_to: string | null
   unit: PricingUnit
+  /** The edited row's context tiers, which the form does not show, kept since a replacement clears what it omits. */
+  pricing_tiers?: OrganizationPricingOverride["pricing_tiers"]
+  /** Set for a price the per-million fields would store in the wrong place, and sent instead of them. */
+  rates?: RatesDocument
+}
+
+/** The body a draft is saved as: its block alone where it has one, since the endpoint refuses the two together. */
+function overrideBody(draft: PricingOverrideDraft) {
+  const { rates, ...columns } = draft
+  if (rates === undefined) return columns
+  const { model_key, effective_from, effective_to } = draft
+  return { model_key, effective_from, effective_to, rates }
 }
 
 interface RateFieldProps {
@@ -72,7 +89,13 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
+      <Input
+        inputMode="decimal"
+        placeholder="0.00"
+        // A raw Input, so the touch-screen rule the field primitives apply
+        // is applied here.
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
+      />
       {description ? <span className="text-caption">{description}</span> : null}
     </TextField>
   )
@@ -135,13 +158,13 @@ export function PricingOverrideDialog({
   // finds it already warm from the card.
   const catalog = useModels(isOpen)
   const { isOperator } = useDeploymentOperator()
-  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
+  const managed = deploymentManagedSelectors(catalog.data?.data)
   const save = (draft: PricingOverrideDraft) => {
     const onDone = { onSuccess: onSaved }
     if (editing) {
       // model_key is absent from the update body: the endpoint refuses to
       // repoint an override at another model.
-      const { model_key: _unused, ...rest } = draft
+      const { model_key: _unused, ...rest } = overrideBody(draft)
       // The endpoint requires a start on a replacement, so that an omitted one
       // cannot silently move a stored period to the present. The form blocks a
       // blank start while editing; this narrows the type and is the belt to
@@ -156,12 +179,16 @@ export function PricingOverrideDialog({
       )
       return
     }
-    create.mutate(draft, onDone)
+    create.mutate(overrideBody(draft), onDone)
   }
   // Seeded on mount only, because the caller remounts this on each open. Not a
   // nicety: these values set money, and inheriting the last row's rates into a
   // different model is the expensive kind of mistake.
   const seedUnit = pricingUnitOf(editing?.unit)
+  // A stored second of audio has an input and an output rate, as a minute does.
+  const audioSecond = (u: PricingUnit) =>
+    u === "second" && editing?.unit === u && pricesAudio(editing.rates)
+  const twoRates = (u: PricingUnit) => hasOutputRate(u) || audioSecond(u)
   const seed = {
     modelKey: editing?.model_key ?? initialModelKey,
     unit: seedUnit,
@@ -171,7 +198,13 @@ export function PricingOverrideDialog({
         ? editing?.input_price_per_million
         : toEnteredRate(editing.input_price_per_million, seedUnit),
     ),
-    output: rateToInput(editing?.output_price_per_million),
+    output: rateToInput(
+      editing === undefined || seedUnit === "token"
+        ? editing?.output_price_per_million
+        : twoRates(seedUnit)
+          ? toEnteredRate(editing.output_price_per_million, seedUnit)
+          : undefined,
+    ),
     cacheRead: rateToInput(editing?.cache_read_price_per_million),
     cacheWrite: rateToInput(editing?.cache_write_price_per_million),
     from: toLocalInput(editing?.effective_from),
@@ -213,7 +246,7 @@ export function PricingOverrideDialog({
   // has to hold for a row saved before it existed.
   const managedReason = managedModelReason({
     modelKey: editing?.model_key ?? modelKey,
-    managedPrefixes,
+    managed,
     isDeploymentOperator: isOperator,
   })
   const periodReason = periodBlockedReason(from, to)
@@ -229,11 +262,13 @@ export function PricingOverrideDialog({
           excludeId: editing?.id,
         })
 
-  // A request or image price is one rate: there is no output, and no cache.
+  // A request or image price is one rate: there is no output, and no cache. A
+  // minute of audio has an output rate, left blank where nothing is made.
   const isTokens = unit === "token"
   const ratesInvalid =
     inputRate === undefined ||
     Number.isNaN(inputRate) ||
+    (twoRates(unit) && Number.isNaN(outputRate ?? 0)) ||
     (isTokens &&
       (outputRate === undefined ||
         Number.isNaN(outputRate) ||
@@ -277,16 +312,27 @@ export function PricingOverrideDialog({
 
   const submit = () => {
     if (isInvalid || inputRate === undefined) return
+    const sameUnit = editing?.unit === unit
+    const tiers = sameUnit ? { pricing_tiers: editing.pricing_tiers } : {}
     if (!isTokens) {
+      const block = ratesForUnit(
+        inputRate,
+        unit,
+        sameUnit ? editing.rates : undefined,
+      )
       save({
         model_key: modelKey.trim(),
         input_price_per_million: toStoredRate(inputRate, unit),
-        output_price_per_million: 0,
+        output_price_per_million: twoRates(unit)
+          ? toStoredRate(outputRate ?? 0, unit)
+          : 0,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
         effective_from: fromLocalInput(from),
         effective_to: fromLocalInput(to),
         unit,
+        ...tiers,
+        ...(block === undefined ? {} : { rates: block }),
       })
       return
     }
@@ -304,6 +350,7 @@ export function PricingOverrideDialog({
       effective_from: fromLocalInput(from),
       effective_to: fromLocalInput(to),
       unit,
+      ...tiers,
     })
   }
 
@@ -355,7 +402,7 @@ export function PricingOverrideDialog({
           setUnit(pricingUnitOf(value))
         }}
         options={PRICING_UNIT_OPTIONS}
-        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
+        description={PRICING_UNIT_DESCRIPTION}
       />
       {isTokens ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -391,12 +438,26 @@ export function PricingOverrideDialog({
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <RateField
-            label={unitRateLabel(unit)}
+            label={
+              audioSecond(unit) ? "Audio in, per second" : unitRateLabel(unit)
+            }
             value={input}
             onChange={setInput}
             isRequired
             autoFocus={focusFirstRate}
           />
+          {twoRates(unit) ? (
+            <RateField
+              label={
+                audioSecond(unit)
+                  ? "Audio out, per second"
+                  : unitOutputRateLabel(unit)
+              }
+              value={output}
+              onChange={setOutput}
+              description="Leave blank where the model makes no audio."
+            />
+          ) : null}
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

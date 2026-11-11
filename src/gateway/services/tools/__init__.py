@@ -10,6 +10,7 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
+``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -25,6 +26,8 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``run_connection_test`` tests an instance with one search or fetch.
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
+``warn_about_legacy_search_settings`` logs at startup what the breaking release that removes the legacy SearXNG
+settings does with each value in effect, from ``LegacySearchValues`` read before and after the stored settings.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
 ``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
@@ -98,8 +101,14 @@ from gateway.services.tools._direct_tool_call import (
     DirectToolUsage,
     WorkspaceWebPolicies,
 )
+from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
+from gateway.services.tools._mcp_admission import (
+    admit_mcp_servers,
+    declares_provider_mcp,
+    refuse_shadowed_builtin_tools,
+)
+from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -122,7 +131,13 @@ from gateway.services.tools._sandbox_credential import (
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
 from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
-from gateway.services.tools._search_tool_service import ReadToolSettings, SearchToolService, StageToolSetting
+from gateway.services.tools._search_tool_service import (
+    ReadToolRate,
+    ReadToolSettings,
+    SearchToolService,
+    StageToolSetting,
+    ToolRateInForce,
+)
 from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
@@ -201,7 +216,11 @@ from gateway.services.tools._web_search import (
     web_search_configured,
 )
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
-from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
+from gateway.services.tools._web_search_responses import (
+    WEB_SEARCH_CALL_ID_PREFIX,
+    provider_web_searches,
+    with_provider_web_searches,
+)
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._web_tool_failure import WebToolFailure
 
@@ -216,6 +235,8 @@ __all__ = [
     "DirectToolService",
     "DirectToolUsage",
     "WorkspaceWebPolicies",
+    "LegacySearchValues",
+    "warn_about_legacy_search_settings",
     "MAX_TOOL_ITERATIONS_CAP",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
@@ -243,6 +264,7 @@ __all__ = [
     "NativeCall",
     "NativeRendering",
     "Tool",
+    "ToolRateInForce",
     "ToolUseBudget",
     "AdmittedWebTools",
     "PricedTool",
@@ -259,7 +281,9 @@ __all__ = [
     "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
+    "McpGrantMembershipListener",
     "admit_mcp_servers",
+    "declares_provider_mcp",
     "admit_web_access",
     "apply_web_access_policy",
     "web_access_disabled_refusal",
@@ -279,12 +303,14 @@ __all__ = [
     "provider_attempt_kwargs",
     "provider_runs_code_natively",
     "provider_tools",
+    "provider_web_searches",
     "read_web_declarations",
     "read_web_fetch_max_uses",
     "read_web_search_max_uses",
     "refuse_shadowed_builtin_tools",
     "resolve_code_executor_preference",
     "with_native_code_execution_tool",
+    "with_provider_web_searches",
     "with_typed_code_execution_tool",
     "validate_web_declarations",
     "web_search_declaration_forms",
@@ -292,6 +318,7 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
+    "ReadToolRate",
     "ReadToolSettings",
     "SearchToolService",
     "StageToolSetting",

@@ -1,81 +1,92 @@
 # Use with Junie
 
-[Junie](https://junie.jetbrains.com) is JetBrains' coding agent. Two different JetBrains products can route through Otari, and each needs its own setup:
+[Junie](https://junie.jetbrains.com) is JetBrains' coding agent. Two JetBrains
+products can route through Otari's OpenAI-compatible API, each with its own
+setup:
 
 - **Junie CLI**, the terminal agent, through a custom model profile.
-- **JetBrains AI Assistant**, inside PyCharm, IntelliJ IDEA and the other IDEs, through its OpenAI-compatible provider.
-
-Otari exposes an OpenAI-compatible endpoint (`POST /api/v1/chat/completions`), so either one gets budgets, usage tracking and traces without changing how you code.
+- **JetBrains AI Assistant**, inside PyCharm, IntelliJ IDEA and the other IDEs.
 
 ## Junie CLI
 
-Junie CLI reaches an OpenAI-compatible backend through a custom model profile. Write one to `~/.junie/models/otari.json`:
+1. On the dashboard's **API keys** page, create a key that accepts Junie's
+   `user` field (see [Junie sends a `user` field](#junie-sends-a-user-field)).
+2. Write a profile to `~/.junie/models/otari.json`:
 
-```json
-{
-  "baseUrl": "https://api.otari.ai/api/v1/chat/completions",
-  "id": "openai:gpt-4o-mini",
-  "apiType": "OpenAICompletion",
-  "apiKey": "${OTARI_JUNIE_KEY}",
-  "displayName": "Otari",
-  "providerName": "otari",
-  "primaryModel": { "id": "openai:gpt-4o-mini" },
-  "fasterModel": { "id": "openai:gpt-4o-mini" }
-}
-```
+   ```json
+   {
+     "baseUrl": "https://api.otari.ai/api/v1/chat/completions",
+     "id": "openai:gpt-4o-mini",
+     "apiType": "OpenAICompletion",
+     "apiKey": "${OTARI_JUNIE_KEY}",
+     "displayName": "Otari",
+     "providerName": "otari",
+     "primaryModel": { "id": "openai:gpt-4o-mini" },
+     "fasterModel": { "id": "openai:gpt-4o-mini" }
+   }
+   ```
 
-Two details differ from most clients:
+3. Export the key and select the profile by its file name, `custom:otari`:
 
-- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1/chat/completions`.
-- `apiKey` accepts a `${VAR}` reference, so the key stays out of the file.
+   ```bash
+   export OTARI_JUNIE_KEY=<your-otari-key>
+   junie --model custom:otari "Add a docstring to the add function in calc.py"
+   ```
 
-Export the key, then select the profile by its **file name** without the extension, which is why `otari.json` is reached as `custom:otari`. The `providerName` inside the file is a label and is not the selector:
+Things to get right in the profile:
 
-```bash
-export OTARI_JUNIE_KEY=<your-otari-key>
-junie --model custom:otari "Add a docstring to the add function in calc.py"
-```
-
-Any model in your catalog works in `id`, `primaryModel` and `fasterModel`: the catalog id that `GET /api/v1/models` returns for your key, which lets Otari choose the provider, or a `provider:model` selector, which pins one. [Model format](models.md#model-format) has the spellings Otari accepts, and [Listing available models](models.md#listing-available-models) shows which models your key can use.
+- `baseUrl` is the full chat completions URL, not the API root, because Junie
+  does not add the path itself. EU accounts use
+  `https://eu.api.otari.ai/api/v1/chat/completions`, and a gateway you run uses
+  its URL plus `/api/v1/chat/completions`. See
+  [Base URL](api-reference.md#base-url).
+- The profile is selected by file name. `providerName` is only a label.
+- `id`, `primaryModel` and `fasterModel` take any model your key can use, as
+  Otari spells it; see [Model format](models.md#model-format) and
+  [Listing available models](models.md#listing-available-models).
 
 ### Junie sends a `user` field
 
-Junie CLI puts a `user` field in every chat completion body, for every internal role it runs, including the main agent, the step summarizer and the chat title creator. You do not set that value, and it has not been the same in every Junie build, so do not count on it being any particular string. Otari reads the field as naming a user, so an ordinary key refuses a request naming anyone but its own user, with HTTP 403.
-
-The CLI does not surface that refusal. The task stops with a message about an artifact it could not build, and the real reason appears only under `~/.junie/logs/`:
+Junie CLI puts a `user` field in every request, with a value you do not control.
+An ordinary key refuses it with `403`. The CLI does not show that refusal: the
+task stops with a message about an artifact it could not build, and the real
+reason is only in `~/.junie/logs/`:
 
 ```
 LLMBadResponseException: 'user' field does not match the authenticated API key's user
 ```
 
-There are two ways to accept the field, and they differ in what you get back.
+Pick one of two fixes:
 
-**Make the key a [service key](end-users.md).** This is the better option and it needs no setting relaxed, so leave `reject_user_mismatch` on the deployment default. On a service key, a name other than the key's own user names one of that key's end users, so Otari creates an end user for the value Junie sends and records its spend on its own. That gives you spend per client rather than one combined total, and the service key can then put that end user on a budget itself with `PUT /api/v1/end-users?external_id=...`.
+- **Make the key a [service key](end-users.md)** (recommended). Otari records
+  Junie's value as an end user with its own spend, which you can put on a
+  budget.
+- **Accept the field on the key**: set **Mismatched `user` field** to
+  **Always accept** under **Advanced** in the key form. All of Junie's usage
+  then lands on the key's user.
 
-**Or set [`reject_user_mismatch=false`](api-keys.md#accept-or-reject-mismatched-user-fields) on the key.** Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
+Either way, spend stays within the key owner's account. See
+[Mismatched `user` fields](api-keys.md#mismatched-user-fields).
 
-Either way the spend stays inside the key owner's account, so accepting the field never lets a key draw on another account's budget.
+### Troubleshooting the CLI
 
-See [Mismatched `user` fields](api-keys.md#mismatched-user-fields) for the full picture.
-
-### Automatic discovery does not find Otari
-
-`junie --provider litellm --litellm-url <url>` asks for `GET /v1/model/info`, an administrative route of the LiteLLM proxy. It is not part of the OpenAI API and Otari does not serve it, so discovery finds no models. Use a custom model profile instead.
-
-Two more things about the CLI model picker:
-
-- It is split into tabs, which `tab` and `shift+tab` move between. A custom profile is not on the JetBrains AI tab, so a reader who checks only the tab that opens first will conclude the profile did not load.
-- A model whose price Otari does not know is shown as $0.00, rather than as unknown.
+- `junie --provider litellm --litellm-url <url>` finds no models, because it
+  asks for a LiteLLM-only route Otari does not serve. Use a custom profile.
+- The model picker has tabs (`tab` and `shift+tab`), and a custom profile is
+  not on the JetBrains AI tab that opens first.
+- A model whose price Otari does not know shows as $0.00.
 
 ## JetBrains AI Assistant
 
-In PyCharm, IntelliJ IDEA and the other IDEs, AI Assistant can add an OpenAI-compatible provider. Give it the Otari API root (`/api/v1`) and one of your keys.
+In AI Assistant's settings, add an OpenAI-compatible provider with the Otari API
+root (such as `https://api.otari.ai/api/v1`) and one of your keys.
 
-AI Assistant lists models with `GET /api/v1/models` and sends no `user` field, so it needs no change to the key's settings. It also ignores the context window Otari reports for a model and shows its own default instead.
+AI Assistant sends no `user` field, so any key works. It shows its own default
+context window rather than the one Otari reports.
 
 ## See also
 
-- [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
-- [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API.
-- [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
-- [Access control](access-control.md#how-a-request-is-attributed): how a request is attributed to a key's user and its budgets.
+- [Use with Claude Code](use-with-claude-code.md)
+- [Use with Codex](use-with-codex.md)
+- [Use with opencode](use-with-opencode.md)
+- [How a request is attributed](access-control.md#how-a-request-is-attributed)

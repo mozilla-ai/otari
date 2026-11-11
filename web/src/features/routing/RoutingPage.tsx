@@ -21,6 +21,7 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
@@ -123,12 +124,14 @@ export function RoutingPage() {
             <RowAction
               icon={canOpenToEdit ? FiEdit2 : FiEye}
               label={canOpenToEdit ? "Edit" : "View"}
+              ariaLabel={`${canOpenToEdit ? "Edit" : "View"} ${policy.name}`}
               onPress={() => openPolicy(policy)}
             />
             {isConfig ? null : (
               <RowAction
                 icon={FiTrash2}
                 label="Delete"
+                ariaLabel={`Delete ${policy.name}`}
                 onPress={() => setPendingDelete(policy)}
               />
             )}
@@ -249,6 +252,7 @@ export function RoutingPage() {
         <TableScrollFrame className="otari-routing-table">
           <DataTable
             ariaLabel="Routing policies"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={rowKeyOf}
@@ -316,7 +320,7 @@ export function RoutingPage() {
 
 /** The models callers used in the last 30 days, as the gateway reports them. */
 function AutomaticFallbacksSection() {
-  const fallbacks = useAutomaticFallbacks()
+  const fallbacks = useAutomaticFallbacks(useNarrowingWorkspace())
   return (
     <AutomaticFallbacks
       fallbacks={fallbacks.data?.models ?? []}

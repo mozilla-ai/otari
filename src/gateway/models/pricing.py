@@ -50,6 +50,10 @@ MAX_REPORTED_UNITS = 1_000_000
 # different fact.
 SEED_ORIGIN = "seed"
 
+# What a rate carries when the provider's own model listing named it, as another
+# Otari's does. A refresh moves it with the listing, as it moves a seed.
+LISTED_ORIGIN = "listed"
+
 # What a rate somebody set through the API carries, which is what stops a
 # refresh moving it. Named for the same reason: the two are written in different
 # modules from the one that reads them back.
@@ -69,6 +73,15 @@ OPERATOR_ORIGIN = "operator"
 # is not the ``default`` that ``ModelObject.pricing_source`` uses internally for
 # the same rung.
 PriceSource = Literal["organization", "deployment", "defaults"]
+
+# What a usage row and a response's ``pricing_source`` name instead when no rate
+# settled the call, because the provider stated what it charged.
+SettledSource = PriceSource | Literal["reported"]
+REPORTED_SOURCE: SettledSource = "reported"
+
+# The same rungs as a hosted provider's model panel names them, with one more:
+# ``provider`` for a rate the provider's own listing named.
+HostedPriceSource = Literal["organization", "deployment", "defaults", "provider"]
 
 # What a price row prices: a model, under its ``provider:model`` key (the
 # ``otari:<tool>`` rows of gateway-run tools among them), or a search or fetch

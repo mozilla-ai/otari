@@ -91,7 +91,12 @@ def _price_requests(spans: list[SpanRecord]) -> list[SpanRecord]:
     for span in spans:
         if span.operation == USAGE_OPERATION:
             continue
-        usage = priced.get(span.request_id or "") if span.kind in _PRICED_KINDS and span.cost_snapshot is None else None
+        # Popped, so a call two instrumentations both exported is priced on one of its spans.
+        usage = (
+            priced.pop(span.request_id or "", None)
+            if span.kind in _PRICED_KINDS and span.cost_snapshot is None
+            else None
+        )
         if usage is not None and usage.cost_snapshot is not None:
             cost = usage.cost_snapshot + (
                 further.get(span.request_id or "", Decimal(0)) if span.kind == "guardrail" else Decimal(0)
@@ -225,6 +230,38 @@ def _gate_summaries(
     return tuple(sorted(summaries, key=order))
 
 
+def counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
+    """The LLM spans whose tokens count: one per call an agent exported.
+
+    Two instrumentations of one process can each describe the same call, sharing its
+    response id; both spans are kept, and the tokens of the one reporting most are
+    counted, its cache counts breaking a tie. A gateway request's spans share its
+    request id across calls, and a span's own id stands in where it carried no
+    response id, so neither is matched.
+    """
+
+    def shared(span: SpanRecord) -> bool:
+        return (
+            span.origin == "otlp"
+            and bool(span.request_id)
+            and span.request_id != span.otel_span_id
+            and span.operation != USAGE_OPERATION
+        )
+
+    def tokens(span: SpanRecord) -> tuple[int, int, int]:
+        calls = (span.input_tokens or 0) + (span.output_tokens or 0)
+        return calls, span.cache_read_tokens or 0, span.cache_write_tokens or 0
+
+    richest: dict[str, SpanRecord] = {}
+    for span in llm:
+        if not shared(span):
+            continue
+        kept = richest.get(span.request_id or "")
+        if kept is None or tokens(span) > tokens(kept):
+            richest[span.request_id or ""] = span
+    return [span for span in llm if not shared(span) or richest[span.request_id or ""] is span]
+
+
 def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -> tuple[TurnView, ...]:
     steps = sorted((span for span in spans if span.kind == "step"), key=_moment)
     turns: list[_Turn] = []
@@ -237,6 +274,10 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
     for span in spans:
         if span.kind != "step" and span.parent_span_id in owner:
             owner[span.parent_span_id].children.append(span)
+    # Over every turn at once, so a call whose two spans fall in two turns counts in one,
+    # and only over spans in a turn, so a copy no turn holds never displaces one that is.
+    in_turns = [span for turn in turns for span in turn.children if span.kind == "llm"]
+    counted = {span.span_id for span in counted_once(in_turns)}
     # A gateway tool loop records each model round as an unbilled LLM span under the billed one.
     llm_ids = {span.span_id for span in spans if span.kind == "llm"}
     rounds: dict[str, int] = {}
@@ -244,6 +285,12 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
         if span.kind == "llm" and span.parent_span_id in llm_ids:
             assert span.parent_span_id is not None
             rounds[span.parent_span_id] = rounds.get(span.parent_span_id, 0) + 1
+    # A call's rounds may sit under the copy that is not counted; the counted copy carries them.
+    kept = {span.request_id: span.span_id for span in in_turns if span.span_id in counted and span.origin == "otlp"}
+    for span in in_turns:
+        if span.span_id not in counted and span.span_id in rounds and span.request_id in kept:
+            copy = kept[span.request_id]
+            rounds[copy] = max(rounds.get(copy, 1), rounds[span.span_id])
     recent = now - last_activity < IDLE_TIMEOUT
     views: list[TurnView] = []
     for index, turn in enumerate(turns):
@@ -255,6 +302,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
         else:
             state = "completed"
         llm = [span for span in turn.children if span.kind == "llm"]
+        calls = [span for span in llm if span.span_id in counted]
         views.append(
             TurnView(
                 index=index,
@@ -263,11 +311,11 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
                 ended_at=last.end_time,
                 step_ids=tuple(step.span_id for step in turn.steps),
                 tool_calls=sum(1 for span in turn.children if span.kind == "tool"),
-                llm_calls=sum(rounds.get(span.span_id, 1) for span in llm),
+                llm_calls=sum(rounds.get(span.span_id, 1) for span in calls),
                 errors=sum(1 for span in turn.children + turn.steps if span.outcome == "error" and not span.recovered),
-                input_tokens=sum(span.input_tokens or 0 for span in llm),
-                output_tokens=sum(span.output_tokens or 0 for span in llm),
-                cache_read_tokens=sum(span.cache_read_tokens or 0 for span in llm),
+                input_tokens=sum(span.input_tokens or 0 for span in calls),
+                output_tokens=sum(span.output_tokens or 0 for span in calls),
+                cache_read_tokens=sum(span.cache_read_tokens or 0 for span in calls),
                 cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
                 continued=turn.continued,
             )

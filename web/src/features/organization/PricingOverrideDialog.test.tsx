@@ -447,6 +447,37 @@ describe("PricingOverrideDialog", () => {
     })
   })
 
+  it("sends a second of video as its block alone, which the endpoint takes instead of the fields", async () => {
+    const requests = mockApi({ overrides: [] })
+    const user = userEvent.setup()
+
+    await renderDialog()
+
+    await user.click(
+      await screen.findByRole("radio", { name: "Seconds of video" }),
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /model key/i }),
+      "deepinfra:PrunaAI/p-video",
+    )
+    await user.type(screen.getByLabelText(/price per second of video/i), "0.02")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+
+    await waitFor(() => {
+      const write = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/pricing`),
+      )
+      expect(write?.body).toEqual({
+        model_key: "deepinfra:PrunaAI/p-video",
+        effective_from: null,
+        effective_to: null,
+        rates: { video: { output: { price: 0.02, unit: "second" } } },
+      })
+    })
+  })
+
   it("opens a stored per-request rate in its own unit, per thousand", async () => {
     const stored = pricingOverride({
       model_key: "cohere:rerank-v3.5",
@@ -460,5 +491,170 @@ describe("PricingOverrideDialog", () => {
 
     expect(await screen.findByRole("radio", { name: "Requests" })).toBeChecked()
     expect(screen.getByLabelText(/price per 1,000 requests/i)).toHaveValue("2")
+  })
+
+  it("opens a stored per-second rate in its own unit, per second", async () => {
+    const stored = pricingOverride({
+      model_key: "deepinfra:PrunaAI/p-video",
+      // A one-price slot reads into the input field, whichever direction it prices.
+      input_price_per_million: 20000,
+      output_price_per_million: 0,
+      unit: "second",
+    })
+    mockApi({ overrides: [stored] })
+
+    await renderDialog([stored], { editing: stored })
+
+    expect(
+      await screen.findByRole("radio", { name: "Seconds of video" }),
+    ).toBeChecked()
+    expect(screen.getByLabelText(/price per second of video/i)).toHaveValue(
+      "0.02",
+    )
+  })
+  it("keeps a video override's rules when its price is edited", async () => {
+    const multipliers = [{ factor: 2, when: { resolution: { equals: "4k" } } }]
+    const stored = pricingOverride({
+      model_key: "deepinfra:PrunaAI/p-video",
+      input_price_per_million: 20000,
+      output_price_per_million: 0,
+      unit: "second",
+      rates: {
+        video: { output: { price: 0.02, unit: "second" } },
+        multipliers,
+      },
+    })
+    const requests = mockApi({ overrides: [stored], writeStatus: 200 })
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    const price = await screen.findByLabelText(/price per second of video/i)
+    await user.clear(price)
+    await user.type(price, "0.03")
+    await user.click(screen.getByRole("button", { name: /save override/i }))
+
+    await waitFor(() => {
+      const write = requests.find((request) => request.method === "PUT")
+      expect(write?.body).toMatchObject({
+        rates: {
+          video: { output: { price: 0.03, unit: "second" } },
+          multipliers,
+        },
+      })
+    })
+  })
+
+  it("keeps a second of audio on audio input when its price is edited", async () => {
+    const stored = pricingOverride({
+      model_key: "openai:whisper-1",
+      input_price_per_million: 100,
+      output_price_per_million: 0,
+      unit: "second",
+      rates: { audio: { input: { price: 0.0001, unit: "second" } } },
+    })
+    const requests = mockApi({ overrides: [stored], writeStatus: 200 })
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    const price = await screen.findByLabelText(/audio in, per second/i)
+    await user.clear(price)
+    await user.type(price, "0.0002")
+    await user.click(screen.getByRole("button", { name: /save override/i }))
+
+    // The columns, which the gateway stores per second on audio input.
+    await waitFor(() => {
+      const write = requests.find((request) => request.method === "PUT")
+      expect(write?.body).toMatchObject({
+        input_price_per_million: 200,
+        unit: "second",
+      })
+      expect(write?.body).not.toHaveProperty("rates")
+    })
+  })
+
+  it("keeps an override's context tiers when its price is edited", async () => {
+    const tiers = [{ min_input_tokens: 200_000, input_price_per_million: 5 }]
+    const stored = pricingOverride({ pricing_tiers: tiers })
+    const requests = mockApi({ overrides: [stored], writeStatus: 200 })
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    const input = await screen.findByLabelText(/input, per 1m tokens/i)
+    await user.clear(input)
+    await user.type(input, "3")
+    await user.click(screen.getByRole("button", { name: /save override/i }))
+
+    // A replacement states the whole row, so a tier left out is cleared.
+    await waitFor(() => {
+      const write = requests.find((request) => request.method === "PUT")
+      expect(write?.body).toMatchObject({
+        input_price_per_million: 3,
+        pricing_tiers: tiers,
+      })
+    })
+  })
+
+  it("opens and keeps a second of audio's output rate", async () => {
+    const stored = pricingOverride({
+      model_key: "openai:gpt-4o-mini-tts",
+      input_price_per_million: 0,
+      output_price_per_million: 300,
+      unit: "second",
+      rates: { audio: { output: { price: 0.0003, unit: "second" } } },
+    })
+    const requests = mockApi({ overrides: [stored], writeStatus: 200 })
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    const output = await screen.findByLabelText(/audio out, per second/i)
+    expect(output).toHaveValue("0.0003")
+    await user.clear(output)
+    await user.type(output, "0.0004")
+    await user.click(screen.getByRole("button", { name: /save override/i }))
+
+    await waitFor(() => {
+      const write = requests.find((request) => request.method === "PUT")
+      expect(write?.body).toMatchObject({
+        input_price_per_million: 0,
+        output_price_per_million: 400,
+        unit: "second",
+      })
+      expect(write?.body).not.toHaveProperty("rates")
+    })
+  })
+
+  it("opens and keeps a minute of audio's output rate", async () => {
+    const stored = pricingOverride({
+      model_key: "openai:gpt-4o-mini-tts",
+      input_price_per_million: 3_000_000,
+      output_price_per_million: 15_000_000,
+      unit: "minute",
+    })
+    const requests = mockApi({ overrides: [stored], writeStatus: 200 })
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    expect(await screen.findByLabelText(/audio in, per minute/i)).toHaveValue(
+      "3",
+    )
+    const output = screen.getByLabelText(/audio out, per minute/i)
+    expect(output).toHaveValue("15")
+    await user.clear(output)
+    await user.type(output, "12")
+    await user.click(screen.getByRole("button", { name: /save override/i }))
+
+    await waitFor(() => {
+      const write = requests.find((request) => request.method === "PUT")
+      expect(write?.body).toMatchObject({
+        input_price_per_million: 3_000_000,
+        output_price_per_million: 12_000_000,
+        unit: "minute",
+      })
+    })
   })
 })

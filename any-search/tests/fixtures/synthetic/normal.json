@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "url": "https://curl.se/docs/projdocs.html",
+        "title": "curl — Project Documentation",
+        "text": "...",
+        "published": "2025-11-05T00:00:00.000Z"
+      }
+    ]
+  }
+}

@@ -683,6 +683,73 @@ async def test_only_the_operator_sets_a_search_tools_rate(async_db: AsyncSession
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["owner", "admin"])
+@pytest.mark.parametrize("model_key", ["otari:code_execution", "otari/code_execution"])
+async def test_only_the_operator_prices_code_execution(async_db: AsyncSession, role: str, model_key: str) -> None:
+    """Every run is on the deployment's sandbox, so an organization's own rate would price none of them.
+
+    Both spellings, since a rate lookup reads either.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-code-execution-{role}", created_by_user_id=None
+    )
+    manager = await _identity(async_db, organization, role=role, name=f"{role} person")
+    operator = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    with pytest.raises(OrganizationPricingToolRateError, match="only the deployment operator sets its rate"):
+        await service.create_for_caller(manager, model_key, _rates(unit="request"))
+    created = await service.create_for_caller(operator, model_key, _rates(unit="request"))
+
+    assert created.model_key == model_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_key", ["otari:web_search", "otari:web_fetch"])
+async def test_an_organization_prices_the_calls_on_its_own_search_and_fetch_keys(
+    async_db: AsyncSession, model_key: str
+) -> None:
+    """These rows price a search or fetch on the organization's own key, which its own account pays for."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-own-web-keys", created_by_user_id=None
+    )
+    admin = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    created = await service.create_for_caller(admin, model_key, _rates(unit="request"))
+
+    assert created.model_key == model_key
+
+
+@pytest.mark.asyncio
+async def test_a_stored_code_execution_rate_may_be_deleted_but_not_replaced(async_db: AsyncSession) -> None:
+    """An organization's stored code execution rate prices no sandbox run, so it may go, not change."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-stored-code-execution", created_by_user_id=None
+    )
+    admin = await _identity(async_db, organization, role="admin", name="admin person")
+    stored = OrganizationModelPricing(
+        organization_id=organization.id,
+        model_key="otari:code_execution",
+        input_price_per_million=0.0,
+        output_price_per_million=0.0,
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        pricing_tiers=[],
+        unit="request",
+    )
+    async_db.add(stored)
+    await async_db.flush()
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    with pytest.raises(OrganizationPricingToolRateError):
+        await service.replace_for_caller(admin, stored.id, _rates(unit="request"))
+    await service.delete_for_caller(admin, stored.id)
+
+    remaining = await async_db.execute(select(OrganizationModelPricing).where(OrganizationModelPricing.id == stored.id))
+    assert remaining.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
 async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment_row(async_db: AsyncSession) -> None:
     """The old ``<provider>:<instance>`` key is a spelling of the instance's own, so every override comes first.
 
@@ -725,7 +792,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
     agreed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek", organization_id=organization.id)
     listed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek")
 
-    assert agreed == ToolRate(key, Decimal("0.003"), "organization")
+    assert agreed == ToolRate(key, Decimal("0.003"), "organization", old_key=True)
     assert listed == ToolRate(key, Decimal("0.004"), "deployment")
 
 
@@ -1066,6 +1133,40 @@ def test_the_route_asks_the_port_this_build_bound(
     container: Any = client.app.state.container  # type: ignore[attr-defined]
     container.bind(ModelProviderPort, lambda session: _FakeHostedModelProvider(served="openai"))
 
+    client.cookies.set(SESSION_COOKIE_NAME, _sign_in_an_admin(db_session_factory))
+    try:
+        unserved = client.post(_ENDPOINT, json=_body(model_key="anthropic:claude-3-5-haiku-latest"))
+        served = client.post(_ENDPOINT, json=_body())
+    finally:
+        client.cookies.clear()
+
+    assert unserved.status_code == status.HTTP_201_CREATED, unserved.text
+    assert served.status_code == status.HTTP_403_FORBIDDEN, served.text
+    assert _MODEL_KEY in served.json()["detail"]
+
+
+@pytest.mark.parametrize("model_key", ["otari:code_execution", "otari/code_execution"])
+def test_the_route_refuses_an_admin_a_code_execution_rate(
+    client: TestClient,
+    db_session_factory: Callable[[], Session],
+    model_key: str,
+) -> None:
+    """The route normalizes the key first, so the refusal names the canonical spelling."""
+    client.cookies.set(SESSION_COOKIE_NAME, _sign_in_an_admin(db_session_factory))
+    try:
+        refused = client.post(_ENDPOINT, json=_body(model_key=model_key, unit="request"))
+    finally:
+        client.cookies.clear()
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    assert "'otari:code_execution'" in refused.json()["detail"]
+
+
+def _sign_in_an_admin(db_session_factory: Callable[[], Session]) -> str:
+    """A dashboard session for an admin of a new organization, who does not operate the deployment.
+
+    Returns the session token, for the session cookie.
+    """
     token = "otari-sess-admin@tenant.test"
     session = db_session_factory()
     try:
@@ -1091,17 +1192,7 @@ def test_the_route_asks_the_port_this_build_bound(
         session.commit()
     finally:
         session.close()
-
-    client.cookies.set(SESSION_COOKIE_NAME, token)
-    try:
-        unserved = client.post(_ENDPOINT, json=_body(model_key="anthropic:claude-3-5-haiku-latest"))
-        served = client.post(_ENDPOINT, json=_body())
-    finally:
-        client.cookies.clear()
-
-    assert unserved.status_code == status.HTTP_201_CREATED, unserved.text
-    assert served.status_code == status.HTTP_403_FORBIDDEN, served.text
-    assert _MODEL_KEY in served.json()["detail"]
+    return token
 
 
 @pytest.mark.asyncio

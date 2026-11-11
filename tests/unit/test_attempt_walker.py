@@ -24,9 +24,17 @@ from gateway.api.routes._attempts import (
     classify_local_attempt_error,
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
+    request_too_large_for_every_attempt_detail,
+    structured_output_failed_for_every_attempt_detail,
     walk_attempts,
 )
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    REQUEST_TOO_LARGE,
+    STRUCTURED_OUTPUT_FAILED,
+    error_code_of,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -304,6 +312,37 @@ async def test_exhaustion_where_every_candidate_rejected_the_request_is_a_400_in
 
 
 @pytest.mark.asyncio
+async def test_exhaustion_where_every_candidate_refused_the_request_as_too_large_is_a_413() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [_Rejection(413, "request too large for a"), _Rejection(413, "request too large for b")],
+        )
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == request_too_large_for_every_attempt_detail(2)
+    assert error_code_of(exc_info.value.headers) == REQUEST_TOO_LARGE
+
+
+@pytest.mark.asyncio
+async def test_a_413_advances_to_the_next_candidate() -> None:
+    """A size limit is the provider's own, so another candidate may still take the request."""
+    chosen, result = await _walk(
+        [_attempt(1, "a"), _attempt(2, "b")], [_Rejection(413, "request too large for a"), "ok"]
+    )
+    assert chosen.position == 2
+    assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_single_attempt_413_keeps_the_providers_sentence_and_code() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a")], [_Rejection(413, "Request too large: Limit 8000, Requested 10974")])
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == "Request too large: Limit 8000, Requested 10974"
+    assert error_code_of(exc_info.value.headers) == REQUEST_TOO_LARGE
+
+
+@pytest.mark.asyncio
 async def test_exhaustion_where_every_prompt_was_too_long_keeps_that_code() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await _walk(
@@ -316,6 +355,33 @@ async def test_exhaustion_where_every_prompt_was_too_long_keeps_that_code() -> N
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == prompt_too_long_for_every_attempt_detail(2)
     assert error_code_of(exc_info.value.headers) == CONTEXT_LENGTH_EXCEEDED
+
+
+class _StructuredOutputFailure(Exception):
+    """Groq's 400 for a generation that did not match the requested schema, as the OpenAI SDK parses its body."""
+
+    def __init__(self) -> None:
+        super().__init__("Failed to generate JSON. Please adjust your prompt.")
+        self.status_code = 400
+        self.body = {"message": str(self), "type": "invalid_request_error", "code": "json_validate_failed"}
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_generation_failed_its_schema_keeps_that_code() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [_StructuredOutputFailure(), _StructuredOutputFailure()])
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == structured_output_failed_for_every_attempt_detail(2)
+    assert error_code_of(exc_info.value.headers) == STRUCTURED_OUTPUT_FAILED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_one_generation_failed_its_schema_is_the_generic_rejection() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")], [_StructuredOutputFailure(), _Rejection(400, "bad temperature")]
+        )
+    assert error_code_of(exc_info.value.headers) == ALL_CANDIDATES_REJECTED
 
 
 @pytest.mark.asyncio
@@ -347,6 +413,7 @@ async def test_exhaustion_where_no_candidate_knew_the_model_is_a_502() -> None:
     [
         [_Rejection(400, "bad request"), _Rejection(404, "no such model")],
         [_Rejection(400, "bad request"), _http_error(503)],
+        [_Rejection(413, "request too large"), _Rejection(400, "bad request")],
         [_Rejection(429, "slow down"), _Rejection(429, "slow down")],
     ],
 )

@@ -41,6 +41,7 @@ const SEARCH_CATALOG: SearchProviderInfo[] = [
     kind: "search",
     requires_api_key: true,
     requires_api_base: false,
+    reports_cost: false,
     default_api_base: "https://api.exa.ai",
     tier: "production",
     options: [
@@ -51,6 +52,7 @@ const SEARCH_CATALOG: SearchProviderInfo[] = [
         default: "auto",
         description: "How Exa searches.",
         operator_only: false,
+        cost_tier: false,
       },
     ],
   },
@@ -59,16 +61,30 @@ const SEARCH_CATALOG: SearchProviderInfo[] = [
     kind: "search",
     requires_api_key: true,
     requires_api_base: false,
+    reports_cost: false,
     default_api_base: "https://api.mojeek.com",
     tier: "production",
     options: [],
   },
-  // Listed with no tier, as the catalog lists a provider no library serves.
+  // As the catalog lists it to an operator: with the endpoint the
+  // deployment's own searxng tools inherit, which a key never does.
   {
     id: "searxng",
     kind: "search",
     requires_api_key: false,
     requires_api_base: true,
+    reports_cost: false,
+    default_api_base: "http://searxng:8080",
+    tier: "production",
+    options: [],
+  },
+  // Listed with no tier, as the catalog lists a provider no library serves.
+  {
+    id: "legacy",
+    kind: "search",
+    requires_api_key: false,
+    requires_api_base: false,
+    reports_cost: false,
     tier: null,
     options: null,
   },
@@ -80,6 +96,7 @@ const FETCH_CATALOG: SearchProviderInfo[] = [
     kind: "fetch",
     requires_api_key: true,
     requires_api_base: false,
+    reports_cost: false,
     tier: "production",
     options: [],
     reports_final_url: false,
@@ -255,7 +272,7 @@ describe("OrganizationWebSearchKeysPage", () => {
     const dialog = await screen.findByRole("dialog")
     await user.click(within(dialog).getByRole("button", { name: /Provider/ }))
     expect(screen.getByRole("option", { name: "exa" })).toBeInTheDocument()
-    expect(screen.queryByRole("option", { name: "searxng" })).toBeNull()
+    expect(screen.queryByRole("option", { name: "legacy" })).toBeNull()
     await user.click(screen.getByRole("option", { name: "exa" }))
     await user.type(within(dialog).getByLabelText(/^Name/), "AAA")
     await user.type(within(dialog).getByLabelText(/API key/), "exa-secret")
@@ -275,6 +292,44 @@ describe("OrganizationWebSearchKeysPage", () => {
       api_key: "exa-secret",
       api_base: null,
       options: { type: "fast" },
+    })
+  })
+
+  it("asks for its own endpoint for a key on a provider that requires one, never the deployment's", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search provider" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: /Provider/ }))
+    await user.click(screen.getByRole("option", { name: "searxng" }))
+    await user.type(within(dialog).getByLabelText(/^Name/), "Team SearXNG")
+    const endpoint = within(dialog).getByLabelText(/API base URL/)
+    expect(endpoint).toHaveAttribute("placeholder", "https://…")
+    expect(within(dialog).queryByText(/searxng:8080/)).toBeNull()
+    expect(
+      within(dialog).getByText(
+        "This provider has no endpoint of its own, so it needs one here.",
+      ),
+    ).toBeInTheDocument()
+    const add = within(dialog).getByRole("button", {
+      name: "Add search provider",
+    })
+    expect(add).toBeDisabled()
+    await user.type(endpoint, "https://searx.acme.example")
+    await user.click(add)
+
+    await waitFor(() => expect(writes(requests, "POST", KEYS)).toHaveLength(1))
+    expect(writes(requests, "POST", KEYS)[0].body).toEqual({
+      kind: "search",
+      provider: "searxng",
+      name: "Team SearXNG",
+      api_key: null,
+      api_base: "https://searx.acme.example",
+      options: null,
     })
   })
 

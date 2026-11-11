@@ -22,6 +22,7 @@ from gateway.services.inference import (
     uses_chat_completions_bridge,
 )
 from gateway.services.mcp_loop_responses import responses_tool_loop, responses_tool_loop_stream
+from gateway.streaming import IncompleteStreamError
 
 _ACOMPLETION = "gateway.services.inference._responses_bridge.acompletion"
 _USAGE = {
@@ -446,6 +447,51 @@ async def test_failure_on_first_chunk_surfaces_before_any_event() -> None:
     stream = await _call({}, failing(), input_data="hi", stream=True)
     with pytest.raises(RuntimeError, match="upstream down"):
         await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_chunks_that_stop_short_of_a_finish_reason_are_a_cut_stream() -> None:
+    """A chat stream that ends cleanly without ever reporting why it ended was cut, not finished."""
+    stream = await _call(
+        {}, _aiter([_chunk({"content": "par"}), _chunk({"content": "tial"})]), input_data="hi", stream=True
+    )
+    seen: list[str] = []
+
+    with pytest.raises(IncompleteStreamError, match="2 chunks received"):
+        async for event in stream:
+            seen.append(event.type)  # noqa: PERF401 - the cut interrupts the loop, so a comprehension would keep nothing
+
+    assert "response.output_text.delta" in seen
+    assert "response.completed" not in seen
+    assert "response.incomplete" not in seen
+
+
+@pytest.mark.asyncio
+async def test_a_stream_with_no_chunks_announces_nothing() -> None:
+    """An empty upstream yields no events, so the stream fails as an empty chat stream does, not as a success."""
+    events = await _stream({}, [])
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_failure_after_output_ends_the_stream_without_a_terminal_event() -> None:
+    """A provider that drops the connection mid-stream must not read as a completed response."""
+
+    async def cut() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk({"content": "partial"})
+        raise ConnectionError("upstream dropped")
+
+    stream = await _call({}, cut(), input_data="hi", stream=True)
+    seen: list[str] = []
+
+    with pytest.raises(ConnectionError, match="upstream dropped"):
+        async for event in stream:
+            seen.append(event.type)  # noqa: PERF401 - the cut interrupts the loop, so a comprehension would keep nothing
+
+    assert "response.output_text.delta" in seen
+    assert "response.completed" not in seen
+    assert "response.incomplete" not in seen
 
 
 # ---------- gateway tool loop over the bridge ----------

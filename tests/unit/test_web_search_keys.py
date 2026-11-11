@@ -30,7 +30,13 @@ from gateway.models.tools import (
 )
 from gateway.services import search_backend
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tools import SearchQuery, _web_search_keys, apply_web_access_policy, resolve_search
+from gateway.services.tools import (
+    SearchQuery,
+    _web_search_keys,
+    apply_web_access_policy,
+    page_budget_chars,
+    resolve_search,
+)
 from gateway.services.tools._web_search_keys import resolve_web_search_key
 from gateway.services.web_search_providers import WebSearchProviderError
 
@@ -275,6 +281,35 @@ async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_a_workspace_keys_hits_keep_their_page_text_within_the_page_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
+        page = {"url": "https://a.example", "content": "a snippet", "extracted_content": "page text " * 100}
+        return [
+            {**page, "title": "A", "published_date": "2026-11-04"},
+            {"title": "no url"},
+            {"url": "", "title": "an empty url"},
+            {"url": "https://b.example", "content": "only a snippet"},
+        ]
+
+    monkeypatch.setattr(search_backend, "provider_search", provider_search)
+    query = SearchQuery(query="q", max_tokens_per_page=5)
+    async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
+        outcome = await search_backend.run_keyed_search(
+            WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
+            query,
+            timeout_s=3.0,
+            client=client,
+        )
+
+    first, second = outcome.results
+    assert (first.url, first.title, first.date) == ("https://a.example", "A", "2026-11-04")
+    assert first.snippet == ("page text " * 100)[: page_budget_chars(query)]
+    assert (second.url, second.snippet, second.date) == ("https://b.example", "only a snippet", None)
+
+
+@pytest.mark.asyncio
 async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     async def failing_provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
         raise WebSearchProviderError("tavily search returned HTTP 401", tag="http_error", status=401)
@@ -381,7 +416,7 @@ def test_a_key_may_name_a_provider_the_libraries_serve_for_its_kind(kind: ToolKi
         ("search", "tabstack"),
         ("fetch", "mojeek"),
         ("fetch", "tavily"),
-        ("search", "searxng"),
+        ("fetch", "searxng"),
         ("search", "nowhere"),
     ],
 )
@@ -399,6 +434,17 @@ def test_a_key_may_not_name_a_provider_its_kind_does_not_offer(kind: ToolKind, p
 async def test_a_keyed_provider_needs_a_key(kind: ToolKind, provider: str) -> None:
     with pytest.raises(WebSearchKeyIncompleteError, match="needs an API key"):
         await _web_search_keys._check_settings(kind, provider, has_key=False, api_base=None, options=None)
+
+
+@pytest.mark.asyncio
+async def test_a_searxng_key_needs_its_own_endpoint_and_no_api_key() -> None:
+    assert _web_search_keys._validated_provider("search", "searxng") == "searxng"
+    with pytest.raises(WebSearchKeyIncompleteError, match="api_base"):
+        await _web_search_keys._check_settings("search", "searxng", has_key=False, api_base=None, options=None)
+
+    await _web_search_keys._check_settings(
+        "search", "searxng", has_key=False, api_base="https://1.1.1.1/searx", options={"engines": "wikinews"}
+    )
 
 
 @pytest.mark.asyncio

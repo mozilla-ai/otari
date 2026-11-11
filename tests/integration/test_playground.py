@@ -46,7 +46,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
 from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -1311,3 +1311,84 @@ def test_a_playground_message_fetches_through_the_instance_on_the_apps_client(
 
     assert code == status.HTTP_200_OK, body
     assert [str(request.url) for request in requests] == ["https://api.tabstack.ai/v1/extract/markdown"]
+
+
+# =============================================================================
+# MCP access binds a session as its user
+# =============================================================================
+
+_MCP_URL = "https://93.184.216.34/mcp"
+
+
+def _store_servers(db_session_factory: Callable[[], Session], world: _World) -> dict[str, uuid.UUID]:
+    """An MCP server everyone reaches and one whose default policy reaches nobody, in alpha one."""
+    with db_session_factory() as db:
+        rows = {
+            name: WorkspaceMcpServer(
+                workspace_id=world.workspaces["alpha_one"], name=name, url=_MCP_URL, everyone_tools=everyone
+            )
+            for name, everyone in (("open", ["*"]), ("locked", []))
+        }
+        db.add_all(rows.values())
+        db.commit()
+        return {name: row.id for name, row in rows.items()}
+
+
+def test_the_menu_offers_only_the_mcp_servers_the_caller_reaches(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _store_servers(db_session_factory, world)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert [server["name"] for server in body["mcp_servers"]] == ["open"]
+
+
+def test_a_session_cannot_reach_a_stored_server_its_access_denies(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    servers = _store_servers(db_session_factory, world)
+
+    code, _ = _request(
+        client,
+        world,
+        "member",
+        "POST",
+        f"{_PREFIX}/chat/completions",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "hi"}],
+            "mcp_server_ids": [str(servers["locked"])],
+        },
+        params=_ws(world),
+    )
+
+    assert code == status.HTTP_404_NOT_FOUND
+
+
+def test_a_session_cannot_name_mcp_servers_where_its_workspace_refuses_them(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    with db_session_factory() as db:
+        workspace = db.get(Workspace, world.workspaces["alpha_one"])
+        assert workspace is not None
+        workspace.request_mcp_servers_allowed = False
+        db.commit()
+
+    code, body = _request(
+        client,
+        world,
+        "member",
+        "POST",
+        f"{_PREFIX}/chat/completions",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "hi"}],
+            "mcp_servers": [{"name": "mine", "url": _MCP_URL}],
+        },
+        params=_ws(world),
+    )
+
+    assert code == status.HTTP_400_BAD_REQUEST
+    assert "does not let a request name MCP servers" in json.dumps(body)

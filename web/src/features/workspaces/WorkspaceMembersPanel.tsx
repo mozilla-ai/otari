@@ -14,6 +14,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { MemberAvatar } from "@/features/account/avatar/MemberAvatar"
 import {
   asMembershipRole,
   MEMBERSHIP_ROLE_OPTIONS,
@@ -159,15 +160,21 @@ export function WorkspaceMembersPanel({
   const [removing, setRemoving] = useState<WorkspaceMember>()
 
   const rows = members.data ?? []
-  const nameByUserId = useMemo(
+  // A workspace row carries neither a name nor an avatar; the person's
+  // organization row carries both.
+  const orgMemberByUserId = useMemo(
     () =>
       new Map(
         orgMembers
           .filter((member) => member.user_id)
-          .map((member) => [member.user_id as string, memberLabel(member)]),
+          .map((member) => [member.user_id as string, member]),
       ),
     [orgMembers],
   )
+  const nameOf = (userId: string) => {
+    const orgMember = orgMemberByUserId.get(userId)
+    return orgMember ? memberLabel(orgMember) : undefined
+  }
   return (
     <div className="flex flex-col gap-4 p-4">
       <h2 className="text-title">Members of {workspaceName}</h2>
@@ -180,39 +187,52 @@ export function WorkspaceMembersPanel({
       ) : rows.length === 0 ? (
         <p className="text-sm text-muted">This workspace has no members yet.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        // Rows divided by hairlines, as every other list here reads. The role
+        // select takes one width in every row, so the selects share a left
+        // edge; on a phone the controls take their own line and the select
+        // fills what Remove leaves.
+        <ul className="flex flex-col divide-y divide-border-subtle border-y border-border-subtle">
           {rows.map((member) => (
             <li
               key={member.id}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-alt px-3 py-2"
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3"
             >
-              <span className="text-body">
-                {nameByUserId.get(member.user_id) ??
-                  `Identity ${member.user_id.slice(0, 8)}`}
-              </span>
-              <Chip
-                size="sm"
-                color={member.status === "active" ? "accent" : "default"}
-              >
-                {member.status}
-              </Chip>
-              <span className="ml-auto flex items-center gap-2">
-                <FilterSelect
-                  ariaLabel={`Role for ${nameByUserId.get(member.user_id) ?? member.user_id} in ${workspaceName}`}
-                  value={member.role}
-                  disabled={!canManageWorkspace || updateRole.isPending}
-                  options={MEMBERSHIP_ROLE_OPTIONS}
-                  onChange={(value) => {
-                    const role = asMembershipRole(value)
-                    if (role) {
-                      updateRole.mutate({
-                        workspaceId: workspaceId,
-                        userId: member.user_id,
-                        role,
-                      })
-                    }
-                  }}
+              <span className="flex min-w-0 flex-1 items-center gap-3">
+                <MemberAvatar
+                  userId={member.user_id}
+                  face={orgMemberByUserId.get(member.user_id)?.avatar_face}
                 />
+                <span className="min-w-0 truncate text-body">
+                  {nameOf(member.user_id) ??
+                    `Identity ${member.user_id.slice(0, 8)}`}
+                </span>
+                <Chip
+                  size="sm"
+                  color={member.status === "active" ? "accent" : "default"}
+                >
+                  {member.status}
+                </Chip>
+              </span>
+              <span className="otari-toolbar flex shrink-0 items-center gap-2 max-sm:w-full">
+                <span className="w-32 max-sm:min-w-0 max-sm:flex-1">
+                  <FilterSelect
+                    fullWidth
+                    ariaLabel={`Role for ${nameOf(member.user_id) ?? member.user_id} in ${workspaceName}`}
+                    value={member.role}
+                    disabled={!canManageWorkspace || updateRole.isPending}
+                    options={MEMBERSHIP_ROLE_OPTIONS}
+                    onChange={(value) => {
+                      const role = asMembershipRole(value)
+                      if (role) {
+                        updateRole.mutate({
+                          workspaceId: workspaceId,
+                          userId: member.user_id,
+                          role,
+                        })
+                      }
+                    }}
+                  />
+                </span>
                 <Button
                   size="sm"
                   variant="danger"
@@ -237,9 +257,7 @@ export function WorkspaceMembersPanel({
           <>
             Remove{" "}
             <strong>
-              {removing
-                ? (nameByUserId.get(removing.user_id) ?? removing.user_id)
-                : ""}
+              {removing ? (nameOf(removing.user_id) ?? removing.user_id) : ""}
             </strong>{" "}
             from {workspaceName}? They keep their organization membership and
             can be added back.

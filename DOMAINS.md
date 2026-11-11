@@ -82,7 +82,10 @@ sessions, email verification and reset, the profile, and deployment-wide
 account administration.
 
 Its tables sit in `models/tenancy.py` today, which organizations holds, except
-`oauth_identity_link` in `models/identity.py`.
+`oauth_identity_link` and `oidc_connection` in `models/identity.py`. The
+connection table is an organization's own way of signing in rather than a
+property of the organization, which is why it sits here and not with
+organizations.
 
 ### organizations
 
@@ -127,7 +130,9 @@ meters a count is reported under.
 Provider credentials: instances configured at runtime, organization-scoped
 provider keys, endpoints a workspace or a user owns, the hosted providers the
 deployment serves on its own credentials with the models it offers on them,
-their health, and what a dispatch needs to reach a provider.
+their health, and what a dispatch needs to reach a provider. It also owns the
+connection to otari.ai, which stores a hosted provider from a key otari.ai
+issues ([docs/platform-connect-protocol.md](docs/platform-connect-protocol.md)).
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.
@@ -248,8 +253,8 @@ Built in the target shape from the start.
 
 ### inference
 
-The request path (the completion dialects, the pass-through endpoints, batches
-and the Playground), and the country file a request's address is looked up in.
+The request path (the completion dialects, the pass-through endpoints, batches,
+video jobs and the Playground), and the country file a request's address is looked up in.
 
 ### platform
 
@@ -307,9 +312,10 @@ each domain it reads, and budgets is the first.
 ### feedback
 
 This domain holds the messages a signed-in dashboard user sends to the Otari
-team. The gateway forwards each one to otari.ai without the caller's
-credentials, and limits how often one caller may send. It is a core feature,
-switched by `feedback_enabled`.
+team from Contact. The gateway checks the address a reply may go to, limits how
+often one caller may send, and hands each message to `FeedbackDeliveryPort`,
+whose core adapter forwards it to otari.ai without the caller's credentials. It
+is a core feature, switched by `feedback_enabled`, which is off by default.
 
 ### Shared
 

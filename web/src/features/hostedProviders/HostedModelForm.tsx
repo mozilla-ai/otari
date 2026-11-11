@@ -2,13 +2,17 @@ import { useState } from "react"
 
 import type { HostedModel, HostedProvider } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { Field } from "@/design-system/forms/Field"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import {
-  PRICING_UNIT_OPTIONS,
+  COLUMN_PRICING_UNIT_OPTIONS,
+  hasOutputRate,
+  PRICING_UNIT_DESCRIPTION,
   pricingUnitOf,
+  unitOutputRateLabel,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
 import {
@@ -16,7 +20,6 @@ import {
   useHostedAvailableModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
-
 import {
   canSubmitDraft,
   createBody,
@@ -73,7 +76,13 @@ export function HostedModelForm({
 
   const { isDirty } = useDirtySnapshot(draft)
   const { parsed } = readDraft(draft)
-  const canSubmit = canSubmitDraft(draft, editing !== undefined)
+  // This form sends rate columns, which the gateway stores per second on audio
+  // input, so a model priced per second of video is not repriced here: the
+  // save would move its price off the slot video billing reads.
+  const pricedPerSecond =
+    editing !== undefined && pricingUnitOf(editing.unit) === "second"
+  const canSubmit =
+    !pricedPerSecond && canSubmitDraft(draft, editing !== undefined)
 
   const saved = () => {
     onSaved()
@@ -118,7 +127,8 @@ export function HostedModelForm({
       placeholder="0.00"
       autoFocus={focusFirstRate && key === "input"}
       isRequired={
-        editing !== undefined && (key === "input" || key === "output")
+        editing !== undefined &&
+        (key === "input" || (key === "output" && draft.unit === "token"))
       }
       isInvalid={!parsed[key].ok}
       errorMessage={parsed[key].ok ? undefined : PRICE_ERROR}
@@ -167,44 +177,63 @@ export function HostedModelForm({
         />
       )}
 
-      <RadioGroup
-        label="Priced per"
-        orientation="horizontal"
-        value={draft.unit}
-        onChange={(value) => {
-          setUnitChanged(true)
-          setDraft({ ...draft, unit: pricingUnitOf(value) })
-        }}
-        options={PRICING_UNIT_OPTIONS}
-        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
-      />
-      {draft.unit === "token" ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {rateField(
-            "Input, per 1M tokens",
-            "input",
-            editing ? undefined : "Set with output, or leave both blank.",
-          )}
-          {rateField("Output, per 1M tokens", "output")}
-          {rateField(
-            "Cache read, per 1M tokens",
-            "cacheRead",
-            "Leave blank to price cached reads as fresh input.",
-          )}
-          {rateField(
-            "Cache write, per 1M tokens",
-            "cacheWrite",
-            "Leave blank to price cache writes as fresh input.",
-          )}
-        </div>
+      {pricedPerSecond ? (
+        <InfoBanner tone="info">
+          This model is priced per second of video, which this form cannot set
+          yet. Send its price to <code>POST /api/v1/pricing</code> as a{" "}
+          <code>rates</code> block instead.
+        </InfoBanner>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {rateField(
-            unitRateLabel(draft.unit),
-            "input",
-            editing ? undefined : "Leave blank to serve at the catalog's rate.",
+        <>
+          <RadioGroup
+            label="Priced per"
+            orientation="horizontal"
+            value={draft.unit}
+            onChange={(value) => {
+              setUnitChanged(true)
+              setDraft({ ...draft, unit: pricingUnitOf(value) })
+            }}
+            options={COLUMN_PRICING_UNIT_OPTIONS}
+            description={PRICING_UNIT_DESCRIPTION}
+          />
+          {draft.unit === "token" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {rateField(
+                "Input, per 1M tokens",
+                "input",
+                editing ? undefined : "Set with output, or leave both blank.",
+              )}
+              {rateField("Output, per 1M tokens", "output")}
+              {rateField(
+                "Cache read, per 1M tokens",
+                "cacheRead",
+                "Leave blank to price cached reads as fresh input.",
+              )}
+              {rateField(
+                "Cache write, per 1M tokens",
+                "cacheWrite",
+                "Leave blank to price cache writes as fresh input.",
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {rateField(
+                unitRateLabel(draft.unit),
+                "input",
+                editing
+                  ? undefined
+                  : "Leave blank to serve at the catalog's rate.",
+              )}
+              {hasOutputRate(draft.unit)
+                ? rateField(
+                    unitOutputRateLabel(draft.unit),
+                    "output",
+                    "Leave blank where the model makes no audio.",
+                  )
+                : null}
+            </div>
           )}
-        </div>
+        </>
       )}
     </FormDialog>
   )

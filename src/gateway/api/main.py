@@ -14,10 +14,12 @@ from gateway.api.routes import (
     auth_profile,
     auth_session,
     auth_signup,
+    auth_sso,
     auth_webauthn,
     batches,
     bootstrap,
     budgets,
+    calling_key,
     catalog,
     chat,
     code_execution,
@@ -48,6 +50,7 @@ from gateway.api.routes import (
     organization_keys,
     organization_pricing,
     organization_routing,
+    organization_sso,
     organization_usage,
     organizations,
     otlp,
@@ -69,6 +72,7 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    videos,
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
@@ -141,6 +145,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     auth_webauthn.router,
     auth_oauth.router,
+    auth_sso.router,
+    organization_sso.router,
     embeddings.router,
     images.router,
     audio.router,
@@ -155,6 +161,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     fetch.router,
     code_execution.router,
     batches.router,
+    videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
@@ -229,6 +236,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # mounted on their own router.
     usage.operator_router,
     usage.key_router,
+    # The calling API key's own usage and budget, answered for that key alone.
+    calling_key.router,
     agent_telemetry.router,
     settings.router,
     rate_limits.router,

@@ -19,7 +19,7 @@ writes in another.
 import dataclasses
 import functools
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -70,6 +70,8 @@ from gateway.schemas.providers import (
     HostedProviderTestRequest,
     HostedProviderUpdateRequest,
 )
+from gateway.services.catalog import offered_model_types
+from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import (
     DiscoveryDial,
     ProviderDiscovery,
@@ -101,11 +103,13 @@ from gateway.services.providers._hosted_name_index import (
     remember_hosted_name,
     remember_hosted_zero_data_retention,
 )
-from gateway.services.providers._hosted_offers import HostedOffers
+from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedSource, HostedSources
+from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
+from gateway.types.model_type import ModelType, OfferedModelType
 
 OrganizationExists = Callable[[uuid.UUID], Awaitable[bool]]
 
@@ -364,18 +368,29 @@ class HostedProviderService:
             remember_hosted_zero_data_retention(name, entry.zero_data_retention)
         get_model_cache().clear(name)
 
-    async def list_models(self, provider: str, *, skip: int = 0, limit: int = 500) -> HostedModelsPublic:
-        """One page of a provider's offered models, each priced as it currently serves.
+    async def list_models(
+        self, provider: str, *, skip: int = 0, limit: int = 500, model_type: OfferedModelType | None = None
+    ) -> HostedModelsPublic:
+        """One page of a provider's offered models, of one kind or of every kind, each priced as it currently serves.
+
+        Every row is read, because the kind is not stored and each kind's count covers the whole provider.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
         """
         async with self.uow:
             source = await self._provider_or_raise(provider)
-            rows, count = await self.models.list_for_provider(source.name, skip=skip, limit=limit)
-        rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
+            rows = await self.models.list_all_for_provider(source.name)
+        kinds = _kinds(source, [row.model for row in rows])
+        page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit)
+        rates = await self.offers.current_rates(source.name, page.rows, implementation=source.implementation)
         return HostedModelsPublic(
-            data=[HostedModelPublic.from_row(model, rates=rates.get(model.model)) for model in rows], count=count
+            data=[
+                HostedModelPublic.from_row(model, rates=rates.get(model.model), model_type=kinds.get(model.model))
+                for model in page.rows
+            ],
+            count=page.count,
+            type_counts=page.type_counts,
         )
 
     async def add_model(self, provider: str, request: HostedModelCreateRequest) -> HostedModelPublic:
@@ -415,7 +430,7 @@ class HostedProviderService:
                     provider, [name], defaults, serves_unlisted=source.serves_unlisted_models
                 )
         rates = await self.offers.current_rates(provider, [model], implementation=implementation)
-        return HostedModelPublic.from_row(model, rates=rates.get(name))
+        return HostedModelPublic.from_row(model, rates=rates.get(name), model_type=_kinds(source, [name]).get(name))
 
     async def update_model(
         self, provider: str, model_id: uuid.UUID, request: HostedModelUpdateRequest
@@ -442,7 +457,9 @@ class HostedProviderService:
             if priced or request.enabled is not None:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)
-        return HostedModelPublic.from_row(model, rates=rates.get(model.model))
+        return HostedModelPublic.from_row(
+            model, rates=rates.get(model.model), model_type=_kinds(source, [model.model]).get(model.model)
+        )
 
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int:
         """Stop serving each named model under its provider, keyed by provider name. Prices and rows stay.
@@ -838,6 +855,8 @@ class HostedProviderService:
         if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=name) for model in declared]
             return ProviderDiscovery(provider=name, models=models)
+        if implementation == OTARI_IMPLEMENTATION:
+            self.offers.remember_listing(name, discovery.models)
         return dataclasses.replace(discovery, provider=name)
 
     @staticmethod
@@ -902,6 +921,23 @@ class HostedProviderService:
 
 async def _undecryptable(provider: str) -> ProviderDiscovery:
     return ProviderDiscovery(provider=provider, models=[], error=UNDECRYPTABLE)
+
+
+def _kinds(source: HostedSource, models: Sequence[str]) -> dict[str, ModelType | None]:
+    """What kind each model ``source`` offers is, by models.dev.
+
+    Another Otari names a model ``vendor/model``, which models.dev knows under
+    the vendor, so that is where its kind is read. The kind its own listing
+    gives does not reach here: the client the listing is read with drops it.
+    """
+    catalog = cached_models_dev_catalog()
+    if source.implementation != OTARI_IMPLEMENTATION:
+        return offered_model_types(catalog, source.implementation, models)
+    kinds: dict[str, ModelType | None] = {}
+    for model in models:
+        vendor, separator, name = model.partition("/")
+        kinds[model] = offered_model_types(catalog, vendor, [name])[name] if separator else None
+    return kinds
 
 
 def _same_version(shown: datetime | None, stored: datetime | None) -> bool:

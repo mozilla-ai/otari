@@ -357,6 +357,12 @@ def test_empty_code_is_a_422(client: TestClient, api_key_header: dict[str, str])
     assert resp.status_code == 422, resp.text
 
 
+def test_whitespace_only_code_is_a_422(client: TestClient, api_key_header: dict[str, str]) -> None:
+    resp = client.post(_ENDPOINT, json={"code": "  \n\t "}, headers=api_key_header)
+
+    assert resp.status_code == 422, resp.text
+
+
 def test_a_resume_the_sandbox_cannot_take_gives_its_claim_back(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str]
 ) -> None:

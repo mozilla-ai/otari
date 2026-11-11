@@ -17,10 +17,12 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
   CATALOG,
+  HOSTED_PROVIDERS,
   MODELS,
   ORGANIZATION_PRICING,
   ORGANIZATION_PROVIDER_MODELS,
   PRICING,
+  SEARCH_TOOLS,
 } from "@/shared/api/queryKeys"
 
 const fetchAllPricing = () => fetchAllRows<PricingResponse>("/pricing")
@@ -64,6 +66,17 @@ export function usePricesInEffect(keys: readonly PricedKey[], enabled = true) {
   })
 }
 
+// Both provider model lists show the deployment's price where it is the rung
+// that answers, so a deployment price moves a row in each.
+function invalidateProviderModels(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS],
+  })
+  void queryClient.invalidateQueries({ queryKey: [HOSTED_PROVIDERS, "models"] })
+}
+
 export function useSetPricing() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -76,6 +89,9 @@ export function useSetPricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      invalidateProviderModels(queryClient)
     },
   })
 }
@@ -101,6 +117,9 @@ export function useDeletePricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      invalidateProviderModels(queryClient)
     },
   })
 }

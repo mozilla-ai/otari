@@ -40,9 +40,11 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
-import { formatDuration, formatTraceTimestamp } from "./format"
+import { formatDuration, formatTraceTimestamp, plural } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent, ShareSessionAction } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
@@ -107,8 +109,6 @@ const HAS_ERROR: Record<string, "true" | "false"> = {
 }
 
 const EMPTY = <span className="text-subtle">—</span>
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 function columns(peekId: string): DataTableColumn<TraceSummary>[] {
   return [
@@ -249,6 +249,14 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const [now, setNow] = useState(() => Date.now())
   // The window a timeline selection asked for, until its list lands.
   const pendingSelection = useRef("")
+  const { recordEvent } = useTelemetry()
+  // The session this page is asking to open, and how. Kept with the session it
+  // names, so a navigation that lands somewhere else (Back overtaking a press,
+  // say) is not credited to the press. Anything else that opens one came by a
+  // link.
+  const opening = useRef<{ id: string; source: "list" | "timeline" } | null>(
+    null,
+  )
 
   const query = url.get("q")
   const page = Math.max(0, url.getNumber("page"))
@@ -351,6 +359,16 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
+  useEffect(() => {
+    // Any change of the open session settles the press, whether it opened that
+    // session, another one or none: Back overtaking it can leave the panel
+    // closed, and a later link to the same session is then a link.
+    const pressed = opening.current
+    opening.current = null
+    if (!peekId) return
+    const source = pressed?.id === peekId ? pressed.source : "link"
+    recordEvent(TELEMETRY_EVENTS.SESSION_OPENED, { source })
+  }, [peekId, recordEvent])
   // An owner of the organization may open a private session by break-glass. What
   // it opened is held here for the session it opened, never polled over, and
   // dropped once the peek shows anything else or closes, so seeing it again takes
@@ -399,20 +417,25 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
 
   const rows = traces.data?.items ?? []
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
-  // The row on screen, or the read's own summary for a link off this page.
-  const openSummary = rows[openIndex] ?? shown?.summary
+  // The read's own summary once it lands: the list is a snapshot, and a
+  // session still running has moved on since. Until then, the row on screen.
+  const openSummary =
+    shown?.summary.trace_id === peekId ? shown.summary : rows[openIndex]
   const open = useMemo(
     () => (openSummary ? toTrace(openSummary, shown) : null),
     [openSummary, shown],
   )
   // A trace is keyed by its workspace and its id, so the URL keeps both.
-  const openPeek = (id: string) =>
+  const openPeek = (id: string) => {
+    // The open one pressed again changes nothing, so nothing is recorded.
+    if (id !== peekId) opening.current = { id, source: "list" }
     url.patch({
       peek: id,
       peek_workspace:
         rows.find((session) => session.trace_id === id)?.workspace_id ?? "",
       span: "",
     })
+  }
   const previous = openIndex > 0 ? rows[openIndex - 1].trace_id : null
   const next =
     openIndex >= 0 && openIndex < rows.length - 1
@@ -438,12 +461,25 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     }
     pendingSelection.current = ""
     if (listed.length !== 1) return
+    // A bar whose one session is already open opens nothing new.
+    if (listed[0].trace_id !== peekId) {
+      opening.current = { id: listed[0].trace_id, source: "timeline" }
+    }
     patch({
       peek: listed[0].trace_id,
       peek_workspace: listed[0].workspace_id,
       span: "",
     })
-  }, [listed, settled, isListError, filterKey, startParam, endParam, patch])
+  }, [
+    listed,
+    settled,
+    isListError,
+    filterKey,
+    startParam,
+    endParam,
+    patch,
+    peekId,
+  ])
 
   // A minute later is a new window; inside the same minute the key holds, so
   // the reads are refetched as well.
@@ -461,8 +497,8 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
       <div className="flex flex-col" inert={open !== null && isMobile}>
         {embedded ? null : (
           <PageIntro title="Sessions">
-            Every agent session the gateway recorded: the turns, LLM calls and
-            tools behind each one. No model response is stored.
+            Every agent session the gateway recorded: the turns, model requests
+            and tools behind each one. No model response is stored.
           </PageIntro>
         )}
         {keepsContent ? (
@@ -517,11 +553,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <SearchField
               label="Search sessions"
-              placeholder="Search by ID, name, agent or user"
+              placeholder="Search ID, name, agent or user"
               value={query}
               onChange={(value) => url.patch({ q: value, page: 0 })}
               maxLength={SEARCH_MAX_LENGTH}
-              className="w-72 max-w-full"
+              // The row's width on a phone, short of Refresh, so the
+              // placeholder fits.
+              className="w-72 max-w-full max-sm:w-auto max-sm:min-w-0 max-sm:flex-1"
             />
             <div className="ml-auto flex items-center gap-3">
               <RefreshButton onRefresh={refresh} />
@@ -549,7 +587,6 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
               }
             />
           </TableScrollFrame>
-          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -562,6 +599,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
             hasNextFallback={traces.data?.has_more ?? false}
             label="Sessions"
           />
+          {isOwner ? <BreakGlassLog /> : null}
         </div>
       </div>
 

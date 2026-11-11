@@ -3,6 +3,8 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
 
+from fastapi import BackgroundTasks
+
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.settings.budgets import BudgetConfig
@@ -16,6 +18,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
@@ -23,6 +26,7 @@ from gateway.schemas.budgets import (
     CreateBudgetRequest,
     EndUserBudgetPublic,
     EndUserPublic,
+    KeyBudgetPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -40,6 +44,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._declared import attach_key_ceiling
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers, end_user_budget_list
+from gateway.services.budgets._key_limits import _KeyLimits
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._reservation_moves import (
@@ -50,6 +55,7 @@ from gateway.services.budgets._reservation_moves import (
 )
 from gateway.services.budgets._reservations import EstimateInputs, ReservationHandle, _normalize_strategy
 from gateway.services.budgets._scopes import ScopeOwnership
+from gateway.services.organizations import UserAccess
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.attempt import Attempt
@@ -68,6 +74,8 @@ class BudgetService:
         organizations: OrganizationService,
         api_keys: ApiKeyService,
         workspace_access: WorkspaceAccess,
+        *,
+        users: UserAccess,
     ) -> None:
         self._uow = uow
         self._repositories = repositories
@@ -80,6 +88,7 @@ class BudgetService:
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
+        self._key_limits = _KeyLimits(repositories, organizations, users)
 
     async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """A page of the budgets the deployment owns and the operator's organization owns."""
@@ -187,11 +196,38 @@ class BudgetService:
             return await self._member_policies.create_policy(user=user, workspace_id=workspace_id, request=request)
 
     async def create_organization_budget(
-        self, *, user: User, request: OrganizationBudgetCreate
+        self,
+        *,
+        user: User,
+        request: OrganizationBudgetCreate,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> OrganizationBudgetPublic:
-        """Create a budget owned by the caller's organization."""
+        """Create a budget owned by the caller's organization.
+
+        With ``growth``, the budget is reported as ``BUDGET_CREATED`` once it
+        commits, and the organization's first as ``BUDGET_RULE_SET`` too.
+        """
         async with self._uow:
-            return await self._organization.create_budget(user=user, request=request)
+            budget = await self._organization.create_budget(user=user, request=request)
+            first = await self._budgets.count_by_organization(budget.organization_id) == 1
+        if growth is None or background_tasks is None:
+            return budget
+        await growth.record_action(
+            background_tasks=background_tasks,
+            action=GrowthAction.BUDGET_CREATED,
+            user_id=user.id,
+            email=user.email,
+            organization_id=budget.organization_id,
+        )
+        if first and user.email is not None:
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.BUDGET_RULE_SET,
+                user_id=user.id,
+                email=user.email,
+            )
+        return budget
 
     async def create_organization_ceiling(
         self, *, user: User, request: OrganizationScopedBudgetCreate
@@ -284,6 +320,13 @@ class BudgetService:
             async with self._uow:
                 await self._end_users.require_assignable_budgets(to_check, organization_id)
         return listed
+
+    async def key_budget(self, api_key: APIKey, *, strategy: str | None) -> KeyBudgetPublic:
+        """What a key may still spend, and every cap that decides it; none when no budget gates the key."""
+        if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
+            return KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+        async with self._uow:
+            return await self._key_limits.read(api_key)
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The user's own budget and its per-minute limits, or None when the user is on none or budgets are disabled."""

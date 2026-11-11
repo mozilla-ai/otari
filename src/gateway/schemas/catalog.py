@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from gateway.models.pricing import PriceSource
 from gateway.types.model_type import ModelType
+from gateway.types.price_unit import PriceUnit
 
 
 class CatalogCapabilities(BaseModel):
@@ -71,9 +72,18 @@ class CatalogModelSummary(BaseModel):
     )
     unpriced_count: int = Field(description="How many offerings carry no price for this caller.")
     discovered: bool = Field(description="Whether any offering was discovered from its provider.")
+    price_unit: PriceUnit | None = Field(
+        default=None,
+        description=(
+            "What the cheapest prices are per: the unit every priced offering is priced in. Null where no "
+            "offering is priced, or where offerings are priced in different units, which leaves both null."
+        ),
+    )
     min_input_price_per_million: float | None = Field(
         default=None,
-        description="The cheapest offering's, at the comparison context where one was asked for.",
+        description=(
+            "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for."
+        ),
     )
     min_output_price_per_million: float | None = None
 
@@ -100,7 +110,11 @@ class CatalogQuery(BaseModel):
     search: str | None = Field(
         default=None,
         max_length=200,
-        description="Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+        description=(
+            "Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; "
+            "a pasted selector, or part of one with a colon or slash, matches too. "
+            "Provider instances are the `provider` filter's."
+        ),
     )
     workspace_id: uuid.UUID | None = Field(
         default=None,
@@ -131,7 +145,10 @@ class CatalogQuery(BaseModel):
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Maximum cheapest input price per million tokens; unpriced models do not match.",
+        description=(
+            "Maximum cheapest input price per million tokens; unpriced models, and models priced in another "
+            "unit, do not match."
+        ),
     )
     pricing: Literal["all", "custom", "default", "priced", "unpriced"] = "all"
     source: Literal["all", "discovered", "custom"] = "all"

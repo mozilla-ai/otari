@@ -400,11 +400,14 @@ export function WorkspacesPage() {
         cell: (workspace) => (
           <div className="flex flex-col gap-0.5">
             {/* The workspace's own page, where its settings, members and
-                access live. */}
+                access live. On a touch screen the target grows to 44px by
+                padding it gives straight back, so the row keeps its pitch;
+                `relative` keeps the description after it from covering the
+                lower half. */}
             <Link
               to="/workspaces/$workspaceId"
               params={{ workspaceId: workspace.id }}
-              className="text-body text-link hover:text-link-hover"
+              className="relative text-body text-link hover:text-link-hover pointer-coarse:-my-3 pointer-coarse:py-3"
             >
               {workspace.name}
             </Link>

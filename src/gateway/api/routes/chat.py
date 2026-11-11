@@ -52,9 +52,9 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.billing_port import BillingPort
@@ -79,6 +79,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
@@ -163,7 +164,7 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = Field(
         default=None,
         max_length=4000,
@@ -314,13 +315,16 @@ class _ChatAdapter:
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
             cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
+            provider_web_searches=provider_web_searches_of(chunk.usage),
+            service_tier=chunk.service_tier,
+            inference_geo=chunk.usage.inference_geo,
         )
         return GatewayUsage(**fields)
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
         if result.usage is None:
             return None
-        return GatewayUsage.from_completion_usage(result.usage)
+        return GatewayUsage.from_completion_usage(result.usage, service_tier=result.service_tier)
 
     def attach_cost(
         self,
@@ -614,6 +618,7 @@ async def run_chat_completion(
             model=request.model,
             user_id_from_request=request.user,
             safety_identifier=request.safety_identifier,
+            price_facts=PriceFacts(service_tier=request.service_tier),
             estimate_prompt_chars=len(str(request.messages)),
             estimate_max_output_tokens=output_cap,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
@@ -722,6 +727,7 @@ async def run_chat_completion(
             model=resolved.model,
             display_model=resolved.alias,
             base_request_fields=request_fields,
+            response=response,
         )
 
     resolved = await resolve_dispatch_provider(

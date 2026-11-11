@@ -35,7 +35,7 @@ from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest
 # rows-per-page the UI offers is 500; 1000 leaves headroom without letting a single
@@ -139,11 +139,6 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def usage_in(workspaces: Select[uuid.UUID]) -> ColumnElement[bool]:
-    """Match the usage rows of these workspaces: the scope of the operator's usage reads."""
-    return UsageLog.workspace_id.in_(workspaces)
-
-
 def _selection_conditions(
     selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> list[ColumnElement[bool]]:
@@ -208,7 +203,7 @@ def _selection_conditions(
     if selection.tool is not None:
         namespace = UsageLog.billing_meters[TOOL_METER_NAMESPACE]
         conditions.append(
-            # See routes/usage._tool_used_expr: the text coercion is what makes a
+            # See the usage log repository's _tool_used_expr: the text coercion is what makes a
             # missing key compare as SQL NULL rather than JSON null.
             namespace.as_string().is_not(None)
             if selection.tool == "any"

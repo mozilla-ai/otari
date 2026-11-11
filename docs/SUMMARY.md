@@ -1,49 +1,60 @@
-# Home
+# Otari
+
+## Getting Started
 
 * [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
 
+## What you can do
+
+* [Build](build.md)
+* [Observe](observe.md)
+* [Control](control.md)
+* [Organize](organize.md)
+
 # Guides
 
-## Organizations and access
+## Build
 
-* [Access control](access-control.md)
-* [Organizations and workspaces](organizations-and-workspaces.md)
-* [Members and invitations](members.md)
-* [API keys](api-keys.md)
-* [Provider keys](provider-keys.md)
-* [Budgets](budgets.md)
-* [Track spend per end user](end-users.md)
-* [Billing on otari.ai](billing.md)
-
-## Dashboard
-
-* [Admin dashboard](dashboard.md)
 * [Playground](playground.md)
-
-## Tools
-
-* [Configure a workspace's tools](workspace-tools.md)
-
-## Agents and frameworks
-
+* [Configure web search](configure-web-search.md)
+* [Configure code execution](configure-code-execution.md)
+* [Configure an MCP server](configure-an-mcp-server.md)
+* [Framework integrations](framework-integrations.md)
 * [Use with Claude Code](use-with-claude-code.md)
 * [Use with Codex](use-with-codex.md)
 * [Use with Junie](use-with-junie.md)
 * [Use with opencode](use-with-opencode.md)
+* [Use with pi](use-with-pi.md)
+* [Use with oh-my-pi](use-with-oh-my-pi.md)
+* [Use with Hermes Agent](use-with-hermes.md)
 * [Use with Pydantic AI](use-with-pydantic-ai.md)
 * [Use with LangChain](use-with-langchain.md)
 * [Use with LangGraph](use-with-langgraph.md)
 
-## Guardrails
+## Observe
 
-* [Inference Guardrails](guardrails.md)
-* [Agent Guardrails](agent-guardrails.md)
+* [Review usage and requests](review-usage-and-requests.md)
+* [Sessions](sessions.md)
+* [Import usage from outside Otari](external-usage.md)
 
-## Observability
+## Control
 
-* [Agent traces](traces.md)
-* [Importing external usage](external-usage.md)
+* [Budgets](budgets.md)
+* [Access control](access-control.md)
+* [API keys](api-keys.md)
+* [Set a budget and ceiling](set-a-budget-and-ceiling.md)
+* [Create a multi-provider routing](create-a-multi-provider-routing.md)
+* [Configure guardrails](configure-guardrails.md)
+* [Track spend per end user](end-users.md)
+
+## Organize
+
+* [Organizations and workspaces](workspaces.md)
+* [Model providers](model-providers.md)
+* [Billing](billing.md)
+* [Manage workspaces](manage-workspaces.md)
+* [Members and invitations](members.md)
 
 # Self-Hosting
 
@@ -51,6 +62,8 @@
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
 * [Sign-in and accounts](sign-in.md)
+* [Single sign-on](sso.md)
+* [Run the dashboard](run-the-dashboard.md)
 
 ## Providers
 
@@ -65,6 +78,8 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [Store agent traces](trace-storage.md)
+* [Service keys on a deployment you run](operator-service-keys.md)
 
 # Reference
 
@@ -74,14 +89,21 @@
 
 * [Models](models.md)
 * [Routing policies](routing.md)
+* [Sessions reference](sessions-reference.md)
+* [External usage reference](external-usage-reference.md)
+* [Budget enforcement](budget-enforcement.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-
-## Agent Guardrails
-
-* [Agent Guardrails reference](agent-guardrails-reference.md)
+* [Guardrails reference](guardrails-reference.md)
 
 ## Protocols
 
 * [Code-execution protocol](code-execution-protocol.md)
+* [Platform connect protocol](platform-connect-protocol.md)
+
+# Privacy
+
+* [Data Collection](privacy/data-collection.md)
+* [Agent Session Content](privacy/agent-session-content.md)
+* [Zero Data Retention](privacy/zdr.md)

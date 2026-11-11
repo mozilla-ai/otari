@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { ActivationApiKey, WorkspaceActivation } from "@/client"
+import type { WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
 import { SetupSuccess } from "@/features/onboarding/SetupSuccess"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
@@ -14,6 +14,8 @@ import { useModels } from "@/shared/api/models"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 /**
  * The step between "a provider is configured" and "this dashboard has something
@@ -21,8 +23,8 @@ import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
  *
  * **A sheet over the page, not a panel on it.** A dashboard whose workspace has
  * never served a request has nothing on it worth reading, so the guide takes
- * the screen the way the platform's flow did, offers a way out in its footer,
- * and never returns once that is taken. It composes with the Overview's own
+ * the screen the way the platform's flow did, and is offered once: every way
+ * out, Skip or a link to another page, retires it for the workspace. It composes with the Overview's own
  * getting-started panel rather than competing with it: that one is shown while
  * the gateway has no provider, when a request cannot succeed yet, and this one
  * takes over once one exists.
@@ -97,14 +99,12 @@ function SetupFlow({
   const prefersReducedMotion = usePrefersReducedMotion()
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
-  const models = useModels()
+  const models = useModels(true, workspaceId)
+  const { recordEvent } = useTelemetry()
   const baseUrl = resolveSnippetBaseUrl()
 
-  // The issued key and a failed mint, held here rather than read off the
-  // mutation. The effect below says why the observer cannot carry them.
-  const [issued, setIssued] = useState<ActivationApiKey>()
-  const [mintError, setMintError] = useState<unknown>()
-  // Guidance links leave the sheet temporarily; Skip retires it on the server.
+  // Every way out retires the guide on the server; this hides the sheet while
+  // that lands, including on the way to a page a guidance link names.
   const [isClosed, setIsClosed] = useState(false)
   const [isFinished, setIsFinished] = useState(false)
   // Only a press somebody made, never the background poll: `isFetching` would
@@ -124,39 +124,32 @@ function SetupFlow({
   // offer no one was ever shown. The sheet and the payoff are never the same
   // render (`experience_eligible` goes false as `status` becomes activated), so
   // the effect has always run by the time the branch below reads it.
+  // The same commit is where the offer is counted as shown, once per mount.
   useEffect(() => {
-    if (isOffered) wasOffered.current = true
-  }, [isOffered])
-
-  // The key is minted when the sheet opens rather than on a press, because the
-  // sheet *is* the press: it is the whole screen, it exists to hand a key over,
-  // and asking for one more click before showing the thing the screen is about
-  // is a step with nothing behind it. A ref rather than the mutation's own
-  // state, so a second mint cannot be issued by a re-render or by React
-  // remounting the effect; the component is keyed on the workspace, so
-  // switching workspaces gets a fresh one.
-  const hasRequestedKey = useRef(false)
-  // Fired once across both of React's development effect invocations, and with
-  // no "ignore a late result" flag, which is the part that is easy to get
-  // wrong: such a flag is scoped to one invocation while the ref above is
-  // scoped to the component, so the first invocation's cleanup would discard
-  // the only request in flight and the second would decline to replace it,
-  // having been told one was already sent. The key minted, arrived, and was
-  // thrown away, leaving the sheet on "Creating your API key…" forever. In
-  // development only, so a production build never showed it.
-  //
-  // Nothing is needed in its place. This component is keyed on the workspace,
-  // so switching destroys the instance, and React discards a `setState` that
-  // lands on one that is gone.
-  //
-  // `mutateAsync` rather than `mutate` with callbacks, because the result then
-  // comes from the promise rather than through the mutation observer, which is
-  // one less thing between the response and the screen.
+    if (!isOffered || wasOffered.current) return
+    wasOffered.current = true
+    recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, {
+      workspace_id: workspaceId,
+    })
+  }, [isOffered, workspaceId, recordEvent])
+  // One showing is retired once, whichever way out lands first: a poll that
+  // finds the first request can arrive while a Skip is still in flight.
+  const retired = useRef(false)
+  const recordRetired = useCallback(
+    (reason: "skipped" | "left" | "activated") => {
+      if (retired.current) return
+      retired.current = true
+      recordEvent(TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED, {
+        workspace_id: workspaceId,
+        reason,
+      })
+    },
+    [workspaceId, recordEvent],
+  )
+  // A first request landing while the sheet was up retires it too.
   useEffect(() => {
-    if (!isOffered || hasRequestedKey.current) return
-    hasRequestedKey.current = true
-    createKey.mutateAsync(workspaceId).then(setIssued, setMintError)
-  }, [isOffered, workspaceId, createKey.mutateAsync])
+    if (isActivated && wasOffered.current) recordRetired("activated")
+  }, [isActivated, recordRetired])
 
   if (isFinished) return null
 
@@ -178,6 +171,18 @@ function SetupFlow({
 
   if (!isOffered) return null
 
+  // Recorded once the server has retired the guide, so a Skip that fails and
+  // is pressed again is one dismissal rather than two.
+  const skip = () =>
+    dismiss.mutate(workspaceId, { onSuccess: () => recordRetired("skipped") })
+
+  // Recorded on the press: the sheet closes at once and the link navigates.
+  const leave = () => {
+    setIsClosed(true)
+    recordRetired("left")
+    dismiss.mutate(workspaceId)
+  }
+
   const checkNow = async () => {
     setIsChecking(true)
     try {
@@ -196,9 +201,9 @@ function SetupFlow({
   return (
     <SetupSheet
       workspaceName={workspaceName}
-      apiKey={issued?.key}
-      keyPrefix={issued?.key_prefix ?? undefined}
-      keySuffix={issued?.key_suffix ?? undefined}
+      apiKey={createKey.data?.key}
+      keyPrefix={createKey.data?.key_prefix ?? undefined}
+      keySuffix={createKey.data?.key_suffix ?? undefined}
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.
@@ -213,12 +218,14 @@ function SetupFlow({
       }
       isChecking={isChecking}
       checkFailed={checkFailed}
-      keyError={mintError}
+      keyError={createKey.error}
+      isCreatingKey={createKey.isPending}
       skipError={dismiss.error}
       isSkipping={dismiss.isPending}
+      onCreateKey={() => createKey.mutate(workspaceId)}
       onCheckNow={() => void checkNow()}
-      onSkip={() => dismiss.mutate(workspaceId)}
-      onDismiss={() => setIsClosed(true)}
+      onSkip={skip}
+      onLeave={leave}
     />
   )
 }

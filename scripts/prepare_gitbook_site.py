@@ -9,7 +9,8 @@ into another space, so such a link becomes the page's absolute URL on the site, 
 builds it: the space's path, the page's `##` group and parent pages, and its file name. A relative
 link to any other file in the repository becomes a GitHub link at the published ref.
 The site also carries the OpenAPI specification and a generated endpoint page per tag under the API reference.
-GitBook renders each operation on those pages from the specification registered in it under SPEC_NAME.
+GitBook renders each operation on those pages from the specification registered in it under SPEC_NAME, or
+under --spec-name, which a preview build sets so its pages read the specification it publishes.
 
 Standard library only, so the publish workflow runs it without installing the project.
 
@@ -62,7 +63,8 @@ _ACRONYMS = {"mcp": "MCP", "otel": "OTel"}
 # Reads come before writes, which is the order an endpoint page lists them in.
 _HTTP_METHODS = ("get", "head", "options", "post", "put", "patch", "delete", "trace")
 _RELEASE_TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
-_NOT_A_SLUG = re.compile(r"[^a-z0-9]+")
+# NOTE: GitBook keeps a dot in a slug, so "Use otari.ai" is served at use-otari.ai.
+_NOT_A_SLUG = re.compile(r"[^a-z0-9.]+")
 
 
 def summary_pages(summary: str) -> list[str]:
@@ -163,11 +165,13 @@ def page_title(page: str) -> str:
     return " ".join([words[0][:1].upper() + words[0][1:], *words[1:]])
 
 
-def endpoint_page(page: str, operations: list[tuple[str, str]]) -> str:
+def endpoint_page(
+    page: str, operations: list[tuple[str, str]], spec_name: str = SPEC_NAME, spec_url: str = SPEC_URL
+) -> str:
     """Return the Markdown page that renders operations from the registered specification."""
     blocks = (
-        f'{{% openapi-operation spec="{SPEC_NAME}" path="{path}" method="{method}" %}}\n'
-        f"[OpenAPI {SPEC_NAME}]({SPEC_URL})\n"
+        f'{{% openapi-operation spec="{spec_name}" path="{path}" method="{method}" %}}\n'
+        f"[OpenAPI {spec_name}]({spec_url})\n"
         "{% endopenapi-operation %}\n"
         for path, method in operations
     )
@@ -197,12 +201,28 @@ class Site:
     spaces: tuple[Space, ...]
     ref: str
     site_url: str = SITE_URL
+    spec_name: str = SPEC_NAME
+    spec_url: str = SPEC_URL
 
     @classmethod
-    def from_summary(cls, docs_dir: Path, ref: str, site_url: str = SITE_URL) -> Site:
+    def from_summary(
+        cls,
+        docs_dir: Path,
+        ref: str,
+        site_url: str = SITE_URL,
+        spec_name: str = SPEC_NAME,
+        spec_url: str = SPEC_URL,
+    ) -> Site:
         """Read the spaces from the SUMMARY.md in docs_dir."""
         spaces = summary_spaces((docs_dir / SUMMARY).read_text(encoding="utf-8"))
-        return cls(docs_dir=docs_dir, spaces=tuple(spaces), ref=ref, site_url=site_url.rstrip("/"))
+        return cls(
+            docs_dir=docs_dir,
+            spaces=tuple(spaces),
+            ref=ref,
+            site_url=site_url.rstrip("/"),
+            spec_name=spec_name,
+            spec_url=spec_url,
+        )
 
     @property
     def published(self) -> frozenset[str]:
@@ -317,7 +337,9 @@ class Site:
             raise ValueError(f"docs/{ENDPOINTS_DIR}/ is reserved for the generated endpoint pages")
         (space_dir / ENDPOINTS_DIR).mkdir()
         for page, operations in by_page.items():
-            (space_dir / ENDPOINTS_DIR / f"{page}.md").write_text(endpoint_page(page, operations), encoding="utf-8")
+            (space_dir / ENDPOINTS_DIR / f"{page}.md").write_text(
+                endpoint_page(page, operations, self.spec_name, self.spec_url), encoding="utf-8"
+            )
         summary = space_dir / SUMMARY
         summary.write_text(nest_endpoint_pages(summary.read_text(encoding="utf-8"), list(by_page)), encoding="utf-8")
 
@@ -328,9 +350,13 @@ def main() -> int:
     parser.add_argument("--ref", default="main", help="Git ref that links to unpublished files point at.")
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "site", help="Directory to write the site to.")
     parser.add_argument("--site-url", default=SITE_URL, help="URL the site is published at, for links between spaces.")
+    parser.add_argument(
+        "--spec-name", default=SPEC_NAME, help="Name the OpenAPI specification is registered under in GitBook."
+    )
+    parser.add_argument("--spec-url", default=SPEC_URL, help="URL GitBook reads that specification from.")
     args = parser.parse_args()
 
-    site = Site.from_summary(DOCS_DIR, args.ref, args.site_url)
+    site = Site.from_summary(DOCS_DIR, args.ref, args.site_url, args.spec_name, args.spec_url)
     if off_menu := pages_off_the_menu(DOCS_DIR, site.published):
         print(
             f"Pages under docs/ that docs/{SUMMARY} does not list: {', '.join(off_menu)}",

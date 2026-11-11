@@ -1,10 +1,20 @@
+# The uv this image installs with, shared by every stage that needs it.
+#
+# Declared before the first stage so the `uv` stage below can take it: `COPY --from`
+# does not expand a variable in an image reference, so the image is pinned through a
+# named stage instead of inline. `tests/unit/test_uv_version_pin.py` holds this to the
+# range `pyproject.toml` declares, which is where the version is decided.
+ARG UV_VERSION=0.13.7
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # The admin dashboard bundle is not committed (see .gitignore), so build it here.
 #
 # Pinned to BUILDPLATFORM: otari-docker.yml publishes linux/amd64 and linux/arm64,
 # so without this the whole install + vite build runs a second time under QEMU for
 # the non-native arch on every publish. The output is JavaScript, CSS, and PNGs,
 # which are architecture-independent, so one native build serves both images.
-FROM --platform=$BUILDPLATFORM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS web
+FROM --platform=$BUILDPLATFORM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS web
 
 WORKDIR /app/web
 
@@ -32,7 +42,7 @@ FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir --upgrade pip uv
+COPY --from=uv /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src
@@ -55,7 +65,10 @@ WORKDIR /app
 # distrusted emSign roots, whatever the system trust store says.
 RUN pip install --no-cache-dir --upgrade "pip>=26.2.2"
 
-RUN useradd -m -u 1000 otari && chown otari:otari /app
+# /data holds what must outlive the container: the default SQLite database and
+# the secret key file beside it. Created and owned here, before VOLUME, so a new
+# volume starts out writable by the otari user.
+RUN useradd -m -u 1000 otari && mkdir /data && chown otari:otari /app /data
 
 COPY --from=builder --chown=otari:otari /app/.venv /app/.venv
 COPY --chown=otari:otari src ./src
@@ -82,5 +95,10 @@ ARG OTARI_VERSION=0.0.0-dev
 ENV OTARI_VERSION=${OTARI_VERSION}
 ENV OTARI_HOST=0.0.0.0
 ENV OTARI_PORT=8000
+# The default only: a database_url in a mounted config file, or
+# OTARI_DATABASE_URL, still wins.
+ENV OTARI_DEFAULT_DATABASE_URL=sqlite:////data/otari.db
+
+VOLUME /data
 
 CMD ["otari", "serve"]

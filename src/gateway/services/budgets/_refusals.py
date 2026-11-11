@@ -67,6 +67,18 @@ def _usd(amount: Decimal, rounding: str) -> str:
     return f"${whole}.{fraction.rstrip('0').ljust(2, '0')}"
 
 
+def user_subject(user_id: str, *, external_id: str | None = None) -> str:
+    """How a refusal names a user: by ``external_id`` for a service key's end user, by ``user_id`` otherwise."""
+    if external_id is not None:
+        return f"End user '{external_id}'"
+    return f"User '{user_id}'"
+
+
+def end_user_fields(external_id: str | None) -> dict[str, str]:
+    """The ``end_user`` a refusal's body names a service key's end user by, so a service routes it without parsing."""
+    return {} if external_id is None else {"end_user": external_id}
+
+
 def refusal_detail(
     subject: str,
     blocked: BlockedAxis,

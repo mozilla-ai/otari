@@ -42,12 +42,12 @@ in its first 30 days.
 """
 
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 
 from any_search._api import AnySearch
 from any_search._errors import ProviderError
+from any_search._http import is_web_url
 from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
 
 MAX_RESULTS = 10
@@ -194,15 +194,6 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
     link, title, description = item.get("link"), item.get("title"), item.get("description")
     if not isinstance(link, str) or not isinstance(title, str) or not isinstance(description, str):
         raise _unexpected(response)
-    if not _is_web_url(link):
+    if not is_web_url(link):
         return None
     return SearchHit(url=link, title=title, snippet=description, raw=item)
-
-
-def _is_web_url(link: str) -> bool:
-    try:
-        parts = urlsplit(link)
-        _ = parts.port  # raises for a port that is not a number from 0 to 65535
-    except ValueError:
-        return False
-    return parts.scheme in ("http", "https") and bool(parts.hostname)

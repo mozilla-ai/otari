@@ -16,7 +16,11 @@ import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { parsePerCallPrice, toPerCall } from "@/features/toolPricing/toolRates"
+import {
+  parsePerCallPrice,
+  perCallText,
+  toPerCall,
+} from "@/features/toolPricing/toolRates"
 import { useSetPricing } from "@/shared/api/pricing"
 import {
   useCreateSearchTool,
@@ -25,12 +29,10 @@ import {
   useUpdateSearchTool,
 } from "@/shared/api/tools"
 import { formatUnitRate } from "@/shared/helpers/format"
-
 import { ProviderOptionFields } from "./ProviderOptionFields"
 import {
   buildOptions,
   nameProblem,
-  perCallText,
   sameOptions,
   servesTheModel,
   splitOptions,
@@ -127,7 +129,7 @@ export function WebToolDialog({
   fetchProviders: readonly SearchProviderInfo[]
   /** The fetch tool that enriches a search tool that names none. */
   fetchDefault: string
-  /** The tool's own per-million rate in force, `undefined` when it has none. */
+  /** The rate in force in dollars per call, `undefined` when the tool is unpriced. */
   currentPrice: number | undefined
   onClose: () => void
   onAddAnother: () => void

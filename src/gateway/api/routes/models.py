@@ -1,5 +1,6 @@
 """OpenAI-compatible models listing endpoint with auto-discovery."""
 
+import uuid
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
+    OrgProviderKeyServiceDep,
     RequestSessionModelProviderPortDep,
     get_config,
     get_db,
@@ -56,6 +58,7 @@ from gateway.services.model_discovery_service import (
 from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.selector_index_service import answered_by_listing, models_by_identity
+from gateway.services.tenancy import OrgProviderKeyService
 
 if TYPE_CHECKING:
     pass
@@ -194,8 +197,13 @@ async def list_models(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
     provider: Annotated[
         str | None, Query(description="Only the models this provider instance serves, described as served there.")
+    ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the models a request billed to this workspace may call."),
     ] = None,
 ) -> ModelListResponse:
     """List all available models, one entry per model however many providers serve it.
@@ -210,7 +218,18 @@ async def list_models(
     `instance:model` selector still pins a request to one provider, and
     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
-    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
+    return ModelListResponse(
+        data=await _listing(
+            db,
+            config,
+            auth,
+            session_identity,
+            model_provider,
+            org_provider_keys,
+            provider=provider,
+            workspace_id=workspace_id,
+        )
+    )
 
 
 async def _listing(
@@ -219,8 +238,10 @@ async def _listing(
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
+    org_provider_keys: OrgProviderKeyService,
     *,
     provider: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[ModelObject]:
     # Alias targets are kept so a model's row is chosen among the offerings a
     # request by its catalog id tries; ``models_by_identity`` still hides them.
@@ -232,12 +253,19 @@ async def _listing(
         provider=provider,
         model_provider=model_provider,
         withhold_alias_targets=False,
+        workspace_id=workspace_id,
     )
     models = list(catalog.models.values())
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
+    slug_providers = await org_provider_keys.slug_providers(organization_id) if organization_id is not None else {}
     return models_by_identity(
-        config, catalog.models_dev, models, organization_id=organization_id, alias_targets=catalog.alias_targets
+        config,
+        catalog.models_dev,
+        models,
+        organization_id=organization_id,
+        alias_targets=catalog.alias_targets,
+        slug_providers=slug_providers,
     )
 
 
@@ -328,6 +356,7 @@ async def get_model(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
 ) -> ModelObject:
     """Get details for a specific model, by catalog id, alias or `instance:model` selector.
 
@@ -335,7 +364,7 @@ async def get_model(
     """
     scope, aliases = await _caller_scope(db, config, auth, session_identity, model_provider)
     if answered_by_listing(model_id, aliases):
-        listed = await _listing(db, config, auth, session_identity, model_provider)
+        listed = await _listing(db, config, auth, session_identity, model_provider, org_provider_keys)
         found = next((obj for obj in listed if obj.id == model_id), None)
         if found is not None:
             return found
@@ -397,6 +426,7 @@ async def _find_model(
             alias_target,
             normalized_pricing_lookup(config, pricing_map),
             models_dev=await load_catalog_metadata(config),
+            organization_id=scope.organization_id,
         )
 
     # Check the pricing table first.
@@ -440,7 +470,9 @@ async def _find_model(
         fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            apply_model_metadata(config, await load_catalog_metadata(config), fallback)
+            apply_model_metadata(
+                config, await load_catalog_metadata(config), fallback, organization_id=scope.organization_id
+            )
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
             )
@@ -461,11 +493,11 @@ async def _find_model(
             pricing_source="configured" if pricing else "none",
         )
         apply_default_pricing(obj)
-        apply_model_metadata(config, await load_catalog_metadata(config), obj)
+        apply_model_metadata(config, await load_catalog_metadata(config), obj, organization_id=scope.organization_id)
         return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
-    apply_model_metadata(config, await load_catalog_metadata(config), obj)
+    apply_model_metadata(config, await load_catalog_metadata(config), obj, organization_id=scope.organization_id)
     return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)

@@ -58,6 +58,7 @@ from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogM
 from gateway.services.catalog import (
     ModelType,
     catalog_model_type,
+    common_price_unit,
     current_selector_index,
     model_selector_for_slug,
     query_catalog,
@@ -71,7 +72,6 @@ from gateway.services.merged_catalog_service import (
     viewer_organization,
     viewer_price,
     viewer_zero_data_retention,
-    withholds_offering,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import (
@@ -394,18 +394,17 @@ async def _group(
     )
     configured_types = {models_dev_provider_id(config.provider_instance_type(i)) for i in config.providers}
     zero_retention = await viewer_zero_data_retention(hosted_providers, org_provider_keys, organization_id)
+    slug_providers = await org_provider_keys.slug_providers(organization_id) if organization_id is not None else {}
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
     for obj in real:
-        seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
+        seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj, slug_providers)
         credential = _get_credential(
             config,
             instance,
             hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
         )
         declared = zero_retention.declared(instance, credential.value)
-        if withholds_offering(merged, zero_data_retention=declared):
-            continue
         seeds.append(seed)
 
         pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)
@@ -510,7 +509,8 @@ def _summary(
     """
     described = [member.metadata for member in members if member.metadata is not None]
     priced = [member.wire.pricing for member in members if member.wire.pricing is not None]
-    rates = [_rates_at_context(pricing, at_context) for pricing in priced]
+    price_unit = common_price_unit(pricing.unit for pricing in priced)
+    rates = [_rates_at_context(pricing, at_context) for pricing in priced] if price_unit else []
     # The description from the offering whose spelling won the name, so the two
     # read as one source; any offering's when none of them named the model.
     winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
@@ -551,6 +551,7 @@ def _summary(
         price_sources=sorted({member.wire.price_source for member in members if member.wire.price_source}),
         unpriced_count=sum(1 for member in members if member.wire.pricing is None),
         discovered=any(member.wire.discovered for member in members),
+        price_unit=price_unit,
         min_input_price_per_million=min((rate[0] for rate in rates), default=None),
         min_output_price_per_million=min((rate[1] for rate in rates), default=None),
     )

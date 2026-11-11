@@ -52,7 +52,7 @@ from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
@@ -72,6 +72,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.providers import aresponses
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
@@ -81,6 +82,7 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_web_searches,
 )
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
@@ -128,7 +130,7 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
@@ -206,7 +208,7 @@ def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dic
 
 
 def _usage_to_completion_usage(
-    usage: ResponseUsage | OpenResponsesUsage | None,
+    usage: ResponseUsage | OpenResponsesUsage | None, *, service_tier: str | None = None, provider_searches: int = 0
 ) -> CompletionUsage | None:
     if usage is None:
         return None
@@ -219,7 +221,24 @@ def _usage_to_completion_usage(
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
+        provider_web_searches=provider_searches,
+        service_tier=service_tier,
     )
+
+
+def _response_usage(response: Any) -> CompletionUsage | None:
+    """The usage row of a whole response, the searches its provider ran included."""
+    return _usage_to_completion_usage(
+        getattr(response, "usage", None),
+        service_tier=_served_tier(response),
+        provider_searches=provider_web_searches(response),
+    )
+
+
+def _served_tier(response: Any) -> str | None:
+    """The tier a response says it was served at, or ``None`` where it says none."""
+    tier = getattr(response, "service_tier", None)
+    return tier if isinstance(tier, str) else None
 
 
 def _ends_a_response(chunk: Any) -> bool:
@@ -277,8 +296,9 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # The chat-completions bridge emits a terminal event whatever its upstream
-        # sent, so this catches a cut native stream and not a cut bridged one.
+        # A cut native stream ends without a terminal event. The chat-completions
+        # bridge raises on a stream that never reported a finish_reason, so a cut
+        # bridged one reaches the error path too.
         return _ends_a_response
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
@@ -291,16 +311,17 @@ class _ResponsesAdapter:
         )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
-        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
+        # By alias, so a JSON schema format's ``schema`` keeps its wire name rather than its field name, ``schema_``.
+        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
         if response_obj and getattr(response_obj, "usage", None):
-            return _usage_to_completion_usage(response_obj.usage)
+            return _response_usage(response_obj)
         return None
 
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
-        return _usage_to_completion_usage(getattr(result, "usage", None))
+        return _response_usage(result)
 
     def attach_cost(
         self,
@@ -491,6 +512,7 @@ async def create_response(
             model=request_body.model,
             user_id_from_request=request_body.user,
             safety_identifier=request_body.safety_identifier,
+            price_facts=PriceFacts(service_tier=request_body.service_tier),
             estimate_prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,
@@ -623,6 +645,7 @@ async def create_response(
             model=model,
             display_model=resolved.alias,
             base_request_fields=base_request_fields,
+            response=response,
         )
 
     # ------------------------------------------------------------------
@@ -643,6 +666,7 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    body = result.model_dump(exclude_none=True)
+    # By alias, as each streamed event is (see ``format_chunk``).
+    body = result.model_dump(exclude_none=True, by_alias=True)
     await idempotency.complete(body, response)
     return body

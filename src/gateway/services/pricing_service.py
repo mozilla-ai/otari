@@ -16,6 +16,7 @@ from gateway.log_config import logger
 from gateway.models.pricing import (
     MODEL_KIND,
     OPERATOR_ORIGIN,
+    SEED_ORIGIN,
     ModelPricing,
     OrganizationModelPricing,
     PriceSource,
@@ -30,6 +31,7 @@ from gateway.repositories.pricing import (
 from gateway.services.pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
+    ModelSearchRate,
     ToolCharges,
     ToolRate,
     ToolRateLookup,
@@ -50,6 +52,7 @@ from gateway.types.tool_charges import (
     InstanceRateKey,
     LabelCalls,
     RateKey,
+    is_provider_web_search_key,
 )
 from gateway.types.tool_charges import (
     gateway_tool_pricing_key as gateway_tool_pricing_key,
@@ -205,25 +208,41 @@ def default_pricing_match(
 ) -> tuple[ModelPricing, str] | None:
     """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
     entry = _resolve_default(provider, model, as_of, implementation)
-    if entry is None or entry.input is None or entry.output is None:
+    if entry is None:
         return None
-
     model_key = f"{provider}:{model}" if provider else model
+    rates = None if entry.pricing is None else pricing_document(entry.pricing)
+    if entry.input is not None and entry.output is not None:
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=entry.input,
+            output_price_per_million=entry.output,
+            cache_read_price_per_million=entry.cache_read,
+            cache_write_price_per_million=entry.cache_write,
+            pricing_tiers=entry.pricing_tiers(),
+            rates=rates,
+        )
+    elif (columns := entry.slot_columns) is not None:
+        # A model with no text price, priced in the one slot its block gives: per minute of audio, per character.
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=columns.input_price_per_million,
+            output_price_per_million=columns.output_price_per_million,
+            cache_read_price_per_million=columns.cache_read_price_per_million,
+            cache_write_price_per_million=columns.cache_write_price_per_million,
+            pricing_tiers=[dict(tier) for tier in columns.pricing_tiers],
+            unit=columns.unit,
+            rates=rates,
+        )
+    else:
+        return None
     logger.debug(
         "Using models.dev default pricing for '%s' (matched %s)",
         # codeql[py/clear-text-logging-sensitive-data]
         model_key,
         entry.reference,
-    )
-    pricing = ModelPricing(
-        model_key=model_key,
-        effective_at=as_of,
-        input_price_per_million=entry.input,
-        output_price_per_million=entry.output,
-        cache_read_price_per_million=entry.cache_read,
-        cache_write_price_per_million=entry.cache_write,
-        pricing_tiers=entry.pricing_tiers(),
-        rates=None if entry.pricing is None else pricing_document(entry.pricing),
     )
     return pricing, entry.reference
 
@@ -256,6 +275,7 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "token",
         rates=override.rates,
+        origin=override.origin,
     )
 
 
@@ -718,17 +738,10 @@ async def find_model_pricing(
     one. Request-path callers pass it, resolved from the authenticating key by
     ``services.workspace_scope.organization_for_key_id``, never from a header.
 
-    ``use_defaults=False`` skips that fallback for any caller whose billable unit
-    is not a token, because every dataset rate is quoted per million *tokens*.
-    Two kinds of caller need it. A key that is not a model at all (a search tool,
-    a gateway-run tool): the models.dev lookup falls back to a provider-agnostic
-    match on the bare name, so a tool an operator happened to name after a real
-    model would pick up that model's rate. And a real model billed under a
-    non-token unit (audio and moderations per request, images per image):
-    ``gpt-4o-transcribe`` and ``gpt-image-1`` are both in the dataset, and their
-    per-million-token rates, read under :func:`flat_request_cost` or
-    :func:`per_image_cost`, become a per-request or per-image rate, writing a
-    charge line at the wrong unit for a rate nobody configured.
+    ``use_defaults=False`` skips that fallback for a key that is not a model at
+    all (a search tool, a gateway-run tool): the models.dev lookup falls back to
+    a provider-agnostic match on the bare name, so a tool an operator happened
+    to name after a real model would pick up that model's rate.
     """
 
     resolved = await resolve_model_pricing(
@@ -757,6 +770,16 @@ class ResolvedPricing(NamedTuple):
     source: PriceSource
     reference: str | None = None
     effective_at: datetime | None = None
+
+
+def is_estimated_rate(resolved: ResolvedPricing) -> bool:
+    """Whether nobody chose ``resolved``: a models.dev default, or a rate seeded from one.
+
+    Such a rate is one headline price for the model, so a charge the provider
+    states for the call is the better figure, as on an aggregator whose price
+    moves with the upstream it routes to.
+    """
+    return resolved.source == "defaults" or resolved.pricing.origin == SEED_ORIGIN
 
 
 class PricingProvenance(NamedTuple):
@@ -1021,15 +1044,20 @@ async def price_tool_calls(
     *,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> ToolCharges:
     """Price a request's successful gateway-run tool calls, per tool and label.
 
     The charge rule is :func:`gateway.services.pricing.charge_tool_calls`; this
     looks up the rates it needs, only for the labels with a call that reported
-    no cost.
+    no cost. ``model_search_rate`` is what the request's model prices a search
+    its provider ran at, read after the operator's rows and before the
+    provider's list price.
     """
     lookups = {lookup for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
-    rates = await _tool_rates(db, lookups, as_of=as_of, organization_id=organization_id)
+    rates = await _tool_rates(
+        db, lookups, as_of=as_of, organization_id=organization_id, model_search_rate=model_search_rate
+    )
     return charge_tool_calls(calls, rates)
 
 
@@ -1059,6 +1087,7 @@ async def _tool_rates(
     *,
     as_of: datetime | None,
     organization_id: uuid.UUID | None,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> dict[ToolRateLookup, ToolRate | None]:
     """The rate each lookup resolves to: its first rate key with a pricing row.
 
@@ -1083,7 +1112,9 @@ async def _tool_rates(
     forms = {form for lookup in lookups for rate_key in lookup.rate_keys for form in _rate_key_forms(rate_key)}
     overrides = await _tool_override_indexes(db, organization_id, forms) if organization_id is not None else {}
     deployment = await _deployment_rates(db, forms, lookup_time)
-    return {lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time) for lookup in lookups}
+    return {
+        lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time, model_search_rate) for lookup in lookups
+    }
 
 
 def _rate_key_forms(rate_key: RateKey) -> list[tuple[PricingKind, str]]:
@@ -1139,16 +1170,23 @@ async def _deployment_rates(
     return found
 
 
+def _is_old_key(rate_key: RateKey, kind: str) -> bool:
+    """Whether a row of ``kind`` that spells ``rate_key`` is an instance's old model-kind key."""
+    return isinstance(rate_key, InstanceRateKey) and kind == MODEL_KIND
+
+
 def _first_tool_rate(
     lookup: ToolRateLookup,
     overrides: Mapping[str, dict[str, list[OverridePeriod]]],
     deployment: Mapping[tuple[str, str], ModelPricing],
     as_of: datetime,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> ToolRate | None:
     """The first of ``lookup``'s rate keys that has a price, its overrides in every spelling ahead of its row.
 
-    The provider's list price applies only when no key has one and default
-    pricing is on.
+    A search the model's provider ran is priced at the model's own search rate
+    when no key has a row, and the provider's list price applies only after
+    that, with default pricing on.
     """
     for rate_key in lookup.rate_keys:
         forms = _rate_key_forms(rate_key)
@@ -1157,10 +1195,18 @@ def _first_tool_rate(
                 overrides.get(kind, {}), [key], as_of, deployment_paid=lookup.operator_set_only
             )
             if override is not None:
-                return ToolRate(rate_key, flat_request_cost(override), "organization")
-        stored = next((deployment[form] for form in forms if form in deployment), None)
-        if stored is not None:
-            return ToolRate(rate_key, flat_request_cost(stored), "deployment")
+                return ToolRate(
+                    rate_key, flat_request_cost(override), "organization", old_key=_is_old_key(rate_key, kind)
+                )
+        form = next((form for form in forms if form in deployment), None)
+        if form is not None:
+            return ToolRate(
+                rate_key, flat_request_cost(deployment[form]), "deployment", old_key=_is_old_key(rate_key, form[0])
+            )
+    if model_search_rate is not None and any(is_provider_web_search_key(key) for key in lookup.rate_keys):
+        return ToolRate(
+            lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source, rules=model_search_rate.rules
+        )
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
             list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None
@@ -1183,6 +1229,15 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     sense: it cannot bill the request either.
     """
     return require_pricing and not has_completion_meter(pricing)
+
+
+def unbillable_rate_detail(model: str, *, unit: str, bills: str) -> str:
+    """The 402 body for a model whose rate is in a unit the endpoint cannot bill on: the unit, and what it bills."""
+    return (
+        f"Model '{model}' is priced per {unit}, which this request cannot be billed on, and require_pricing is on, "
+        f"so it cannot be served. This endpoint bills {bills} (POST {API_ROOT}/pricing, or the pricing section "
+        "of config.yml)."
+    )
 
 
 def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:

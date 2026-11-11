@@ -129,11 +129,24 @@ def test_settings_defaults(tmp_path: Path) -> None:
 
 def test_settings_reports_secret_key_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    # As on PostgreSQL, where no key file is kept.
+    monkeypatch.setattr("gateway.main.sqlite_database_file", lambda _url: None)
     with _client(tmp_path) as client:
         response = client.get(f"{API_ROOT}/settings", headers=AUTH)
 
     assert response.status_code == 200
     assert response.json()["secret_key_configured"] is False
+
+
+def test_settings_reports_the_key_a_sqlite_deployment_generated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    with _client(tmp_path) as client:
+        response = client.get(f"{API_ROOT}/settings", headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["secret_key_configured"] is True
 
 
 def test_settings_reports_secret_key_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,6 +238,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "web_search_allow_private_hosts",
         "web_retrieval_trust_env_proxy",
         "provider_allow_private_hosts",
+        "oidc_allow_private_hosts",
         "sandbox_url",
         "guardrails_url",
     ):

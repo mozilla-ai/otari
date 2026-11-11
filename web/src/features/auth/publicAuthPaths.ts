@@ -7,17 +7,17 @@ import type { OAuthProvider } from "./oauthProviders"
  * These are deliberately not files in `src/routes/`, for the reason
  * `AcceptInvitationPage` is not one either: every route there sits behind the
  * session gate `App.tsx`'s `DeploymentRoot` puts in front of the router, and
- * the whole point of these eight is that the visitor holds neither a session nor
+ * the whole point of these is that the visitor holds neither a session nor
  * the master key. `DeploymentRoot` renders them directly, ahead of that gate.
  *
  * The gateway agrees on the spelling rather than being told it: the
  * verification and reset messages it sends carry `/#/verify-email?token=…` and
- * `/#/reset-password?token=…` (`services/tenancy/user_service.py`), so a
- * rename here breaks a link that is already in somebody's inbox. The two OAuth
- * callbacks are the same kind of agreement for a different reason: the gateway
- * redirects `/auth/{provider}/callback` here (`gateway/main.py`), because a
- * redirect URI may not carry a fragment and so cannot be a hash path itself, so
- * renaming one breaks a URI already registered with a provider.
+ * `/#/reset-password?token=…`, so a rename here breaks a link that is already
+ * in somebody's inbox. Every OAuth or organization-connection callback is the
+ * same kind of agreement for a different reason: a redirect URI may not carry
+ * a fragment and so cannot be a hash path itself, so a fixed, registered path
+ * is redirected to one of these instead, and renaming one breaks a URI
+ * already registered with a provider.
  */
 
 /**
@@ -37,9 +37,12 @@ import type { OAuthProvider } from "./oauthProviders"
  * nor spend a code. The sign-in screen drops the button, and the callback URL a
  * provider or a bookmark still reaches answers with a panel saying so.
  *
- * `none` is the pair a token already in hand reaches. Neither sends anything,
- * and the message that carried the token was sent while mail *was* configured,
- * so refusing them on today's setting would strand a link that still works.
+ * `none` is a page reached only after something else already proved itself: a
+ * mailed link's token, an authorization code an identity provider's own
+ * redirect carries, or the first-run setup key the gateway prints in its own
+ * log (`/#/setup?key=…`, `services/master_key_service.py`). Nothing here sends
+ * anything, so refusing it on today's configuration would strand a proof that
+ * still works.
  */
 type PublicAuthRequirement = "mail" | "oauth" | "none"
 
@@ -69,12 +72,17 @@ export const PUBLIC_AUTH_PAGES = {
   "/recover-password": "mail",
   "/verify-email": "none",
   "/reset-password": "none",
+  "/setup": "none",
   // Spelled out per provider rather than matched with a parameter, so this
   // table stays the single closed list of what renders in front of a session
   // and `publicAuthPath` keeps answering on an exact lookup. The `satisfies`
   // below is what keeps that spelling-out honest.
   "/auth/google/callback": "oauth",
   "/auth/github/callback": "oauth",
+  // Fixed for every organization's own connection alike, never per-provider:
+  // the deployment publishes no list to gate this on, the way `oauth_providers`
+  // gates the pair above, so it is always open.
+  "/auth/sso/callback": "none",
 } as const satisfies Record<string, PublicAuthRequirement> &
   Record<OAuthCallbackPath, "oauth">
 
@@ -102,7 +110,11 @@ export function publicAuthPath(hash: string): PublicAuthPath | null {
  * router: the accept-invitation page and every public auth page.
  */
 export function rendersAheadOfRouter(pathname: string): boolean {
-  return isAcceptInvitationPath(pathname) || publicAuthPath(pathname) !== null
+  return (
+    isAcceptInvitationPath(pathname) ||
+    isSsoAuthorizePath(pathname) ||
+    publicAuthPath(pathname) !== null
+  )
 }
 
 /**
@@ -126,6 +138,33 @@ export function resolveSignInReturnHash(hash: string): string {
  */
 export function isAcceptInvitationPath(hashOrPath: string): boolean {
   return hashOrPath.replace(/^#/, "").split("?")[0] === "/accept-invitation"
+}
+
+/**
+ * The organization slug a hash or pathname names for a sign-in through its
+ * own connection, or null for any other path. Matched on the path alone, so a
+ * query string does not hide it.
+ */
+export function ssoAuthorizeSlug(hashOrPath: string): string | null {
+  const path = hashOrPath.replace(/^#/, "").split("?")[0] ?? ""
+  const match = /^\/sso\/([^/]+)$/.exec(path)
+  if (!match) {
+    return null
+  }
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a hash or a pathname names a sign-in through one organization's own
+ * connection: a direct link naming its slug, or that same shape set while a
+ * sign-in started elsewhere is already under way.
+ */
+export function isSsoAuthorizePath(hashOrPath: string): boolean {
+  return ssoAuthorizeSlug(hashOrPath) !== null
 }
 
 /** Which provider an OAuth callback path finishes, or null for any other page. */

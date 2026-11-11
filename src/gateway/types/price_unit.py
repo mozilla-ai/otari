@@ -60,7 +60,7 @@ AcceptedPriceUnit = Annotated[PriceUnit, BeforeValidator(current_unit_name)]
 
 
 def models_dev_unit(value: str | None) -> PriceUnit | None:
-    """The unit a v2 price's ``unit`` names: ``token`` where the document gives none, ``None`` for one not known."""
+    """The unit a v2 price names, or ``None`` for one no meter knows, so a new unit is never billed as tokens."""
     unit = value or "token"
     if unit not in MODELS_DEV_UNITS:
         return None

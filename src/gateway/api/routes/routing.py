@@ -404,8 +404,8 @@ async def upsert_policy_in_workspace(
     config: GatewayConfig,
     *,
     workspace_id: uuid.UUID,
-) -> PolicyResponse:
-    """Create or update a stored policy in an already-resolved workspace.
+) -> tuple[PolicyResponse, bool]:
+    """Create or update a stored policy in an already-resolved workspace, and say whether it created one.
 
     ``workspace_id`` is a parameter rather than read off ``request`` because the
     two routers that reach this resolve it differently and must keep doing so:
@@ -424,6 +424,10 @@ async def upsert_policy_in_workspace(
     the new spec. The new name is validated exactly as a fresh one is, because a
     rename can walk a policy into every collision a create can. Sending the field
     asserts the named policy is stored, so it never falls back to creating one.
+
+    The second value is true when this write inserted the row rather than editing
+    one, which is what the commit settled: a concurrent create of the same name
+    is refused with 409 here rather than reported as an edit.
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
@@ -466,6 +470,7 @@ async def upsert_policy_in_workspace(
     # filled, key order stable) rather than whatever shape the client happened to
     # send. Otherwise two equivalent writes would produce different rows.
     stored_spec = spec.model_dump(mode="json", exclude_none=True)
+    created = policy is None
     if policy:
         policy.spec = stored_spec
     else:
@@ -509,7 +514,7 @@ async def upsert_policy_in_workspace(
         spec.router_backend or "none",
     )
     await _refresh_quietly(db, policy.name)
-    return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
+    return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic), created
 
 
 @router.post("")
@@ -523,12 +528,13 @@ async def set_policy(
     Omitting ``workspace_id`` means the deployment's default workspace, which is
     where an operator acting deployment-wide writes.
     """
-    return await upsert_policy_in_workspace(
+    policy, _ = await upsert_policy_in_workspace(
         request,
         db,
         config,
         workspace_id=await resolve_managed_workspace_id(db, request.workspace_id),
     )
+    return policy
 
 
 async def delete_policy_in_workspace(
@@ -612,6 +618,17 @@ async def explain_policy(
     with reasons, which is the part that catches a "failover" policy that has
     quietly compiled down to a single attempt.
     """
+    return explain_in_workspace(request, config, workspace_id=request.workspace_id)
+
+
+def explain_in_workspace(
+    request: ExplainRequest, config: GatewayConfig, *, workspace_id: uuid.UUID | None
+) -> ExplainResponse:
+    """The body of ``explain_policy``, with ``name`` and the candidates resolved in ``workspace_id``.
+
+    Public so the tenant-scoped router can compile in a workspace it resolved
+    itself, rather than one the request names.
+    """
     if request.name is None and request.spec is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -627,7 +644,7 @@ async def explain_policy(
     else:
         assert request.name is not None
         name = request.name
-        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=request.workspace_id)
+        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=workspace_id)
         if resolved is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found")
         spec = resolved
@@ -640,7 +657,7 @@ async def explain_policy(
         spec,
         user_id=request.user_id,
         allowlist=request.allowed_models,
-        workspace_id=request.workspace_id,
+        workspace_id=workspace_id,
     )
     try:
         plan = compile_policy(
@@ -652,7 +669,7 @@ async def explain_policy(
             allowlist=request.allowed_models,
             budget=BudgetState(used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd),
             router_ordering=weighted_ordering,
-            workspace_id=request.workspace_id,
+            workspace_id=workspace_id,
         )
     except NoEligibleCandidatesError as exc:
         return ExplainResponse(

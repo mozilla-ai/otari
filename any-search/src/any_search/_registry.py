@@ -19,11 +19,23 @@ def _providers() -> dict[str, type["AnySearch"]]:
     from any_search.providers.exa import ExaProvider
     from any_search.providers.fake import FakeProvider
     from any_search.providers.mojeek import MojeekProvider
+    from any_search.providers.perplexity import PerplexityProvider
+    from any_search.providers.searxng import SearxngProvider
     from any_search.providers.serply import SerplyProvider
+    from any_search.providers.synthetic import SyntheticProvider
 
     return {
         provider.METADATA.name: provider
-        for provider in (DeepSeekProvider, ExaProvider, FakeProvider, MojeekProvider, SerplyProvider)
+        for provider in (
+            DeepSeekProvider,
+            ExaProvider,
+            FakeProvider,
+            MojeekProvider,
+            PerplexityProvider,
+            SearxngProvider,
+            SerplyProvider,
+            SyntheticProvider,
+        )
     }
 
 

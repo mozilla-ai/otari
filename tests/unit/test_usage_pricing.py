@@ -5,7 +5,6 @@ settlement tests run the same table: a request costs the same on either edition.
 """
 
 import json
-import logging
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,10 @@ from any_llm.types.completion import CompletionUsage
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, price_request
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing import (
+    MEASURED_UNITS,
+    PriceFacts,
+    Quantities,
+    Slot,
     UsageCharge,
     can_price,
     estimate_settles,
@@ -25,7 +28,7 @@ from gateway.services.pricing import (
     validated_units,
 )
 from gateway.services.pricing._usage_pricing import METERS
-from gateway.types.price_unit import PRICE_UNITS
+from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
 _CASES: list[dict[str, Any]] = json.loads(
     (Path(__file__).resolve().parents[1] / "fixtures" / "usage_pricing_cases.json").read_text()
@@ -40,6 +43,7 @@ def _rate(spec: dict[str, Any] | None) -> ModelPricing | None:
         input_price_per_million=Decimal(spec["input"]),
         output_price_per_million=Decimal(spec.get("output", "0")),
         unit=spec["unit"],
+        rates=spec.get("rates"),
     )
 
 
@@ -51,6 +55,7 @@ def _price(case: dict[str, Any]) -> UsageCharge | None:
         if tokens is None or not (tokens["input"] or tokens["output"])
         else billable_usage(input_tokens=tokens["input"], output_tokens=tokens["output"], cache_tokens_included=True),
         units=case["units"],
+        facts=PriceFacts(**case.get("facts", {})),
     )
 
 
@@ -99,10 +104,10 @@ def test_the_gate_admits_exactly_what_settlement_can_price(case: dict[str, Any])
     assert admitted == (_price(case) is not None)
 
 
-def test_every_meter_is_keyed_on_a_price_unit() -> None:
-    """The table and the vocabulary name the same things, and the five newer units have no row yet."""
-    assert set(METERS) <= set(PRICE_UNITS)
+def test_every_unit_has_a_meter_or_is_measured() -> None:
+    """The table and the measured units together name every unit, and nothing else."""
     assert set(METERS) == {"token", "request", "image"}
+    assert set(METERS) | MEASURED_UNITS == set(PRICE_UNITS)
 
 
 @pytest.mark.parametrize("reports_tokens", [False, True])
@@ -169,7 +174,7 @@ def test_an_unusable_rate_prices_nothing_rather_than_serving_free(unit: str, bad
     assert not can_price(rate, meter="images", reports_tokens=True)
 
 
-# The five units stored ahead of their meters, and one no rate can name.
+# The five measured units, which no count or token report meets, and one no rate can name.
 @pytest.mark.parametrize("unit", ["character", "megapixel", "second", "minute", "web_search", "seconds"])
 def test_a_rate_in_a_unit_with_no_meter_prices_nothing(unit: str) -> None:
     rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(1), unit=unit)
@@ -185,18 +190,172 @@ def test_a_rate_in_a_unit_with_no_meter_prices_nothing(unit: str) -> None:
     assert not can_price(rate, meter=None, reports_tokens=True)
 
 
-def test_a_token_rate_read_per_unit_warns_once_per_model_and_meter(caplog: pytest.LogCaptureFixture) -> None:
-    rate = ModelPricing(model_key="legacy:warned-once", input_price_per_million=Decimal("0.04"), unit="token")
+def _slot_rate(rates: dict[str, Any], unit: str = "token") -> ModelPricing:
+    return ModelPricing(
+        model_key="provider:model",
+        input_price_per_million=Decimal(1),
+        output_price_per_million=Decimal(0),
+        unit=unit,
+        rates=rates,
+    )
 
-    with caplog.at_level(logging.WARNING):
-        for _ in range(3):
-            price_usage(rate, tokens=None, units={"images": 1})
-        price_usage(rate, tokens=None, units={"requests": 1})
 
-    warnings = [record.getMessage() for record in caplog.records if "legacy:warned-once" in record.getMessage()]
-    assert len(warnings) == 2
-    assert "set its unit to image and multiply its input price by 1,000,000" in warnings[0]
-    assert "set its unit to request, keeping its price" in warnings[1]
+_IMAGE_OUTPUT: Slot = ("image", "output")
+_AUDIO_INPUT: Slot = ("audio", "input")
+_TEXT_INPUT: Slot = ("text", "input")
+_TOKENS = billable_usage(input_tokens=1000, output_tokens=0, cache_tokens_included=True)
+
+
+@pytest.mark.parametrize(
+    ("rates", "slot", "quantities", "cost", "meters", "line"),
+    [
+        (
+            {"image": {"output": {"price": 0.04, "unit": "image"}}},
+            _IMAGE_OUTPUT,
+            {"image": 2, "megapixel": Decimal("2.097152")},
+            "0.080000",
+            {"images": 2},
+            {"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": 0.08},
+        ),
+        (
+            {"image": {"output": {"price": 0.05, "unit": "megapixel"}}},
+            _IMAGE_OUTPUT,
+            {"image": 2, "megapixel": Decimal("2.097152")},
+            "0.104858",
+            {"megapixels": 2.097152},
+            {"meter": "megapixels", "units": 2.097152, "unit": "megapixel", "unit_rate": 0.05, "cost": 0.1048576},
+        ),
+        (
+            {"audio": {"input": {"price": 0.006, "unit": "minute"}}},
+            _AUDIO_INPUT,
+            {"second": Decimal(90), "minute": Decimal("1.5")},
+            "0.009000",
+            {"minutes": 1.5},
+            {"meter": "minutes", "units": 1.5, "unit": "minute", "unit_rate": 0.006, "cost": 0.009},
+        ),
+        (
+            {"audio": {"input": {"price": 0.0001, "unit": "second"}}},
+            _AUDIO_INPUT,
+            {"second": Decimal(90), "minute": Decimal("1.5")},
+            "0.009000",
+            {"seconds": 90},
+            {"meter": "seconds", "units": 90, "unit": "second", "unit_rate": 0.0001, "cost": 0.009},
+        ),
+        (
+            {"text": {"input": {"price": 15, "unit": "character"}}},
+            _TEXT_INPUT,
+            {"character": 2000},
+            "0.030000",
+            {"characters": 2000},
+            {"meter": "characters", "units": 2000, "unit": "character", "rate_per_million": 15.0, "cost": 0.03},
+        ),
+    ],
+    ids=["per image", "per megapixel", "per minute", "per second", "per character"],
+)
+def test_a_slot_in_a_measured_unit_prices_the_quantity_in_that_unit(
+    rates: dict[str, Any],
+    slot: Slot,
+    quantities: Quantities,
+    cost: str,
+    meters: dict[str, Any],
+    line: dict[str, Any],
+) -> None:
+    charge = price_usage(_slot_rate(rates), tokens=_TOKENS, units={"images": 2}, quantities=quantities, slot=slot)
+
+    assert charge is not None
+    assert charge.cost == Decimal(cost)
+    assert charge.meters == meters
+    assert charge.lines == [line]
+    assert can_price(_slot_rate(rates), meter="images", reports_tokens=True, slot=slot, measures=frozenset(quantities))
+
+
+def test_a_slot_in_a_measured_unit_prices_nothing_the_attempt_did_not_measure() -> None:
+    """A per-megapixel rate never bills the image count, and the gate refuses an endpoint that cannot measure it."""
+    rate = _slot_rate({"image": {"output": {"price": 0.05, "unit": "megapixel"}}})
+
+    assert price_usage(rate, tokens=_TOKENS, units={"images": 2}, quantities={"image": 2}, slot=_IMAGE_OUTPUT) is None
+    assert not can_price(rate, meter="images", reports_tokens=True, slot=_IMAGE_OUTPUT, measures=frozenset({"image"}))
+
+
+def test_a_slot_in_tokens_or_requests_prices_as_the_table_says() -> None:
+    """The slot chooses only among measured units; tokens and requests keep their meters."""
+    per_token = _slot_rate({"text": {"input": {"price": 1}, "image": {"output": {"price": 1}}}})
+    per_request = _slot_rate({"text": {"input": {"price": 2000, "unit": "request"}}}, unit="request")
+    quantities: Quantities = {"image": 2, "character": 10}
+
+    tokens = price_usage(per_token, tokens=_TOKENS, units={"images": 2}, quantities=quantities, slot=_IMAGE_OUTPUT)
+    requests = price_usage(per_request, tokens=None, units={"requests": 1}, quantities=quantities, slot=_TEXT_INPUT)
+
+    assert tokens is not None and tokens.cost == Decimal("0.001")
+    assert requests is not None and requests.meters == {"requests": 1}
+    assert price_usage(per_token, tokens=None, units={"requests": 1}, quantities=quantities, slot=_TEXT_INPUT) is None
+
+
+def test_a_rate_with_no_price_in_the_slot_prices_as_the_table_says() -> None:
+    """An image rate on the text slot has no slot there, so it is read by its unit: per image."""
+    rate = _slot_rate({"image": {"output": {"price": 0.04, "unit": "image"}}}, unit="image")
+
+    charge = price_usage(rate, tokens=None, units={"images": 3}, quantities={"character": 5}, slot=_TEXT_INPUT)
+
+    assert charge is not None
+    assert charge.meters == {"images": 3}
+
+
+def test_a_free_token_rate_settles_free_with_no_tokens_reported() -> None:
+    free = ModelPricing(
+        model_key="openai:free", input_price_per_million=Decimal(0), output_price_per_million=Decimal(0)
+    )
+    priced = ModelPricing(
+        model_key="openai:priced", input_price_per_million=Decimal(0), output_price_per_million=Decimal(1)
+    )
+
+    assert price_usage(free, tokens=None, units={"requests": 1}) == UsageCharge(Decimal(0), {}, [])
+    assert can_price(free, meter="requests", reports_tokens=False)
+    assert price_usage(priced, tokens=None, units={"requests": 1}) is None
+    assert not can_price(priced, meter="requests", reports_tokens=False)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"cache_read_price_per_million": Decimal("0.1")},
+        {"cache_write_price_per_million": Decimal("0.1")},
+        {"pricing_tiers": [{"min_input_tokens": 200_000, "input_price_per_million": 2.0}]},
+    ],
+    ids=["cache read", "cache write", "tier"],
+)
+def test_a_token_rate_with_any_price_above_zero_is_not_free(extra: dict[str, Any]) -> None:
+    """Only a rate priced at zero everywhere settles free with nothing reported."""
+    rate = ModelPricing(
+        model_key="openai:m", input_price_per_million=Decimal(0), output_price_per_million=Decimal(0), **extra
+    )
+
+    assert price_usage(rate, tokens=None, units={"requests": 1}) is None
+    assert not can_price(rate, meter="requests", reports_tokens=False)
+
+
+def test_a_token_rate_free_in_its_text_columns_but_not_in_its_block_is_not_free() -> None:
+    """A speech model whose text is free and whose audio output is not settles nothing at zero."""
+    rate = ModelPricing(
+        model_key="gemini:tts",
+        input_price_per_million=Decimal(0),
+        output_price_per_million=Decimal(0),
+        rates={
+            "text": {"input": {"price": 0, "unit": "token"}, "output": {"price": 0, "unit": "token"}},
+            "audio": {"output": {"price": 10, "unit": "token"}},
+        },
+    )
+    speech: frozenset[PriceUnit] = frozenset({"character"})
+
+    assert price_usage(rate, tokens=None, units={"requests": 1}, quantities={"character": 5}, slot=_TEXT_INPUT) is None
+    assert not can_price(rate, meter="requests", reports_tokens=False, slot=_TEXT_INPUT, measures=speech)
+    free_block = ModelPricing(
+        model_key="local:tts",
+        input_price_per_million=Decimal(0),
+        output_price_per_million=Decimal(0),
+        rates={"text": {"input": {"price": 0, "unit": "token"}}, "audio": {"output": {"price": 0, "unit": "token"}}},
+    )
+    assert can_price(free_block, meter="requests", reports_tokens=False, slot=_TEXT_INPUT, measures=speech)
 
 
 _REPORTED = CompletionUsage(prompt_tokens=12, completion_tokens=34, total_tokens=46)

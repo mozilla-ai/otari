@@ -67,6 +67,9 @@ _NO_REDIRECTION_OPENERS = (("$((", "))"), ("((", "))"), ("$[", "]"), ("${", "}")
 # Every character that can open or close one of those pairs, so most characters skip the pair check.
 _PAIR_CHARACTERS = frozenset("$(=[)]}")
 
+# Every character that can open or close a command or process substitution, or a subshell inside one.
+_SUBSTITUTION_CHARACTERS = frozenset("$<>()")
+
 # The characters a backslash escapes inside double quotes, where it is otherwise literal.
 _ESCAPED_IN_DOUBLE_QUOTES = frozenset('$`"\\\n')
 
@@ -233,6 +236,38 @@ class _NoRedirectionPairs:
         return 0
 
 
+class _Substitutions:
+    """The command and process substitutions open at a point in a command, and the subshells open inside them.
+
+    Bash reads `$(...)`, `<(...)` and `>(...)` as part of the word around them, so the `)` that closes one does not end
+    that word, and a `#` right after it is ordinary text. The `)` that closes a subshell does end a word, so a subshell
+    inside a substitution is tracked too, to tell the two apart.
+    A substitution holds a whole command, so unlike the pairs `_NoRedirectionPairs` tracks, it allows a heredoc.
+    """
+
+    def __init__(self) -> None:
+        # True for a substitution, False for a subshell inside one.
+        self._open: list[bool] = []
+
+    def advance(self, command: str, index: int) -> tuple[int, bool]:
+        """Open or close a substitution, or a subshell inside one, at the unquoted `index`.
+
+        Return how many characters that took, or 0, and whether a word starts after them.
+        """
+        char = command[index]
+        if char in "$<>" and command.startswith("(", index + 1):
+            self._open.append(True)
+            return 2, True
+        if not self._open:
+            return 0, False
+        if char == "(":
+            self._open.append(False)
+            return 1, True
+        if char == ")":
+            return 1, not self._open.pop()
+        return 0, False
+
+
 def _read_heredoc_operator(command: str, index: int) -> tuple[_Heredoc, int] | None:
     """Return the heredoc that a `<<` at `index` opens, and the index past its delimiter word.
 
@@ -336,6 +371,7 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
     """Remove the text Bash does not read as command words: comments and heredoc bodies.
 
     A `#` starts a comment only where it begins an unquoted word, after whitespace or one of `_METACHARACTERS`.
+    The `)` that closes a command or process substitution does not end its word, so `$(ls)#x` is one word, as in Bash.
     A comment ends with its own line.
     A heredoc body is the data its command reads, so it is removed with its terminator line.
     A heredoc with no certain terminator line is kept as command text.
@@ -351,6 +387,7 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
     pending_heredocs: list[_Heredoc] = []
     terminators: _HeredocTerminators | None = None
     pairs = _NoRedirectionPairs()
+    substitutions = _Substitutions()
     result: list[str] = []
     index = 0
     length = len(command)
@@ -426,6 +463,13 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
             # Only an opening parenthesis ends a word, so `$((1))#x` stays one word, as in Bash.
             at_word_start = command[index - 1] == "("
             continue
+        if char in _SUBSTITUTION_CHARACTERS and not pairs.any_open:
+            substitution_length, at_word_start_after = substitutions.advance(command, index)
+            if substitution_length:
+                result.append(command[index : index + substitution_length])
+                index += substitution_length
+                at_word_start = at_word_start_after
+                continue
         if char == "<" and command.startswith("<<", index):
             is_here_string = command.startswith("<<<", index)
             opened = None if is_here_string or pairs.any_open else _read_heredoc_operator(command, index)
@@ -752,7 +796,7 @@ def evaluate_command(
     if not evidence.commands:
         # Call-scoped and empty: a PreToolUse call for an edit tool rather
         # than Bash, which never collects command evidence at all (see
-        # docs/agent-guardrails.md). Reporting PASS would read as a check that ran
+        # cli/docs/agent-guardrails.md). Reporting PASS would read as a check that ran
         # and found nothing, when this gate never had anything to check.
         return GateResult(
             gate_id=gate.id,
@@ -819,7 +863,7 @@ def evaluate_command_if_changed(
     forever, the edit being the very thing blocked. ``call`` scope
     therefore resolves ``not_applicable``, deferring the gate to the
     ``Stop`` event where `otari hook` submits the session's real command
-    history (see docs/agent-guardrails.md).
+    history (see cli/docs/agent-guardrails.md).
 
     Under ``session`` scope an empty command list is a real answer rather
     than a missing one, and resolves ``fail``: a session that changed a
@@ -1089,7 +1133,7 @@ def evaluate_verifier(
     ``evidence is None`` (this event never runs verifier gates, resolves
     ``not_applicable``) vs. "ran verifier gates but is missing this
     one's verdict" (resolves ``unknown``) distinction; see that function's
-    own docstring and docs/agent-guardrails.md for why both matter here too.
+    own docstring and cli/docs/agent-guardrails.md for why both matter here too.
 
     Unlike a judge gate, this gate's outcome can genuinely block a required
     gate: a verifier's exit code is reproducible, not a model's opinion, so

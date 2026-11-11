@@ -153,6 +153,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
+      if (/\/keys\/[^/]+\/end-users/.test(url)) return jsonResponse([])
       if (KEYS_URL.test(url)) {
         if (url.endsWith("/rotate") && method === "POST") {
           const id = url.split("/").slice(-2)[0]
@@ -1165,9 +1166,12 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Only selected" }))
     // The scope picker is a catalog combobox, not free text: type to filter, then
     // pick the discovered model.
-    await user.type(screen.getByLabelText("Add a model"), "gpt-4o")
+    await user.type(
+      screen.getByRole("combobox", { name: "Allowed models" }),
+      "gpt-4o",
+    )
     await user.click(
-      await screen.findByRole("option", { name: "openai:gpt-4o" }),
+      await screen.findByRole("option", { name: "gpt-4o (OpenAI)" }),
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}")
@@ -1209,6 +1213,7 @@ describe("KeysPage", () => {
       is_service_key: true,
       end_user_budget_ids: [],
       end_user_budget_id: null,
+      max_end_users: null,
     })
   })
 
@@ -1238,6 +1243,7 @@ describe("KeysPage", () => {
       is_service_key: true,
       end_user_budget_ids: [],
       end_user_budget_id: null,
+      max_end_users: 10000,
     })
   })
 
@@ -1265,6 +1271,40 @@ describe("KeysPage", () => {
     expect(
       within(dialog).queryByLabelText("Service key"),
     ).not.toBeInTheDocument()
+  })
+
+  it("opens a service key's end users from its menu, and offers them for no other key", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "mlpa",
+          is_service_key: true,
+          is_organization_service_key: true,
+        }),
+        apiKey({ id: "key-2", key_name: "plain" }),
+      ],
+      deploymentOperator: false,
+      role: "owner",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const plain = (await screen.findByText("plain")).closest("tr")!
+    await user.click(
+      within(plain).getByRole("button", { name: /^Actions for / }),
+    )
+    await screen.findByRole("menuitem", { name: /^Edit/ })
+    expect(
+      screen.queryByRole("menuitem", { name: /^End users/ }),
+    ).not.toBeInTheDocument()
+    await user.keyboard("{Escape}")
+
+    const row = screen.getByText("mlpa").closest("tr")!
+    await chooseAction(user, row, "End users")
+
+    const dialog = await screen.findByRole("dialog", { name: "End users" })
+    expect(within(dialog).getByText("mlpa")).toBeInTheDocument()
   })
 
   it("does not offer a member a service key", async () => {

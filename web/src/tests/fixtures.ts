@@ -15,6 +15,8 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  OidcConnection,
+  OidcConnectionDomain,
   Organization,
   OrganizationContext,
   OrganizationDomain,
@@ -23,6 +25,10 @@ import type {
   OrganizationMember,
   OrganizationPricingOverride,
   OrganizationSpendCeiling,
+  OrganizationSso,
+  OrganizationSsoEnforcement,
+  OrganizationSsoPreflight,
+  OrganizationSsoPreflightMember,
   OrgProviderKey,
   OrgProviderModel,
   PendingOrganizationInvitation,
@@ -37,6 +43,7 @@ import type {
   WorkspaceCodeExecutionPolicy,
   WorkspaceHostedProvider,
   WorkspaceMcpServer,
+  WorkspaceMcpServerGrant,
   WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
@@ -204,6 +211,8 @@ export function bootstrap(
     oauth_providers: [],
     mail_ready: false,
     feedback_enabled: true,
+    // Off, so a page test sends no connect read: the connect tests turn it on.
+    platform_connect: false,
     // Off, the setting default: the workload identity tests turn it on.
     federation_member_rules: false,
     // Off by default, matching the config default; the public-catalog tests
@@ -380,6 +389,7 @@ export function workspace(overrides: Partial<Workspace> = {}): Workspace {
     created_by_user_id: null,
     trace_content_enabled: false,
     trace_content_tool_output: true,
+    request_mcp_servers_allowed: true,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
     ...overrides,
@@ -689,6 +699,103 @@ export function organizationDomain(
   }
 }
 
+/** One of the organization's email domains, as its own SSO connection reports it. */
+export function oidcConnectionDomain(
+  overrides: Partial<OidcConnectionDomain> = {},
+): OidcConnectionDomain {
+  return {
+    domain: "acme.example",
+    enabled: true,
+    proof_expires_at: "2099-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * An organization's own bring-your-own OIDC connection, as its admins see it.
+ *
+ * Carries only the last four characters of the client secret, which the
+ * connection never serves back.
+ */
+export function oidcConnection(
+  overrides: Partial<OidcConnection> = {},
+): OidcConnection {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    issuer: "https://idp.acme.example",
+    resolved_issuer: "https://idp.acme.example",
+    client_id: "acme-dashboard",
+    client_secret_last4: "wxyz",
+    display_name: "Acme Okta",
+    default_role: "member",
+    enabled: true,
+    discovered_at: "2026-08-24T00:00:00+00:00",
+    domains: [oidcConnectionDomain()],
+    ...overrides,
+  }
+}
+
+/** The caller's organization's current sign-in enforcement. Off, with no exception recorded, by default. */
+export function organizationSsoEnforcement(
+  overrides: Partial<OrganizationSsoEnforcement> = {},
+): OrganizationSsoEnforcement {
+  return {
+    required: false,
+    break_glass_user_id: null,
+    break_glass_waived: false,
+    ...overrides,
+  }
+}
+
+/**
+ * What `GET`/`PUT`/`POST /organizations/me/sso` answer with.
+ *
+ * `connection` defaults to null, the state before an organization has saved
+ * one, so a test about a configured connection passes it explicitly rather
+ * than inheriting the happy path by accident.
+ */
+export function organizationSso(
+  overrides: Partial<OrganizationSso> = {},
+): OrganizationSso {
+  return {
+    connection: null,
+    redirect_uri: "https://otari.example.com/auth/sso/callback",
+    enforcement: organizationSsoEnforcement(),
+    ...overrides,
+  }
+}
+
+/** One member the preflight report samples, for recognizing who they are. */
+export function organizationSsoPreflightMember(
+  overrides: Partial<OrganizationSsoPreflightMember> = {},
+): OrganizationSsoPreflightMember {
+  return {
+    user_id: "66666666-6666-6666-6666-666666666666",
+    email: "member@acme.example",
+    full_name: "Pat Member",
+    ...overrides,
+  }
+}
+
+/**
+ * What `GET /organizations/me/sso/preflight` answers with.
+ *
+ * Nobody affected by default, the common case the design describes for a
+ * young organization, so a test about the warning passes a sample explicitly.
+ */
+export function organizationSsoPreflight(
+  overrides: Partial<OrganizationSsoPreflight> = {},
+): OrganizationSsoPreflight {
+  return {
+    total_members: 1,
+    affected_count: 0,
+    affected_members: [],
+    affected_members_truncated: false,
+    break_glass_candidates: [],
+    ...overrides,
+  }
+}
+
 /**
  * One rate an organization has stored for a model.
  *
@@ -733,6 +840,7 @@ export function orgProviderModel(
     id: "77777777-7777-7777-7777-777777777777",
     org_provider_key_id: "66666666-6666-6666-6666-666666666666",
     model: "gpt-4o",
+    type: "chat",
     input_price_per_million: 2.5,
     output_price_per_million: 10,
     cache_read_price_per_million: null,
@@ -880,6 +988,10 @@ export function workspaceMcpServer(
     // builder wants. Not interchangeable with `[]`, which admits no tool.
     allowed_tools: null,
     enabled: true,
+    // What every key of the workspace may call: everything, as a create
+    // defaults to.
+    everyone_tools: ["*"],
+    read_tools: [],
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
     // Never checked, which is how a row stored before checks existed reads.
@@ -901,6 +1013,27 @@ export function workspaceMcpServerHealth(
     tool_count: 2,
     missing_allowed_tools: [],
     tools: ["list_issues", "get_issue"],
+    ...overrides,
+  }
+}
+
+/**
+ * One exception on a server's access list: a key's, allowing every tool, by
+ * default. A user's grant names no key, and a test about one says so.
+ */
+export function workspaceMcpServerGrant(
+  overrides: Partial<WorkspaceMcpServerGrant> = {},
+): WorkspaceMcpServerGrant {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    subject: "key",
+    api_key_id: "key-1",
+    key_name: "ci-bot",
+    key_active: true,
+    user_id: "33333333-3333-3333-3333-333333333333",
+    tools: ["*"],
+    created_at: "2026-08-01T00:00:00+00:00",
+    updated_at: "2026-08-01T00:00:00+00:00",
     ...overrides,
   }
 }

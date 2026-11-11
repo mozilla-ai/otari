@@ -32,6 +32,12 @@ MODELS_DEV = parse_catalog(
         "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
         # An entry with no window, so the dataset below it is asked.
         "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
+        "amazon-bedrock": {
+            "models": {
+                "nvidia.nemotron-nano-3-30b": {"tool_call": True, "structured_output": True},
+                "us.anthropic.claude-sonnet-4-5-v1:0": {"structured_output": True},
+            },
+        },
     }
 )
 
@@ -96,6 +102,20 @@ def test_capabilities_map_models_dev_flags_to_openrouter_fields() -> None:
         input_modalities=["text", "image"],
         output_modalities=["text"],
     )
+
+
+def test_response_format_is_left_out_where_any_llm_refuses_it() -> None:
+    """Bedrock sends ``response_format`` only to Anthropic models, whatever models.dev flags."""
+    nemotron = model_capabilities(_config(), MODELS_DEV, "bedrock:nvidia.nemotron-nano-3-30b")
+    claude = model_capabilities(_config(), MODELS_DEV, "bedrock:us.anthropic.claude-sonnet-4-5-v1:0")
+    # An instance named otherwise is judged by the provider it declares.
+    declared = model_capabilities(
+        _config(aws={"provider_type": "bedrock"}), MODELS_DEV, "aws:nvidia.nemotron-nano-3-30b"
+    )
+
+    assert nemotron is not None and nemotron.supported_parameters == ["tools", "tool_choice"]
+    assert claude is not None and claude.supported_parameters == ["response_format"]
+    assert declared is not None and declared.supported_parameters == ["tools", "tool_choice"]
 
 
 def test_an_entry_without_flags_lists_no_parameters() -> None:

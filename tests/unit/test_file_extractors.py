@@ -537,6 +537,37 @@ def test_chrome_that_never_closes_falls_back_to_the_whole_page() -> None:
     assert file_extractors.html_main_text(html).startswith("Menu\nThe article's own text.")
 
 
+def test_a_chrome_region_closes_at_the_end_tag_that_balances_it() -> None:
+    """A nested element of the same tag closing first leaves the region open; the balancing one closes it."""
+    html = f"<div>{_ARTICLE}<div role='navigation'>Crumbs<div>Inner</div>Trail</div>Tail</div><nav>Menu</nav>"
+
+    text = file_extractors.html_main_text(html)
+
+    assert text.startswith("The article's own text.")
+    assert text.endswith("\nTail")
+    for chrome in ("Crumbs", "Inner", "Trail", "Menu"):
+        assert chrome not in text
+
+
+def test_a_hidden_void_element_opens_no_region() -> None:
+    """A void element never closes, so as a region it would swallow the rest of the page."""
+    html = f"<nav>Menu</nav><img hidden src='x'><input aria-hidden='true'>{_ARTICLE}"
+
+    text = file_extractors.html_main_text(html)
+
+    assert text.startswith("The article's own text.")
+    assert "Menu" not in text
+
+
+def test_a_main_role_on_any_element_marks_the_content() -> None:
+    html = f"<div>Teaser</div><div role='MAIN'>{_ARTICLE}</div><section role='Article'><p>Aside story</p></section>"
+
+    text = file_extractors.html_main_text(html)
+
+    assert text.startswith("The article's own text.")
+    assert "Teaser" not in text and "Aside story" not in text
+
+
 def _pdf(*pages: str | None) -> bytes:
     """A PDF of one page per argument, holding that text, or none for ``None``."""
     import pypdfium2 as pdfium

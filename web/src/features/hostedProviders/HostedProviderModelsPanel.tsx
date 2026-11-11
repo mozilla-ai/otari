@@ -15,13 +15,14 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
+import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
+import type { KindFilter } from "@/features/models/offeredKinds"
+import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
   useHostedModels,
   useRefreshHostedModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
-import { formatRate } from "@/shared/helpers/format"
 
 import { HostedModelForm } from "./HostedModelForm"
 import { refreshOutcome } from "./refreshOutcome"
@@ -36,41 +37,24 @@ import { refreshOutcome } from "./refreshOutcome"
 // history stay where the operator can turn it back on. Unavailable beside it
 // marks a model the gateway switched off because its provider refused to serve it.
 
-/** A rate cell. An absent rate is a dash, never a zero, which is a real price. */
-function rate(value: number | null | undefined) {
-  return value === null || value === undefined ? (
-    <span className="text-subtle">—</span>
-  ) : (
-    <span className="text-mono-caption tabular-nums">{formatRate(value)}</span>
-  )
-}
-
 /**
- * The input cell, which names its unit when the rate is not per token: a
- * per-request rate of 2000 per million under "Input / 1M" would read as a
- * token price a thousand times too high.
+ * Where a model's rate comes from. `provider` is the price the provider's own
+ * listing named, as another Otari's does. A default on an `otari` provider is
+ * the vendor's public rate, which the Otari behind it may not charge, so it is
+ * named an estimate.
  */
-function inputRate(row: HostedModel) {
-  const unit = pricingUnitOf(row.unit)
-  const value = row.input_price_per_million
-  if (unit === "token" || value === null || value === undefined) {
-    return rate(value)
-  }
-  return (
-    <span className="text-mono-caption tabular-nums">
-      {formatPricedRate(value, unit)}
-    </span>
-  )
-}
-
-/** A rate that only a token price carries, as a dash on any other unit. */
-function tokenRate(row: HostedModel, value: number | null | undefined) {
-  return rate(pricingUnitOf(row.unit) === "token" ? value : undefined)
-}
-
-function PriceSourceBadge({ source }: { source: HostedModel["price_source"] }) {
+function PriceSourceBadge({
+  source,
+  isEstimate,
+}: {
+  source: HostedModel["price_source"]
+  isEstimate: boolean
+}) {
   if (source === "deployment") return <Badge tone="muted">Custom</Badge>
-  if (source === "defaults") return <Badge tone="muted">Default</Badge>
+  if (source === "provider") return <Badge tone="muted">Listed</Badge>
+  if (source === "defaults") {
+    return <Badge tone="muted">{isEstimate ? "Estimate" : "Default"}</Badge>
+  }
   return <Badge tone="warn">Unpriced</Badge>
 }
 
@@ -81,7 +65,8 @@ export function HostedProviderModelsPanel({
 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
-  const models = useHostedModels(provider.name, page, pageSize)
+  const [kind, setKind] = useState<KindFilter>("")
+  const models = useHostedModels(provider.name, page, pageSize, kind)
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
 
@@ -110,29 +95,16 @@ export function HostedProviderModelsPanel({
       isRowHeader: true,
       cell: (row) => row.model,
     },
-    { id: "input", header: "Input / 1M", align: "end", cell: inputRate },
-    {
-      id: "output",
-      header: "Output / 1M",
-      align: "end",
-      cell: (row) => tokenRate(row, row.output_price_per_million),
-    },
-    {
-      id: "cache_read",
-      header: "Cache read",
-      align: "end",
-      cell: (row) => tokenRate(row, row.cache_read_price_per_million),
-    },
-    {
-      id: "cache_write",
-      header: "Cache write",
-      align: "end",
-      cell: (row) => tokenRate(row, row.cache_write_price_per_million),
-    },
+    ...offeredPriceColumns<HostedModel>(),
     {
       id: "source",
-      header: "Price",
-      cell: (row) => <PriceSourceBadge source={row.price_source} />,
+      header: "Rate",
+      cell: (row) => (
+        <PriceSourceBadge
+          source={row.price_source}
+          isEstimate={provider.provider === "otari"}
+        />
+      ),
     },
     {
       id: "enabled",
@@ -194,8 +166,9 @@ export function HostedProviderModelsPanel({
             </p>
           ) : null}
           <p className="text-caption">
-            Priced in USD per million tokens unless a rate says it is per
-            request or per image. A model offered without a price starts
+            Priced in USD per million tokens for text models. An image, audio or
+            video model's price is in its own unit, named when you hover it, and
+            beside it on a phone. A model offered without a price starts
             switched off, and stays off until it is priced or switched on.
           </p>
         </div>
@@ -228,8 +201,20 @@ export function HostedProviderModelsPanel({
         </p>
       ) : null}
 
-      {/* A failed list is not an empty one. */}
-      {!models.error && rows.length === 0 ? (
+      {models.data && rows.length + kind.length > 0 ? (
+        <OfferedKindTabs
+          counts={models.data.type_counts}
+          shown={kind}
+          onShow={(next) => {
+            setKind(next)
+            setPage(0)
+          }}
+        />
+      ) : null}
+
+      {/* A failed list is not an empty one, and a kind with no models left is
+          an empty table under its tab rather than "no models offered". */}
+      {!models.error && rows.length === 0 && kind === "" ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what the provider lists, or add a model to say what this provider serves and at what price."
@@ -242,6 +227,7 @@ export function HostedProviderModelsPanel({
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${provider.name}`}
+              mobileLayout="cards"
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}

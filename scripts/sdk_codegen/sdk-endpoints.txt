@@ -78,10 +78,16 @@ GET /api/v1/models/{model_id}                       # redundant, list_models cov
 # mcp.list_tools and mcp.execute methods are the next step for the SDKs, and
 # execution needs one deliberate property no generated wrapper gives it for
 # free: exactly one HTTP attempt, never a retry.
+GET /api/v1/mcp/servers                             # not yet wrapped
 GET /api/v1/mcp/servers/{mcp_server_id}/tools       # not yet wrapped
 POST /api/v1/mcp/execute                            # not yet wrapped
 # Image edits: no SDK shell wraps the multipart upload yet.
 POST /api/v1/images/edits                 # not yet wrapped
+# Videos: no SDK shell wraps the job routes yet.
+POST /api/v1/videos                       # not yet wrapped
+GET /api/v1/videos                        # not yet wrapped
+GET /api/v1/videos/{video_id}             # not yet wrapped
+GET /api/v1/videos/{video_id}/content     # not yet wrapped
 # Files API: added to the gateway spec, not yet wrapped by any SDK shell.
 POST /api/v1/files                       # not yet wrapped
 GET /api/v1/files                        # not yet wrapped
@@ -203,6 +209,9 @@ GET /api/v1/trace-content/policy                    # dashboard-only
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped
+GET /api/v1/key/budget                              # not yet wrapped
+GET /api/v1/key/usage/summary                       # not yet wrapped
+GET /api/v1/key/usage/series                        # not yet wrapped
 POST /api/v1/keys/{key_id}/rotate                   # not yet wrapped
 GET /api/v1/budgets/{budget_id}/reset-logs          # not yet wrapped
 PUT /api/v1/budgets/{budget_id}                     # not yet wrapped
@@ -238,15 +247,22 @@ DELETE /api/v1/auth/session                         # dashboard-only
 # flow. An SDK authenticates with the master key or an API key and never holds
 # a password, so there is nothing here for one to wrap.
 PUT /api/v1/auth/password                           # dashboard-only
-# Who the signed-in identity is, and the name it goes by: the account page's own read and write, beside
+# Who the signed-in identity is, its name and its avatar: the account page's own read and writes, beside
 # the credential ones. An SDK authenticates as a key rather than as a person and
 # has no account page to render, so there is nothing here for one to wrap.
 GET /api/v1/auth/profile                            # dashboard-only
 PATCH /api/v1/auth/profile                          # dashboard-only
+PUT /api/v1/auth/profile/avatar                     # dashboard-only
 # A signed-in person's message to the Otari team, sent from the top bar (the
 # account menu on a phone).
 # It is something a person writes, not something an integration calls.
 POST /api/v1/feedback                               # dashboard-only
+# Connecting the deployment to otari.ai from its dashboard: an operator starts
+# the attempt, approves it in a browser, and the page follows it. An SDK caller
+# that wants otari.ai stores the key through /hosted-providers.
+POST /api/v1/platform/connect                       # dashboard-only
+GET /api/v1/platform/connect                        # dashboard-only
+DELETE /api/v1/platform/connect                     # dashboard-only
 # Signup, email verification, and password reset (otari#650): claiming a
 # roster identity's dashboard login and recovering it, the same browser-only
 # credential flow PUT /api/v1/auth/password is. No SDK caller holds a password.
@@ -276,6 +292,11 @@ DELETE /api/v1/auth/webauthn/credentials/{credential_id}   # dashboard-only
 # dashboard uses rather than a token an SDK could hold.
 GET /api/v1/auth/oauth/{provider}/authorize         # dashboard-only
 POST /api/v1/auth/oauth/{provider}/callback         # dashboard-only
+# SSO sign-in through an organization's own OIDC connection (otari#879): the same browser
+# redirect and CSRF-state shape as the OAuth sign-in above, so it carries the same reasoning.
+POST /api/v1/auth/sso/lookup                        # dashboard-only
+GET /api/v1/auth/sso/{slug}/authorize               # dashboard-only
+POST /api/v1/auth/sso/callback                      # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /otlp/v1/logs                                  # otel ingest
 POST /otlp/v1/traces                                # otel ingest
@@ -402,6 +423,7 @@ GET /api/v1/organizations/me/usage/series                       # dashboard-only
 GET /api/v1/organizations/me/routing-policies                   # dashboard-only
 POST /api/v1/organizations/me/routing-policies                  # dashboard-only
 DELETE /api/v1/organizations/me/routing-policies/{name}         # dashboard-only
+POST /api/v1/organizations/me/routing-policies/explain          # dashboard-only
 GET /api/v1/organizations/me/aliases                            # dashboard-only
 POST /api/v1/organizations/me/aliases                           # dashboard-only
 DELETE /api/v1/organizations/me/aliases/{name}                  # dashboard-only
@@ -417,6 +439,7 @@ POST /api/v1/organizations/me/keys/{key_id}/rotate              # dashboard-only
 POST /api/v1/organizations/me/keys/{key_id}/federation-rules    # dashboard-only
 GET /api/v1/organizations/me/keys/{key_id}/federation-rules     # dashboard-only
 DELETE /api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}  # dashboard-only
+GET /api/v1/organizations/me/keys/{key_id}/end-users            # dashboard-only
 # The organization's own budgets and the ceilings enforcing them
 # (otari-ai#1943), excluded for the same reason as the keys above: the
 # organization is resolved from the caller's dashboard session rather than named
@@ -447,6 +470,16 @@ POST /api/v1/organizations/me/guardrail-definitions                    # dashboa
 PATCH /api/v1/organizations/me/guardrail-definitions/{definition_id}   # dashboard-only
 DELETE /api/v1/organizations/me/guardrail-definitions/{definition_id}  # dashboard-only
 POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dashboard-only
+# Scoped by the caller's dashboard session like the organization surfaces
+# above: an SDK caller holding a workspace key has no organization identity to
+# configure sign-in for.
+GET /api/v1/organizations/me/sso                                # dashboard-only
+PUT /api/v1/organizations/me/sso                                 # dashboard-only
+PATCH /api/v1/organizations/me/sso                               # dashboard-only
+POST /api/v1/organizations/me/sso/test                           # dashboard-only
+DELETE /api/v1/organizations/me/sso                              # dashboard-only
+GET /api/v1/organizations/me/sso/preflight                       # dashboard-only
+PUT /api/v1/organizations/me/sso/enforcement                     # dashboard-only
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 POST /api/v1/organizations/me/member-invitations/bulk           # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
@@ -546,5 +579,12 @@ GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # 
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}                  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access          # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check    # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants  # operator surface
+PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}  # operator surface
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access    # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface

@@ -20,7 +20,9 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
+import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
+import type { KindFilter } from "@/features/models/offeredKinds"
+import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
   useOrgProviderModels,
   useRefreshOrgProviderModelPricing,
@@ -29,7 +31,6 @@ import {
   useWithdrawOrgProviderModel,
 } from "@/shared/api/organizations"
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
-import { formatRate } from "@/shared/helpers/format"
 
 import { OfferModelDialog } from "./OfferModelDialog"
 import { refreshOutcome } from "./refreshOutcome"
@@ -51,44 +52,6 @@ import { refreshOutcome } from "./refreshOutcome"
 // organization never sees. `canEdit` is still a prop so the controls can be
 // disabled rather than absent where that reads better, and so this is testable
 // on its own.
-
-/**
- * A rate cell. An absent rate is a dash, never a zero, which is a real price.
- *
- * One spelling for absent, and it is `undefined`: the wire has the field
- * optional *and* nullable, and a rate has no empty value to use instead, since
- * zero is a real price. The call sites convert at the boundary.
- */
-function rate(value: number | undefined) {
-  return value === undefined ? (
-    <span className="text-subtle">—</span>
-  ) : (
-    <span className="text-mono-caption tabular-nums">{formatRate(value)}</span>
-  )
-}
-
-/**
- * The input cell, which names its unit when the rate is not per token: a
- * per-request rate of 2000 per million under "Input / 1M" would read as a
- * token price a thousand times too high.
- */
-function inputRate(row: OrgProviderModel) {
-  const unit = pricingUnitOf(row.unit)
-  const value = row.input_price_per_million ?? undefined
-  if (unit === "token" || value === undefined) return rate(value)
-  return (
-    <span className="text-mono-caption tabular-nums">
-      {formatPricedRate(value, unit)}
-    </span>
-  )
-}
-
-/** A rate that only a token price carries, as a dash on any other unit. */
-function tokenRate(row: OrgProviderModel, value: number | null | undefined) {
-  return rate(
-    pricingUnitOf(row.unit) === "token" ? (value ?? undefined) : undefined,
-  )
-}
 
 // Typed rather than `string`, so the day a rung is renamed or added this stops
 // compiling instead of quietly falling through to Unpriced. The spellings are
@@ -112,6 +75,8 @@ export function ProviderModelsPanel({
   pageSize,
   onPageChange,
   onPageSizeChange,
+  kind,
+  onKindChange,
 }: {
   providerKey: OrgProviderKey
   canEdit: boolean
@@ -125,8 +90,11 @@ export function ProviderModelsPanel({
   pageSize: number
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
+  /** Which kind of model is shown, empty for every kind. Owned above, in the URL, as the page is. */
+  kind: KindFilter
+  onKindChange: (kind: KindFilter) => void
 }) {
-  const models = useOrgProviderModels(providerKey.id, page, pageSize)
+  const models = useOrgProviderModels(providerKey.id, page, pageSize, kind)
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
   const clearRate = useDeleteOrganizationPricing()
@@ -165,30 +133,7 @@ export function ProviderModelsPanel({
       isRowHeader: true,
       cell: (row) => row.model,
     },
-    {
-      id: "input",
-      header: "Input / 1M",
-      align: "end",
-      cell: inputRate,
-    },
-    {
-      id: "output",
-      header: "Output / 1M",
-      align: "end",
-      cell: (row) => tokenRate(row, row.output_price_per_million),
-    },
-    {
-      id: "cache_read",
-      header: "Cache read",
-      align: "end",
-      cell: (row) => tokenRate(row, row.cache_read_price_per_million),
-    },
-    {
-      id: "cache_write",
-      header: "Cache write",
-      align: "end",
-      cell: (row) => tokenRate(row, row.cache_write_price_per_million),
-    },
+    ...offeredPriceColumns<OrgProviderModel>(),
     {
       id: "source",
       header: "Rate",
@@ -279,9 +224,10 @@ export function ProviderModelsPanel({
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {providerKey.name}</h3>
           <p className="text-caption">
-            Priced for this organization only, per million tokens unless a rate
-            says it is per request or per image. A model nothing prices is
-            offered but not served, and stays off until it has a rate.
+            Priced for this organization only, per million tokens for text
+            models. An image, audio or video model's price is in its own unit,
+            named when you hover it, and beside it on a phone. A model nothing
+            prices is offered but not served, and stays off until it has a rate.
           </p>
         </div>
         {canEdit ? (
@@ -340,9 +286,18 @@ export function ProviderModelsPanel({
         </p>
       ) : null}
 
+      {models.data && rows.length + kind.length > 0 ? (
+        <OfferedKindTabs
+          counts={models.data.type_counts}
+          shown={kind}
+          onShow={onKindChange}
+        />
+      ) : null}
+
       {/* A failed list is not an empty one: with a settled error, rendering
-          "no models yet" would tell an admin their catalog is gone. */}
-      {!models.error && rows.length === 0 ? (
+          "no models yet" would tell an admin their catalog is gone. A kind
+          with no models left is an empty table under its tab, not this. */}
+      {!models.error && rows.length === 0 && kind === "" ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -355,6 +310,7 @@ export function ProviderModelsPanel({
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
+              mobileLayout="cards"
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
