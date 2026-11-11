@@ -16,16 +16,17 @@ from fastapi import APIRouter, Depends, status
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_config, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.models.tenancy import User
 from gateway.schemas.identity import (
     OIDCConnectionEnabledRequest,
     OIDCConnectionPublic,
     OIDCConnectionRequest,
-    OrganizationSsoEnforcementPublic,
     OrganizationSsoEnforcementRequest,
     OrganizationSsoPreflightPublic,
     OrganizationSsoPublic,
 )
-from gateway.services.oauth_service import redirect_uri as _oauth_redirect_uri
+from gateway.services.identity import OIDCConnectionService
+from gateway.services.oauth_service import sso_redirect_uri
 
 # Master key on the router, as the rest of the ``/api/v1/organizations/me`` surface
 # declares it. What the caller may change is decided per request by the service's own
@@ -37,15 +38,18 @@ router = APIRouter(
 )
 
 
-def _settings(
+async def _settings(
     config: GatewayConfig,
+    connections: OIDCConnectionService,
+    identity: User,
     connection: OIDCConnectionPublic | None,
-    enforcement: OrganizationSsoEnforcementPublic,
 ) -> OrganizationSsoPublic:
+    """The settings page's whole answer: ``connection`` beside the organization's enforcement."""
+    enforcement = await connections.get_enforcement_for_user(user=identity)
     # A deployment with no public address of its own builds a path rather than an address, which no
     # provider accepts, so there is nothing to register and the caller is told that rather than
     # handed a value that cannot work.
-    registerable = _oauth_redirect_uri(config, "sso") if config.public_base_url else None
+    registerable = sso_redirect_uri(config) if config.public_base_url else None
     return OrganizationSsoPublic(redirect_uri=registerable, connection=connection, enforcement=enforcement)
 
 
@@ -60,8 +64,7 @@ async def get_organization_sso(
     ``connection`` is null until the organization saves one.
     """
     connection = await connections.get_for_user(user=identity)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await _settings(config, connections, identity, connection)
 
 
 @router.put("")
@@ -77,8 +80,7 @@ async def put_organization_sso(
     encrypted at rest and never served back.
     """
     connection = await connections.save_for_user(user=identity, request=request)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await _settings(config, connections, identity, connection)
 
 
 @router.patch("")
@@ -96,8 +98,7 @@ async def patch_organization_sso(
     it first.
     """
     connection = await connections.set_enabled_for_user(user=identity, enabled=request.enabled)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await _settings(config, connections, identity, connection)
 
 
 @router.post("/test")
@@ -111,8 +112,7 @@ async def test_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     connection = await connections.test_for_user(user=identity)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await _settings(config, connections, identity, connection)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
