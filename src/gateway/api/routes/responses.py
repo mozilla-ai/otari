@@ -666,7 +666,25 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    # By alias, as each streamed event is (see ``format_chunk``).
-    body = result.model_dump(exclude_none=True, by_alias=True)
+    body = response_body(result)
     await idempotency.complete(body, response)
+    return body
+
+
+_INLINE_COST_FIELDS = ("cost_usd", "pricing_source")
+
+
+def response_body(result: Any) -> dict[str, Any]:
+    """A whole response as the JSON it is answered with, by alias as each streamed event is (see ``format_chunk``).
+
+    A native Responses provider's usage type drops the fields it does not declare,
+    so the cost ``attach_cost`` put on it is copied across here.
+    """
+    body: dict[str, Any] = result.model_dump(exclude_none=True, by_alias=True)
+    usage = getattr(result, "usage", None)
+    if isinstance(body.get("usage"), dict) and isinstance(usage, OpenResponsesUsage):
+        for name in _INLINE_COST_FIELDS:
+            value = getattr(usage, name, None)
+            if value is not None:
+                body["usage"].setdefault(name, value)
     return body
