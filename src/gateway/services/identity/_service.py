@@ -27,12 +27,12 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.identity import (
-    OIDC_PROVIDER_PREFIX,
     BlockedEmail,
     EmailAssertion,
     MailedLinkStatus,
     OIDCConnection,
     ProviderIdentity,
+    is_organization_connection_provider,
 )
 from gateway.models.tenancy import Organization, OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
@@ -458,7 +458,7 @@ class IdentityService:
     async def _account_for(self, external: ProviderIdentity, label: str) -> IdentityResolution:
         link = await self._links.get_by_identity(provider=external.provider, subject=external.subject)
         if link is not None:
-            if external.provider.startswith(OIDC_PROVIDER_PREFIX):
+            if is_organization_connection_provider(external.provider):
                 await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
             password_removed = await self._prove_vouched_address(account)
@@ -466,7 +466,7 @@ class IdentityService:
             self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
 
-        if external.provider.startswith(OIDC_PROVIDER_PREFIX):
+        if is_organization_connection_provider(external.provider):
             return await self._account_for_sso(external, label)
 
         resolution = await self._identity_provider.resolve(external)
@@ -530,7 +530,7 @@ class IdentityService:
         the name comes from and a later sign-in is when a change to it arrives. A provider reporting
         none leaves the name alone rather than clearing it.
         """
-        if not external.provider.startswith(OIDC_PROVIDER_PREFIX):
+        if not is_organization_connection_provider(external.provider):
             return
         if external.full_name is None or external.full_name == account.full_name:
             return

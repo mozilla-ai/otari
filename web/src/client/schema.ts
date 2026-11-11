@@ -8600,6 +8600,10 @@ export interface components {
          *     current invitation, which may have expired, so the roster can offer to
          *     revoke or reissue it.
          *
+         *     ``is_sso_account`` records how the account came about, not whether the
+         *     connection still admits it: an organization that repoints or drops its
+         *     connection leaves the account provisioned by one and unable to sign in.
+         *
          *     ``attribution_user_id`` is the addition the platform has no counterpart for.
          *     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
          *     not to this UUID identity, so this carries the ``user_id`` a caller passes to
@@ -8635,6 +8639,12 @@ export interface components {
             invitation_expires_at?: string | null;
             /** Invitation Id */
             invitation_id?: string | null;
+            /**
+             * Is Sso Account
+             * @description Whether an organization's own OIDC connection provisioned this member's account. Such an account is created with no sign-in address, so email is null until one is set.
+             * @default false
+             */
+            is_sso_account: boolean;
             /** Organization Member Id */
             organization_member_id?: string | null;
             /** Role */

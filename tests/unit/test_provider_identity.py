@@ -8,6 +8,7 @@ from gateway.models.identity import (
     MAX_SUBJECT_LENGTH,
     EmailAssertion,
     ProviderIdentity,
+    is_organization_connection_provider,
     oidc_identity_provider,
 )
 
@@ -75,3 +76,17 @@ def test_provider_identity_refuses_a_provider_over_255_characters() -> None:
 def test_oidc_identity_provider_refuses_an_issuer_that_would_not_fit() -> None:
     with pytest.raises(ValueError):
         oidc_identity_provider("https://" + "a" * 260)
+
+
+def test_an_oidc_provider_names_an_organization_connection() -> None:
+    assert is_organization_connection_provider(oidc_identity_provider("https://login.example.com")) is True
+
+
+def test_a_built_in_provider_does_not_name_an_organization_connection() -> None:
+    assert is_organization_connection_provider("google") is False
+
+
+def test_an_account_naming_no_provider_does_not_name_an_organization_connection() -> None:
+    """The local operator shape, which names no provider."""
+
+    assert is_organization_connection_provider(None) is False

@@ -138,6 +138,15 @@ class BlockedEmail(Base):
         return "@" not in self.pattern
 
 
+def is_organization_connection_provider(provider: str | None) -> bool:
+    """Whether ``provider`` names an organization's own OIDC connection rather than a built-in one.
+
+    NOTE: ``oidc_flow_provider`` writes a connection id under the same prefix, so this is true of a
+    pending-flow provider as well. Callers holding one must not read it as an identity provider.
+    """
+    return provider is not None and provider.startswith(OIDC_PROVIDER_PREFIX)
+
+
 def oidc_identity_provider(issuer: str) -> str:
     """Return the identity provider naming everyone this OIDC issuer vouches for.
 
@@ -218,6 +227,7 @@ __all__ = [
     "OAuthIdentityLink",
     "OIDCConnection",
     "ProviderIdentity",
+    "is_organization_connection_provider",
     "oidc_flow_provider",
     "oidc_identity_provider",
 ]

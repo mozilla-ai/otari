@@ -54,6 +54,7 @@ from gateway.exceptions.organizations_exceptions import (
     WorkspaceNotFoundError,
 )
 from gateway.log_config import logger
+from gateway.models.identity import is_organization_connection_provider
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
@@ -2784,6 +2785,7 @@ class OrganizationService:
             invitation_id=invitation.id if invitation is not None else None,
             invitation_expires_at=invitation.expires_at if invitation is not None else None,
             email=user.email,
+            is_sso_account=is_organization_connection_provider(user.oauth_provider),
             full_name=user.full_name,
             avatar_face=user.avatar_face,
             role=membership.role,
