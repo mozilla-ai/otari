@@ -26,10 +26,10 @@ from gateway.models.files import FileObject, new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
-from gateway.services.files._attachment_uploads import upload_attachment
+from gateway.services.files._attachment_uploads import upload_attachment, uploads_attachments
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for
-from gateway.services.files._provider_uploads import ProviderCopies
+from gateway.services.files._provider_uploads import ProviderCopies, provider_holds_copies
 from gateway.services.files._staging import StagedFile
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
@@ -351,6 +351,10 @@ class FileService:
         record = await self._reserve_produced(output, storage_ref)
         return await self._write(record, chunks)
 
+    def provider_holds_copies(self, provider: LLMProvider) -> bool:
+        """Whether ``provider``'s own code execution can be given an attached file as a copy."""
+        return provider_holds_copies(provider)
+
     async def provider_file_ids(
         self, files: Sequence[StagedFile], account: ProviderAccount, credential: ResolvedCredential
     ) -> dict[str, str]:
@@ -366,6 +370,10 @@ class FileService:
             ProviderUploadFailedError: a copy could not be made or recorded.
         """
         return await self._provider_copies.file_ids_for(files, account, credential)
+
+    def uploads_attachments(self, provider: LLMProvider | str | None) -> bool:
+        """Whether an attachment can be moved into ``provider``'s own file storage."""
+        return uploads_attachments(provider)
 
     async def attachment_uri(
         self,

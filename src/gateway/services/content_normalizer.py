@@ -40,7 +40,7 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.files import FileScope, FileService, StagedFile, uploads_attachments
+from gateway.services.files import FileScope, FileService, StagedFile
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.providers import CountryNotServedError
@@ -166,7 +166,7 @@ def inline_limit_for(
     if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
         return None
     upload = None
-    if files is not None and uploads_attachments(provider):
+    if files is not None and files.uploads_attachments(provider):
         attachments = files
 
         async def upload(data: bytes, mime: str, filename: str) -> str:
