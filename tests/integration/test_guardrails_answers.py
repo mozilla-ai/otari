@@ -234,6 +234,7 @@ def test_a_streamed_answer_a_guardrail_refuses_ends_in_an_error_and_is_still_bil
     assert response.status_code == 200
     assert "forb" not in _sse_text(response.text)
     assert "guardrail_violation" in response.text
+    assert "Answer blocked by guardrail policy." in response.text
     [row] = db_session.scalars(select(UsageLog)).all()
     assert (row.prompt_tokens, row.completion_tokens, row.status_code) == (11, 7, 403)
 

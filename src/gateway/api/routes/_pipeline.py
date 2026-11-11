@@ -55,7 +55,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
 from functools import partial, reduce
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, cast
 
 import httpx
 import httpx2
@@ -1060,6 +1060,8 @@ def stream_error_message(exc: BaseException) -> str | None:
     provider failure it leaves to the 502), since that detail is already safe
     for the caller to read.
     """
+    if isinstance(exc, AnswerRefused):
+        return str(cast("dict[str, Any]", exc.detail)["message"])
     if isinstance(exc, HTTPException):
         return None
     mapping = classify_provider_error(exc)
