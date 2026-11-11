@@ -2,7 +2,7 @@
 icon: globe
 ---
 
-# Configure web search
+# Web search
 
 The **Web search** settings let you control how requests from a workspace can access and search the web. You can customize web access for individual workspaces, including which keys searches use, which domains can be accessed, and how many results a search can return.
 
@@ -19,7 +19,7 @@ To configure web search for a workspace:
 
 The domain lists apply to the search and fetch Otari runs, not to direct searches or to a provider's own tools running on the provider; see [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
 
-![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/configure-web-search.png)
+![A workspace's Web search page: the switch, the search and fetch keys, who runs provider tools, and Advanced.](assets/screenshots/web-search.png)
 
 ## The organization's search and fetch keys
 
