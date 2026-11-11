@@ -16,5 +16,5 @@ test("a workspace's code execution policy", async ({ page }) => {
   await expect(
     page.getByText("Who runs provider code tools", { exact: true }).first(),
   ).toBeVisible()
-  await docScreenshot(page, "configure-code-execution")
+  await docScreenshot(page, "code-execution")
 })

@@ -21,7 +21,7 @@ test("a workspace's web search policy", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Not set Who runs provider web search" }),
   ).toBeVisible()
-  await docScreenshot(page, "configure-web-search")
+  await docScreenshot(page, "web-search")
 
   await page.getByRole("button", { name: "Advanced" }).click()
   for (const label of [

@@ -36,7 +36,7 @@ async function cleanUp(page: Page): Promise<void> {
   }
 }
 
-// docs/configure-an-mcp-server.md: "Connect a server", then each step of "Control
+// docs/mcp-servers.md: "Connect a server", then each step of "Control
 // who can use it" on the page saving opens.
 test("configure an MCP server", async ({ page }) => {
   // Five dialogs and a trace, against a gateway it boots from cold.
@@ -62,7 +62,7 @@ test("configure an MCP server", async ({ page }) => {
     const policy = dialog.getByRole("radiogroup", { name: "Default policy" })
     await expect(policy.getByRole("radio", { name: "Allow" })).toBeChecked()
     await expect(policy.getByRole("radio", { name: "Deny" })).toBeVisible()
-    await docScreenshot(dialog, "configure-an-mcp-server")
+    await docScreenshot(dialog, "mcp-servers")
 
     await dialog.getByRole("button", { name: "Add MCP server" }).click()
     await expect(dialog).toBeHidden()
