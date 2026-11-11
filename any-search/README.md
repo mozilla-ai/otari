@@ -379,7 +379,7 @@ await engine.search(query, extraction=None)  # each result's description as its 
 |---|---|
 | `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
 | `snippet` | `contents.highlights`, joined; `description` when there are none |
-| `text` | `contents.markdown`, only under `extraction_mode` `full_page`; `markdown` is added to `full_page.extraction_formats` when they lack it, and an HTML copy stays in `raw` |
+| `text` | `contents.markdown`, only when `extraction_mode` is `full_page`; `markdown` is added to the `full_page.extraction_formats` array by default and an HTML copy, when listed there, is available in `raw` |
 | `published` | `page_age` when it is ISO 8601, taken as UTC; another form stays in `raw` |
 
 You.com reports no cost. `max_results` becomes `count`, 10 when unset, at most 100, and at most 50

@@ -70,8 +70,8 @@ class YouDotComProvider(AnyFetch):
                 name="full_page",
                 type="object",
                 description=(
-                    'Formats to return, as {"extraction_formats": ["markdown", "html"]}. Markdown is always asked '
-                    "for; an HTML copy stays in raw."
+                    'Formats to return, as {"extraction_formats": ["markdown", "html"]}. Markdown is always requested. '
+                    "HTML version, when additionally requested, is returned in raw output."
                 ),
             ),
             OptionSpec(
