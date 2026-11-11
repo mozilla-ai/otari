@@ -264,8 +264,9 @@ A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
 pricing data has not caught up with cannot be billed at nothing. With
 `require_pricing: false` the deployment serves unpriced traffic by choice, so
-such a model is offered switched on and served at no cost, like an unpriced
-model of a `providers:` instance (see
+such a model is offered switched on and served at no cost (or at the charge
+its provider states, as OpenRouter's does), like an unpriced model of a
+`providers:` instance (see
 [Default pricing](configuration.md#default-pricing)).
 
 A refusal on that path says which narrowing turned the model away (see
