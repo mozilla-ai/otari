@@ -257,10 +257,7 @@ def _settlement(client: TestClient, request_id: str, headers: dict[str, str]) ->
 # ProtocolMismatch, checked after the accounting, counts as the expected failure.
 # Strict on the scripted provider, so a fix fails the run until its entry is
 # removed; a live provider may not reproduce one, so there a pass is allowed.
-_KNOWN_GAPS: dict[tuple[str, bool, bool], str] = {
-    ("messages", True, False): "a Messages stream ends with an `event: done` the SDK hands back as a typeless event",
-    ("messages", True, True): "a Messages stream ends with an `event: done` the SDK hands back as a typeless event",
-}
+_KNOWN_GAPS: dict[tuple[str, bool, bool], str] = {}
 
 
 @pytest.mark.parametrize("tools", [False, True], ids=["no-tools", "gateway-tool-loop"])
