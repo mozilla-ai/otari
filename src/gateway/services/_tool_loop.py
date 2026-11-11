@@ -20,6 +20,7 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
@@ -70,6 +71,27 @@ def tool_failure_detail(pool: ToolBackend, name: str) -> str:
 def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
     """Log a call that raised, keeping the exception's text out of the line for the same reason."""
     logger.warning("%s: %s", detail, name, extra={"error_type": type(exc).__name__})
+
+
+INVALID_ARGUMENTS_ERROR = (
+    "[tool error] invalid_arguments: the arguments were not a JSON object, so the tool did not run"
+)
+
+
+def parse_tool_arguments(name: str, raw: str | None) -> dict[str, Any] | None:
+    """The arguments the model sent for a call to ``name``, or ``None`` when they are not a JSON object.
+
+    Empty arguments read as none. A call whose arguments are ``None`` here is refused with
+    :data:`INVALID_ARGUMENTS_ERROR` rather than run with arguments it did not send.
+    """
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Tool call arguments are not a JSON object; not running %s", name)
+    return None
 
 
 class MaxToolIterationsExceeded(Exception):

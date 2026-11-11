@@ -18,7 +18,6 @@ wrappers the routes call.
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
@@ -45,10 +44,12 @@ from gateway.core.usage import (
 from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
     MaxToolIterationsExceeded,
     StreamAction,
     ToolBackend,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -247,7 +248,8 @@ async def _run_owned_calls(
     That's the standard idiom for "treat tool failures as recoverable, let
     cancellation propagate".
 
-    A call past ``budget`` is refused the same way, as a tool error the model reads.
+    A call past ``budget``, or one whose arguments are not a JSON object, is refused
+    the same way, as a tool error the model reads.
 
     For a call to one of ``native_tools``, the request's tools announced in
     ``otari_tool_calls``, or to an MCP server's tool, this yields ``(False, entries)``
@@ -257,12 +259,14 @@ async def _run_owned_calls(
     """
     for tc in mcp_calls:
         name = tc["function"]["name"]
-        try:
-            args = json.loads(tc["function"]["arguments"] or "{}")
-        except json.JSONDecodeError:
-            args = {}
+        args = parse_tool_arguments(name, tc["function"]["arguments"])
         rendering = native_rendering(name, Dialect.CHAT) if name in native_tools else None
-        call = NativeCall(name, tc["id"] or "", args if isinstance(args, dict) else {})
+        call = NativeCall(name, tc["id"] or "", args or {})
+        if args is None:
+            results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": INVALID_ARGUMENTS_ERROR})
+            if rendering is not None:
+                yield True, rendering.refused(call)
+            continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
             results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})

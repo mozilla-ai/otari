@@ -32,6 +32,7 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
+from gateway.services._tool_loop import INVALID_ARGUMENTS_ERROR
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -840,6 +841,70 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     assert tool_msg["content"] == "[tool error] Gateway tool execution failed"
     assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
     assert "sk-live-secret" not in str(captured) + str(logged)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", ['{"u": "x"', '["x"]', "null"])
+async def test_loop_refuses_a_call_whose_arguments_are_not_a_json_object(
+    monkeypatch: pytest.MonkeyPatch, arguments: str
+) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", arguments)]),
+            _completion(finish="stop", content="recovered"),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.append(kwargs["messages"])
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    )
+
+    assert out.choices[0].message.content == "recovered"
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "c", "content": INVALID_ARGUMENTS_ERROR}
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_refuses_a_call_whose_arguments_are_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": ')]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        captured.append(kwargs["messages"])
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _ in mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "call_1", "content": INVALID_ARGUMENTS_ERROR}
 
 
 # ---------- streaming loop ----------
