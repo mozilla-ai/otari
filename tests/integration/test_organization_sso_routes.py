@@ -3,7 +3,7 @@
 The service layer (`test_oidc_connection_service.py`) already covers discovery,
 encryption, and the conflict/race paths. This file covers what only the HTTP surface
 can: the status codes, and the response shape an administrator actually reads,
-including the `redirect_uri` the route adds over the service's own schema.
+including the `redirect_uri` a configured deployment reports.
 """
 
 import uuid
@@ -369,6 +369,37 @@ def test_the_response_reflects_enforcement_once_it_is_set(
         "break_glass_user_id": str(owner_id),
         "break_glass_waived": False,
     }
+
+
+def test_every_route_that_answers_with_the_settings_carries_enforcement(
+    client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enforcement is part of the settings, so a write answers with it as a read does.
+
+    Asserted on each writing route, because a client that refreshes its view from a write's own
+    answer reads enforcement from there rather than from a following GET.
+    """
+    _stub_discovery(monkeypatch)
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforcement-every-route")
+        owner_token = _identity(
+            session, email="owner@acme-enforcement-every-route.test", organization_id=organization.id, role="owner"
+        )
+    finally:
+        session.close()
+
+    off = {"required": False, "break_glass_user_id": None, "break_glass_waived": False}
+    answers = {
+        "PUT": _call(client, owner_token, "PUT", _ENDPOINT, json=_connection_body()),
+        "POST": _call(client, owner_token, "POST", f"{_ENDPOINT}/test"),
+        "PATCH": _call(client, owner_token, "PATCH", _ENDPOINT, json={"enabled": False}),
+        "GET": _call(client, owner_token, "GET", _ENDPOINT),
+    }
+
+    for method, response in answers.items():
+        assert response.status_code == status.HTTP_200_OK, f"{method}: {response.text}"
+        assert response.json()["enforcement"] == off, method
 
 
 def test_test_and_delete_refuse_404_with_no_connection_saved(

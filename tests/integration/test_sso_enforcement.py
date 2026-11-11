@@ -94,6 +94,7 @@ def _connection_service(
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
         offered_providers=offered_providers,
+        sso_redirect_uri="https://otari.test/auth/sso/callback",
     )
 
 

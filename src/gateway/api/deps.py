@@ -157,7 +157,7 @@ from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
-from gateway.services.oauth_service import provider_label
+from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
 from gateway.services.overview import OverviewService
@@ -1766,6 +1766,9 @@ def get_oidc_connection_service(
 
     ``sign_in_states`` is the one repository built on the session instead, for the reason the
     service's own attribute gives: the sign-in client is used after the block that built it.
+
+    ``sso_redirect_uri`` is None where this deployment has no public address,
+    because a path alone is not registerable at a provider.
     """
     return OIDCConnectionService(
         uow,
@@ -1778,6 +1781,7 @@ def get_oidc_connection_service(
         offered_providers=frozenset(
             provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
         ),
+        sso_redirect_uri=redirect_uri(config, "sso") if config.public_base_url else None,
     )
 
 
