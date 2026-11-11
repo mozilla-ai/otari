@@ -19,6 +19,11 @@ oauth_apps:
       - http://localhost/
 ```
 
+Each key an app is issued holds the [scopes](api-keys.md#scopes) its
+registration names under `scopes`, and `inference` alone when it names none, so
+an app calls models and nothing else unless you say so. An app key is never a
+service key, so it cannot hold the `end_users` scopes.
+
 Restart the gateway after changing registration. Empty `oauth_apps` disables
 these endpoints. Removing a registration prevents new approvals and exchanges;
 revoke already-issued keys on the API keys page. HTTPS redirects match exactly. HTTP is allowed only for
@@ -38,8 +43,8 @@ OAuth discovery metadata is not currently published.
 Open `/api/v1/oauth/apps/authorize` on the gateway with these query parameters:
 `client_id`, `redirect_uri`, `response_type=code`, `state`,
 `code_challenge` and `code_challenge_method=S256`. Other parameters, such as
-`scope`, are ignored: the key always carries the user's own access in the
-approved workspace.
+`scope`, are ignored: the key carries the user's own access in the approved
+workspace, narrowed to the scopes the registration names.
 
 The authorization endpoint uses the deployment's `ui_base_url` (falling back to
 `public_base_url`), so a separately hosted dashboard works too. The dashboard

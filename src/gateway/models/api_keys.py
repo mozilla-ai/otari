@@ -9,6 +9,7 @@ from sqlalchemy import JSON, CheckConstraint, DateTime, Enum, ForeignKey, Index,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base, UtcDateTime
+from gateway.types.key_scope import KeyScope
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
@@ -122,6 +123,10 @@ class APIKey(Base):
     # allowed_models names the deprecated way (see services/model_access.py),
     # [] = no tool, a list = tool names, '*' for every search tool.
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
+    # The endpoint groups this key may reach (``types/key_scope.py``), stored
+    # normalized. The column defaults to no scope at all, so a row written
+    # without naming any authenticates and reaches only the open catalog reads.
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, server_default="[]")
     # A service key may name end users in a request's ``user`` field. Each one is
     # a ``users`` row owned by this key's user (``users.parent_user_id``), created
     # on first use, so a key can only ever bill end users in its owner's scope.
@@ -157,6 +162,10 @@ class APIKey(Base):
     user = relationship("User", back_populates="api_keys")
     usage_logs = relationship("UsageLog", back_populates="api_key", passive_deletes=True)
 
+    def holds_scope(self, scope: KeyScope) -> bool:
+        """Whether this key may reach the endpoints ``scope`` names."""
+        return scope.value in self.scopes
+
     def is_organization_service_key(self) -> bool:
         """Whether an organization made this service key for itself, so its end users go on that organization's budgets.
 
@@ -188,6 +197,7 @@ class APIKey(Base):
             "capture_agent_telemetry": self.capture_agent_telemetry,
             "allowed_models": self.allowed_models,
             "allowed_tools": self.allowed_tools,
+            "scopes": list(self.scopes),
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),

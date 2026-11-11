@@ -23,12 +23,15 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.budgets import BudgetScopeRequest
 from gateway.services.budgets._scoped_enforcement import get_scope_ceilings
 
+from .conftest import ALL_KEY_SCOPES
 from .tenancy_helpers import budget_service, create_budget, create_member, create_organization, create_workspace
 
 
 def _key(client: TestClient, master_key_header: dict[str, str], *, user_id: str, **fields: Any) -> dict[str, Any]:
     response = client.post(
-        f"{API_ROOT}/keys", json={"key_name": f"key-{user_id}", "user_id": user_id} | fields, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": f"key-{user_id}", "user_id": user_id} | fields,
+        headers=master_key_header,
     )
     assert response.status_code == 200, response.text
     created: dict[str, Any] = response.json()
@@ -309,7 +312,13 @@ async def test_a_members_key_lists_the_ceilings_the_gate_checks(async_db: AsyncS
     )
     assert organization_member is not None
     await get_or_create_attribution_user(async_db, user_id=str(volunteer.id), alias="Volunteer")
-    key = APIKey(id="volunteer-key", key_hash="hash-volunteer", workspace_id=workspace.id, user_id=str(volunteer.id))
+    key = APIKey(
+        id="volunteer-key",
+        key_hash="hash-volunteer",
+        workspace_id=workspace.id,
+        user_id=str(volunteer.id),
+        scopes=ALL_KEY_SCOPES,
+    )
     async_db.add(key)
     for scope_type, scope_id in (
         ("workspace_member", str(workspace_member.id)),

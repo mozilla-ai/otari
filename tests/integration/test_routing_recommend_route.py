@@ -21,6 +21,8 @@ from gateway.services.inference import DecisionProviderError
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
 from gateway.services.secret_box import generate_secret_key
 
+from .conftest import ALL_KEY_SCOPES
+
 PATH = f"{API_ROOT}/routing/recommend"
 
 ANSWER: dict[str, Any] = {
@@ -246,7 +248,9 @@ def test_the_hold_is_sized_from_the_whole_question(client: TestClient, master_ke
         headers=master_key_header,
     )
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "token-key", "user_id": "token-capped"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "token-key", "user_id": "token-capped"},
+        headers=master_key_header,
     ).json()
     spawn = _spawn(prompt="List files.", description="y" * 1000)
 

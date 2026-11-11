@@ -36,6 +36,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
+from gateway.types.key_scope import KeyScope, normalize_scopes
 
 
 class KeySummary(NamedTuple):
@@ -66,7 +67,14 @@ class ApiKeyService:
         return await self._keys.get_workspace_id_for_key(key_id)
 
     async def issue_app_key(
-        self, *, user: User, workspace_id: uuid.UUID, client_id: str, app_name: str, key_format: ApiKeyFormatPort
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        app_name: str,
+        scopes: Iterable[KeyScope],
+        key_format: ApiKeyFormatPort,
     ) -> str:
         """Mint a budget-enforced app credential inside the caller's authority transaction."""
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
@@ -81,6 +89,7 @@ class ApiKeyService:
             user_id=str(user.id),
             workspace_id=workspace_id,
             client_id=client_id,
+            scopes=normalize_scopes(scopes),
         )
         return key
 

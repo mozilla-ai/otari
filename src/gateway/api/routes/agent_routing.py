@@ -21,6 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from gateway.api.deps import AgentModelRecommenderPortDep, get_config, verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import (
     ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
     DecisionCallError,
@@ -44,6 +45,7 @@ from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest, RecommendationRefusal
 from gateway.services.routing import ROUTER_LABEL, build_decision_request, candidates_for
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 
@@ -96,6 +98,7 @@ class _RecommenderCall:
             "description": "No subagent router is switched on, or a master-key call names no `user`.",
         },
     },
+    openapi_extra=key_scope(KeyScope.AGENTS),
 )
 async def recommend_model_for_agent(
     raw_request: Request,

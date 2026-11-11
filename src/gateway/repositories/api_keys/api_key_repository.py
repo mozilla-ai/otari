@@ -33,6 +33,7 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         user_id: str,
         workspace_id: uuid.UUID,
         client_id: str,
+        scopes: list[str],
     ) -> None:
         """Stage a budget-enforced, self-service key with inherited access restrictions."""
         self.db.add(
@@ -46,6 +47,7 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
                 workspace_id=workspace_id,
                 self_service=True,
                 exclude_from_budget=False,
+                scopes=scopes,
                 metadata_={"oauth_client_id": client_id},
             )
         )

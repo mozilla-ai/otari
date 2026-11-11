@@ -2,6 +2,7 @@
 
 An API key is the credential an application sends to Otari. Each key belongs to
 one workspace and one user, and that decides where its usage and spend land.
+Its [scopes](#scopes) decide which endpoints it may call.
 
 Applications send the key as a bearer token. The base URL to use and the other
 accepted headers are in [Base URL](api-reference.md#base-url) and
@@ -16,6 +17,12 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
    it.
 4. Click **Create key**, then copy the key. It is shown once, so store it
    before you close the dialog.
+
+**Access** sets what the key may call. It starts on **Call models**, which
+holds the `inference` scope alone. **Coding agent** adds what the Claude Code
+plugin's hooks, routing and telemetry need, **Usage import** holds what
+reporting usage from elsewhere needs, and **Custom** lists every scope; see
+[Scopes](#scopes). Edit a key to change its access later.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
@@ -79,6 +86,7 @@ see [What config.yml owns](configuration.md#what-configyml-owns).
 Besides its user and workspace, a key can have:
 
 - an expiry, and an on/off state
+- [scopes](#scopes), which say which endpoints it may call
 - a list of allowed models and tools (see
   [Model and search tool access](#model-and-search-tool-access))
 - a budget of its own, which applies alongside its owner's
@@ -155,3 +163,56 @@ and no `allowed_tools` gets the tools it could already run that are also on the
 user's new list, so the switch never widens a key. A list sent back unchanged is
 not checked again, so a key naming a since-deleted tool can still save an
 unrelated change. No search tool may be named `*`.
+
+### Scopes
+
+A key's scopes name the groups of endpoints it may call. A key holds the least
+it needs, so a leaked key can do only what its scopes allow, whatever its
+owner can do.
+
+| Scope | Lets the key |
+| --- | --- |
+| `inference` | Call models: chat completions, messages, responses, embeddings, moderations, rerank, audio, images, video, and decisions |
+| `files:read` | List and download files |
+| `files:write` | Upload and delete files |
+| `batches:read` | List batches and read their results |
+| `batches:write` | Create and cancel batches |
+| `web` | Search and fetch the web, directly or as a tool Otari runs during a model call |
+| `code:execute` | Run code, directly or as a tool Otari runs during a model call |
+| `mcp:read` | List MCP servers and their tools |
+| `mcp:execute` | Call MCP tools, directly or during a model call |
+| `telemetry:write` | Send OpenTelemetry traces, logs and metrics |
+| `agents` | Coding-agent hooks and subagent model recommendations |
+| `usage:read` | Read its own budget, usage and request records |
+| `usage:write` | Report usage it observed elsewhere |
+| `end_users:read` | List its end users and their budgets (service keys only) |
+| `end_users:write` | Create, move and block its end users (service keys only) |
+| `end_users:delete` | Delete its end users and erase their records (service keys only) |
+
+Every key may read the model, tool, price and provider catalogs, whatever its
+scopes. No scope lets a key create or manage keys: that takes a dashboard
+session or the master key, so revoking a key always ends what it can do.
+
+A key created without naming any scopes gets `inference` alone. Name them in
+`scopes` when you create the key, through `POST /api/v1/keys` or
+`POST /api/v1/organizations/me/keys`:
+
+```json
+{"key_name": "pipeline", "scopes": ["inference", "files:write", "batches:write", "batches:read"]}
+```
+
+`PATCH` on the same routes replaces a key's scopes. The change applies from the
+key's next request, so narrowing a key you suspect has leaked takes effect
+without rotating its secret. A key needs at least one scope, and only a service
+key may hold the `end_users` scopes.
+
+A request whose key lacks the scope an endpoint needs is refused with `403`,
+and the message names the scope. A model call that asks Otari to run a web,
+code execution or MCP tool needs that tool's scope too. The master key holds
+every scope. Each operation in the [OpenAPI specification](public/openapi.json)
+lists the scopes it needs in `x-otari-key-scopes`, empty where every key may
+call it.
+
+Keys that existed before scopes hold every scope that existed then, so they
+keep working; a scope added later is never granted to a key that did not ask
+for it.

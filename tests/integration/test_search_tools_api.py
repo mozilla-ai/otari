@@ -46,7 +46,7 @@ from gateway.services.web_retrieval_network import (
 )
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_web_url
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 
 @pytest.fixture
@@ -598,7 +598,9 @@ def test_every_catalog_reader_lists_providers_and_only_an_operator_sees_the_depl
 ) -> None:
     assert catalog_client.get(f"{API_ROOT}/search-tools/providers").status_code == 401
 
-    minted = catalog_client.post(f"{API_ROOT}/keys", json={"key_name": "reader"}, headers=master_key_header)
+    minted = catalog_client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "reader"}, headers=master_key_header
+    )
     api_key = {API_KEY_HEADER: f"Bearer {minted.json()['key']}"}
     by_api_key = _catalog(catalog_client, headers=api_key)
     assert by_api_key["searxng"]["default_api_base"] is None
@@ -654,7 +656,9 @@ def test_deleting_a_stored_tool_restores_the_config_one(
     client = fake_file_client
     client.post(f"{API_ROOT}/users", json={"user_id": "searcher"}, headers=master_key_header)
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "searcher", "user_id": "searcher"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "searcher", "user_id": "searcher"},
+        headers=master_key_header,
     )
     api_key_header = {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
     stored = {"hits": [{"url": "https://stored.example"}]}

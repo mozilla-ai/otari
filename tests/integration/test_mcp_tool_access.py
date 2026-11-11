@@ -52,7 +52,7 @@ from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD
 
-from .conftest import MODEL_NAME, _to_async_url
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, _to_async_url
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
@@ -138,7 +138,7 @@ def _bearer(key: dict[str, Any]) -> dict[str, str]:
 
 
 def _new_key(client: TestClient, master: dict[str, str], **body: Any) -> dict[str, Any]:
-    response = client.post(f"{API_ROOT}/keys", json={"key_name": "k", **body}, headers=master)
+    response = client.post(f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "k", **body}, headers=master)
     assert response.status_code == 200, response.text
     created: dict[str, Any] = response.json()
     return created

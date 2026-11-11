@@ -96,6 +96,8 @@ def test_approved_key_is_owned_budget_enforced_and_single_use(
         assert key.workspace_id == world.workspaces["alpha_one"]
         assert key.self_service and not key.exclude_from_budget and not key.is_service_key
         assert key.metadata_["oauth_client_id"] == "thunderbolt"
+        # The registration names no scopes, so the key calls models and nothing else.
+        assert key.scopes == ["inference"]
         assert db.scalars(select(OAuthAppGrant)).first() is None
     assert redeem(client, code).status_code == 400
     headers = {"Authorization": f"Bearer {result.json()['access_token']}"}

@@ -15,6 +15,7 @@ from gateway.api.deps import (
     get_log_writer,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -24,6 +25,7 @@ from gateway.services.budgets import rerank_estimate
 from gateway.services.inference import RERANK_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["rerank"])
 
@@ -42,7 +44,7 @@ class RerankRequest(BaseModel):
     user: str | None = Field(default=None, description="User ID for usage attribution")
 
 
-@router.post("/rerank")
+@router.post("/rerank", openapi_extra=key_scope(KeyScope.INFERENCE))
 async def create_rerank(
     raw_request: Request,
     response: Response,

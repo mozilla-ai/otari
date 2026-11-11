@@ -33,7 +33,7 @@ from gateway.core.database import release_session
 from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, ALL_SERVICE_KEY_SCOPES, build_test_client
 
 
 @pytest.fixture
@@ -155,7 +155,9 @@ def test_files_are_user_scoped(
     # not per-key, and keys created without a user_id all share the "default" user
     # (see keys.py / get_or_create_default_user), so give this key its own owner.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
@@ -181,7 +183,9 @@ def test_no_owner_keys_share_default_user_files(
     up = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
-    sibling = client.post(f"{API_ROOT}/keys", json={"key_name": "sibling"}, headers=master_key_header)
+    sibling = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "sibling"}, headers=master_key_header
+    )
     sibling_header = {next(iter(api_key_header)): f"Bearer {sibling.json()['key']}"}
 
     assert client.get(f"{API_ROOT}/files/{file_id}", headers=sibling_header).status_code == 200
@@ -315,7 +319,7 @@ def test_file_id_extracted_reaches_provider(
 def _service_key(client: TestClient, master_key_header: dict[str, str], header_name: str, name: str) -> dict[str, str]:
     created = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": name, "user_id": name, "is_service_key": True},
+        json={"key_name": name, "user_id": name, "is_service_key": True, "scopes": ALL_SERVICE_KEY_SCOPES},
         headers=master_key_header,
     )
     assert created.status_code == 200, created.text
@@ -772,7 +776,9 @@ def test_anthropic_listing_pages_with_next_page(
 
     # A token issued to another user names a file this caller cannot see.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     other_headers = {next(iter(api_key_header)): f"Bearer {other.json()['key']}", **_ANTHROPIC}
     _upload_text_files(client, other_headers, 2)

@@ -512,6 +512,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     operator_can_enable: true,
     allowed_models: null,
     allowed_tools: null,
+    scopes: ["inference"],
     exclude_from_budget: false,
     reject_user_mismatch: null,
     is_service_key: false,

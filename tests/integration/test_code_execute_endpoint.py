@@ -34,6 +34,8 @@ from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReacha
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
+from .conftest import ALL_SERVICE_KEY_SCOPES
+
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ENDPOINT = f"{API_ROOT}/code/execute"
 _USAGE_LABEL = "/v1/code/execute"
@@ -237,7 +239,12 @@ def test_a_service_key_reads_back_what_an_end_users_run_wrote(
     """The key names the end user on the upload, the run and the download, and owns nothing of theirs itself."""
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "code-service", "user_id": "code-service", "is_service_key": True},
+        json={
+            "key_name": "code-service",
+            "user_id": "code-service",
+            "is_service_key": True,
+            "scopes": ALL_SERVICE_KEY_SCOPES,
+        },
         headers=master_key_header,
     ).json()
     headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
@@ -485,6 +492,7 @@ def test_a_service_key_bills_the_end_user_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "code-service",
             "user_id": "code-service",
             "is_service_key": True,
