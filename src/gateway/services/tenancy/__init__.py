@@ -11,7 +11,7 @@ ring listed here makes every module in it unimportable. The offered-models
 service is in `services/providers/` for that reason among others.
 """
 
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener, MembershipListeners
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_domain_service import (
@@ -40,6 +40,7 @@ from gateway.services.tenancy.user_service import (
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 __all__ = [
+    "DeploymentAdministrationAccess",
     "DeploymentUserService",
     "DomainAutoJoinListener",
     "InvitationClaimSettings",

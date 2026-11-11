@@ -258,6 +258,16 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
+
+# Consent POST shares the authorization URL but still requires a signed-in identity.
+_UNAUTHENTICATED_OPERATIONS = frozenset(
+    {
+        ("get", f"{API_ROOT}/oauth/apps/authorize"),
+        ("get", f"{API_ROOT}/oauth/apps/clients"),
+        ("post", f"{API_ROOT}/oauth/apps/token"),
+        ("post", f"{API_ROOT}/oauth/apps/revoke"),
+    }
+)
 # Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
 # browser app built on either (dangerouslyAllowBrowser) passes the preflight.
 # Named one by one rather than allowing every header, which would let a browser
@@ -1393,9 +1403,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
             if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
             requirement: list[dict[str, list[str]]] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
-            for operation in path_item.values():
+            for method, operation in path_item.items():
                 if isinstance(operation, dict):
-                    operation["security"] = requirement
+                    operation["security"] = [] if (method, path) in _UNAUTHENTICATED_OPERATIONS else requirement
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

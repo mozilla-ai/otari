@@ -32,7 +32,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.overview.overview_service import OverviewService, judge
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -460,7 +460,7 @@ def _service(db: AsyncSession) -> OverviewService:
     return OverviewService(
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
-        DeploymentUserService(db),
+        DeploymentAdministrationAccess(db),
         WorkspaceService(db, **membership_writes(db)),
     )
 

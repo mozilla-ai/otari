@@ -465,7 +465,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/_helpers.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
-    "gateway/api/routes/admin.py",
     "gateway/api/routes/agent_telemetry.py",
     "gateway/api/routes/aliases.py",
     "gateway/api/routes/audio.py",
@@ -615,7 +614,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
-    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
@@ -1425,6 +1423,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.identity.BlockedEmail": {
         "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.identity.OAuthAppGrant": {
+        "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),
     },
     "gateway.models.identity.OAuthIdentityLink": {

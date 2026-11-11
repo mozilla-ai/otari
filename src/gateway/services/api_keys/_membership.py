@@ -56,4 +56,11 @@ class ApiKeyMembershipListener:
         """Nothing here: ``organization_member_changed`` already disabled what the change takes away."""
 
 
-__all__ = ["ApiKeyMembershipListener"]
+class ApiKeyDeactivationListener:
+    """Account deactivation switches off self-service keys without permanently revoking them."""
+
+    def __init__(self, repositories: ApiKeyRepositories) -> None:
+        self._keys = repositories.keys
+
+    async def deactivate_self_service_keys(self, user_id: uuid.UUID) -> None:
+        await self._keys.disable_self_service_owned(str(user_id))

@@ -801,3 +801,11 @@ __all__ = [
     "VerificationPasswordIncorrectError",
     "VerificationTokenInvalidError",
 ]
+
+
+class OAuthAppGrantError(TenancyValidationError):
+    """A refused OAuth app request, rendered with the protocol's error response."""
+
+    def __init__(self, error: str, description: str) -> None:
+        super().__init__(description)
+        self.error, self.description = error, description

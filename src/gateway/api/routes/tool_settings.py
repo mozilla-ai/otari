@@ -66,7 +66,7 @@ from gateway.services.guardrail_catalog import (
     cached_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
     SERVICE_URL_FIELD,
@@ -261,7 +261,7 @@ async def get_tool_settings(
     a session reads everything only while it operates the deployment, and
     otherwise gets the fields without the service endpoints in them.
     """
-    include_urls = session_identity is None or await DeploymentUserService(db).has_administration_access(
+    include_urls = session_identity is None or await DeploymentAdministrationAccess(db).has_administration_access(
         session_identity
     )
     return _current_fields(config, include_urls=include_urls)

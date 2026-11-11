@@ -2,8 +2,9 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.models.identity import (
     MAX_BLOCK_REASON_LENGTH,
@@ -13,6 +14,7 @@ from gateway.models.identity import (
     MailedLinkStatus,
 )
 from gateway.models.tenancy import AVATAR_FACE_COUNT, OrganizationDomainRole
+from gateway.schemas.identity.oauth_apps import OAuthClientId, OAuthRedirectUri, OAuthState, PKCECodeChallenge
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
@@ -399,3 +401,16 @@ __all__ = [
     "SsoSessionPublic",
     "UpdateAvatarRequest",
 ]
+
+
+class AppAuthorizationRequest(BaseModel):
+    """The dashboard records explicit approval for one workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+    client_id: OAuthClientId
+    redirect_uri: OAuthRedirectUri
+    state: OAuthState
+    code_challenge: PKCECodeChallenge
+    code_challenge_method: Literal["S256"]
+    response_type: Literal["code"] = "code"
+    workspace_id: uuid.UUID

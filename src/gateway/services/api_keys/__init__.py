@@ -30,7 +30,7 @@ from gateway.services.api_keys._federation import (
     rule_matches,
     unverified_issuer,
 )
-from gateway.services.api_keys._membership import ApiKeyMembershipListener
+from gateway.services.api_keys._membership import ApiKeyDeactivationListener, ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService, KeySummary
 from gateway.services.api_keys._service_keys import (
@@ -52,6 +52,7 @@ __all__ = [
     "END_USER_SETTINGS",
     "JWT_BEARER_GRANT",
     "AccessTokenClaims",
+    "ApiKeyDeactivationListener",
     "ApiKeyMembershipListener",
     "ApiKeyService",
     "FederatedIdentity",

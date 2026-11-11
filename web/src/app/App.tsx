@@ -101,6 +101,12 @@ export default function App({
  * one decision no route gets to make, and accepting an invitation is one no
  * *session* gets to require.
  */
+const AppAuthorizationPage = lazy(() =>
+  import("@/features/auth/AppAuthorizationPage").then((module) => ({
+    default: module.AppAuthorizationPage,
+  })),
+)
+
 function DeploymentRoot({ hash }: { hash: string }) {
   const { public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
@@ -181,6 +187,13 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // Auth gates the router rather than living inside it: signing in is the one
   // decision no route gets to make. The route table and the shell it renders
   // into are in src/routes, wired up in src/app/router.tsx.
+  if (hash.split("?")[0] === "#/oauth/authorize") {
+    return (
+      <Suspense fallback={<PageLoading label="Loading authorization…" />}>
+        <AppAuthorizationPage key={hash} />
+      </Suspense>
+    )
+  }
   return <SignedInRoot />
 }
 

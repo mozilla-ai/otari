@@ -78,7 +78,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.price_unit import PriceUnit
@@ -289,7 +289,7 @@ class OrganizationPricingService:
             raise OrganizationPricingManagedModelError(model_key)
 
     async def _operates_deployment(self, user: TenancyUser) -> bool:
-        return await DeploymentUserService(self.db).has_administration_access(user)
+        return await DeploymentAdministrationAccess(self.db).has_administration_access(user)
 
     async def _origin_for(self, user: TenancyUser) -> str:
         """The origin a rate ``user`` writes is stored under, which settlement reads back."""

@@ -67,6 +67,7 @@ from gateway.repositories.health_checks import (
     HealthCheckSettingsRepository,
 )
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -111,6 +112,7 @@ from gateway.services.api_keys import (
     API_KEY_VALIDATION_FAILED_DETAIL,
     MASTER_KEY_USER_REQUIRED_DETAIL,
     USER_MISMATCH_DETAIL,
+    ApiKeyDeactivationListener,
     ApiKeyMembershipListener,
     ApiKeyService,
     FederatedTokenVerifier,
@@ -141,7 +143,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, reso
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
-from gateway.services.identity import IdentityService, OIDCConnectionService
+from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -204,7 +206,7 @@ from gateway.services.tenancy import (
     organization_guardrail_runner,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
@@ -819,7 +821,7 @@ async def require_deployment_operator(
     A **header master key** is the deployment credential itself, so it passes; it
     names nobody, and ``get_current_identity`` resolves it to the bootstrap
     operator. A **session** is put to
-    ``DeploymentUserService.has_administration_access``, which `/api/v1/admin`
+    ``DeploymentAdministrationAccess.has_administration_access``, which `/api/v1/admin`
     already treats as the answer to "may this caller act deployment-wide": a
     superuser, or the bootstrap operator whatever its flag says. Reused rather
     than re-derived so the routers guarded here and the account administration
@@ -835,7 +837,9 @@ async def require_deployment_operator(
     of its own, so admitting a non-operator is spelled at a router instead of
     hidden in one route's decorator.
     """
-    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(session_identity):
+    if session_identity is not None and not await DeploymentAdministrationAccess(db).has_administration_access(
+        session_identity
+    ):
         record_auth_failure("not_deployment_operator")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -951,12 +955,12 @@ async def catalog_reader_operates_deployment(
     The question :func:`require_deployment_operator` asks, answered rather than
     enforced, for a catalog read that shows its operator what it withholds from
     everyone else. A session is put to the same
-    ``DeploymentUserService.has_administration_access``. Without one, the caller
+    ``DeploymentAdministrationAccess.has_administration_access``. Without one, the caller
     holds the master key, which operates the deployment, or an API key, which
     does not.
     """
     if session_identity is not None:
-        return await DeploymentUserService(db).has_administration_access(session_identity)
+        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
     _, is_master_key = auth
     return is_master_key
 
@@ -1267,7 +1271,7 @@ async def require_deployment_operator_or_absent(
     passes. Declared on a router rather than per route, for the reason the 403
     gate gives.
     """
-    if not await DeploymentUserService(db).has_administration_access(identity):
+    if not await DeploymentAdministrationAccess(db).has_administration_access(identity):
         record_auth_failure("not_deployment_operator")
         raise DeploymentAdministrationUnavailableError
 
@@ -1470,7 +1474,7 @@ def get_overview_service(
     return OverviewService(
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
-        DeploymentUserService(db),
+        DeploymentAdministrationAccess(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `get_workspace_service` builds.
         WorkspaceService(db, uow=uow, membership_listener=membership_listener),
@@ -1491,12 +1495,26 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
-def get_deployment_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> DeploymentUserService:
-    """Build the request's deployment user service, which answers whether a caller operates the deployment."""
-    return DeploymentUserService(db)
+def get_deployment_user_service(
+    db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep
+) -> DeploymentUserService:
+    """Wire account changes and self-service key deactivation to the request's single transaction."""
+    return DeploymentUserService(db, uow=uow, keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)))
 
 
 DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
+
+
+def get_deployment_administration_access(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeploymentAdministrationAccess:
+    """Read deployment administration authority without constructing mutation collaborators."""
+    return DeploymentAdministrationAccess(db)
+
+
+DeploymentAdministrationAccessDep = Annotated[
+    DeploymentAdministrationAccess, Depends(get_deployment_administration_access)
+]
 
 
 def get_membership_organization_service(
@@ -3004,6 +3022,32 @@ def get_direct_tool_service(
 
 DirectToolServiceDep = Annotated[DirectToolService, Depends(get_direct_tool_service)]
 
+
+def get_oauth_app_service(
+    request: Request,
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
+    workspaces: WorkspaceServiceDep,
+) -> OAuthAppService:
+    """Build app authorization using the external authorization API origin as issuer."""
+    return OAuthAppService(
+        uow,
+        OAuthAppGrantRepository(uow),
+        get_api_key_service(uow),
+        key_format,
+        organizations,
+        workspaces,
+        apps=config.oauth_apps,
+        ui_link=config.ui_link,
+        issuer=str(request.base_url.replace(path="", query="", fragment="")).rstrip("/"),
+    )
+
+
+OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
+
+
 __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
@@ -3072,4 +3116,6 @@ __all__ = [
     "verify_master_key",
     "DirectToolServiceDep",
     "get_direct_tool_service",
+    "OAuthAppServiceDep",
+    "get_oauth_app_service",
 ]
