@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderModel } from "@/client"
@@ -87,6 +88,8 @@ function renderPanel(
     onPageSizeChange?: (size: number) => void
     kind?: KindFilter
     onKindChange?: (kind: KindFilter) => void
+    search?: string
+    onSearchChange?: (search: string) => void
   } = {},
 ) {
   const client = new QueryClient({
@@ -104,6 +107,8 @@ function renderPanel(
         onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
         kind={pager.kind ?? ""}
         onKindChange={pager.onKindChange ?? vi.fn()}
+        search={pager.search ?? ""}
+        onSearchChange={pager.onSearchChange ?? vi.fn()}
       />
     </QueryClientProvider>,
   )
@@ -316,6 +321,86 @@ describe("ProviderModelsPanel", () => {
     expect(
       await screen.findByRole("button", { name: "Image 0" }),
     ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("asks the gateway for the models a search names, and reports what is typed", async () => {
+    const requests = mockApi()
+    const onSearchChange = vi.fn()
+    await renderPanel(true, vi.fn(), { search: "gpt", onSearchChange })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(requests.some((request) => request.url.includes("search=gpt"))).toBe(
+      true,
+    )
+
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+      "-4",
+    )
+    expect(onSearchChange).toHaveBeenLastCalledWith("gpt-4")
+  })
+
+  it("shows an empty table, not an empty catalog, when a search matches nothing", async () => {
+    mockApi({ models: [] })
+    await renderPanel(true, vi.fn(), { search: "nothing" })
+
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("keeps the search box while a cleared search loads every model", async () => {
+    // The search's empty answer stays on screen while the unfiltered list is
+    // on its way, which must not read as an empty catalog.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("search=")
+        ? jsonResponse({ count: 0, data: [], type_counts: {} })
+        : new Promise<Response>(() => {}),
+    )
+    function Harness() {
+      const [search, setSearch] = useState("nothing")
+      return (
+        <ProviderModelsPanel
+          providerKey={KEY}
+          canEdit
+          onEditRate={vi.fn()}
+          page={0}
+          pageSize={25}
+          onPageChange={vi.fn()}
+          onPageSizeChange={vi.fn()}
+          kind=""
+          onKindChange={vi.fn()}
+          search={search}
+          onSearchChange={setSearch}
+        />
+      )
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await renderWithRouter(
+      <QueryClientProvider client={client}>
+        <Harness />
+      </QueryClientProvider>,
+    )
+    await screen.findByText("No models match this search.")
+
+    await userEvent.clear(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+    )
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([input]) => !String(input).includes("search=")),
+      ).toBe(true),
+    )
+
+    expect(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+    ).toHaveFocus()
     expect(screen.queryByText("No models offered yet")).toBeNull()
   })
 
