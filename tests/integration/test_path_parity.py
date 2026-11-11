@@ -41,7 +41,7 @@ from anthropic.types import Message, RawMessageStreamEvent
 from fastapi.testclient import TestClient
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import Response, ResponseStreamEvent
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from gateway.core.config import API_ROOT, MODEL_HEADER, PROVIDER_HEADER, REQUEST_ID_HEADER, GatewayConfig
 
@@ -206,48 +206,35 @@ def _events(text: str) -> list[dict[str, Any]]:
     return payloads
 
 
-def _chat(payload: Any, stream: bool) -> Reported:
-    if not stream:
-        completion = ChatCompletion.model_validate(payload)
-        assert completion.id, "a chat completion has an id"
-        assert completion.created > 0, "a chat completion has a creation time"
-        usage = payload["usage"]
-        return Reported(usage["prompt_tokens"], usage["completion_tokens"], usage.get("cost_usd"))
-    chunks = [ChatCompletionChunk.model_validate(event) for event in payload]
-    ids = {chunk.id for chunk in chunks}
-    assert len(ids) == 1, f"every chunk of one stream carries the same id, got {sorted(ids)}"
-    assert next(iter(ids)), "a chat completion chunk has an id"
-    with_usage = [event for event in payload if event.get("usage")]
-    assert with_usage, "a stream reports its usage"
-    usage = with_usage[-1]["usage"]
+class ProtocolMismatch(AssertionError):
+    """A response that does not have the shape its endpoint's official SDK expects."""
+
+
+def _chat_usage(payload: Any, stream: bool) -> Reported:
+    if stream:
+        with_usage = [event for event in payload if event.get("usage")]
+        assert with_usage, "a stream reports its usage"
+        payload = with_usage[-1]
+    usage = payload["usage"]
     return Reported(usage["prompt_tokens"], usage["completion_tokens"], usage.get("cost_usd"))
 
 
-def _responses(payload: Any, stream: bool) -> Reported:
+def _responses_usage(payload: Any, stream: bool) -> Reported:
     if stream:
-        for event in payload:
-            _STREAM_EVENTS["responses"].validate_python(event)
         completed = [event for event in payload if event.get("type") == "response.completed"]
         assert len(completed) == 1, "a stream ends with one response.completed event"
         payload = completed[0]["response"]
-    response = Response.model_validate(payload)
-    assert response.id, "a response has an id"
     usage = payload["usage"]
     return Reported(usage["input_tokens"], usage["output_tokens"], usage.get("cost_usd"))
 
 
-def _messages(payload: Any, stream: bool) -> Reported:
+def _messages_usage(payload: Any, stream: bool) -> Reported:
     if not stream:
-        message = Message.model_validate(payload)
-        assert message.id, "a message has an id"
         usage = payload["usage"]
         return Reported(usage["input_tokens"], usage["output_tokens"], usage.get("cost_usd"))
-    for event in payload:
-        _STREAM_EVENTS["messages"].validate_python(event)
     start = [event for event in payload if event.get("type") == "message_start"]
     deltas = [event for event in payload if event.get("type") == "message_delta"]
     assert len(start) == 1, "a stream opens with one message_start event"
-    assert start[0]["message"]["id"], "a message has an id"
     assert deltas, "a stream reports its final usage on a message_delta event"
     # message_delta usage is cumulative; input_tokens there, when present, supersedes message_start's.
     final = deltas[-1]["usage"]
@@ -255,11 +242,56 @@ def _messages(payload: Any, stream: bool) -> Reported:
     return Reported(input_tokens, final["output_tokens"], final.get("cost_usd"))
 
 
-_READERS: dict[str, Callable[[Any, bool], Reported]] = {
-    "chat/completions": _chat,
-    "responses": _responses,
-    "messages": _messages,
+def _check_chat(payload: Any, stream: bool) -> None:
+    if not stream:
+        completion = ChatCompletion.model_validate(payload)
+        if not completion.id or completion.created <= 0:
+            raise ProtocolMismatch(f"a chat completion has an id and a creation time, got {completion.id!r}")
+        return
+    ids = {ChatCompletionChunk.model_validate(event).id for event in payload}
+    if len(ids) != 1 or not next(iter(ids)):
+        raise ProtocolMismatch(f"every chunk of one stream carries the same id, got {sorted(ids)}")
+
+
+def _check_responses(payload: Any, stream: bool) -> None:
+    if stream:
+        for event in payload:
+            _STREAM_EVENTS["responses"].validate_python(event)
+        payload = next(event for event in payload if event.get("type") == "response.completed")["response"]
+    if not Response.model_validate(payload).id:
+        raise ProtocolMismatch("a response has an id")
+
+
+def _check_messages(payload: Any, stream: bool) -> None:
+    if not stream:
+        if not Message.model_validate(payload).id:
+            raise ProtocolMismatch("a message has an id")
+        return
+    for event in payload:
+        _STREAM_EVENTS["messages"].validate_python(event)
+    start = next(event for event in payload if event.get("type") == "message_start")
+    if not start["message"]["id"]:
+        raise ProtocolMismatch("a message has an id")
+
+
+_USAGE_READERS: dict[str, Callable[[Any, bool], Reported]] = {
+    "chat/completions": _chat_usage,
+    "responses": _responses_usage,
+    "messages": _messages_usage,
 }
+_PROTOCOL_CHECKS: dict[str, Callable[[Any, bool], None]] = {
+    "chat/completions": _check_chat,
+    "responses": _check_responses,
+    "messages": _check_messages,
+}
+
+
+def _check_protocol(endpoint: str, payload: Any, stream: bool) -> None:
+    """Raise ``ProtocolMismatch`` where the response is not what the endpoint's official SDK expects."""
+    try:
+        _PROTOCOL_CHECKS[endpoint](payload, stream)
+    except ValidationError as exc:
+        raise ProtocolMismatch(str(exc)) from exc
 
 
 def _settlement(client: TestClient, request_id: str, headers: dict[str, str]) -> dict[str, Any]:
@@ -274,9 +306,10 @@ def _settlement(client: TestClient, request_id: str, headers: dict[str, str]) ->
         time.sleep(0.1)
 
 
-# Paths that fail today, keyed by (endpoint, stream, tools). Strict on the
-# scripted provider, so a fix fails the run until its entry is removed; a live
-# model may skip the tool, so there a pass is allowed.
+# Protocol mismatches that happen today, keyed by (endpoint, stream, tools). Only
+# a ProtocolMismatch counts as the expected failure, checked after the accounting.
+# Strict on the scripted provider, so a fix fails the run until its entry is
+# removed; a live provider may not reproduce one, so there a pass is allowed.
 _KNOWN_GAPS: dict[tuple[str, bool, bool], str] = {
     ("chat/completions", True, True): (
         "a streamed tool loop passes each round's provider id through, so one stream carries two ids"
@@ -304,7 +337,7 @@ def test_every_path_reports_and_settles_the_same_request_alike(
     tools: bool,
 ) -> None:
     if gap := _KNOWN_GAPS.get((endpoint, stream, tools)):
-        request.applymarker(pytest.mark.xfail(strict=not backend.live, reason=gap))
+        request.applymarker(pytest.mark.xfail(strict=not backend.live, raises=ProtocolMismatch, reason=gap))
 
     response = client.post(
         f"{API_ROOT}/{endpoint}",
@@ -313,17 +346,20 @@ def test_every_path_reports_and_settles_the_same_request_alike(
     )
 
     assert response.status_code == 200, response.text
-    if not backend.live:
+    if backend.live:
+        assert provider.rounds, "the request reached the provider"
+        if tools and len(provider.rounds) < 2:
+            pytest.skip("the live model answered without searching, so no tool loop ran")
+    else:
         rounds = 2 if tools else 1
         assert len(provider.rounds) == rounds, f"expected {rounds} model rounds, the provider saw {provider.requests}"
-    assert provider.rounds, "the request reached the provider"
     request_id = response.headers.get(REQUEST_ID_HEADER)
     assert request_id, "the response names its request"
     assert response.headers.get(PROVIDER_HEADER) == PROVIDER, "the response names the provider that served it"
     assert response.headers.get(MODEL_HEADER) == backend.model, "the response names the model that served it"
 
     payload = _events(response.text) if stream else response.json()
-    reported = _READERS[endpoint](payload, stream)
+    reported = _USAGE_READERS[endpoint](payload, stream)
     expected_input, expected_output = provider.usage()
     assert (reported.input_tokens, reported.output_tokens) == (expected_input, expected_output), (
         f"the response reports every round's tokens, summed: the provider reported {provider.rounds}"
@@ -340,3 +376,5 @@ def test_every_path_reports_and_settles_the_same_request_alike(
     )
     assert settled["cost_usd"] is not None
     assert Decimal(settled["cost_usd"]) == Decimal(reported.cost_usd), "the request settles at the cost it reported"
+
+    _check_protocol(endpoint, payload, stream)
