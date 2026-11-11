@@ -11832,9 +11832,11 @@ export interface components {
         };
         /**
          * DisabledReason
-         * @description Represents the reason an API key cannot be enabled by its owner.
+         * @description Represents the reason an API key cannot be enabled.
          *
-         *     A key with no reason set can be enabled by its owner.
+         *     Every reason blocks the key's owner. Some also block an operator, which
+         *     ``operator_may_clear`` records. A key with no reason set can be enabled by
+         *     its owner.
          * @enum {string}
          */
         DisabledReason: "operator" | "revoked";
@@ -13952,6 +13954,8 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /** Operator Can Enable */
+            operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */

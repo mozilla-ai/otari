@@ -919,6 +919,7 @@ describe("KeysPage", () => {
           key_name: "revoked",
           is_active: false,
           disabled_reason: "revoked",
+          operator_can_enable: false,
         }),
       ],
     })
@@ -932,6 +933,34 @@ describe("KeysPage", () => {
     const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
     expect(enable).toHaveAttribute("aria-disabled", "true")
     expect(within(enable).getByText("Revoked permanently")).toBeInTheDocument()
+  })
+
+  it("keeps an operator out of a reason the server says they cannot clear", async () => {
+    // The page follows operator_can_enable, not the reason, so a reason added
+    // to the server's vocabulary stays locked here rather than enabled.
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "held",
+          is_active: false,
+          disabled_reason: "operator",
+          operator_can_enable: false,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("held")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for held" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).toHaveAttribute("aria-disabled", "true")
+    expect(
+      within(enable).getByText("Cannot be enabled again"),
+    ).toBeInTheDocument()
   })
 
   it("offers a viewer their keys to read and nothing that changes one", async () => {

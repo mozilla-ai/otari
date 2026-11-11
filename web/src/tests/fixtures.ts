@@ -505,6 +505,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     expires_at: null,
     is_active: true,
     disabled_reason: null,
+    operator_can_enable: true,
     allowed_models: null,
     allowed_tools: null,
     exclude_from_budget: false,

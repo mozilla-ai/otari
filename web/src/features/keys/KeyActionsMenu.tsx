@@ -17,10 +17,14 @@ import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { keyFingerprint } from "./secretCaption"
 
 /** The hint shown when the viewer cannot enable this key. */
-function cannotEnableHint(reason: ApiKeyDisabledReason): string {
-  return reason === "revoked"
-    ? "Revoked permanently"
-    : "Only an operator can enable it"
+function cannotEnableHint(
+  reason: ApiKeyDisabledReason,
+  operatorCanEnable: boolean,
+): string {
+  if (reason === "revoked") return "Revoked permanently"
+  return operatorCanEnable
+    ? "Only an operator can enable it"
+    : "Cannot be enabled again"
 }
 
 export function KeyActionsMenu({
@@ -94,7 +98,7 @@ export function KeyActionsMenu({
       hint: apiKey.is_active
         ? "Callers get 401"
         : cannotEnable
-          ? cannotEnableHint(cannotEnable)
+          ? cannotEnableHint(cannotEnable, apiKey.operator_can_enable)
           : "Allow requests",
       icon: apiKey.is_active ? FiPause : FiPlay,
       isDisabled: isPending || (!apiKey.is_active && Boolean(cannotEnable)),
