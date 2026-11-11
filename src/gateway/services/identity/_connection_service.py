@@ -17,6 +17,7 @@ from gateway.exceptions.identity_exceptions import (
     OIDCDiscoveryError,
     SsoBreakGlassRequiredError,
     SsoBreakGlassRouteRequiredError,
+    SsoNotAddressableError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
@@ -35,6 +36,7 @@ from gateway.schemas.identity import (
     OrganizationSsoEnforcementPublic,
     OrganizationSsoPreflightMemberPublic,
     OrganizationSsoPreflightPublic,
+    OrganizationSsoPublic,
 )
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
@@ -103,6 +105,7 @@ class OIDCConnectionService:
         allow_private_hosts: bool,
         passkey_rp_id: str | None,
         offered_providers: frozenset[str],
+        sso_redirect_uri: str | None,
     ) -> None:
         self._uow = uow
         self._repositories = repositories
@@ -121,6 +124,8 @@ class OIDCConnectionService:
         self._allow_private_hosts = allow_private_hosts
         self._passkey_rp_id = passkey_rp_id
         self._offered_providers = offered_providers
+        # This is None where the deployment has no public address of its own.
+        self._sso_redirect_uri = sso_redirect_uri
 
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
@@ -134,8 +139,18 @@ class OIDCConnectionService:
 
     async def get_for_user(self, *, user: User) -> OIDCConnectionPublic | None:
         """Return the caller's organization's connection, or None. Owners and admins only."""
-        organization = await self._managed_organization(user)
+        return await self._connection_for(await self._managed_organization(user))
 
+    async def settings_for_user(self, *, user: User) -> OrganizationSsoPublic:
+        """Return the caller's organization's sign-in connection settings. Owners and admins only."""
+        organization = await self._managed_organization(user)
+        return OrganizationSsoPublic(
+            redirect_uri=self._sso_redirect_uri,
+            connection=await self._connection_for(organization),
+            enforcement=self._enforcement_of(organization),
+        )
+
+    async def _connection_for(self, organization: Organization) -> OIDCConnectionPublic | None:
         async with self._uow:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
@@ -371,7 +386,7 @@ class OIDCConnectionService:
         return connection if connection is not None and connection.enabled else None
 
     async def start_sign_in(
-        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
+        self, connection: OIDCConnection, metadata: DiscoveredProvider
     ) -> BrowserBoundAuthorization:
         """Mint an authorization URL for ``connection``'s own provider, and stage the pending state.
 
@@ -379,19 +394,18 @@ class OIDCConnectionService:
             SsoNotAddressableError: This deployment has no address a provider may send a browser
                 back to.
         """
+        redirect_uri = self._registered_redirect_uri()
         async with self._uow:
             client = client_for(
                 connection,
                 metadata,
                 pending=self._sign_in_states,
                 redirect_uri=redirect_uri,
-                allow_private_hosts=allow_private_hosts,
+                allow_private_hosts=self._allow_private_hosts,
             )
             return await client.get_authorization_url(redirect_uri=redirect_uri)
 
-    async def client_for_sign_in(
-        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
-    ) -> StoredStateClient:
+    async def client_for_sign_in(self, connection: OIDCConnection, metadata: DiscoveredProvider) -> StoredStateClient:
         """Build the client ``connection``'s own provider signs in through.
 
         Raises:
@@ -403,9 +417,14 @@ class OIDCConnectionService:
                 connection,
                 metadata,
                 pending=self._sign_in_states,
-                redirect_uri=redirect_uri,
-                allow_private_hosts=allow_private_hosts,
+                redirect_uri=self._registered_redirect_uri(),
+                allow_private_hosts=self._allow_private_hosts,
             )
+
+    def _registered_redirect_uri(self) -> str:
+        if self._sso_redirect_uri is None:
+            raise SsoNotAddressableError
+        return self._sso_redirect_uri
 
     async def record_first_sign_in(self, connection: OIDCConnection) -> None:
         """Record that a sign-in through ``connection`` succeeded.
@@ -421,9 +440,8 @@ class OIDCConnectionService:
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
 
-    async def get_enforcement_for_user(self, *, user: User) -> OrganizationSsoEnforcementPublic:
-        """Return the caller's organization's current sign-in enforcement. Owners and admins only."""
-        organization = await self._managed_organization(user)
+    @staticmethod
+    def _enforcement_of(organization: Organization) -> OrganizationSsoEnforcementPublic:
         return OrganizationSsoEnforcementPublic(
             required=organization.sso_required,
             break_glass_user_id=organization.sso_break_glass_user_id,

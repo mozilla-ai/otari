@@ -15,20 +15,19 @@ issuer for it would make the check trivially true.
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, HTTPException, Request, Response, status
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
     IdentityServiceDep,
     MaintenanceModeDep,
     OIDCConnectionServiceDep,
-    get_config,
     record_auth_failure,
 )
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import (
@@ -54,7 +53,6 @@ from gateway.services.oauth_service import (
     apply_flow_cookie,
     browser_token_for,
     drop_finished_flow,
-    sso_redirect_uri,
 )
 from gateway.services.tenancy import report_new_account
 
@@ -89,7 +87,6 @@ async def authorize_sso(
     slug: str,
     request: Request,
     response: Response,
-    config: Annotated[GatewayConfig, Depends(get_config)],
     connections: OIDCConnectionServiceDep,
     flow_cookie: SsoFlowCookie = None,
 ) -> SsoAuthorizeResponse:
@@ -107,12 +104,7 @@ async def authorize_sso(
         raise OIDCSignInUnavailableError
     metadata = await connections.metadata_for_sign_in(connection)
     try:
-        bound = await connections.start_sign_in(
-            connection,
-            metadata,
-            redirect_uri=sso_redirect_uri(config),
-            allow_private_hosts=config.oidc_allow_private_hosts,
-        )
+        bound = await connections.start_sign_in(connection, metadata)
     except DATABASE_ERRORS as exc:
         raise database_error("record a pending SSO sign-in", exc) from None
     apply_flow_cookie(
@@ -136,7 +128,6 @@ async def callback_sso(
     growth: GrowthSignalPortDep,
     background_tasks: BackgroundTasks,
     maintenance_mode: MaintenanceModeDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
     flow_cookie: SsoFlowCookie = None,
 ) -> SsoSessionPublic:
     """Exchange an authorization code and set the HttpOnly session cookie.
@@ -160,12 +151,7 @@ async def callback_sso(
         raise OAuthStateError
     try:
         metadata = await connections.metadata_for_sign_in(connection)
-        client = await connections.client_for_sign_in(
-            connection,
-            metadata,
-            redirect_uri=sso_redirect_uri(config),
-            allow_private_hosts=config.oidc_allow_private_hosts,
-        )
+        client = await connections.client_for_sign_in(connection, metadata)
         external = await exchange_sso_code(
             client,
             code=body.code,

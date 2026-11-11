@@ -184,14 +184,6 @@ def redirect_uri(config: GatewayConfig, provider: str) -> str:
     return f"{base_url(config)}/auth/{provider}/callback"
 
 
-def sso_redirect_uri(config: GatewayConfig) -> str:
-    """The one callback every organization's own OIDC connection registers and is sent back to.
-
-    The connection a callback belongs to is resolved from its pending ``state``, never from the path.
-    """
-    return redirect_uri(config, "sso")
-
-
 def base_url(config: GatewayConfig) -> str:
     """This deployment's own address with no trailing slash, or an empty string.
 
@@ -664,7 +656,6 @@ __all__ = [
     "provider_refused_the_code",
     "redirect_uri",
     "require_configured",
-    "sso_redirect_uri",
     "state_hash",
     "trusts_email_claim",
 ]

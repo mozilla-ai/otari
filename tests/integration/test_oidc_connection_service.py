@@ -136,6 +136,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         # The providers a configured deployment offers, because a link at one nobody configured is
         # not a way in and an empty set here would hide that rule rather than exercise it.
         offered_providers=frozenset(OAUTH_PROVIDERS),
+        sso_redirect_uri="https://otari.test/auth/sso/callback",
     )
 
 
@@ -650,6 +651,7 @@ _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object
     "get_for_user": lambda service, user: service.get_for_user(user=user),
     "save_for_user": lambda service, user: service.save_for_user(user=user, request=_request()),
     "set_enabled_for_user": lambda service, user: service.set_enabled_for_user(user=user, enabled=False),
+    "settings_for_user": lambda service, user: service.settings_for_user(user=user),
     "test_for_user": lambda service, user: service.test_for_user(user=user),
 }
 
@@ -898,9 +900,7 @@ async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
         discovered_at=datetime.now(UTC),
     )
 
-    client = await service.client_for_sign_in(
-        stored, metadata, redirect_uri="https://otari.example.com/auth/sso/callback", allow_private_hosts=False
-    )
+    client = await service.client_for_sign_in(stored, metadata)
 
     # Reached the way apron-auth reaches it during the exchange, outside every block this service
     # opened. None is the answer for a state nothing minted; the point is that it answers.
