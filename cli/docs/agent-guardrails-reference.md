@@ -129,8 +129,8 @@ Every gate declares a non-empty `runs` list. Each entry is `<event>.<evidence>`:
 | `pre_tool_use.edit_target` | before a tool call | the path an `Edit`/`Write`/`NotebookEdit` (or Codex `apply_patch`) call names in its own `tool_input` | yes, the write never happens | no: a `Bash` call declares no path, so every shell write is invisible |
 | `pre_tool_use.read_target` | before a tool call | the path a `Read` call names in its own `tool_input` | yes, the contents never enter the transcript | no: a shell read (`cat`, `less`) is invisible, and nothing catches it later |
 | `pre_tool_use.command` | before a tool call | the literal text of a `Bash` command | yes, the command never runs | no: it cannot see inside a script the command invokes |
-| `stop.working_tree` | after the turn | every path `git status --porcelain` reports | no, the file already changed | yes, over the tree, whatever wrote it |
-| `stop.session` | after the turn | the working tree plus the session's own transcript | no | yes |
+| `stop.working_tree` | after the turn | paths in the selected branch change range plus the current working tree, including non-ignored untracked files | no, the file already changed | yes, over the change range and tree, whatever wrote it |
+| `stop.session` | after the turn | Stop change paths plus the session's own transcript | no | yes |
 | `stop.verifier` | after the turn | a repo-local verifier script's exit code | no | whatever the script checks |
 
 No entry sees a path a shell command is about to touch: before the command runs there is only its text. A `path` gate catches `echo x >> CHANGELOG.md` at `stop.working_tree`, after the file changed, and a shell read at no moment at all. The guide explains the consequences under [Why a write rule names both moments](agent-guardrails.md#why-a-write-rule-names-both-moments).
@@ -276,7 +276,7 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `rubric` | yes | Free text describing what to check. |
-| `when_changed` | no | Globs, in the `path` grammar. When given, the gate applies only to a session that changed a matching path, and otherwise resolves `not_applicable` without a model call. Omitted, it always applies. |
+| `when_changed` | no | Globs, in the `path` grammar. When given, the gate applies only when a matching path is in Stop's selected branch change range or current working tree; otherwise it resolves `not_applicable` without a model call. Omitted, it always applies. |
 | `judge_cli` | no | A string or ordered list of CLIs that may make this gate's call: `claude`, `codex`. See [Choosing a judge CLI](#choosing-a-judge-cli). |
 | `priority` | no | Integer, default `0`. |
 
@@ -294,7 +294,9 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
 
 **The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. The call is billed to whatever account that CLI is signed into, not through Otari. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing.
 
-**The diff** is `git diff HEAD` plus every untracked file the ignore rules do not exclude, each appended as a `new file` hunk. Bytes that are not valid UTF-8 are replaced.
+**The diff** covers Stop's selected committed change range plus the current working-tree changes. Every non-ignored untracked file is appended as a `new file` hunk. Bytes that are not valid UTF-8 are replaced. Since the selected branch range can keep a committed path in scope across Stop events, a matching judge gate can run and incur a model call again on a later event.
+
+The hook prefers the configured upstream's merge base when it is ahead of the default branch's merge base; otherwise it uses the default branch's merge base. If neither branch can be resolved, it uses `HEAD`, which leaves only working-tree changes in scope. This keeps default-branch commits added after a rebase out of the judged range.
 
 | Limit | Value |
 | --- | --- |
@@ -308,7 +310,7 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
 | Total time for every judge call and retry in one event | 480 seconds |
 
 - A binary untracked file is named with its content omitted. A symlink is rendered as its link text, and its target is never opened. A file that cannot be read is named with its content omitted.
-- When the untracked files cannot be listed, or `git diff HEAD` fails (no `HEAD` yet, a timeout, no `git`), the gate reports `error` without a model call.
+- When untracked files cannot be listed, or collecting the selected diff fails (for example, no `HEAD`, a timeout, or no `git`), the gate reports `error` without a model call.
 - A gate past the cap resolves `not_run`, and its line in `systemMessage` names the cap and how to raise it. `otari hook` given an invalid cap runs the default and says so in `systemMessage`; `validate` and `check` refuse it.
 - A gate whose turn comes after the 480-second budget is spent reports `error` without a call. The budget stays under Claude Code's default 600-second command-hook timeout. Raising the cap does not raise the budget, so with slow judges a high cap leaves the last gates reporting `error`.
 - To raise the cap for one repository, set `OTARI_HOOK_MAX_JUDGES` in the environment the harness runs the hook in, such as the `env` block of the repository's `.claude/settings.json`.
@@ -343,7 +345,7 @@ A gate whose verdict comes from a script's exit status. Runs on `Stop` only. Unl
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `verifier` | yes | Path to an executable script: repo-relative in a repository's file, home-relative in a file under `~/.otari/`. Absolute paths are rejected. |
-| `when_changed` | no | Globs, in the `path` grammar. When given, the gate applies only to a session that changed a matching path, and otherwise resolves `not_applicable` without running the script. |
+| `when_changed` | no | Globs, in the `path` grammar. When given, the gate applies only when a matching path is in Stop's selected branch change range or current working tree; otherwise it resolves `not_applicable` without running the script. |
 | `priority` | no | Integer, default `0`. |
 
 ```yaml
@@ -390,7 +392,7 @@ A gate resolves against the evidence its moment produced.
 
 | Evidence | What it is |
 | --- | --- |
-| paths | Repo-relative paths this moment puts in scope: the single target a tool call is about to write or read, or what `git status` reported changed, together with which of those moments it was. |
+| paths | Repo-relative paths this moment puts in scope: the single target a tool call is about to write or read, or Stop's selected branch change range and current working-tree paths, together with which moment supplied them. |
 | commands | Shell commands observed running, or about to run. Its scope is either `call` (the single tool call about to run) or `session` (every command the session has run so far). `command` gates judge only `call` scope, `command_if_changed` only `session` scope. |
 | judge verdicts | One `pass`, `fail` or `error` per `judge` gate, from the model call `otari hook` made for it. A gate past the judge gate cap gets `not_run` instead, and no model call. |
 | verifier verdicts | One `pass`, `fail` or `error` per `verifier` gate, from the script's exit status: 0, 1, and anything else respectively. |
@@ -429,7 +431,7 @@ A deterministic gate written `advisory` uses `systemMessage` alone.
 
 **On `Stop`**, `otari hook` collects two kinds of evidence itself, because Claude Code's Stop payload carries neither directly:
 
-- Changed paths, from `git status --porcelain`, which covers anything a `Bash` call wrote.
+- Changed paths, from the selected branch change range plus `git status --porcelain`, which covers committed changes and anything a `Bash` call wrote in the current working tree; non-ignored untracked paths are included.
 - Commands, in `session` scope, from the session transcript at `transcript_path`: every `Bash` tool call (`message.content[]` blocks with `type: "tool_use"` and `name: "Bash"`), skipping records marked `isSidechain: true` (a subagent's turn). A command that ran before the session's last `Edit`/`Write`/`NotebookEdit` call is dropped, so a command must have run after the final edit to satisfy `command_if_changed`. A `Bash` call does not move that cutoff, even one that wrote to the tree, since the required command is often the writer itself. If the transcript cannot be read, no command evidence is collected (not an empty list), and a gate that needs it resolves `unknown`.
 
 `command` gates do not evaluate against the session list. A forbidden command is judged at the `PreToolUse` call about to run it, and `otari hook setup` puts `Bash` in the matcher whenever the guardrail has a `command` gate.
@@ -500,7 +502,7 @@ A deterministic gate written `advisory` uses `systemMessage` alone.
 - `apply_patch` carries no `file_path`: the patch arrives as `tool_input.command`, and the paths it touches (one call can touch several) are read from its `*** Add/Update/Delete File: <path>` header lines.
 - The shell tool dispatches as `Bash`.
 - Codex's **Code Mode** wraps any number of shell and `apply_patch` calls in one JS snippet under a tool named `code_mode_exec`, for which Codex's docs give `exec` as a matcher alias; the matcher names both. That snippet is checked as one command, so a `command` gate finds a forbidden phrase anywhere in it.
-- Code Mode does not dispatch `PreToolUse` for the shell and `apply_patch` calls it wraps (openai/codex#23411, open upstream), so a session running through Code Mode is checked at `Stop` only: by `git status` and by a scan of Codex's rollout JSONL transcript.
+- Code Mode does not dispatch `PreToolUse` for the shell and `apply_patch` calls it wraps (openai/codex#23411, open upstream), so a session running through Code Mode is checked at `Stop` only: by the selected branch change range and current working tree, plus a scan of Codex's rollout JSONL transcript.
 - Codex has no read tool, so `pre_tool_use.read_target` is never collected.
 
 ## Command-line reference
@@ -591,7 +593,7 @@ A **warning** is a gate that parses, runs, and may not mean what its author inte
 
 #### Dry-run output
 
-`--command` and `--path` are each evaluated at every moment a real session would offer them, with the evidence `otari hook` collects there: one `PreToolUse` block per command or path, then one `Stop` block with all of them together. A path is spelled the way each moment spells it, which differs only for a symlink: a `PreToolUse` edit target is resolved, while a `Stop` path is the tracked name `git status` reports. A repository reached through a directory symlink (every macOS temp path) is normalized without following the file's own link.
+`--command` and `--path` are each evaluated at every moment a real session would offer them, with the evidence `otari hook` collects there: one `PreToolUse` block per command or path, then one `Stop` block with all of them together. A path is spelled the way each moment spells it, which differs only for a symlink: a `PreToolUse` edit target is resolved, while a `Stop` path uses its repository-relative name from the selected change range or working-tree status. A repository reached through a directory symlink (every macOS temp path) is normalized without following the file's own link.
 
 | Label | Meaning |
 | --- | --- |
