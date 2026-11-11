@@ -144,9 +144,18 @@ class OIDCConnectionService:
     async def settings_for_user(self, *, user: User) -> OrganizationSsoPublic:
         """Return the caller's organization's sign-in connection settings. Owners and admins only."""
         organization = await self._managed_organization(user)
+        return self._settings(organization, await self._connection_for(organization))
+
+    def _settings(self, organization: Organization, connection: OIDCConnectionPublic | None) -> OrganizationSsoPublic:
+        """Assemble the settings answer.
+
+        NOTE: Enforcement is reported as of the organization the request resolved. Only
+        ``set_sso_enforcement_for_user`` writes it, and every decision taken on it is re-read
+        under ``lock_settings``.
+        """
         return OrganizationSsoPublic(
             redirect_uri=self._sso_redirect_uri,
-            connection=await self._connection_for(organization),
+            connection=connection,
             enforcement=self._enforcement_of(organization),
         )
 
@@ -158,8 +167,11 @@ class OIDCConnectionService:
             domains = await self._domains.for_organization(organization.id)
             return self._to_public(connection, domains)
 
-    async def save_for_user(self, *, user: User, request: OIDCConnectionRequest) -> OIDCConnectionPublic:
+    async def save_for_user(self, *, user: User, request: OIDCConnectionRequest) -> OrganizationSsoPublic:
         """Discover the submitted issuer and store the caller's organization's connection. Owners and admins only.
+
+        Answers with the organization's whole settings, as every method that changes the connection
+        does, so a caller needs no second read to show the result.
 
         Discovery runs before any write, and only a successful discovery opens the transaction that
         stores it, so a refused issuer leaves an existing connection, its document, and its secret
@@ -208,9 +220,11 @@ class OIDCConnectionService:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.for_organization(organization.id)
             await self._revoke_blocked_sessions(organization, connection)
-            return self._to_public(connection, domains)
+            stored = self._to_public(connection, domains)
 
-    async def set_enabled_for_user(self, *, user: User, enabled: bool) -> OIDCConnectionPublic:
+        return self._settings(organization, stored)
+
+    async def set_enabled_for_user(self, *, user: User, enabled: bool) -> OrganizationSsoPublic:
         """Pause or resume sign-in through the caller's organization's connection. Owners and admins only.
 
         Needs no credential and reaches no provider, so a connection can be paused while its
@@ -236,9 +250,11 @@ class OIDCConnectionService:
             connection.enabled = enabled
             self._connections.stage(connection)
             domains = await self._domains.for_organization(organization.id)
-            return self._to_public(connection, domains)
+            stored = self._to_public(connection, domains)
 
-    async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
+        return self._settings(organization, stored)
+
+    async def test_for_user(self, *, user: User) -> OrganizationSsoPublic:
         """Re-discover the caller's organization's own issuer and store the result. Owners and admins only.
 
         Raises:
@@ -272,7 +288,9 @@ class OIDCConnectionService:
             current.discovered_at = discovered.discovered_at
             self._connections.stage(current)
             domains = await self._domains.for_organization(organization.id)
-            return self._to_public(current, domains)
+            stored = self._to_public(current, domains)
+
+        return self._settings(organization, stored)
 
     async def delete_for_user(self, *, user: User) -> None:
         """Remove the caller's organization's connection. Owners and admins only.

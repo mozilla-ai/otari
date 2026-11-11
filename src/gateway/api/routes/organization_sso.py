@@ -54,8 +54,7 @@ async def put_organization_sso(
     Owners and admins only. Replaces any existing connection. The client secret is
     encrypted at rest and never served back.
     """
-    await connections.save_for_user(user=identity, request=request)
-    return await connections.settings_for_user(user=identity)
+    return await connections.save_for_user(user=identity, request=request)
 
 
 @router.patch("")
@@ -71,8 +70,7 @@ async def patch_organization_sso(
     409 when pausing a connection the organization still requires sign-in through: stop requiring
     it first.
     """
-    await connections.set_enabled_for_user(user=identity, enabled=request.enabled)
-    return await connections.settings_for_user(user=identity)
+    return await connections.set_enabled_for_user(user=identity, enabled=request.enabled)
 
 
 @router.post("/test")
@@ -84,8 +82,7 @@ async def test_organization_sso(
 
     Refused with 404 when the organization has not saved a connection yet.
     """
-    await connections.test_for_user(user=identity)
-    return await connections.settings_for_user(user=identity)
+    return await connections.test_for_user(user=identity)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)

@@ -32,7 +32,7 @@ from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, DashboardSession, Organization, User
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
-from gateway.schemas.identity import OIDCConnectionRequest
+from gateway.schemas.identity import OIDCConnectionPublic, OIDCConnectionRequest, OrganizationSsoPublic
 from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity import OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
@@ -228,6 +228,12 @@ async def _live_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
     return len(result.scalars().all())
 
 
+def _connection_of(settings: OrganizationSsoPublic) -> OIDCConnectionPublic:
+    """The connection a settings answer carries, asserted present as a successful write leaves it."""
+    assert settings.connection is not None
+    return settings.connection
+
+
 def _request(**overrides: Any) -> OIDCConnectionRequest:
     fields: dict[str, Any] = {
         "issuer": _ISSUER,
@@ -258,7 +264,7 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     document = _document(resolved_issuer)
     _stub_discovery(monkeypatch, resolved_issuer=resolved_issuer, document=document)
 
-    public = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    public = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
 
     assert public.resolved_issuer == resolved_issuer
 
@@ -276,7 +282,9 @@ async def test_a_save_cannot_pause_a_connection(async_db: AsyncSession, monkeypa
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
     await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
 
-    saved = await _connection_service(async_db).save_for_user(user=admin, request=_request(display_name="Renamed IdP"))
+    saved = _connection_of(
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(display_name="Renamed IdP"))
+    )
 
     assert saved.enabled is False
     assert saved.display_name == "Renamed IdP"
@@ -292,8 +300,10 @@ async def test_save_encrypts_the_client_secret_and_returns_only_last4(
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(client_secret="s3cr3t-client-value")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(client_secret="s3cr3t-client-value")
+        )
     )
 
     assert public.client_secret_last4 == "alue"
@@ -369,7 +379,7 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
-    first = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    first = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
 
     replacement_issuer = "https://idp.acme.example"
     replacement_document = _document(replacement_issuer)
@@ -381,15 +391,17 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
         discovered_at=replacement_discovered_at,
     )
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin,
-        request=_request(
-            issuer=replacement_issuer,
-            client_id="a-replacement-client-id",
-            client_secret="replacement-secret-9999",
-            display_name="Renamed IdP",
-            default_role="viewer",
-        ),
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin,
+            request=_request(
+                issuer=replacement_issuer,
+                client_id="a-replacement-client-id",
+                client_secret="replacement-secret-9999",
+                display_name="Renamed IdP",
+                default_role="viewer",
+            ),
+        )
     )
 
     assert public.id == first.id
@@ -416,8 +428,10 @@ async def test_an_edit_that_leaves_the_secret_out_keeps_the_stored_one(
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(client_secret=None, display_name="Renamed IdP")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(client_secret=None, display_name="Renamed IdP")
+        )
     )
 
     assert public.display_name == "Renamed IdP"
@@ -542,8 +556,10 @@ async def test_a_first_save_that_loses_the_race_takes_over_the_row_that_won(
 
     monkeypatch.setattr(OIDCConnectionRepository, "add", _add_after_a_concurrent_save)
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(display_name="The IdP that asked second")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(display_name="The IdP that asked second")
+        )
     )
 
     assert public.display_name == "The IdP that asked second"
@@ -569,7 +585,7 @@ async def test_pausing_writes_the_one_field_and_reads_no_provider(
     calls: list[str] = []
     _stub_refused_discovery(monkeypatch, calls=calls)
 
-    paused = await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+    paused = _connection_of(await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False))
 
     assert paused.enabled is False
     assert calls == []
@@ -588,7 +604,7 @@ async def test_resuming_admits_sign_in_again(async_db: AsyncSession, monkeypatch
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
     await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
 
-    resumed = await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=True)
+    resumed = _connection_of(await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=True))
 
     assert resumed.enabled is True
     stored = await _stored(async_db, organization.id)
@@ -625,7 +641,7 @@ async def test_a_first_connection_admits_sign_in(async_db: AsyncSession, monkeyp
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
 
-    saved = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    saved = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
 
     assert saved.enabled is True
     stored = await _stored(async_db, organization.id)
@@ -772,7 +788,7 @@ async def test_test_for_user_rediscovers_and_stores(async_db: AsyncSession, monk
     refreshed_document["token_url"] = f"{_ISSUER}/token-v2"
     _stub_discovery(monkeypatch, document=refreshed_document)
 
-    public = await _connection_service(async_db).test_for_user(user=admin)
+    public = _connection_of(await _connection_service(async_db).test_for_user(user=admin))
 
     assert public.resolved_issuer == _ISSUER
     stored = await _stored(async_db, organization.id)
@@ -905,7 +921,7 @@ async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
     service = _connection_service(async_db)
-    public = await service.save_for_user(user=admin, request=_request())
+    public = _connection_of(await service.save_for_user(user=admin, request=_request()))
     stored = await _stored(async_db, organization.id)
     assert stored is not None
     metadata = DiscoveredProvider(
