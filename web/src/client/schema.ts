@@ -19021,8 +19021,8 @@ export interface components {
          *     The example is the first-boot claim, because that is the call an operator
          *     makes first and the one whose required fields are not obvious from the
          *     schema: ``email`` is optional here in general and *required* when the
-         *     identity has no address yet. Without it the generated Postman body carries
-         *     only ``new_password``, which is the one shape that cannot complete the flow
+         *     identity has no address yet. Without it a request body built from the spec
+         *     carries only ``new_password``, which is the one shape that cannot complete the flow
          *     the docs walk through.
          * @example {
          *       "email": "operator@example.com",
