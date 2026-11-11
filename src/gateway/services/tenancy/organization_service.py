@@ -1672,6 +1672,8 @@ class OrganizationService:
 
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
+        # Before the commit, so a failed read cannot leave a committed invitation unmailed.
+        share_link = await self._may_share_accept_links(user, config)
 
         try:
             async with self._require_unit_of_work():
@@ -1708,7 +1710,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
-            share_link=await self._may_share_accept_links(user, config),
+            share_link=share_link,
         )
         # Last, so nothing an adapter does can stand between a committed invitation and its email.
         await _report_invitations(
@@ -1746,6 +1748,8 @@ class OrganizationService:
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
+        # Before the commit, and once, since the emails go out concurrently on one session.
+        share_link = await self._may_share_accept_links(user, config)
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
@@ -1788,8 +1792,6 @@ class OrganizationService:
                     failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
 
         mailer = Mailer(config)
-        # Decided once, before the emails go out concurrently on one session.
-        share_link = await self._may_share_accept_links(user, config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.
         limit = asyncio.Semaphore(_BULK_INVITE_MAIL_CONCURRENCY)
 

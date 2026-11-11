@@ -65,7 +65,9 @@ link to share by hand. A link that was emailed is never shown to the inviter. Th
 email names the inviter by name and address. Where
 [signup is open](configuration.md#signup), only a deployment operator is shown a
 link: opening one accepts for the invitee, so anyone else's invitee signs in with
-that address and accepts from their pending invitations instead.
+that address and accepts from their pending invitations instead. One with no way
+to sign in yet (no mail and no Google or GitHub) needs a password link from a
+deployment operator.
 
 **Mail limits.** Over any 24 hours, an organization can send only so many
 invitation emails, and an address can receive only so many from all organizations

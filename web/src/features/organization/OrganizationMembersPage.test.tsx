@@ -749,9 +749,10 @@ describe("OrganizationMembersPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
-  it("tells a non-operator where signup is open that the invitee finds the invitation by signing in", async () => {
+  it("says the invitee finds the invitation by signing in when no link comes back", async () => {
     // Where anyone can create an organization, the server returns an unsent
-    // link to an operator alone, since opening it accepts for the invitee.
+    // link to an operator alone, since opening it accepts for the invitee. A
+    // failed send to a non-operator's invitee therefore leaves nothing to share.
     mockApi({
       members: [OWNER],
       context: organizationContext({ deployment_operator: false }),
@@ -769,16 +770,13 @@ describe("OrganizationMembersPage", () => {
     })
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />, {
-      mail_ready: false,
+      mail_ready: true,
       open_signup: true,
     })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    expect(
-      screen.getByText(/they find the invitation once they sign in/),
-    ).toBeInTheDocument()
     await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {

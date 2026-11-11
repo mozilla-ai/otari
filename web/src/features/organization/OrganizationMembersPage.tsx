@@ -269,8 +269,9 @@ function InvitationLinkDialog({
 // link is emailed where mail can be sent, and comes back to share only when
 // the email did not go out: the only way in on a deployment without mail,
 // since claiming an identity through signup needs mail and accepting with a
-// password does not. Where signup is open that is an operator's alone (see
-// InvitationLinkDialog).
+// password does not. Where signup is open the link comes back to an operator
+// alone, which the bootstrap cannot say, so InvitationLinkDialog reads the
+// response rather than this form guessing.
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -280,9 +281,7 @@ function InviteMemberForm({
 }) {
   const invite = useInviteOrganizationMember()
   const bulkInvite = useBulkInviteOrganizationMembers()
-  const { mail_ready, open_signup } = useDeployment()
-  const { isOperator } = useDeploymentOperator()
-  const sharesLinks = !open_signup || isOperator
+  const { mail_ready } = useDeployment()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
@@ -461,9 +460,7 @@ function InviteMemberForm({
           description={
             mail_ready
               ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
-              : sharesLinks
-                ? "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
-                : "One or more, separated by commas or new lines. This deployment sends no mail, so they find the invitation once they sign in with that address. The membership becomes active once they accept it."
+              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
           }
         />
         <Select

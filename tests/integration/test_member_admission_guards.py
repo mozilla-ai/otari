@@ -38,6 +38,7 @@ from .tenancy_helpers import (
     NO_BLOCKED_ADDRESSES,
     NO_MAIL_LIMIT,
     NO_SSO_ENFORCEMENT,
+    NO_TERMS,
     create_member,
     create_organization,
     membership_writes,
@@ -275,6 +276,39 @@ async def test_an_owner_can_reactivate_a_member_who_had_joined_under_open_signup
     updated = await service.update_active_organization_member_for_user(
         user=owner,
         organization_member_id=membership.id,
+        request=ActiveOrganizationMemberUpdateRequest(status="active"),
+        sso_enforcement=NO_SSO_ENFORCEMENT,
+        open_signup=True,
+    )
+
+    assert updated.status == "active"
+
+
+async def test_an_owner_can_reactivate_a_member_who_accepted_an_invitation_under_open_signup(
+    async_db: AsyncSession,
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    # Invited where signup is closed, the one place an owner gets the unsent link to accept with.
+    invited = await service.invite_active_organization_member_for_user(
+        user=owner,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=_TEST_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+    assert invited.accept_link is not None
+    await service.accept_invitation(
+        invited.accept_link.split("token=", 1)[1], claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES
+    )
+    await service.remove_active_organization_member_for_user(
+        user=owner, organization_member_id=invited.organization_member_id
+    )
+
+    updated = await service.update_active_organization_member_for_user(
+        user=owner,
+        organization_member_id=invited.organization_member_id,
         request=ActiveOrganizationMemberUpdateRequest(status="active"),
         sso_enforcement=NO_SSO_ENFORCEMENT,
         open_signup=True,

@@ -437,9 +437,11 @@ async def invite_active_organization_member(
     once the recipient accepts (``POST /api/v1/invitations/accept``). When the
     email did not go out (``mail_sent`` is false: mail is not configured, the
     send failed, or the invitation mail limit was reached), the response
-    carries the accept link so the caller can share it themselves. An address
-    whose invitation is still pending is refused; reissue that invitation to
-    send a new link.
+    carries the accept link so the caller can share it themselves, except under
+    ``open_signup`` to a caller who is not a deployment operator, whose invitee
+    accepts from their pending invitations once signed in. An address whose
+    invitation is still pending is refused; reissue that invitation to send a
+    new link.
     """
     return await service.invite_active_organization_member_for_user(
         user=current_identity,
@@ -470,7 +472,8 @@ async def bulk_invite_active_organization_members(
     would check it, and an address that is refused lands in ``failed`` with the
     reason rather than failing the request, so the answer is 200 even when some
     or all were refused. Each invited entry carries its own ``mail_sent``, and
-    its accept link when that is false.
+    its accept link when that is false, on the terms ``POST /me/member-invitations``
+    returns one.
     """
     return await service.invite_active_organization_members_for_user(
         user=current_identity,
@@ -495,8 +498,9 @@ async def reissue_active_organization_member_invitation(
     """Give a pending or expired invitation a new accept link. Organization owners and admins only.
 
     The old link stops working. The new one is emailed as an invitation is, and
-    returned in ``accept_link`` when it was not, so a lost link can be
-    recovered whether or not the deployment sends mail.
+    returned in ``accept_link`` when it was not, on the terms
+    ``POST /me/member-invitations`` returns one, so a lost link can be recovered
+    whether or not the deployment sends mail.
     """
     return await service.reissue_organization_member_invitation_for_user(
         user=current_identity,

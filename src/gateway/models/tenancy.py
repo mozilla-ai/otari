@@ -1258,7 +1258,8 @@ class InviteOrganizationMemberResultPublic(SQLModel):
             "The link to share with the invitee yourself, set only when mail_sent is false. A "
             "delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. "
             "Where open_signup is on it is never set for an inviter who is not a deployment operator: the "
-            "invitee accepts from their pending invitations once signed in."
+            "invitee accepts from their pending invitations once signed in, and one who has no way to "
+            "sign in yet can get a password link from a deployment operator."
         ),
     )
     expires_at: datetime

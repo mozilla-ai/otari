@@ -3787,9 +3787,11 @@ export interface paths {
          *     once the recipient accepts (``POST /api/v1/invitations/accept``). When the
          *     email did not go out (``mail_sent`` is false: mail is not configured, the
          *     send failed, or the invitation mail limit was reached), the response
-         *     carries the accept link so the caller can share it themselves. An address
-         *     whose invitation is still pending is refused; reissue that invitation to
-         *     send a new link.
+         *     carries the accept link so the caller can share it themselves, except under
+         *     ``open_signup`` to a caller who is not a deployment operator, whose invitee
+         *     accepts from their pending invitations once signed in. An address whose
+         *     invitation is still pending is refused; reissue that invitation to send a
+         *     new link.
          */
         post: operations["organizations-invite_active_organization_member"];
         delete?: never;
@@ -3816,7 +3818,8 @@ export interface paths {
          *     would check it, and an address that is refused lands in ``failed`` with the
          *     reason rather than failing the request, so the answer is 200 even when some
          *     or all were refused. Each invited entry carries its own ``mail_sent``, and
-         *     its accept link when that is false.
+         *     its accept link when that is false, on the terms ``POST /me/member-invitations``
+         *     returns one.
          */
         post: operations["organizations-bulk_invite_active_organization_members"];
         delete?: never;
@@ -3862,8 +3865,9 @@ export interface paths {
          * @description Give a pending or expired invitation a new accept link. Organization owners and admins only.
          *
          *     The old link stops working. The new one is emailed as an invitation is, and
-         *     returned in ``accept_link`` when it was not, so a lost link can be
-         *     recovered whether or not the deployment sends mail.
+         *     returned in ``accept_link`` when it was not, on the terms
+         *     ``POST /me/member-invitations`` returns one, so a lost link can be recovered
+         *     whether or not the deployment sends mail.
          */
         post: operations["organizations-reissue_active_organization_member_invitation"];
         delete?: never;
@@ -14049,7 +14053,7 @@ export interface components {
         InviteOrganizationMemberResultPublic: {
             /**
              * Accept Link
-             * @description The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. Where open_signup is on it is never set for an inviter who is not a deployment operator: the invitee accepts from their pending invitations once signed in.
+             * @description The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. Where open_signup is on it is never set for an inviter who is not a deployment operator: the invitee accepts from their pending invitations once signed in, and one who has no way to sign in yet can get a password link from a deployment operator.
              */
             accept_link?: string | null;
             /**
