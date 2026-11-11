@@ -904,7 +904,7 @@
             "type": "number"
           },
           "provider": {
-            "description": "The decision provider: typesafe, openrouter or llamacpp.",
+            "description": "The decision provider: typesafe, openrouter, gemini or llamacpp.",
             "maxLength": 32,
             "minLength": 1,
             "title": "Provider",

@@ -2,17 +2,19 @@
 
 TypeSafe's ``/v1/systemone`` defined the shape, and OpenRouter's alpha
 ``/api/alpha/decisions`` and llama-server's ``/v1/systemone`` adopted it, so one
-request body reaches any of them. None is an any-llm provider, so this module is
-the client for all three: it resolves a
-``<name>:<model>`` selector against ``decision_providers``, sends the body to
-that upstream, and returns its answer unchanged.
+request body reaches any of them. Gemini's ``/v1beta/decisions`` asks the same
+three question types in its own words, so its body and answer are translated
+here. None is an any-llm provider, so this module is the client for all of them:
+it resolves a ``<name>:<model>`` selector against ``decision_providers``, sends
+the body to that upstream, and returns its answer in TypeSafe's shape.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
 _ENDPOINTS: dict[str, tuple[str | None, str]] = {
     "typesafe": ("https://api.typesafe.ai", "/v1/systemone"),
     "openrouter": ("https://openrouter.ai/api", "/alpha/decisions"),
+    "gemini": ("https://generativelanguage.googleapis.com", "/v1beta/decisions"),
     "llamacpp": (None, "/v1/systemone"),
 }
 
@@ -138,6 +141,76 @@ def reported_charge(response: DecisionResponse) -> Decimal | None:
     return quantize_cost(Decimal(str(usage.cost))) if usage is not None and usage.cost is not None else None
 
 
+def _gemini_text(content: object) -> str:
+    """Gemini takes text where TypeSafe also takes structured JSON, which its guide says to serialize."""
+    return content if isinstance(content, str) else json.dumps(content)
+
+
+def _gemini_image(data_url: str) -> dict[str, str]:
+    """An inline image block from a ``data:image/...;base64,...`` URL, the only image form a request admits."""
+    header, _, data = data_url.partition(",")
+    return {"type": "image", "mime_type": header.removeprefix("data:").split(";", 1)[0], "data": data}
+
+
+def _gemini_question(question: dict[str, Any]) -> dict[str, Any]:
+    """One question in Gemini's words. Fields TypeSafe allows beyond these have no Gemini counterpart."""
+    kind = question["type"]
+    out: dict[str, Any] = {"type": kind, "instructions": _gemini_text(question["instructions"])}
+    criteria = question.get("criteria")
+    if kind == "noul" and isinstance(criteria, dict):
+        named = {"true_description": criteria.get("true"), "false_description": criteria.get("false")}
+        described = {key: _gemini_text(value) for key, value in named.items() if value is not None}
+        if described:
+            out["criteria"] = described
+    elif kind == "choice" and isinstance(criteria, dict):
+        out["criteria"] = {option: "" if text is None else _gemini_text(text) for option, text in criteria.items()}
+    elif kind == "score" and isinstance(criteria, list):
+        out["criteria"] = [_gemini_text(level) for level in criteria]
+    return out
+
+
+def _gemini_body(body: dict[str, Any]) -> dict[str, Any]:
+    """``body``, in TypeSafe's shape, as Gemini's Decisions API takes it.
+
+    The state becomes ``input``: text, followed by an image block per inline image.
+    """
+    text = _gemini_text(body["state"])
+    images = cast("list[str]", body.get("images") or [])
+    payload: str | list[dict[str, str]] = (
+        [{"type": "text", "text": text}, *(_gemini_image(image) for image in images)] if images else text
+    )
+    questions = cast("dict[str, dict[str, Any]]", body["questions"])
+    return {
+        "model": body["model"],
+        "input": payload,
+        "questions": {name: _gemini_question(question) for name, question in questions.items()},
+    }
+
+
+def _gemini_answer(answer: dict[str, Any], model: str) -> dict[str, Any]:
+    """Gemini's answer in TypeSafe's shape: the model named, and the token counts under TypeSafe's keys.
+
+    Gemini's own usage fields stay alongside, as extra fields the response schema keeps.
+    """
+    normalized = {"model": model, **answer}
+    usage = answer.get("usage")
+    if isinstance(usage, dict):
+        normalized["usage"] = {
+            **usage,
+            "input_tokens": usage.get("total_input_tokens", 0),
+            "output_tokens": usage.get("total_output_tokens", 0),
+        }
+    return normalized
+
+
+def _auth_headers(provider: DecisionProvider) -> dict[str, str]:
+    if not provider.api_key:
+        return {}
+    if provider.provider == "gemini":
+        return {"x-goog-api-key": provider.api_key}
+    return {"Authorization": f"Bearer {provider.api_key}"}
+
+
 async def request_decision(
     provider: DecisionProvider,
     body: dict[str, Any],
@@ -145,6 +218,9 @@ async def request_decision(
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     """Send ``body`` to the provider and return its decoded answer.
+
+    ``body`` and the answer are in TypeSafe's shape whichever provider is asked;
+    a provider that speaks another is translated on the way out and back.
 
     The error message names the provider and the upstream status only. A
     provider's error body can echo the state it was sent, which is caller
@@ -156,11 +232,12 @@ async def request_decision(
 
     """
     http = client or get_decision_client()
+    gemini = provider.provider == "gemini"
     try:
         response = await http.post(
             provider.url,
-            json=body,
-            headers={"Authorization": f"Bearer {provider.api_key}"} if provider.api_key else {},
+            json=_gemini_body(body) if gemini else body,
+            headers=_auth_headers(provider),
             timeout=provider.timeout_s,
             # A redirect would carry the provider's key to wherever it points.
             follow_redirects=False,
@@ -181,4 +258,4 @@ async def request_decision(
     if not isinstance(answer, dict):
         msg = f"{provider.provider} decisions returned a {type(answer).__name__} body, expected an object"
         raise DecisionProviderError(msg, status_code=response.status_code)
-    return answer
+    return _gemini_answer(answer, str(body.get("model", ""))) if gemini else answer
