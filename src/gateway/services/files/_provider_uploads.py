@@ -32,6 +32,7 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.files import FileProviderCopy
+from gateway.ports.file_storage_port import FILE_STORE_ERRORS
 from gateway.ports.provider_file_port import ProviderFileSession
 from gateway.repositories.files import FileProviderCopyRepository
 from gateway.services.files._provider_files import minimum_copy_lifetime
@@ -237,7 +238,7 @@ class ProviderCopies:
         """
         try:
             data = await self._file_store.get(staged.storage_ref)
-        except OSError as exc:
+        except FILE_STORE_ERRORS as exc:
             logger.warning(
                 "Could not read file %s to copy it to provider %s: %s", staged.file_id, account.provider.value, exc
             )

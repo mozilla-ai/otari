@@ -1563,7 +1563,8 @@ async def test_a_session_nothing_can_resume_is_never_leased_a_container_id() -> 
 
 
 @pytest.mark.asyncio
-async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease() -> None:
+@pytest.mark.parametrize("read_error", [OSError("no such blob"), ValueError("ref escapes the store")])
+async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease(read_error: Exception) -> None:
     """A seed that fails releases the sandbox rather than holding one nobody was told about."""
     discarded: list[bool] = []
 
@@ -1579,7 +1580,7 @@ async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease
 
     class _FailingFiles(_FakeFiles):
         async def read_input(self, staged: Any) -> bytes:
-            raise OSError("no such blob")
+            raise read_error
 
     containers = _FakeContainers()
     backend = SandboxBackend(port=_DiscardablePort(), containers=containers, files=_FailingFiles(inputs=[_staged()]))

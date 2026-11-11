@@ -70,8 +70,8 @@ def _store() -> Mock:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("delete_error", [None, FileNotFoundError(), PermissionError()])
-async def test_sweep_transfers_outside_transactions(delete_error: OSError | None) -> None:
+@pytest.mark.parametrize("delete_error", [None, FileNotFoundError(), PermissionError(), ValueError("bad ref")])
+async def test_sweep_transfers_outside_transactions(delete_error: Exception | None) -> None:
     uow = _Transactions()
     repo = Mock(spec=FileRepository)
     store = Mock(spec=FileStoragePort)
@@ -108,7 +108,7 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
     result = await _service(uow, repo, store, copies).sweep(batch_size=2)
     copies.remove_stale_pending.assert_awaited_once()
     copies.remove_expired.assert_awaited_once()
-    blocked = isinstance(delete_error, PermissionError)
+    blocked = isinstance(delete_error, (PermissionError, ValueError))
     assert result == SweepBatch(reclaimed=0 if blocked else 1, seen=1, cursor=(now, "file-1"))
     assert uow.depth == 0
     assert uow.blocks == (1 if blocked else 2)

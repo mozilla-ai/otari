@@ -299,6 +299,25 @@ async def test_a_provider_that_will_not_take_the_copy_leaves_no_reservation(monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("read_error", [OSError("blob missing"), ValueError("ref escapes the store")])
+async def test_bytes_that_will_not_read_back_leave_no_reservation(
+    monkeypatch: pytest.MonkeyPatch, read_error: Exception
+) -> None:
+    class _UnreadableStore(_Store):
+        async def get(self, storage_ref: str) -> bytes:
+            raise read_error
+
+    copies = _Copies()
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
+
+    with pytest.raises(ProviderUploadFailedError):
+        await _file_ids(_copies_service(monkeypatch, copies=copies, store=_UnreadableStore(), client=client))
+
+    assert copies.events == ["reserve", "cancel"]
+    assert client.uploads == []
+
+
+@pytest.mark.asyncio
 async def test_a_reservation_reclaimed_before_it_is_confirmed_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     copies = _Copies(confirms=False)
     client = _Client(ProviderCopyReceipt(file_id="file_new"))
