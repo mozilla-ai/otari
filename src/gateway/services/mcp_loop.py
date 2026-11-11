@@ -474,8 +474,9 @@ class _ChatStreamState:
         # official OpenAI client raise IndexError.
         self.visible_tool_index: dict[int, int] = {}
         self.next_visible_tool_index = 0
-        # The round's first upstream chunk: activity chunks copy its id, model and
-        # timestamp so they read as part of the same stream.
+        # The round's first upstream chunk with choices (its first chunk until one
+        # arrives): activity chunks copy its id, model and timestamp so they read as
+        # part of the same stream, and a choiceless preamble names no response.
         self.template: ChatCompletionChunk | None = None
 
     def deferred_terminal(self) -> list[ChatCompletionChunk]:
@@ -622,7 +623,7 @@ class _ChatToolLoopStrategy:
                 acc.stream_id = event.id
         elif event.id != acc.stream_id:
             event = event.model_copy(update={"id": acc.stream_id})
-        if state.template is None:
+        if state.template is None or (event.choices and not state.template.choices):
             state.template = event
         if state.first is None and event.choices:
             state.first = event
