@@ -200,6 +200,26 @@ def _tool_name(entry: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _released_tool_choice(choice: Any) -> Any:
+    """``choice`` once its round has run, with any force lifted; ``None`` drops it.
+
+    A forced choice (``required``, Messages' ``any``, a named tool) is met by the
+    round that ran it, and the loop only reaches another round after one did. Sent
+    again, it would make the model call a tool every round and only answer on the
+    last one. Messages keeps ``disable_parallel_tool_use`` and Responses keeps its
+    ``allowed_tools`` list, since neither is a force.
+    """
+    if choice == "required":
+        return None
+    if not isinstance(choice, dict) or choice.get("type") in {"auto", "none"}:
+        return choice
+    if choice.get("type") == "allowed_tools":
+        return {**choice, "mode": "auto"}
+    if "disable_parallel_tool_use" in choice:
+        return {"type": "auto", "disable_parallel_tool_use": choice["disable_parallel_tool_use"]}
+    return None
+
+
 # What the last round tells the model. Withholding the tools is not enough on its own:
 # Gemini 2.5, denied the call it wants mid-task, ends with no answer at all.
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
@@ -211,11 +231,13 @@ def _round_kwargs(
     user_tools: list[dict[str, Any]],
     pool: ToolBackend,
     *,
+    first: bool,
     final: bool,
 ) -> dict[str, Any]:
     """The tool arguments for one round.
 
-    The last round the loop allows withholds the gateway's own tools, so the model
+    A forced ``tool_choice`` applies to the first round only (see
+    :func:`_released_tool_choice`). The last round the loop allows withholds the gateway's own tools, so the model
     answers from what its earlier rounds gathered rather than calling a tool whose
     result could never reach it. The caller's tools stay, since a call of one ends
     the loop anyway. Every provider the loop serves accepts a transcript holding
@@ -225,6 +247,12 @@ def _round_kwargs(
     kwargs = dict(base)
     if tools:
         kwargs["tools"] = tools
+    if not first and "tool_choice" in kwargs:
+        released = _released_tool_choice(kwargs["tool_choice"])
+        if released is None:
+            kwargs.pop("tool_choice")
+        else:
+            kwargs["tool_choice"] = released
     if final:
         choice_name = _tool_name(kwargs.get("tool_choice"))
         if not tools or (choice_name is not None and pool.owns_tool(choice_name)):
@@ -305,7 +333,9 @@ async def run_tool_loop(
     first_response_signaled = False
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs = _round_kwargs(
+            base, merged_tools, user_tools, pool, first=iteration == 1, final=iteration == max_iterations
+        )
         kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
         kwargs["stream"] = False
 
@@ -387,7 +417,9 @@ async def run_tool_loop_stream(
     acc = strategy.new_stream_accumulator()
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs = _round_kwargs(
+            base, merged_tools, user_tools, pool, first=iteration == 1, final=iteration == max_iterations
+        )
         kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
 
         stream = await strategy.open_stream(kwargs)

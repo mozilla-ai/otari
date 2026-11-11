@@ -32,6 +32,7 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
+from gateway.services._tool_loop import _released_tool_choice
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -2187,3 +2188,106 @@ async def test_activity_chunks_carry_the_id_of_the_first_chunk_with_choices(monk
     activity = [c for c in chunks if getattr(c, mcp_loop_module.TOOL_ACTIVITY_FIELD, None) is not None]
     assert len(activity) == 2
     assert {(c.id, c.model) for c in activity} == {("cmpl-1", "fake")}
+
+
+_FORCED_CHOICES = ["required", {"type": "function", "function": {"name": "fetch_url"}}]
+
+
+def _forced(kwargs: dict[str, Any]) -> bool:
+    return kwargs.get("tool_choice") not in (None, "auto")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_choice", _FORCED_CHOICES)
+async def test_a_forced_tool_choice_runs_the_tool_once_then_lets_the_model_answer(
+    monkeypatch: pytest.MonkeyPatch, tool_choice: Any
+) -> None:
+    rounds: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        rounds.append(kwargs)
+        if _forced(kwargs):
+            return _completion(finish="tool_calls", tool_calls=[(f"call_{len(rounds)}", "fetch_url", "{}")])
+        return _completion(finish="stop", content="answer")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    out = await mcp_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "tool_choice": tool_choice,
+        },
+        pool=pool,
+        max_iterations=5,
+    )
+
+    assert out.choices[0].message.content == "answer"
+    assert pool.calls == [("fetch_url", {})]
+    assert [r.get("tool_choice") for r in rounds] == [tool_choice, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_choice", _FORCED_CHOICES)
+async def test_a_forced_tool_choice_runs_the_tool_once_when_streaming(
+    monkeypatch: pytest.MonkeyPatch, tool_choice: Any
+) -> None:
+    rounds: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        rounds.append(kwargs)
+        chunks = (
+            [_chunk(tool_calls=[(0, f"call_{len(rounds)}", "fetch_url", "{}")]), _chunk(finish="tool_calls")]
+            if _forced(kwargs)
+            else [_chunk(content="answer"), _chunk(finish="stop")]
+        )
+
+        async def gen() -> AsyncIterator[ChatCompletionChunk]:
+            for chunk in chunks:
+                yield chunk
+
+        return gen()
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    async for _ in mcp_tool_loop_stream(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "tool_choice": tool_choice,
+        },
+        pool=pool,
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == [("fetch_url", {})]
+    assert [r.get("tool_choice") for r in rounds] == [tool_choice, None]
+
+
+@pytest.mark.parametrize(
+    ("choice", "released"),
+    [
+        ("auto", "auto"),
+        ("none", "none"),
+        ("required", None),
+        ({"type": "function", "function": {"name": "fetch_url"}}, None),
+        ({"type": "function", "name": "fetch_url"}, None),
+        ({"type": "code_interpreter"}, None),
+        ({"type": "any"}, None),
+        ({"type": "tool", "name": "fetch_url"}, None),
+        (
+            {"type": "tool", "name": "fetch_url", "disable_parallel_tool_use": True},
+            {"type": "auto", "disable_parallel_tool_use": True},
+        ),
+        ({"type": "auto", "disable_parallel_tool_use": True}, {"type": "auto", "disable_parallel_tool_use": True}),
+        (
+            {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "fetch_url"}]},
+            {"type": "allowed_tools", "mode": "auto", "tools": [{"type": "function", "name": "fetch_url"}]},
+        ),
+    ],
+)
+def test_a_released_tool_choice_lifts_only_the_force(choice: Any, released: Any) -> None:
+    assert _released_tool_choice(choice) == released
