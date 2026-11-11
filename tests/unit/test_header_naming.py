@@ -35,6 +35,7 @@ INHERITED_HEADERS = {
     "X-RateLimit-Remaining": "Rate-limit convention clients already parse.",
     "X-RateLimit-Reset": "Rate-limit convention clients already parse.",
     "X-Subscription-Token": "The Brave Search API's own header.",
+    "x-goog-api-key": "The Gemini API's own credential header, which its Decisions API takes.",
     "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
     **{
         f"x-stainless-{suffix}": "Sent by the OpenAI and Anthropic JS SDKs; allowed through CORS for browser apps."
