@@ -102,6 +102,14 @@ class _UsageReader:
                 self.completion = usage.get("completion_tokens") or usage.get("output_tokens") or self.completion
 
 
+# The events after which a Responses or Messages stream sends nothing more.
+_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed", "message_stop"})
+
+
+def _ends_stream(event: Any) -> bool:
+    return isinstance(event, dict) and event.get("type") in _TERMINAL_EVENTS
+
+
 def _round(body: dict[str, Any]) -> int:
     return sum(1 for m in body.get("messages") or [] if m.get("role") == "tool")
 
@@ -212,15 +220,21 @@ class _Handler(BaseHTTPRequestHandler):
                 self._raw(upstream.status, content_type, payload)
                 return
             self._open_stream(upstream.status, content_type)
+            recorded = False
             for line in upstream:
+                text = line.decode(errors="replace").strip()
+                data = text.removeprefix("data:").strip() if text.startswith("data:") else ""
+                event = json.loads(data) if data and data != "[DONE]" else None
+                reader.feed(event)
+                # A client stops reading at the event that ends the stream, so the
+                # round is recorded before that event reaches it, not at EOF.
+                if not recorded and (data == "[DONE]" or _ends_stream(event)):
+                    self.server.record_round((reader.prompt, reader.completion))
+                    recorded = True
                 self.wfile.write(line)
                 self.wfile.flush()
-                text = line.decode(errors="replace").strip()
-                if text.startswith("data:"):
-                    data = text.removeprefix("data:").strip()
-                    if data and data != "[DONE]":
-                        reader.feed(json.loads(data))
-        self.server.record_round((reader.prompt, reader.completion))
+        if not recorded:
+            self.server.record_round((reader.prompt, reader.completion))
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Keep the test output quiet."""
