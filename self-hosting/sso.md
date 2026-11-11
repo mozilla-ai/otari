@@ -49,6 +49,8 @@ existing account by address, name, or anything else. That account holds no
 email address, so API keys, budgets, and usage stay on whichever account
 already held them: an identity change never moves them to a new account.
 
+Because the account holds no address, the organization's **Members & roles** page shows no email under that person's name. It marks the row SSO in that place instead, so the row reads as an account the connection provisioned rather than one whose address is missing. A row showing neither is an account that has no address yet, such as an operator identity nobody has claimed.
+
 Where the organization already holds another account for the address a
 connection's first sign-in claims, the two accounts are never merged
 automatically and neither one is told about the other.

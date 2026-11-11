@@ -442,7 +442,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberPublic": {
-        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
+        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``is_sso_account`` records how the account came about, not whether the\nconnection still admits it: an organization that repoints or drops its\nconnection leaves the account provisioned by one and unable to sign in.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
           "attribution": {
             "anyOf": [
@@ -528,6 +528,12 @@
               }
             ],
             "title": "Invitation Id"
+          },
+          "is_sso_account": {
+            "default": false,
+            "description": "Whether an organization's own OIDC connection provisioned this member's account. Such an account is created with no sign-in address, so email is null until one is set.",
+            "title": "Is Sso Account",
+            "type": "boolean"
           },
           "organization_member_id": {
             "anyOf": [
