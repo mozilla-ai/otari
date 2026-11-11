@@ -58,8 +58,9 @@ definition's version) and the exact text, so a tool result resent on every turn
 of an agent loop costs one call to the guardrail per worker. A check that gave no
 verdict is asked again.
 
-Images and documents are not read. A guardrail on `output` or `tool_calls` needs
-the whole answer, so a streamed answer is held until it is complete and then sent
+Images and documents are not read, and neither is a Responses `shell_call_output`,
+whose output is stdout and stderr chunks rather than text. A guardrail on `output`
+or `tool_calls` needs the whole answer, so a streamed answer is held until it is complete and then sent
 at once.
 
 ## Modes
