@@ -3866,8 +3866,8 @@ export interface paths {
          *
          *     The old link stops working. The new one is emailed as an invitation is, and
          *     returned in ``accept_link`` when it was not, on the terms
-         *     ``POST /me/member-invitations`` returns one, so a lost link can be recovered
-         *     whether or not the deployment sends mail.
+         *     ``POST /me/member-invitations`` returns one. Where no link is returned, the
+         *     invitee accepts from their pending invitations once signed in.
          */
         post: operations["organizations-reissue_active_organization_member_invitation"];
         delete?: never;

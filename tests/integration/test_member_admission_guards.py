@@ -46,7 +46,8 @@ from .tenancy_helpers import (
 
 pytestmark = pytest.mark.asyncio
 
-_TEST_CONFIG = GatewayConfig()
+# Closed signup and no mail, whatever the environment says, so an unsent link is always returned.
+_TEST_CONFIG = GatewayConfig().model_copy(update={"open_signup": False, "public_base_url": None})
 _OPEN_SIGNUP_CONFIG = _TEST_CONFIG.model_copy(update={"open_signup": True})
 DOMAIN = "acme.example"
 ADDRESS = f"ada@{DOMAIN}"

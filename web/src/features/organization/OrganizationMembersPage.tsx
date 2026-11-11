@@ -460,7 +460,7 @@ function InviteMemberForm({
           description={
             mail_ready
               ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
-              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+              : "One or more, separated by commas or new lines. This deployment sends no mail, so the result shows how they join: an accept link to share, or accepting once they sign in with this address."
           }
         />
         <Select

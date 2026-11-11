@@ -9,13 +9,13 @@ Organization **Admins and Owners** can invite other members to collaborate and c
 3. Enter one or more **Email addresses** separated by commas or new lines.
 4. Select the **Role** you want to assign: Owner, Admin, Member, or Viewer.
 5. Choose the workspaces the new member should have access to.
-6. Click **Invite member**. The user will receive an invitation by email, and their membership will become active once they accept it. When no email goes out, the dialog shows an accept link to share with them instead.
+6. Click **Invite member**. The user will receive an invitation by email, and their membership will become active once they accept it. When no email goes out, the dialog shows an accept link to share with them instead, except where [Delivery](#invitations) says it does not.
 
 ![The Invite member dialog, with two addresses, the Admin role and one workspace chosen.](assets/screenshots/invite-member.png)
 
 You can paste up to 100 addresses at once. Everyone gets the same role and
 workspaces. Each address succeeds or fails on its own, and the result shows, for
-each one, whether its email went out or the link to share.
+each one, whether its email went out or, where one is shown, the link to share.
 
 ## Manage existing members
 
@@ -28,7 +28,7 @@ Admins and Owners can also manage existing members. On **Members & roles**:
 An invited row shows when its invitation has expired, and offers:
 
 - **Reissue**, which sends a new accept link (or shows it, when no email goes
-  out). The old link stops working. Use this to recover a lost link, or instead
+  out and links are shown). The old link stops working. Use this to recover a lost link, or instead
   of inviting the same address again, which is refused while an invitation is
   pending.
 - **Revoke**, which withdraws the invitation.

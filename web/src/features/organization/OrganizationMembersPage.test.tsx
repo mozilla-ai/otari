@@ -859,7 +859,7 @@ describe("OrganizationMembersPage", () => {
     expect(screen.queryByText(/token=ada@example.com/)).toBeNull()
   })
 
-  it("says a link comes back to share when mail cannot be sent", async () => {
+  it("says how the invitee joins when mail cannot be sent", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />, { mail_ready: false })
@@ -868,7 +868,9 @@ describe("OrganizationMembersPage", () => {
       await screen.findByRole("button", { name: "Invite member" }),
     )
     expect(
-      screen.getByText(/you get an accept link to share with them/),
+      screen.getByText(
+        /an accept link to share, or accepting once they sign in/,
+      ),
     ).toBeInTheDocument()
   })
 
