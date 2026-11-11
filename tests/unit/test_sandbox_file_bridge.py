@@ -27,14 +27,10 @@ from gateway.exceptions.files_exceptions import FileOverBudgetError, FileStorage
 from gateway.models.files import FileObject
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FileProviderCopyRepository, FileRepositories, FileRepository
-from gateway.services.files import (
-    CODE_EXECUTION_OUTPUT_PURPOSE,
-    FileBackends,
-    FileService,
-    ProviderFile,
-    SandboxFileBridge,
-)
+from gateway.services.files import FileBackends, FileService, SandboxFileBridge
+from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE
 from gateway.types.provider_account import ResolvedCredential
+from gateway.types.provider_file import ProviderFile
 
 
 class _MemoryStore:
