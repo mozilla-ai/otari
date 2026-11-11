@@ -8,6 +8,7 @@ import mimetypes
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 from any_llm import LLMProvider
 
@@ -19,6 +20,7 @@ from gateway.log_config import logger
 from gateway.models.files import new_file_id
 from gateway.ports.provider_file_port import ProviderFileSession
 from gateway.services.files._metadata import expiry_for
+from gateway.services.files._provider_files import produced_files_for, store_inline_outputs
 from gateway.services.files._service import FileBackends, FileService, NewOutput
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
@@ -141,6 +143,14 @@ class SandboxFileBridge:
             self._provider_files_left -= 1
             self._provider_bytes_left -= len(data)
         return file_id
+
+    def produced_files(self, dialect: str, reply: Any) -> list[ProviderFile]:
+        """The provider files a completed reply, or one streamed event, of ``dialect`` names."""
+        return produced_files_for(dialect, reply)
+
+    async def store_inline_outputs(self, dialect: str, reply: Any) -> None:
+        """Store the files ``reply`` carries inline, rewriting it to name each stored file instead."""
+        await store_inline_outputs(dialect, reply, self.store_provider_output)
 
     async def copy_provider_files(self, files: list[ProviderFile], *, provider: str, provider_instance: str) -> None:
         """Copy the files a provider's own sandbox produced into the store, each under the provider's ID.

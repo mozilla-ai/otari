@@ -1,7 +1,6 @@
 """The files domain: uploaded files, their lifecycle, and the sweep that gives their storage back."""
 
 from gateway.services.files._metadata import expiry_for
-from gateway.services.files._provider_files import produced_files_for, store_inline_outputs
 from gateway.services.files._sandbox_bridge import SandboxFileBridge
 from gateway.services.files._service import (
     DEFAULT_LIST_LIMIT,
@@ -39,7 +38,5 @@ __all__ = [
     "StagedFile",
     "SweepBatch",
     "expiry_for",
-    "produced_files_for",
     "run_file_sweeper",
-    "store_inline_outputs",
 ]

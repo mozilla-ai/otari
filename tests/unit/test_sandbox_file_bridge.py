@@ -10,8 +10,10 @@ stubbed.
 from __future__ import annotations
 
 import asyncio
+import base64
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Collection
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -660,3 +662,45 @@ async def test_an_inline_provider_output_that_cannot_be_stored_never_raises() ->
     bridge = _bridge(_MemoryStore(), record_error=TimeoutError())
 
     assert await bridge.store_provider_output(b"data", "text/plain") is None
+
+
+def _anthropic_file_event(file_id: str) -> SimpleNamespace:
+    """A Messages ``content_block_start`` whose tool result names one provider-held file."""
+    output = SimpleNamespace(file_id=file_id)
+    return SimpleNamespace(
+        type="content_block_start",
+        content_block=SimpleNamespace(content=SimpleNamespace(content=[output])),
+    )
+
+
+def test_the_bridge_reads_produced_files_for_the_dialect_it_is_given() -> None:
+    """The dialect picks the reader, so a Messages event is not read as a Responses one."""
+    event = _anthropic_file_event("cfile_1")
+    bridge = _bridge(_MemoryStore())
+
+    assert [file.file_id for file in bridge.produced_files("messages", event)] == ["cfile_1"]
+    assert bridge.produced_files("responses", event) == []
+    assert bridge.produced_files("chat", event) == []
+
+
+@pytest.mark.asyncio
+async def test_the_bridge_stores_an_inline_output_through_its_own_store() -> None:
+    """An inline output lands in this request's store and the reply is rewritten to name it."""
+    store = _MemoryStore()
+    db = _FakeDb()
+    result: dict[str, Any] = {
+        "type": "code_execution_result",
+        "content": [],
+        "inline_outputs": [{"mime_type": "image/png", "data": base64.b64encode(b"\x89PNG").decode()}],
+    }
+    event = SimpleNamespace(
+        type="content_block_start",
+        content_block={"type": "code_execution_tool_result", "content": result},
+    )
+
+    await _bridge(store, _CommittingUnitOfWork(db)).store_inline_outputs("messages", event)
+
+    (record,) = db.added
+    assert store.blobs == {record.storage_ref: b"\x89PNG"}
+    assert "inline_outputs" not in result
+    assert [block["file_id"] for block in result["content"]] == [record.id]

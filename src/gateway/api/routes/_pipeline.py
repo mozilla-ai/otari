@@ -260,7 +260,7 @@ from gateway.services.code_execution import (
     SandboxContainerRegistry,
     names_provider_container,
 )
-from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for, store_inline_outputs
+from gateway.services.files import SandboxFileBridge
 from gateway.services.guardrails import InProcessGuardrail
 from gateway.services.inference import (
     EMPTY_COMPLETION_DETAIL,
@@ -472,6 +472,7 @@ from gateway.streaming import (
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
+from gateway.types.provider_file import ProviderFile
 from gateway.types.session_principal import SessionPrincipal
 from gateway.types.tool_charges import InstanceRateKey, LabelCalls, RateKey, describe_rate_key
 
@@ -4884,8 +4885,8 @@ async def _copying_produced_files(
     the provider sent inline (Gemini) is stored and the event rewritten to name it.
     """
     async for chunk in stream:
-        await store_inline_outputs(dialect, chunk, files_bridge.store_provider_output)
-        if files := produced_files_for(dialect, chunk):
+        await files_bridge.store_inline_outputs(dialect, chunk)
+        if files := files_bridge.produced_files(dialect, chunk):
             await copy(files)
         yield chunk
 
@@ -7345,11 +7346,9 @@ async def run_non_stream(
                 ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
         _attach_settled_cost(adapter, result, logged)
-        if tool_ctx.sandbox_files is not None:
-            await store_inline_outputs(adapter.name, result, tool_ctx.sandbox_files.store_provider_output)
-        await _copy_provider_files(
-            ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
-        )
+        if (bridge := tool_ctx.sandbox_files) is not None:
+            await bridge.store_inline_outputs(adapter.name, result)
+            await _copy_provider_files(ctx, bridge, bridge.produced_files(adapter.name, result), instance=provider)
         if display_model is not None:
             relabel_model(result, display_model)
         return result
