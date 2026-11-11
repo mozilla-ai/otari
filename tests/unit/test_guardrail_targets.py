@@ -125,6 +125,18 @@ def test_responses_reads_function_call_outputs() -> None:
     assert output["output"] == "withheld"
 
 
+def test_responses_reads_a_local_shell_calls_output() -> None:
+    request = SimpleNamespace(
+        input=[
+            {"role": "user", "content": "list the invoices"},
+            {"type": "local_shell_call", "call_id": "call_1", "action": {"type": "exec", "command": ["ls"]}},
+            {"type": "local_shell_call_output", "call_id": "call_1", "output": _INJECTION},
+        ]
+    )
+
+    assert _shape(responses_targets(request)) == [("after_tool", _INJECTION, None, True)]
+
+
 def test_responses_continuing_a_stored_response_sends_only_the_output() -> None:
     """With ``previous_response_id`` the call lives at the provider, so the tool's name is unknown here."""
     request = SimpleNamespace(input=[{"type": "function_call_output", "call_id": "call_1", "output": _INJECTION}])

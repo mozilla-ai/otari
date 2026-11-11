@@ -12756,7 +12756,7 @@ export interface components {
              * @default monitor
              * @enum {string}
              */
-            mode: "monitor" | "block";
+            mode: "block" | "monitor";
             /** On */
             on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
@@ -15811,7 +15811,7 @@ export interface components {
              * @default monitor
              * @enum {string}
              */
-            mode: "monitor" | "block";
+            mode: "block" | "monitor";
             /**
              * On
              * @description What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call before it runs or reaches the client), output (the model's answer)
@@ -16162,14 +16162,14 @@ export interface components {
              * Mode
              * @enum {string}
              */
-            mode?: "monitor" | "block";
+            mode?: "block" | "monitor";
             /** On */
             on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @enum {string}
              */
-            on_unavailable?: "monitor" | "block";
+            on_unavailable?: "block" | "monitor";
             /** Profile */
             profile?: string;
             /** Url */

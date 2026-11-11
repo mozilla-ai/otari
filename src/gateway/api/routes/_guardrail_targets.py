@@ -141,8 +141,13 @@ def messages_targets(request: Any) -> list[RequestTarget]:
 
 
 # Items the model produced. Everything after the last of them is new.
-_RESPONSES_MODEL_ITEMS = frozenset({"function_call", "custom_tool_call", "reasoning"})
-_RESPONSES_TOOL_OUTPUTS = frozenset({"function_call_output", "custom_tool_call_output"})
+_RESPONSES_MODEL_ITEMS = frozenset(
+    {"function_call", "custom_tool_call", "local_shell_call", "shell_call", "apply_patch_call", "reasoning"}
+)
+# The outputs whose `output` is text. A `shell_call_output` carries stdout and stderr chunks and is not read.
+_RESPONSES_TOOL_OUTPUTS = frozenset(
+    {"function_call_output", "custom_tool_call_output", "local_shell_call_output", "apply_patch_call_output"}
+)
 
 
 def responses_targets(request: Any) -> list[RequestTarget]:

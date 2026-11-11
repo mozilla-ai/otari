@@ -30,7 +30,7 @@ from gateway.models.base import Base, UtcDateTime
 GuardrailDirection = Literal["input", "tool_results", "tool_calls", "output"]
 """What a guardrail reads: the caller's input, tool results, the tool calls the model makes, or its answer."""
 
-GuardrailMode = Literal["monitor", "block"]
+GuardrailMode = Literal["block", "monitor"]
 """What a guardrail does when it fires: record it, or refuse or withhold the content."""
 
 DEFAULT_DIRECTIONS: tuple[GuardrailDirection, ...] = ("input",)

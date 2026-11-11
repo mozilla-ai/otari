@@ -122,6 +122,18 @@ def _tool_name(dialect: str, event: Any) -> tuple[tuple[Any, ...], str] | None:
     return None
 
 
+def _provider_call(dialect: str, event: Any) -> tuple[Any, ...] | None:
+    """The key of a Messages block that starts a call the provider runs itself, such as its own web search.
+
+    Its arguments stream as a client call's do, but it never reaches the client,
+    so it is not read, as :func:`answer_parts` does not read it either.
+    """
+    block = getattr(event, "content_block", None)
+    if dialect != "messages" or block is None or getattr(event, "type", None) != "content_block_start":
+        return None
+    return None if block.type in ("tool_use", "text") else ("call", event.index)
+
+
 async def guarded_stream(
     stream: AsyncIterator[Any],
     guardrails: RequestGuardrails,
@@ -138,6 +150,7 @@ async def guarded_stream(
         events: list[Any] = []
         texts: dict[tuple[Any, ...], str] = {}
         names: dict[tuple[Any, ...], str] = {}
+        provider_calls: set[tuple[Any, ...]] = set()
         usage: CompletionUsage | None = None
         async for event in stream:
             events.append(event)
@@ -145,12 +158,14 @@ async def guarded_stream(
                 usage = reported if usage is None else merge_stream_usage(usage, reported)
             if (named := _tool_name(dialect, event)) is not None:
                 names[named[0]] = named[1]
+            if (provider_call := _provider_call(dialect, event)) is not None:
+                provider_calls.add(provider_call)
             for delta in _deltas(dialect, event):
                 texts[delta.channel] = texts.get(delta.channel, "") + delta.text
         parts = [
             AnswerPart("tool_call" if key[0] == "call" else "text", text, tool=names.get(key))
             for key, text in texts.items()
-            if text
+            if text and key not in provider_calls
         ]
         try:
             await guardrails.finish_answer(parts)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -133,6 +134,44 @@ async def test_a_held_stream_the_guardrails_let_through_is_sent_on_unchanged(mon
 
     assert out == chunks
     assert seen == ["the answer is 42"]
+
+
+@pytest.mark.asyncio
+async def test_a_held_messages_stream_does_not_read_a_call_the_provider_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider's own web search streams its query as a client call would, and is left out as it is unstreamed."""
+    seen: list[str] = []
+
+    async def _record(guardrails: list[GuardrailConfig], text: str, **kwargs: object) -> GuardrailVerdict:
+        seen.append(text)
+        return await _flag(guardrails, text, **kwargs)
+
+    def _start(index: int, kind: str, name: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            type="content_block_start", index=index, content_block=SimpleNamespace(type=kind, name=name)
+        )
+
+    def _json(index: int, partial: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            type="content_block_delta",
+            index=index,
+            delta=SimpleNamespace(type="input_json_delta", partial_json=partial),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _record)
+    guardrails = RequestGuardrails(
+        [GuardrailConfig(profile="mod", mode="block", on=["tool_calls"])], response=Response()
+    )
+    events = [
+        _start(0, "server_tool_use", "web_search"),
+        _json(0, '{"query": "forbidden"}'),
+        _start(1, "tool_use", "send_mail"),
+        _json(1, '{"to": "a@b"}'),
+    ]
+
+    out = [event async for event in guarded_stream(_events(*events), guardrails, "messages", lambda _: None)]
+
+    assert out == events
+    assert seen == ['{"to": "a@b"}']
 
 
 @pytest.mark.asyncio

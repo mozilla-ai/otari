@@ -380,16 +380,17 @@ async def test_a_gateway_run_tool_result_is_read_in_the_loop(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_the_gateways_own_tool_error_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _flagging(_POISONED, calls=calls))
+async def test_an_mcp_servers_error_result_is_read_like_any_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An MCP result with ``isError`` reaches the model as ``[tool error]`` plus the server's own text."""
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _flagging(_POISONED))
     guardrails = RequestGuardrails(
         [GuardrailConfig(profile="pi", mode="block", **_READS_TOOL_RESULTS)], response=Response()
     )
 
-    text = "[tool error] MCP tool execution failed"
-    assert await guardrails.after_tool_call("lookup", text) == text
-    assert calls == []
+    text = await guardrails.after_tool_call("lookup", f"[tool error] {_POISONED}")
+
+    assert text.startswith("[tool error] This tool result was withheld by Otari")
+    assert _POISONED not in text
 
 
 def test_a_guardrail_reading_only_input_guards_no_tool_and_no_answer() -> None:

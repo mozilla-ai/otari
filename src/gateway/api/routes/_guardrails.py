@@ -44,7 +44,7 @@ from gateway.services.guardrails import (
     run_input_guardrails,
     withheld_tool_result,
 )
-from gateway.services.tool_usage import TOOL_ERROR_SENTINEL, is_tool_error
+from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError
 
 if TYPE_CHECKING:
@@ -246,11 +246,11 @@ class RequestGuardrails:
         """``text``, or what the model reads in its place when a guardrail withholds it.
 
         For a tool the gateway runs, inside its tool loop. Never raises for a check
-        that cannot run: one that fails closed withholds the result instead. The
-        gateway's own ``[tool error]`` text carries nothing from outside, so it is
-        not read.
+        that cannot run: one that fails closed withholds the result instead. A
+        ``[tool error]`` result is read too, since an MCP server's own error text
+        follows that prefix.
         """
-        if not self._reads("tool_results") or not text or is_tool_error(text):
+        if not self._reads("tool_results") or not text:
             return text
         kept: list[str] = []
         content = _Content(

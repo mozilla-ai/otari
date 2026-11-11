@@ -9502,8 +9502,8 @@
           "mode": {
             "default": "monitor",
             "enum": [
-              "monitor",
-              "block"
+              "block",
+              "monitor"
             ],
             "title": "Mode",
             "type": "string"
@@ -16094,8 +16094,8 @@
             "default": "monitor",
             "description": "monitor records the verdict and forwards the request; block refuses flagged input or a flagged answer with 403 and withholds a flagged tool result or tool call",
             "enum": [
-              "monitor",
-              "block"
+              "block",
+              "monitor"
             ],
             "title": "Mode",
             "type": "string"
@@ -16668,8 +16668,8 @@
           },
           "mode": {
             "enum": [
-              "monitor",
-              "block"
+              "block",
+              "monitor"
             ],
             "title": "Mode",
             "type": "string"
@@ -16690,8 +16690,8 @@
           },
           "on_unavailable": {
             "enum": [
-              "monitor",
-              "block"
+              "block",
+              "monitor"
             ],
             "title": "On Unavailable",
             "type": "string"
