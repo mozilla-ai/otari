@@ -1,14 +1,14 @@
 """Single-use OAuth app authorization grants.
 
 Revision ID: d8a491bc02fa
-Revises: a7f2c91d4e60
+Revises: c4b8e2a19d73
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "d8a491bc02fa"
-down_revision = "a7f2c91d4e60"
+down_revision = "c4b8e2a19d73"
 branch_labels = None
 depends_on = None
 
