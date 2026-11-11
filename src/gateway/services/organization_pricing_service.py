@@ -72,6 +72,7 @@ from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProv
 from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing_service import (
     default_model_pricing,
+    default_pricing_match,
     normalize_effective_at,
     override_as_model_pricing,
     pricing_key_forms,
@@ -149,6 +150,17 @@ def _resolve_defaults(model_keys: Sequence[str], as_of: datetime) -> dict[str, M
     return resolved
 
 
+def _resolve_matches(model_keys: Sequence[str], as_of: datetime) -> dict[str, tuple[ModelPricing, str]]:
+    """Community default rates for several keys, each with the models.dev entry it came from. Synchronous."""
+    resolved: dict[str, tuple[ModelPricing, str]] = {}
+    for model_key in model_keys:
+        provider, _, model = model_key.partition(":")
+        match = default_pricing_match(provider or None, model or model_key, as_of)
+        if match is not None:
+            resolved[model_key] = match
+    return resolved
+
+
 class OrganizationPricingService:
     """Read and write the caller's organization's pricing overrides."""
 
@@ -217,6 +229,15 @@ class OrganizationPricingService:
         if not wanted:
             return {}
         return await asyncio.to_thread(_resolve_defaults, wanted, as_of)
+
+    async def community_default_matches(
+        self, model_keys: Collection[str], as_of: datetime
+    ) -> dict[str, tuple[ModelPricing, str]]:
+        """:meth:`community_defaults`, each with the ``models.dev:<provider>/<model>`` entry that answered."""
+        wanted = sorted(set(model_keys))
+        if not wanted:
+            return {}
+        return await asyncio.to_thread(_resolve_matches, wanted, as_of)
 
     async def stage_seeded_rates(self, rows: Sequence[OrganizationModelPricing]) -> None:
         """Stage rates copied from the dataset on an organization's behalf.

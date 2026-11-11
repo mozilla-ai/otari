@@ -251,7 +251,10 @@ Which price list meters a request depends on whose credential served it:
   [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
 
 On the Providers page, an unpriced model is offered but not served, each key's
-row counts its serving models, and a key serving none is marked.
+row counts its serving models, and a key serving none is marked. A default
+rate copied from another provider's listing of the same model id names that
+provider, for example **Default from cortecs**: models.dev had no price for the
+model under the key's own provider, so a reseller's price stands in for it.
 
 ### Entering a rate
 

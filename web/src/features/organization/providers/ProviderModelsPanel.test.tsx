@@ -126,6 +126,23 @@ describe("ProviderModelsPanel", () => {
     expect(within(row).getByText("Default")).toBeInTheDocument()
   })
 
+  it("names the provider a default was copied from when it is not the key's own", async () => {
+    mockApi({
+      models: [
+        orgProviderModel({ id: "a", model: "own-listing" }),
+        orgProviderModel({
+          id: "b",
+          model: "resold",
+          default_from: "cortecs",
+        }),
+      ],
+    })
+    await renderPanel()
+
+    expect(await screen.findByText("Default from cortecs")).toBeInTheDocument()
+    expect(screen.getByText("Default")).toBeInTheDocument()
+  })
+
   it("names each rung of the ladder rather than calling them all the same", async () => {
     // The badge is the answer to "who decided this number", and the three rungs
     // are answered by three different people: the organization, the deployment,

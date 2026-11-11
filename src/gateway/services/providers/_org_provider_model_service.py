@@ -38,7 +38,7 @@ resolves community defaults, both of which can take the whole discovery timeout.
 
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from functools import partial
@@ -80,12 +80,14 @@ from gateway.services.catalog import KeyOwner, offered_model_types, record_serve
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
+from gateway.services.pricing import REFERENCE_PREFIX
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.model_type import ModelType, OfferedModelType
+from gateway.types.models_dev import models_dev_provider_ids
 from gateway.types.price_unit import PriceUnit
 
 # What a client is told about where a rate came from. The spellings are
@@ -119,13 +121,14 @@ class _Price:
     cache_write_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
     unit: PriceUnit = "token"
+    default_from: str | None = None
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:
     return None if value is None else quantize_rate(value)
 
 
-def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool:
+def _same_rates(stored: OrganizationModelPricing | ModelPricing, default: ModelPricing) -> bool:
     """Whether a stored rate still says what today's community default says, per the same unit.
 
     Compared at the rate column's own scale, because the stored value has been
@@ -180,6 +183,28 @@ def _price_from(rate: EffectiveRate) -> _Price:
         pricing_id=rate.row.id if rate.row is not None else None,
         unit=rate.rates.unit or "token",
     )
+
+
+def _entry_provider(reference: str) -> str:
+    """The provider id of a ``models.dev:<provider>/<model>`` reference."""
+    return reference.removeprefix(REFERENCE_PREFIX).partition("/")[0]
+
+
+def _default_from(key: OrgProviderKey, rate: EffectiveRate, match: tuple[ModelPricing, str] | None) -> str | None:
+    """The other provider whose models.dev entry ``rate`` was copied from, or None.
+
+    None for the key's own provider's entry, and where today's entry is not
+    the one that set the rate: a seeded rate the dataset has since moved could
+    have come from anywhere, and a guess is worse than nothing.
+    """
+    if match is None:
+        return None
+    default, reference = match
+    stored = rate.row if rate.row is not None else rate.rates
+    if not _same_rates(stored, default):
+        return None
+    provider = _entry_provider(reference)
+    return None if provider in {key.provider, *models_dev_provider_ids(key.provider)} else provider
 
 
 def _seeded_row(
@@ -248,6 +273,7 @@ def _model_public(
         price_source=price.source if price else None,
         pricing_id=price.pricing_id if price else None,
         unit=price.unit if price else "token",
+        default_from=price.default_from if price else None,
         enabled=row.enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -358,7 +384,8 @@ class OrgProviderModelService:
             rows = await self.models.list_all_for_key(key_id)
             kinds = _kinds(key, [row.model for row in rows])
             page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit)
-            prices = await self._current_prices(key, page.rows)
+            rates = await self._rates_in_effect(key, page.rows)
+        prices = await self._prices(key, rates)
         return OrgProviderKeyModelsPublic(
             data=[_model_public(row, prices.get(row.model), kinds.get(row.model)) for row in page.rows],
             count=page.count,
@@ -436,10 +463,10 @@ class OrgProviderModelService:
                 # slice resolves it. Without this the loser of that race leaves
                 # with a 500 rather than the 409 it is.
                 raise OrgProviderModelAlreadyOfferedError(provider, conflict.model) from conflict
-            prices = await self._current_prices(key, [row])
-            public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
+            rates = await self._rates_in_effect(key, [row])
+        prices = await self._prices(key, rates)
         await self.refresh_overlay()
-        return public
+        return _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
 
     async def set_model_enabled(
         self, *, user: User, key_id: uuid.UUID, model_id: uuid.UUID, enabled: bool
@@ -468,15 +495,15 @@ class OrgProviderModelService:
             if row is None:
                 raise OrgProviderModelNotFoundError(model_id)
             if enabled and not row.enabled and self._pricing_required:
-                priced = await self._current_prices(key, [row])
+                priced = await self._rates_in_effect(key, [row])
                 if row.model not in priced:
                     raise OrgProviderModelUnpricedError(row.model)
             row.enabled = enabled
             await self.models.save(row)
-            prices = await self._current_prices(key, [row])
-            public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
+            rates = await self._rates_in_effect(key, [row])
+        prices = await self._prices(key, rates)
         await self.refresh_overlay()
-        return public
+        return _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
 
     async def remove_model(self, *, user: User, key_id: uuid.UUID, model_id: uuid.UUID) -> None:
         """Stop offering one model. Its rate and its history stay.
@@ -777,13 +804,13 @@ class OrgProviderModelService:
     # Pricing and dialing
     # ------------------------------------------------------------------
 
-    async def _current_prices(self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]) -> dict[str, _Price]:
+    async def _rates_in_effect(
+        self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]
+    ) -> dict[str, EffectiveRate]:
         """What each offered model currently costs this organization, keyed by model.
 
         The ladder's order belongs to `OrganizationPricingService.rates_in_effect`,
-        which is what settlement walks. What is decided here is only how a rung
-        is *named* to a reader: a row this surface seeded reports as a default,
-        because that is what it is.
+        which is what settlement walks. Runs inside a block.
         """
         if not rows:
             return {}
@@ -791,10 +818,26 @@ class OrgProviderModelService:
         keys_by_model = {row.model: f"{key.selector_prefix}:{row.model}" for row in rows}
         effective = await self.org_pricing.rates_in_effect(key.organization_id, keys_by_model.values(), now)
         return {
-            model: _price_from(rate)
-            for model, model_key in keys_by_model.items()
-            if (rate := effective.get(model_key)) is not None
+            model: rate for model, model_key in keys_by_model.items() if (rate := effective.get(model_key)) is not None
         }
+
+    async def _prices(self, key: OrgProviderKey, rates: dict[str, EffectiveRate]) -> dict[str, _Price]:
+        """Name each rate for a reader, with the provider a default came from.
+
+        A row this surface seeded reports as a default, because that is what it
+        is. Runs outside a block: which entry a default came from is a dataset
+        walk, the same thread hop as :meth:`_defaults_for`.
+        """
+        named = {model: _price_from(rate) for model, rate in rates.items()}
+        prefix = key.selector_prefix
+        defaults = [model for model, price in named.items() if price.source == PRICE_SOURCE_DEFAULT]
+        matches = await self.org_pricing.community_default_matches(
+            [f"{prefix}:{model}" for model in defaults], datetime.now(tz=UTC)
+        )
+        for model in defaults:
+            if (source := _default_from(key, rates[model], matches.get(f"{prefix}:{model}"))) is not None:
+                named[model] = replace(named[model], default_from=source)
+        return named
 
     async def _defaults_for(self, prefix: str, models: Sequence[str]) -> dict[str, ModelPricing]:
         """Today's community rate for each model, keyed by the bare model name.

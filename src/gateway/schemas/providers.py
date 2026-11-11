@@ -258,6 +258,14 @@ class OrgProviderKeyModelPublic(SQLModel):
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
     unit: PriceUnit = "token"
+    default_from: str | None = Field(
+        default=None,
+        description=(
+            "For a `defaults` rate, the models.dev provider whose entry it was copied from, "
+            "when that is not this key's own provider: a reseller listing the same model id. "
+            "None for the key's own provider, and when the entry that set a stored rate is no longer known."
+        ),
+    )
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None

@@ -848,6 +848,7 @@ export function orgProviderModel(
     price_source: "defaults",
     pricing_id: null,
     unit: "token",
+    default_from: null,
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,

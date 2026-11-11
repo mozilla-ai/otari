@@ -56,14 +56,24 @@ import { refreshOutcome } from "./refreshOutcome"
 // Typed rather than `string`, so the day a rung is renamed or added this stops
 // compiling instead of quietly falling through to Unpriced. The spellings are
 // the gateway's one `PriceSource` vocabulary, which the Models page names too.
+// A default copied from another provider's listing of the same model id names
+// that provider, because a reseller's price is not the provider's own.
 function PriceSourceBadge({
   source,
+  defaultFrom,
 }: {
   source: OrgProviderModel["price_source"]
+  defaultFrom: OrgProviderModel["default_from"]
 }) {
   if (source === "organization") return <Badge tone="muted">Your rate</Badge>
   if (source === "deployment") return <Badge tone="muted">Deployment</Badge>
-  if (source === "defaults") return <Badge tone="muted">Default</Badge>
+  if (source === "defaults") {
+    return (
+      <Badge tone="muted">
+        {defaultFrom ? `Default from ${defaultFrom}` : "Default"}
+      </Badge>
+    )
+  }
   return <Badge tone="warn">Unpriced</Badge>
 }
 
@@ -137,7 +147,12 @@ export function ProviderModelsPanel({
     {
       id: "source",
       header: "Rate",
-      cell: (row) => <PriceSourceBadge source={row.price_source} />,
+      cell: (row) => (
+        <PriceSourceBadge
+          source={row.price_source}
+          defaultFrom={row.default_from}
+        />
+      ),
     },
     {
       id: "enabled",

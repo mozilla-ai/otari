@@ -140,8 +140,14 @@ def _discovery(monkeypatch: pytest.MonkeyPatch, *models: str, error: str | None 
     monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", _stub)
 
 
-def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
-    """Make the community dataset price exactly ``rates``, and nothing else."""
+def _defaults(
+    monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]], *, sources: dict[str, str] | None = None
+) -> None:
+    """Make the community dataset price exactly ``rates``, and nothing else.
+
+    ``sources`` names the models.dev provider whose entry prices a model; the
+    key's own provider otherwise.
+    """
 
     def _stub(
         provider: str | None, model: str, as_of: object, *, implementation: str | None = None
@@ -157,7 +163,16 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             unit="token",
         )
 
+    def _match(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> tuple[ModelPricing, str] | None:
+        pricing = _stub(provider, model, as_of)
+        if pricing is None:
+            return None
+        return pricing, f"models.dev:{(sources or {}).get(model, provider)}/{model}"
+
     monkeypatch.setattr("gateway.services.organization_pricing_service.default_model_pricing", _stub)
+    monkeypatch.setattr("gateway.services.organization_pricing_service.default_pricing_match", _match)
 
 
 async def _key(db: AsyncSession, owner: User, *, provider: str = "openai", name: str = "primary") -> uuid.UUID:
@@ -484,6 +499,64 @@ async def test_an_offered_model_says_what_its_rate_is_per(
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     assert listed.data[0].unit == "request"
     assert listed.data[0].input_price_per_million == 2000.0
+
+
+async def test_a_default_priced_from_another_providers_entry_names_that_provider(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reseller's price for the same id is a plausible rate, not the provider's own, so the admin is told."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner, provider="mistral")
+    _discovery(monkeypatch, "mistral-large-4-0", "mistral-small-3-2")
+    _defaults(
+        monkeypatch,
+        {"mistral-large-4-0": ("0.765", "2.351"), "mistral-small-3-2": ("0.1", "0.3")},
+        sources={"mistral-large-4-0": "cortecs"},
+    )
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+
+    assert {row.model: (row.price_source, row.default_from) for row in listed.data} == {
+        "mistral-large-4-0": ("defaults", "cortecs"),
+        "mistral-small-3-2": ("defaults", None),
+    }
+
+
+async def test_a_seeded_rate_the_dataset_has_since_moved_names_no_source(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Today's entry did not set the stored rate, so naming it would be a guess."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner, provider="mistral")
+    _discovery(monkeypatch, "mistral-large-4-0")
+    _defaults(monkeypatch, {"mistral-large-4-0": ("0.765", "2.351")}, sources={"mistral-large-4-0": "cortecs"})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    _defaults(monkeypatch, {"mistral-large-4-0": ("0.7", "2.1")}, sources={"mistral-large-4-0": "nebius"})
+    [row] = (await _service(async_db).list_models(user=owner, key_id=key_id)).data
+
+    assert (row.input_price_per_million, row.default_from) == (0.765, None)
+
+
+async def test_a_rate_the_admin_set_names_no_default_source(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner, provider="mistral")
+    _discovery(monkeypatch, "mistral-large-4-0")
+    _defaults(monkeypatch, {"mistral-large-4-0": ("0.765", "2.351")}, sources={"mistral-large-4-0": "cortecs"})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+    [stored] = await _organization_rates(async_db)
+    stored.origin = "api"
+    await async_db.commit()
+
+    [row] = (await _service(async_db).list_models(user=owner, key_id=key_id)).data
+
+    assert (row.price_source, row.default_from) == ("organization", None)
 
 
 async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
