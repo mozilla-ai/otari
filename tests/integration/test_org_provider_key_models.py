@@ -613,6 +613,76 @@ async def test_an_unchanged_default_is_not_repriced(async_db: AsyncSession, monk
     assert result.repriced == []
 
 
+async def test_a_catalog_update_moves_every_organizations_seeded_rates(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What an applied catalog update runs: every organization's keys, with no one signed in.
+
+    A model that arrived unpriced is served once the new prices cover it, a
+    seeded rate follows the new default, and a rate an admin chose stays.
+    """
+    first = await _organization(async_db, slug="acme")
+    first_owner = await _member(async_db, first, role="owner", full_name="First")
+    second = await _organization(async_db, slug="globex")
+    second_owner = await _member(async_db, second, role="owner", full_name="Second")
+    first_key = await _key(async_db, first_owner)
+    second_key = await _key(async_db, second_owner, provider="mistral")
+    _discovery(monkeypatch, "gpt-4o", "gpt-6-unreleased")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _service(async_db).refresh_models(user=first_owner, key_id=first_key)
+    _discovery(monkeypatch, "mistral-large-4-0")
+    await _service(async_db).refresh_models(user=second_owner, key_id=second_key)
+    assert await _offered(async_db, first_key) == {"gpt-4o": True, "gpt-6-unreleased": False}
+    assert await _offered(async_db, second_key) == {"mistral-large-4-0": False}
+
+    _defaults(
+        monkeypatch, {"gpt-4o": ("2.0", "8"), "gpt-6-unreleased": ("4", "16"), "mistral-large-4-0": ("0.7", "2.1")}
+    )
+    moved = await _service(async_db).refresh_seeded_rates()
+
+    assert moved == 3
+    assert await _offered(async_db, first_key) == {"gpt-4o": True, "gpt-6-unreleased": True}
+    assert await _offered(async_db, second_key) == {"mistral-large-4-0": True}
+    rates = {row.model_key: row.input_price_per_million for row in await _organization_rates(async_db)}
+    assert rates == {
+        "openai:gpt-4o": Decimal("2.0"),
+        "openai:gpt-6-unreleased": Decimal("4"),
+        "mistral:mistral-large-4-0": Decimal("0.7"),
+    }
+
+
+async def test_a_catalog_update_skips_a_key_it_cannot_reprice_and_moves_the_rest(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One key's failure must not hold back every other organization's prices."""
+    first = await _organization(async_db, slug="acme")
+    first_owner = await _member(async_db, first, role="owner", full_name="First")
+    second = await _organization(async_db, slug="globex")
+    second_owner = await _member(async_db, second, role="owner", full_name="Second")
+    first_key = await _key(async_db, first_owner)
+    second_key = await _key(async_db, second_owner)
+    _discovery(monkeypatch, "gpt-6-unreleased")
+    _defaults(monkeypatch, {})
+    await _service(async_db).refresh_models(user=first_owner, key_id=first_key)
+    await _service(async_db).refresh_models(user=second_owner, key_id=second_key)
+
+    service = _service(async_db)
+    list_all_for_key = service.models.list_all_for_key
+
+    async def _fails_for_the_first_key(key_id: uuid.UUID) -> object:
+        if key_id == first_key:
+            raise OperationalError("SELECT 1", {}, Exception("the connection went away"))
+        return await list_all_for_key(key_id)
+
+    monkeypatch.setattr(service.models, "list_all_for_key", _fails_for_the_first_key)
+    _defaults(monkeypatch, {"gpt-6-unreleased": ("4", "16")})
+    moved = await service.refresh_seeded_rates()
+
+    assert moved == 1
+    assert await _offered(async_db, first_key) == {"gpt-6-unreleased": False}
+    assert await _offered(async_db, second_key) == {"gpt-6-unreleased": True}
+
+
 async def test_a_deployment_priced_model_is_offered_without_a_seeded_rate(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

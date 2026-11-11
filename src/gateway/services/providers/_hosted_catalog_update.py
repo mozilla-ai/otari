@@ -3,8 +3,10 @@
 One operation behind the scheduled update, the Update catalog button and an
 approval of reviewed prices, so the two halves never run out of order: the model
 step prices new rows at the prices the first step just applied, and a row held
-for want of a price is served once it has one. Removing the prices nothing
-serves is opt-in and never scheduled, because it deletes price history.
+for want of a price is served once it has one. Applied prices also move the
+seeded rates of every organization's provider keys, for the same reason.
+Removing the prices nothing serves is opt-in and never scheduled, because it
+deletes price history.
 """
 
 import asyncio
@@ -52,6 +54,14 @@ class PriceUpdates(Protocol):
         ...
 
 
+class SeededRates(Protocol):
+    """The organization provider keys' rates seeded from the community prices."""
+
+    async def refresh_seeded_rates(self) -> int:
+        """Move every seeded rate onto today's default; how many models moved."""
+        ...
+
+
 def _price_public(preview: PricingRefreshPreview) -> HostedCatalogPriceUpdatePublic:
     return HostedCatalogPriceUpdatePublic(
         fetched_at=preview.fetched_at,
@@ -75,9 +85,25 @@ def _summary(prices: str, catalog: HostedCatalogRefreshPublic) -> str:
 class HostedCatalogUpdate:
     """Preview, apply or schedule the catalog update."""
 
-    def __init__(self, hosted: HostedProviderService, prices: PriceUpdates) -> None:
+    def __init__(self, hosted: HostedProviderService, prices: PriceUpdates, seeded: SeededRates) -> None:
         self.hosted = hosted
         self.prices = prices
+        self.seeded = seeded
+
+    async def _reprice_organizations(self) -> int:
+        """Carry applied prices to the organization keys; 0 when that fails.
+
+        The prices are committed by now, so a failure is logged rather than
+        raised: each key still moves on its own Refresh pricing.
+        """
+        try:
+            return await self.seeded.refresh_seeded_rates()
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "Moving organization keys onto the new prices failed (%s); each key keeps its rates until refreshed",
+                describe_database_error(exc),
+            )
+            return 0
 
     async def preview(self, *, cleanup: bool) -> HostedCatalogUpdatePreviewPublic:
         """Fetch the latest prices and hold them, and dial every provider, writing nothing else.
@@ -101,6 +127,8 @@ class HostedCatalogUpdate:
     async def apply(self, *, digest: str | None, cleanup: bool) -> HostedCatalogUpdatePublic:
         """Apply the prices reviewed under ``digest``, if any, then refresh every provider's models.
 
+        Applied prices then move every organization key's seeded rates.
+
         Raises:
             HostedCatalogPricesChangedError: the pending prices are not the reviewed ones; nothing changed.
             HostedCatalogPricesUnsavedError: the prices could not be applied; nothing changed.
@@ -117,7 +145,8 @@ class HostedCatalogUpdate:
             if not applied:
                 raise HostedCatalogPricesChangedError
         catalog = await self.hosted.refresh_catalog(apply=True, remove=cleanup)
-        return HostedCatalogUpdatePublic(prices_applied=applied, catalog=catalog)
+        repriced = await self._reprice_organizations() if applied else 0
+        return HostedCatalogUpdatePublic(prices_applied=applied, catalog=catalog, organization_models_repriced=repriced)
 
     async def run_scheduled(self, policy: str, interval_seconds: float) -> str | None:
         """One scheduled update under ``policy``, or ``None`` when another worker owns it.
@@ -134,6 +163,8 @@ class HostedCatalogUpdate:
             logger.warning("Scheduled catalog update could not fetch models.dev prices; refreshing models only")
             prices = "unreachable"
         catalog = await self.hosted.refresh_catalog(apply=True, remove=False)
+        if prices == "applied":
+            await self._reprice_organizations()
         return _summary(prices, catalog)
 
 

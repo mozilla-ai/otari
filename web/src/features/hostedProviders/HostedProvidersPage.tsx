@@ -63,6 +63,7 @@ import {
   catalogRefreshFailures,
   catalogRefreshOutcome,
   modelsPreviewOutcome,
+  organizationRepricedOutcome,
   pricePreviewOutcome,
 } from "./refreshOutcome"
 import { formatCountries } from "./supportedCountries"
@@ -103,10 +104,12 @@ type ProviderRow =
 function CatalogUpdateReport({
   result,
   pricesApplied,
+  organizationModelsRepriced,
   onRemoveProvider,
 }: {
   result: HostedCatalogRefresh
   pricesApplied: boolean
+  organizationModelsRepriced: number
   onRemoveProvider: (provider: string) => void
 }) {
   const failures = catalogRefreshFailures(result)
@@ -115,6 +118,9 @@ function CatalogUpdateReport({
       <p role="status">
         {pricesApplied ? "Applied the latest models.dev prices. " : ""}
         {catalogRefreshOutcome(result)}
+        {organizationModelsRepriced > 0
+          ? ` ${organizationRepricedOutcome(organizationModelsRepriced)}`
+          : ""}
       </p>
       {result.removed_count > 0 ? (
         <p className="mt-1 text-caption">
@@ -661,6 +667,9 @@ export function HostedProvidersPage() {
         <CatalogUpdateReport
           result={catalogUpdate.data.catalog}
           pricesApplied={catalogUpdate.data.prices_applied}
+          organizationModelsRepriced={
+            catalogUpdate.data.organization_models_repriced
+          }
           onRemoveProvider={setPendingDelete}
         />
       ) : null}

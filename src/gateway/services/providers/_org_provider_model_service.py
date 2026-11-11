@@ -41,11 +41,12 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 
 from fastapi import BackgroundTasks
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import DATABASE_ERRORS
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -324,6 +325,17 @@ class OrgProviderModelService:
             raise OrgProviderKeyNotFoundError(key_id)
         return key
 
+    async def _live_key(self, key_id: uuid.UUID) -> OrgProviderKey:
+        """A key that is not archived, read for no caller.
+
+        Raises:
+            OrgProviderKeyNotFoundError: no such key, or it has been archived.
+        """
+        key = await self.keys.get(key_id)
+        if key is None or key.archived_at is not None:
+            raise OrgProviderKeyNotFoundError(key_id)
+        return key
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
@@ -592,6 +604,28 @@ class OrgProviderModelService:
         repriced = await self._reprice(lambda: self._key_for_user(user, key_id), key_id=key_id, added=[])
         await self.refresh_overlay()
         return OrgProviderModelsRefreshPublic(added=[], repriced=repriced, count=count)
+
+    async def refresh_seeded_rates(self) -> int:
+        """Move every organization key's seeded rates onto today's default; how many models moved.
+
+        What an applied price update runs, so a model that arrived unpriced is
+        served without an admin pressing Refresh pricing on each key. Acts for
+        no caller, so it authorizes nothing. A key that fails is logged and
+        skipped, so one organization cannot hold back the others.
+        """
+        async with self.uow:
+            key_ids = [key.id for key in await self.keys.list_all_live()]
+        moved = 0
+        for key_id in key_ids:
+            try:
+                moved += len(await self._reprice(partial(self._live_key, key_id), key_id=key_id, added=[]))
+            except OrgProviderKeyNotFoundError:
+                continue
+            except DATABASE_ERRORS as exc:
+                logger.warning("Repricing provider key %s failed (%s)", key_id, describe_database_error(exc))
+        if moved:
+            await self.refresh_overlay()
+        return moved
 
     # ------------------------------------------------------------------
     # The two rules

@@ -993,6 +993,11 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+Applied prices also reach every organization's own provider keys. A rate
+seeded from the community default follows the new default, and a model that
+arrived unpriced is priced and switched on, so no admin has to press
+**Refresh pricing** on each key. A rate an organization set itself stays.
+
 With `models_dev_metadata` on, an update also stores the catalog of model
 facts it downloaded, which gives each model its kind and details, so the
 dashboard does not show a price for a model it still calls unknown. Storing it

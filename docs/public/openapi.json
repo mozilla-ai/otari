@@ -10463,6 +10463,11 @@
           "catalog": {
             "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
           },
+          "organization_models_repriced": {
+            "description": "How many models on organization provider keys moved onto the applied prices: a seeded rate that changed, or an unpriced model now priced and served.",
+            "title": "Organization Models Repriced",
+            "type": "integer"
+          },
           "prices_applied": {
             "title": "Prices Applied",
             "type": "boolean"
@@ -10470,7 +10475,8 @@
         },
         "required": [
           "prices_applied",
-          "catalog"
+          "catalog",
+          "organization_models_repriced"
         ],
         "title": "HostedCatalogUpdatePublic",
         "type": "object"
@@ -35984,7 +35990,7 @@
     },
     "/api/v1/hosted-providers/catalog-update": {
       "post": {
-        "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
+        "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Applied prices also move every organization provider key's seeded\nrates, and serve its models they now price. Without a ``digest`` no price\nchanges. A ``digest`` that no longer names the pending prices answers 409\nand changes nothing. ``cleanup`` removes the prices of models no provider\nserves, with their history.",
         "operationId": "hosted-providers-update_catalog",
         "requestBody": {
           "content": {

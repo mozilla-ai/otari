@@ -991,6 +991,12 @@ class HostedCatalogUpdatePublic(SQLModel):
 
     prices_applied: bool
     catalog: HostedCatalogRefreshPublic
+    organization_models_repriced: int = Field(
+        description=(
+            "How many models on organization provider keys moved onto the applied prices: "
+            "a seeded rate that changed, or an unpriced model now priced and served."
+        ),
+    )
 
 
 class HostedAvailableModelsPublic(SQLModel):

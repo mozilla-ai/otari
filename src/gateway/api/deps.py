@@ -1998,28 +1998,37 @@ def get_agent_recommender_service(uow: Annotated[UnitOfWork, Depends(get_unit_of
 AgentRecommenderServiceDep = Annotated[AgentRecommenderService, Depends(get_agent_recommender_service)]
 
 
-def build_hosted_catalog_update(uow: UnitOfWork, *, config: GatewayConfig) -> HostedCatalogUpdate:
+def build_hosted_catalog_update(
+    uow: UnitOfWork, *, config: GatewayConfig, org_models: OrgProviderModelService
+) -> HostedCatalogUpdate:
     """Build the catalog update on ``uow``; its price steps open sessions of their own."""
-    return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config))
+    return HostedCatalogUpdate(
+        build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config), org_models
+    )
 
 
 def get_hosted_catalog_update(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    org_models: OrgProviderModelServiceDep,
 ) -> HostedCatalogUpdate:
     """The catalog update for one request, on its Unit of Work."""
-    return build_hosted_catalog_update(uow, config=config)
+    return build_hosted_catalog_update(uow, config=config, org_models=org_models)
 
 
 HostedCatalogUpdateDep = Annotated[HostedCatalogUpdate, Depends(get_hosted_catalog_update)]
 
 
-def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
+def build_scheduled_catalog_update(config: GatewayConfig, container: Container) -> ScheduledRun:
     """Build the catalog update worker's run, each on a Unit of Work of its own."""
 
     async def run(policy: str, interval_seconds: float) -> str | None:
-        async with create_unit_of_work() as uow:
-            return await build_hosted_catalog_update(uow, config=config).run_scheduled(policy, interval_seconds)
+        async with create_unit_of_work_with_session() as (session, uow):
+            org_models = build_org_provider_model_service(
+                session, uow, config=config, model_provider=container.resolve(ModelProviderPort, session, uow=uow)
+            )
+            update = build_hosted_catalog_update(uow, config=config, org_models=org_models)
+            return await update.run_scheduled(policy, interval_seconds)
 
     return run
 

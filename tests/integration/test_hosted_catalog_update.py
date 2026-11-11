@@ -13,6 +13,7 @@ from decimal import Decimal
 import pytest
 from any_llm.types.model import Model
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import build_hosted_provider_service
@@ -123,8 +124,27 @@ class FakePrices:
         return self.approve_returns
 
 
-def _update(db: AsyncSession, prices: FakePrices) -> HostedCatalogUpdate:
-    return HostedCatalogUpdate(build_hosted_provider_service(UnitOfWork(db), config=GatewayConfig()), prices)
+class FakeSeededRates:
+    """Counts the runs of the organization keys' reprice, and moves ``moves`` models each time."""
+
+    def __init__(self, moves: int = 2) -> None:
+        self.runs = 0
+        self.moves = moves
+        self.fails = False
+
+    async def refresh_seeded_rates(self) -> int:
+        self.runs += 1
+        if self.fails:
+            raise OperationalError("SELECT 1", {}, Exception("the connection went away"))
+        return self.moves
+
+
+def _update(db: AsyncSession, prices: FakePrices, seeded: FakeSeededRates | None = None) -> HostedCatalogUpdate:
+    return HostedCatalogUpdate(
+        build_hosted_provider_service(UnitOfWork(db), config=GatewayConfig()),
+        prices,
+        seeded if seeded is not None else FakeSeededRates(),
+    )
 
 
 async def _provider(db: AsyncSession, monkeypatch: pytest.MonkeyPatch, *models: str) -> None:
@@ -310,3 +330,58 @@ async def test_a_scheduled_update_whose_price_fetch_fails_still_refreshes_models
 
     assert outcome == "prices unreachable; 1 models added; 0 providers not reached"
     assert await _offered(async_db) == {"gpt-4o": True, "gpt-5-1017": True}
+
+
+async def test_applied_prices_move_every_organization_keys_seeded_rates(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise an organization key keeps the old rates until an admin presses Refresh pricing on it."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _provider(async_db, monkeypatch, "gpt-4o")
+    seeded = FakeSeededRates(moves=3)
+
+    outcome = await _update(async_db, FakePrices(), seeded).apply(digest=DIGEST, cleanup=False)
+
+    assert seeded.runs == 1
+    assert outcome.organization_models_repriced == 3
+
+
+async def test_an_update_that_applies_no_prices_leaves_organization_keys_alone(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _provider(async_db, monkeypatch, "gpt-4o")
+    seeded = FakeSeededRates()
+
+    outcome = await _update(async_db, FakePrices(), seeded).apply(digest=None, cleanup=False)
+
+    assert seeded.runs == 0
+    assert outcome.organization_models_repriced == 0
+
+
+async def test_applied_prices_stay_applied_when_the_organization_reprice_fails(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prices are committed by then, so a failure here is logged rather than reported as a failed update."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _provider(async_db, monkeypatch, "gpt-4o")
+    seeded = FakeSeededRates()
+    seeded.fails = True
+
+    outcome = await _update(async_db, FakePrices(), seeded).apply(digest=DIGEST, cleanup=False)
+
+    assert outcome.prices_applied is True
+    assert outcome.organization_models_repriced == 0
+
+
+@pytest.mark.parametrize(("policy", "runs"), [("auto", 1), ("review", 0)])
+async def test_a_scheduled_update_moves_organization_rates_only_when_it_applies_prices(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, policy: str, runs: int
+) -> None:
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _provider(async_db, monkeypatch, "gpt-4o")
+    seeded = FakeSeededRates()
+
+    await _update(async_db, FakePrices(), seeded).run_scheduled(policy, 3600)
+
+    assert seeded.runs == runs

@@ -595,7 +595,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # runtime-settable and each tick re-reads it.
     _LifespanWorker(
         "catalog update",
-        lambda config, _container: run_catalog_updater(config, build_scheduled_catalog_update(config)),
+        lambda config, container: run_catalog_updater(config, build_scheduled_catalog_update(config, container)),
     ),
     # Started whatever ``model_cache_ttl_seconds`` says, for the same reason.
     # Gating on it would strand the gateway: the TTL is runtime-settable, and

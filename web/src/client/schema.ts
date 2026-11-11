@@ -2008,9 +2008,11 @@ export interface paths {
          *
          *     The price step comes first, so the model step prices new models at the
          *     prices it applied, and a model held for want of a price is served once it
-         *     has one. Without a ``digest`` no price changes. A ``digest`` that no longer
-         *     names the pending prices answers 409 and changes nothing. ``cleanup``
-         *     removes the prices of models no provider serves, with their history.
+         *     has one. Applied prices also move every organization provider key's seeded
+         *     rates, and serve its models they now price. Without a ``digest`` no price
+         *     changes. A ``digest`` that no longer names the pending prices answers 409
+         *     and changes nothing. ``cleanup`` removes the prices of models no provider
+         *     serves, with their history.
          */
         post: operations["hosted-providers-update_catalog"];
         delete?: never;
@@ -13217,6 +13219,11 @@ export interface components {
          */
         HostedCatalogUpdatePublic: {
             catalog: components["schemas"]["HostedCatalogRefreshPublic"];
+            /**
+             * Organization Models Repriced
+             * @description How many models on organization provider keys moved onto the applied prices: a seeded rate that changed, or an unpriced model now priced and served.
+             */
+            organization_models_repriced: number;
             /** Prices Applied */
             prices_applied: boolean;
         };

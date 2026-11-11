@@ -10,6 +10,7 @@ import {
   catalogRefreshFailures,
   catalogRefreshOutcome,
   modelsPreviewOutcome,
+  organizationRepricedOutcome,
   pricePreviewOutcome,
   refreshOutcome,
 } from "./refreshOutcome"
@@ -74,6 +75,17 @@ const sweep = (patch: Partial<CatalogRefresh>): CatalogRefresh => ({
   removed_override_rows: 0,
   kept: [],
   ...patch,
+})
+
+describe("organizationRepricedOutcome", () => {
+  it("counts the models in the singular and the plural", () => {
+    expect(organizationRepricedOutcome(1)).toBe(
+      "Moved 1 model on organization provider keys onto the new prices.",
+    )
+    expect(organizationRepricedOutcome(3)).toBe(
+      "Moved 3 models on organization provider keys onto the new prices.",
+    )
+  })
 })
 
 describe("catalogRefreshOutcome", () => {

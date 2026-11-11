@@ -66,6 +66,11 @@ export function catalogRefreshOutcome(result: HostedCatalogRefresh): string {
     : "Nothing to change: the catalog already matches this page."
 }
 
+/** One sentence for the organization key models an applied price update moved. */
+export function organizationRepricedOutcome(count: number): string {
+  return `Moved ${plural(count, "model", "models")} on organization provider keys onto the new prices.`
+}
+
 /**
  * One sentence for what a sweep is about to do, for the confirm dialog.
  *

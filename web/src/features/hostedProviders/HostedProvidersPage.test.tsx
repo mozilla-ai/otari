@@ -258,6 +258,7 @@ function mockApi(
       const sent = body as { digest: string | null; cleanup: boolean }
       return jsonResponse({
         prices_applied: sent.digest !== null,
+        organization_models_repriced: sent.digest !== null ? 2 : 0,
         catalog: sent.cleanup
           ? sweep
           : { ...EMPTY_SWEEP, providers: sweep.providers },
@@ -1208,7 +1209,7 @@ describe("HostedProvidersPage", () => {
     })
     expect(
       await screen.findByText(
-        "Applied the latest models.dev prices. Offered 1 new model.",
+        "Applied the latest models.dev prices. Offered 1 new model. Moved 2 models on organization provider keys onto the new prices.",
       ),
     ).toBeInTheDocument()
   })

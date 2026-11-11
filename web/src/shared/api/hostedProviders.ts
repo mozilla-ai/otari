@@ -31,6 +31,9 @@ import {
   HOSTED_PROVIDERS,
   MODELS,
   NO_RETRY,
+  ORGANIZATION_PRICING,
+  ORGANIZATION_PROVIDER_KEYS,
+  ORGANIZATION_PROVIDER_MODELS,
   PLATFORM_CONNECT,
   PRICING,
   PROVIDER_HEALTH,
@@ -346,9 +349,11 @@ export function useHostedCatalogUpdatePreview(
 
 /**
  * The catalog update: the reviewed models.dev prices, then every provider's
- * models, then the cleanup if it was asked for.
+ * models, then the cleanup if it was asked for. Applied prices also move the
+ * seeded rates on every organization provider key, so those reads go too.
  */
 export function useHostedCatalogUpdate() {
+  const queryClient = useQueryClient()
   const invalidate = useInvalidateHosted()
   return useMutation({
     mutationFn: (body: HostedCatalogUpdateRequest) =>
@@ -357,7 +362,16 @@ export function useHostedCatalogUpdate() {
         body: JSON.stringify(body),
         signal: longRequestSignal(),
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      for (const key of [
+        ORGANIZATION_PROVIDER_MODELS,
+        ORGANIZATION_PROVIDER_KEYS,
+        ORGANIZATION_PRICING,
+      ]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
   })
 }
 
