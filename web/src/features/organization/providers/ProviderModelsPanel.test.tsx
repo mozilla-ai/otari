@@ -3,8 +3,9 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrgProviderModel } from "@/client"
+import type { OrgProviderModel, OrgProviderPriceCatalog } from "@/client"
 import type { KindFilter } from "@/features/models/offeredKinds"
+import { formatDate } from "@/shared/helpers/format"
 import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
@@ -24,7 +25,12 @@ interface MockOpts {
   /** What a refresh answers, which is where a provider's own refusal arrives. */
   refresh?: Record<string, unknown>
   listFails?: boolean
+  /** What the price catalog read answers. */
+  priceCatalog?: OrgProviderPriceCatalog
 }
+
+const PRICES_FROM = "2026-11-10T13:32:00+00:00"
+const NEWER_AT = "2026-11-11T10:52:00+00:00"
 
 function typeCounts(models: OrgProviderModel[]): Record<string, number> {
   const counts: Record<string, number> = {}
@@ -43,6 +49,15 @@ function mockApi(opts: MockOpts = {}) {
     const method = (init?.method ?? "GET").toUpperCase()
     requests.push({ url, method })
 
+    if (url.includes("/price-catalog")) {
+      return jsonResponse(
+        opts.priceCatalog ?? {
+          prices_from: PRICES_FROM,
+          bundled: false,
+          newer_at: null,
+        },
+      )
+    }
     if (url.includes("/organizations/me/pricing/")) {
       return new Response(null, { status: 204 })
     }
@@ -141,6 +156,52 @@ describe("ProviderModelsPanel", () => {
 
     expect(await screen.findByText("Default from cortecs")).toBeInTheDocument()
     expect(screen.getByText("Default")).toBeInTheDocument()
+  })
+
+  it("says which models.dev catalog the default prices come from", async () => {
+    mockApi()
+    await renderPanel()
+
+    expect(
+      await screen.findByText(
+        `Default prices come from the models.dev catalog of ${formatDate(PRICES_FROM)}.`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("says newer prices wait for an operator, so Refresh pricing finding nothing is explained", async () => {
+    mockApi({
+      priceCatalog: {
+        prices_from: PRICES_FROM,
+        bundled: false,
+        newer_at: NEWER_AT,
+      },
+    })
+    await renderPanel()
+
+    expect(
+      await screen.findByText(
+        `Default prices come from the models.dev catalog of ${formatDate(PRICES_FROM)}. Newer prices, fetched ${formatDate(NEWER_AT)}, are not in force yet.`,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "A deployment operator must update the catalog before Refresh pricing can use them.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("names the packaged catalog while no update has been accepted", async () => {
+    mockApi({
+      priceCatalog: { prices_from: PRICES_FROM, bundled: true, newer_at: null },
+    })
+    await renderPanel()
+
+    expect(
+      await screen.findByText(
+        `Default prices come from the models.dev catalog packaged with Otari, made ${formatDate(PRICES_FROM)}.`,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("names each rung of the ladder rather than calling them all the same", async () => {

@@ -137,6 +137,9 @@ export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
 // panel on each of those writes. Scoped per key below the root, because a page
 // can have one key's panel open at a time and the others must not refetch.
 export const ORGANIZATION_PROVIDER_MODELS = "organization-provider-models"
+// Which models.dev prices the default rates follow. Deployment-wide, and moved
+// only by a catalog update or the schedule, so nothing on the page invalidates it.
+export const ORGANIZATION_PRICE_CATALOG = "organization-price-catalog"
 // What a provider says it serves on a stored credential. The DISCOVERABLE rule
 // one scope down: answering dials the upstream, so it must not share a head with
 // anything a price or a toggle invalidates, or every save would re-dial.

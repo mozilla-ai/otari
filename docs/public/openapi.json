@@ -15293,6 +15293,41 @@
         "title": "OrgProviderModelsRefreshPublic",
         "type": "object"
       },
+      "OrgProviderPriceCatalogPublic": {
+        "description": "Which models.dev prices a key's default rates follow, and whether newer ones wait for a catalog update.",
+        "properties": {
+          "bundled": {
+            "description": "The prices in force are the catalog packaged with the gateway.",
+            "title": "Bundled",
+            "type": "boolean"
+          },
+          "newer_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When newer models.dev prices were fetched. Refresh pricing does not reach them until a deployment operator runs a catalog update. None when none are known.",
+            "title": "Newer At"
+          },
+          "prices_from": {
+            "description": "When the community prices in force took effect: when an operator or the schedule accepted them, or, while `bundled`, when the packaged catalog was made.",
+            "format": "date-time",
+            "title": "Prices From",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prices_from",
+          "bundled"
+        ],
+        "title": "OrgProviderPriceCatalogPublic",
+        "type": "object"
+      },
       "OrgWebSearchKeyCreateRequest": {
         "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
         "example": {
@@ -42905,6 +42940,36 @@
           }
         ],
         "summary": "Create Org Provider Key",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/provider-keys/price-catalog": {
+      "get": {
+        "description": "Which models.dev prices the keys' default rates follow, and when newer ones were fetched.\n\nRefresh pricing moves a seeded rate onto the prices in force, never onto\nnewer ones: those take a catalog update a deployment operator runs.\nOrganization owners and admins only.",
+        "operationId": "provider-keys-get_org_provider_price_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderPriceCatalogPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Org Provider Price Catalog",
         "tags": [
           "provider-keys"
         ]

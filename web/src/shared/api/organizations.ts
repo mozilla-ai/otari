@@ -36,6 +36,7 @@ import type {
   OrgProviderModel,
   OrgProviderModels,
   OrgProviderModelsRefresh,
+  OrgProviderPriceCatalog,
   PendingOrganizationInvitation,
   SwitchOrganizationRequest,
   UpdateOrganizationDomainRequest,
@@ -54,6 +55,7 @@ import {
   ORGANIZATION_CONTEXT,
   ORGANIZATION_DOMAINS,
   ORGANIZATION_MEMBERS,
+  ORGANIZATION_PRICE_CATALOG,
   ORGANIZATION_PROVIDER_AVAILABLE_MODELS,
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
@@ -1038,6 +1040,20 @@ export function useOrgProviderModels(
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === keyId ? previous : undefined,
+    enabled,
+  })
+}
+
+// Which models.dev prices Refresh pricing moves the default rates onto, and
+// when newer ones were fetched, which only a catalog update applies.
+export function useOrgProviderPriceCatalog(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_PRICE_CATALOG],
+    queryFn: () =>
+      apiFetch<OrgProviderPriceCatalog>(
+        "/organizations/me/provider-keys/price-catalog",
+      ),
+    staleTime: 60_000,
     enabled,
   })
 }

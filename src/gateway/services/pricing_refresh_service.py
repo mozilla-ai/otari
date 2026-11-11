@@ -29,6 +29,7 @@ from gateway.services.model_catalog_service import (
     catalog_refresh_interval,
     catalog_source_changed,
     clear_catalog_cache,
+    downloaded_models_dev_catalog,
     fetch_models_dev_document,
     models_dev_base_url,
     serve_catalog,
@@ -37,6 +38,7 @@ from gateway.services.pricing import (
     MAX_RESIDENT_GENERATIONS,
     ModelsDevPriceIndex,
     PriceGeneration,
+    active_generations,
     add_accepted_generation,
     current_index,
     invalid_rate_count,
@@ -431,6 +433,72 @@ async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> lis
         )
         for row in (await session.execute(stmt)).all()
     ]
+
+
+@dataclass(frozen=True)
+class PriceCatalogStatus:
+    """Which models.dev prices are in force, and whether newer ones are waiting.
+
+    ``prices_from`` is when the prices in force took effect: when they were
+    accepted, or, while ``bundled``, the day the packaged catalog was made.
+    ``newer_at`` is when newer prices were fetched, held for review or
+    downloaded with the model facts, which only a catalog update applies.
+    """
+
+    prices_from: datetime
+    bundled: bool
+    newer_at: datetime | None
+
+
+# The last downloaded catalog compared with the prices in force, by identity,
+# and whether its prices differed. A comparison walks the whole catalog, and
+# both sides change only on a download or an accept.
+_newer_checked: tuple[object, object, bool] | None = None
+
+
+def _prices_differ(catalog: ModelsDevCatalog, index: ModelsDevPriceIndex) -> bool:
+    """Whether ``catalog`` prices anything other than ``index`` does. Synchronous; run off the loop."""
+    try:
+        latest = _parse_snapshot(json.dumps(snapshot_document(catalog), separators=(",", ":"), ensure_ascii=False))
+    except ValueError:
+        return False
+    return _snapshot_prices(latest) != _snapshot_prices(index)
+
+
+async def _downloaded_newer_at(in_force: PriceGeneration) -> datetime | None:
+    """When the downloaded catalog was fetched, if it is newer than ``in_force`` and prices differently."""
+    global _newer_checked
+    downloaded = downloaded_models_dev_catalog()
+    if downloaded is None:
+        return None
+    catalog, fetched_at = downloaded
+    fetched_at = normalize_effective_at(fetched_at)
+    if fetched_at <= in_force.effective_at:
+        return None
+    checked = _newer_checked
+    if checked is None or checked[0] is not catalog or checked[1] is not in_force.index:
+        differs = await asyncio.to_thread(_prices_differ, catalog, in_force.index)
+        checked = _newer_checked = (catalog, in_force.index, differs)
+    return fetched_at if checked[2] else None
+
+
+async def price_catalog_status(session: AsyncSession) -> PriceCatalogStatus:
+    """The date of the prices in force, and when newer prices were fetched, if any.
+
+    Held prices answer first, because a catalog update applies exactly those.
+    Otherwise a catalog the refresher downloaded after the accept counts when
+    its prices differ.
+    """
+    in_force = active_generations()[-1]
+    pending_at = (
+        await session.execute(
+            select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_PENDING_SOURCE)
+        )
+    ).scalar_one_or_none()
+    newer_at = normalize_effective_at(pending_at) if pending_at is not None else await _downloaded_newer_at(in_force)
+    return PriceCatalogStatus(
+        prices_from=normalize_effective_at(in_force.effective_at), bundled=in_force.baseline, newer_at=newer_at
+    )
 
 
 async def _discard_unchanged(session: AsyncSession, preview: PricingRefreshPreview) -> bool:

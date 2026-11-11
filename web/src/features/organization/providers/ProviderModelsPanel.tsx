@@ -25,6 +25,7 @@ import type { KindFilter } from "@/features/models/offeredKinds"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
   useOrgProviderModels,
+  useOrgProviderPriceCatalog,
   useRefreshOrgProviderModelPricing,
   useRefreshOrgProviderModels,
   useSetOrgProviderModelEnabled,
@@ -33,6 +34,7 @@ import {
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
 
 import { OfferModelDialog } from "./OfferModelDialog"
+import { PriceCatalogNote } from "./PriceCatalogNote"
 import { refreshOutcome } from "./refreshOutcome"
 
 // One provider key's models.
@@ -110,6 +112,8 @@ export function ProviderModelsPanel({
   const clearRate = useDeleteOrganizationPricing()
   const refreshModels = useRefreshOrgProviderModels(providerKey.id)
   const refreshPricing = useRefreshOrgProviderModelPricing(providerKey.id)
+  // Only where Refresh pricing is offered, which is what the note explains.
+  const priceCatalog = useOrgProviderPriceCatalog(canEdit)
 
   const [isOffering, setIsOffering] = useState(false)
   const [offerOpenCount, setOfferOpenCount] = useState(0)
@@ -285,6 +289,10 @@ export function ProviderModelsPanel({
           </div>
         ) : null}
       </div>
+
+      {canEdit && priceCatalog.data ? (
+        <PriceCatalogNote catalog={priceCatalog.data} />
+      ) : null}
 
       <ErrorBanner
         error={

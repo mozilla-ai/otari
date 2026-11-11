@@ -355,6 +355,8 @@ export type OfferOrgProviderModelRequest =
 export type UpdateOrgProviderModelRequest =
   Schemas["OrgProviderKeyModelUpdateRequest"]
 export type OrgProviderModelsRefresh = Schemas["OrgProviderModelsRefreshPublic"]
+// Which models.dev prices the default rates follow, and when newer ones were fetched.
+export type OrgProviderPriceCatalog = Schemas["OrgProviderPriceCatalogPublic"]
 export type OrgProviderAvailableModels =
   Schemas["OrgProviderAvailableModelsPublic"]
 

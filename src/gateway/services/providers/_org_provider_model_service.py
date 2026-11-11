@@ -75,12 +75,14 @@ from gateway.schemas.providers import (
     OrgProviderKeyModelsPublic,
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
+    OrgProviderPriceCatalogPublic,
 )
 from gateway.services.catalog import KeyOwner, offered_model_types, record_served_models
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing import REFERENCE_PREFIX
+from gateway.services.pricing_refresh_service import PriceCatalogStatus
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
@@ -294,6 +296,7 @@ class OrgProviderModelService:
         models: OrgProviderKeyModelRepository,
         keys: OrgProviderKeyRepository,
         refresh_overlay: Callable[[], Awaitable[None]],
+        price_catalog_status: Callable[[], Awaitable[PriceCatalogStatus]],
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
@@ -306,7 +309,8 @@ class OrgProviderModelService:
         the rules about which rates may exist at all.
 
         ``refresh_overlay`` reloads the dispatch-path credential and allow-list
-        cache. Injected as a callable because that function takes the session,
+        cache, and ``price_catalog_status`` reads which community prices are in
+        force. Injected as callables because those functions take the session,
         which a service may not name.
         """
         self.uow = uow
@@ -317,6 +321,7 @@ class OrgProviderModelService:
         self.models = models
         self.keys = keys
         self.refresh_overlay = refresh_overlay
+        self.price_catalog_status = price_catalog_status
 
     @property
     def _pricing_required(self) -> bool:
@@ -390,6 +395,20 @@ class OrgProviderModelService:
             data=[_model_public(row, prices.get(row.model), kinds.get(row.model)) for row in page.rows],
             count=page.count,
             type_counts=page.type_counts,
+        )
+
+    async def price_catalog(self, *, user: User) -> OrgProviderPriceCatalogPublic:
+        """Which community prices Refresh pricing moves seeded rates onto, and whether newer ones wait.
+
+        Deployment-wide, but read by the people who manage provider keys, so
+        it answers organization owners and admins.
+        """
+        async with self.uow:
+            organization = await self.organizations.get_active_organization_for_user(user)
+            await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+            status = await self.price_catalog_status()
+        return OrgProviderPriceCatalogPublic(
+            prices_from=status.prices_from, bundled=status.bundled, newer_at=status.newer_at
         )
 
     async def available_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderAvailableModelsPublic:

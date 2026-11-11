@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -18,7 +18,7 @@ import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
 from gateway.core.config import GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.model_catalog_service import ModelsDevRefusedError
+from gateway.services.model_catalog_service import ModelsDevRefusedError, serve_catalog
 from gateway.services.pricing import (
     active_generations,
     active_timeline,
@@ -520,3 +520,60 @@ async def test_history_longer_than_the_resident_window_fails_closed_before_it(
     assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
     latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
     assert latest is not None and latest.input == Decimal(3)
+
+
+@pytest.fixture
+def served_catalog() -> Iterator[None]:
+    """Start and end with no downloaded catalog served."""
+    refresh.reset_catalog_refresh_state()
+    yield
+    refresh.reset_catalog_refresh_state()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("served_catalog")
+async def test_the_price_catalog_is_the_bundled_one_until_one_is_accepted(session: AsyncSession) -> None:
+    status = await refresh.price_catalog_status(session)
+
+    assert status == refresh.PriceCatalogStatus(
+        prices_from=bundled_generation().effective_at, bundled=True, newer_at=None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("served_catalog")
+async def test_the_price_catalog_dates_from_the_accept_and_names_held_prices_as_newer(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    accepted = active_generations()[-1].effective_at
+    upstream["catalog"] = _catalog(5)
+    await refresh.prepare_price_refresh(session)
+    pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+    assert pending is not None
+
+    status = await refresh.price_catalog_status(session)
+
+    assert (status.prices_from, status.bundled) == (accepted, False)
+    assert status.newer_at == pending.updated_at.replace(tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("served_catalog")
+async def test_a_downloaded_catalog_is_newer_only_when_its_prices_differ(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The catalog refresher downloads the facts on its own schedule; a changed price is what makes it news."""
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    later = datetime.now(UTC) + timedelta(hours=1)
+
+    serve_catalog(parse_catalog(_catalog()), later, None)
+    unchanged = await refresh.price_catalog_status(session)
+    serve_catalog(parse_catalog(_catalog(5)), later, None)
+    changed = await refresh.price_catalog_status(session)
+    serve_catalog(parse_catalog(_catalog(5)), active_generations()[-1].effective_at - timedelta(hours=1), None)
+    older = await refresh.price_catalog_status(session)
+
+    assert (unchanged.newer_at, changed.newer_at, older.newer_at) == (None, later, None)

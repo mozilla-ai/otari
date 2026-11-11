@@ -271,6 +271,25 @@ class OrgProviderKeyModelPublic(SQLModel):
     updated_at: datetime | None = None
 
 
+class OrgProviderPriceCatalogPublic(SQLModel):
+    """Which models.dev prices a key's default rates follow, and whether newer ones wait for a catalog update."""
+
+    prices_from: datetime = Field(
+        description=(
+            "When the community prices in force took effect: when an operator or the schedule accepted them, "
+            "or, while `bundled`, when the packaged catalog was made."
+        ),
+    )
+    bundled: bool = Field(description="The prices in force are the catalog packaged with the gateway.")
+    newer_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When newer models.dev prices were fetched. Refresh pricing does not reach them "
+            "until a deployment operator runs a catalog update. None when none are known."
+        ),
+    )
+
+
 class OrgProviderKeyModelsPublic(SQLModel):
     """One page of a key's offered models, and how many there are in total.
 

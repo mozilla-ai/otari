@@ -49,6 +49,15 @@ If you have multiple keys for the same provider, mark one as the default so work
 
 Workspaces inherit the organization default per provider unless you define a different key.
 
+## Keep a key's prices current
+
+Each key's models are priced from the community prices of models.dev until you set your own rate. A model with no price is offered but not served, and stays off until it has one. Open a key's models on **Inference** to see them:
+
+* **Refresh pricing** moves each default rate onto the models.dev prices in force, and turns on a model that now has a price. A rate you set yourself never moves.
+* The line beside it says which models.dev catalog those prices come from, and its date.
+* When the deployment has fetched newer prices that are not in force yet, the line says so. **Refresh pricing** cannot reach them: a deployment operator must update the catalog first. That update moves every key's default rates by itself, so no one has to press **Refresh pricing** afterwards.
+* A default rate copied from another provider's listing of the same model shows that provider, for example **Default from cortecs**. models.dev had no price for the model under the key's own provider.
+
 ## How workspaces resolve provider keys
 
 When a workspace makes a request, Otari resolves which provider key to use in this order:

@@ -37,6 +37,7 @@ from gateway.schemas.providers import (
     OrgProviderKeysPublic,
     OrgProviderKeyUpdateRequest,
     OrgProviderModelsRefreshPublic,
+    OrgProviderPriceCatalogPublic,
     WorkspaceProviderKeyOverridePublic,
     WorkspaceProviderKeyOverrideRequest,
     WorkspaceProviderKeyOverridesPublic,
@@ -83,6 +84,19 @@ async def list_org_provider_keys(
     return await service.list_keys_for_user(
         user=current_identity, include_archived=include_archived, skip=skip, limit=limit
     )
+
+
+@org_router.get("/price-catalog")
+async def get_org_provider_price_catalog(
+    service: OrgProviderModelServiceDep, current_identity: CurrentIdentity
+) -> OrgProviderPriceCatalogPublic:
+    """Which models.dev prices the keys' default rates follow, and when newer ones were fetched.
+
+    Refresh pricing moves a seeded rate onto the prices in force, never onto
+    newer ones: those take a catalog update a deployment operator runs.
+    Organization owners and admins only.
+    """
+    return await service.price_catalog(user=current_identity)
 
 
 @org_router.post("", status_code=status.HTTP_201_CREATED)

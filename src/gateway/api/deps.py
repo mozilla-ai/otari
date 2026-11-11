@@ -163,7 +163,7 @@ from gateway.services.organizations import InvitationMailLimit, OrganizationClai
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
+from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates, price_catalog_status
 from gateway.services.pricing_service import (
     RequestPrices,
     ResolvedPricing,
@@ -1803,6 +1803,7 @@ def build_org_provider_model_service(
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
+        price_catalog_status=lambda: price_catalog_status(db),
     )
 
 

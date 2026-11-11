@@ -179,3 +179,15 @@ def test_an_update_whose_prices_changed_since_the_preview_is_a_409_that_offers_n
 def test_the_catalog_update_refuses_a_request_with_no_credential(client: TestClient) -> None:
     assert client.post(f"{PATH}/catalog-update/preview", json={}).status_code == 401
     assert client.post(f"{PATH}/catalog-update", json={}).status_code == 401
+
+
+def test_the_organization_reads_the_date_of_the_prices_its_default_rates_follow(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.get(f"{ORG_KEYS}/price-catalog", headers=master_key_header)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["bundled"], body["newer_at"]) == (True, None)
+    assert body["prices_from"]
+    assert client.get(f"{ORG_KEYS}/price-catalog").status_code == 401

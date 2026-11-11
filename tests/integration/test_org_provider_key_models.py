@@ -55,6 +55,7 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
 )
+from gateway.services.pricing_refresh_service import price_catalog_status
 from gateway.services.pricing_service import is_estimated_rate, resolve_model_pricing
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
@@ -122,6 +123,7 @@ def _service(db: AsyncSession, *, require_pricing: bool = True) -> OrgProviderMo
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
+        price_catalog_status=lambda: price_catalog_status(db),
     )
 
 
@@ -1063,6 +1065,23 @@ async def test_switching_a_model_off_is_never_refused(async_db: AsyncSession, mo
 # --------------------------------------------------------------------------- #
 # Authorization
 # --------------------------------------------------------------------------- #
+
+
+async def test_an_admin_reads_which_prices_the_default_rates_follow(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+
+    catalog = await _service(async_db).price_catalog(user=admin)
+
+    assert (catalog.bundled, catalog.newer_at) == (True, None)
+
+
+async def test_a_plain_member_may_not_read_which_prices_are_in_force(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+
+    with pytest.raises(NotAuthorizedError):
+        await _service(async_db).price_catalog(user=member)
 
 
 async def test_a_plain_member_may_not_read_the_offered_models(async_db: AsyncSession) -> None:

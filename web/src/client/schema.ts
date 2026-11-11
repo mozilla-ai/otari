@@ -4073,6 +4073,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/provider-keys/price-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Org Provider Price Catalog
+         * @description Which models.dev prices the keys' default rates follow, and when newer ones were fetched.
+         *
+         *     Refresh pricing moves a seeded rate onto the prices in force, never onto
+         *     newer ones: those take a catalog update a deployment operator runs.
+         *     Organization owners and admins only.
+         */
+        get: operations["provider-keys-get_org_provider_price_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/provider-keys/{key_id}": {
         parameters: {
             query?: never;
@@ -15428,6 +15452,28 @@ export interface components {
             error?: string | null;
             /** Repriced */
             repriced: string[];
+        };
+        /**
+         * OrgProviderPriceCatalogPublic
+         * @description Which models.dev prices a key's default rates follow, and whether newer ones wait for a catalog update.
+         */
+        OrgProviderPriceCatalogPublic: {
+            /**
+             * Bundled
+             * @description The prices in force are the catalog packaged with the gateway.
+             */
+            bundled: boolean;
+            /**
+             * Newer At
+             * @description When newer models.dev prices were fetched. Refresh pricing does not reach them until a deployment operator runs a catalog update. None when none are known.
+             */
+            newer_at?: string | null;
+            /**
+             * Prices From
+             * Format: date-time
+             * @description When the community prices in force took effect: when an operator or the schedule accepted them, or, while `bundled`, when the packaged catalog was made.
+             */
+            prices_from: string;
         };
         /**
          * OrgWebSearchKeyCreateRequest
@@ -28882,6 +28928,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-get_org_provider_price_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderPriceCatalogPublic"];
                 };
             };
         };

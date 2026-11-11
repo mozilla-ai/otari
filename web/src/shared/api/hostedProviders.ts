@@ -31,6 +31,7 @@ import {
   HOSTED_PROVIDERS,
   MODELS,
   NO_RETRY,
+  ORGANIZATION_PRICE_CATALOG,
   ORGANIZATION_PRICING,
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
@@ -365,6 +366,7 @@ export function useHostedCatalogUpdate() {
     onSuccess: () => {
       invalidate()
       for (const key of [
+        ORGANIZATION_PRICE_CATALOG,
         ORGANIZATION_PROVIDER_MODELS,
         ORGANIZATION_PROVIDER_KEYS,
         ORGANIZATION_PRICING,

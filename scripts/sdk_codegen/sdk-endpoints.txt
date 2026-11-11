@@ -534,6 +534,7 @@ DELETE /api/v1/workspaces/{workspace_id}/web-search                         # da
 # key that already carries its resolved credentials; managing which
 # organization-scoped BYO key a workspace defaults to is a dashboard concern.
 GET /api/v1/organizations/me/provider-keys                                    # dashboard-only
+GET /api/v1/organizations/me/provider-keys/price-catalog                      # dashboard-only
 POST /api/v1/organizations/me/provider-keys                                   # dashboard-only
 PATCH /api/v1/organizations/me/provider-keys/{key_id}                         # dashboard-only
 DELETE /api/v1/organizations/me/provider-keys/{key_id}                        # dashboard-only

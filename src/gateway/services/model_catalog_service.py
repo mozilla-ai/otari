@@ -183,6 +183,13 @@ def cached_models_dev_catalog() -> ModelsDevCatalog | None:
     return _served()
 
 
+def downloaded_models_dev_catalog() -> tuple[ModelsDevCatalog, datetime] | None:
+    """The catalog this worker serves and when it was downloaded; ``None`` while it serves the bundled one."""
+    if _cache.data is None or _cache.fetched_at is None:
+        return None
+    return _cache.data, _cache.fetched_at
+
+
 def serve_catalog(catalog: ModelsDevCatalog, fetched_at: datetime, source: str | None) -> None:
     """Serve ``catalog``, downloaded at ``fetched_at`` from ``source``: a stored copy, or one this worker fetched."""
     _cache.data = catalog

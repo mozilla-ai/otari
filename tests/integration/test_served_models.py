@@ -21,6 +21,7 @@ from gateway.schemas.providers import OrgProviderKeyCreateRequest
 from gateway.services.catalog._served import refresh_served_models, reset_served_models, served_facts
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
 from gateway.services.organization_pricing_service import OrganizationPricingService
+from gateway.services.pricing_refresh_service import price_catalog_status
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
@@ -121,6 +122,7 @@ def _org_service(db: AsyncSession) -> OrgProviderModelService:
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
+        price_catalog_status=lambda: price_catalog_status(db),
     )
 
 
