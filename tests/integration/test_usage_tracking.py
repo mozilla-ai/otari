@@ -20,8 +20,8 @@ _HAS_GEMINI_KEY = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_completion_accuracy(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
@@ -114,8 +114,8 @@ async def test_completion_accuracy(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 async def test_streaming_completion_accuracy(
+    mock_chat_completion: Any,
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],

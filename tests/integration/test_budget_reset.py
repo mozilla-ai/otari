@@ -133,8 +133,8 @@ def test_nonexistent_budget_returns_404(client: TestClient, master_key_header: d
     assert "not found" in response.json()["detail"].lower()
 
 
-@pytest.mark.skipif(not _HAS_GEMINI_KEY, reason="requires GEMINI_API_KEY or GOOGLE_API_KEY")
 def test_budget_actually_resets_when_duration_passes(
+    mock_chat_completion: Any,
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],

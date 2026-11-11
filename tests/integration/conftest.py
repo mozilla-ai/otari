@@ -48,6 +48,16 @@ from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
 
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    Choice,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionUsage,
+)
+
 MODEL_NAME = "gemini:gemini-2.5-flash"
 # The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
 # enrich its hits through.
@@ -687,3 +697,49 @@ def live_server(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> Gene
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@pytest.fixture
+def mock_chat_completion() -> Generator[None]:
+    """Mock acompletion in chat route so completion tests run deterministically in CI without external credentials."""
+    async def _mock_stream() -> AsyncGenerator[ChatCompletionChunk, None]:
+        yield ChatCompletionChunk(
+            id="chatcmpl-mock-chunk-1",
+            object="chat.completion.chunk",
+            created=1700000000,
+            model=MODEL_NAME,
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="Hello Alice! "), finish_reason=None)],
+        )
+        yield ChatCompletionChunk(
+            id="chatcmpl-mock-chunk-2",
+            object="chat.completion.chunk",
+            created=1700000000,
+            model=MODEL_NAME,
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(content="Nice to meet you."), finish_reason="stop")],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
+        )
+
+    async def _mock_acompletion(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            return _mock_stream()
+        return ChatCompletion(
+            id="chatcmpl-mock-test",
+            object="chat.completion",
+            created=1700000000,
+            model=MODEL_NAME,
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content="Hello Alice! Nice to meet you.",
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
+        )
+
+    with patch("gateway.api.routes.chat.acompletion", new=_mock_acompletion):
+        yield
+
