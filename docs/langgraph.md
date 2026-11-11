@@ -1,7 +1,7 @@
-# Use with LangGraph
+# LangGraph
 
 LangGraph calls models through LangChain's chat models, so `ChatOtari` from
-`langchain-otari` ([Use with LangChain](use-with-langchain.md)) is all it takes.
+`langchain-otari` ([the LangChain guide](langchain.md)) is all it takes.
 Every model call in every node then gets Otari's budgets, usage tracking,
 fallback routing and guardrails.
 
@@ -103,5 +103,5 @@ or alias name); see [Model format](models.md#model-format) and
 
 ## See also
 
-- [Use with LangChain](use-with-langchain.md): agents, structured output and streaming with `ChatOtari`.
-- [Use with Pydantic AI](use-with-pydantic-ai.md).
+- [LangChain](langchain.md): agents, structured output and streaming with `ChatOtari`.
+- [Pydantic AI](pydantic-ai.md).

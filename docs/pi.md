@@ -1,4 +1,4 @@
-# Use with pi
+# pi
 
 [pi](https://pi.dev) is a minimal terminal coding agent. The
 [pi-otari](https://github.com/mozilla-ai/pi-otari) extension adds Otari as a
@@ -62,6 +62,6 @@ Every setting and the troubleshooting list are in the
 
 ## See also
 
-- [Use with oh-my-pi](use-with-oh-my-pi.md)
-- [Use with Claude Code](use-with-claude-code.md)
-- [Use with opencode](use-with-opencode.md)
+- [oh-my-pi](oh-my-pi.md)
+- [Claude Code](claude-code.md)
+- [opencode](opencode.md)

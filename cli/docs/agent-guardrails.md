@@ -285,7 +285,7 @@ export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
   reporting works on a gateway you run, not on otari.ai today.
 - **Claude Code** does not pass these variables to its hooks; set them in the
   `env` block of `~/.claude/settings.json`, beside the exporter variables of
-  [Send Claude Code sessions to Otari](../../docs/use-with-claude-code.md#send-claude-code-sessions-to-otari).
+  [Send Claude Code sessions to Otari](../../docs/claude-code.md#send-claude-code-sessions-to-otari).
   Keep the key out of project settings files you commit.
 - **The server sees your gates**, including their messages and your own gates in
   `~/.otari/`. Point `OTARI_URL` only at a server you trust with them. It keeps
