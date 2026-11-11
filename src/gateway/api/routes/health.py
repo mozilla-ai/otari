@@ -5,10 +5,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
 from gateway.version import __version__
 
 router = APIRouter(prefix="/health", tags=["health"])
+
+
+class _DatabaseOutage:
+    """Whether the last readiness check found the database unavailable.
+
+    An orchestrator probes every few seconds, so an outage is logged when it starts
+    and when it ends rather than once per probe.
+    """
+
+    ongoing = False
 
 
 @router.get("")
@@ -58,8 +69,10 @@ async def health_readiness(
     try:
         await db.execute(text("SELECT 1"))
         db_status = "connected"
-    except Exception as e:
-        logger.error("Database connectivity check failed: %s", e)
+    except DATABASE_ERRORS as e:
+        log = logger.debug if _DatabaseOutage.ongoing else logger.warning
+        log("Readiness check: database unavailable (%s)", describe_database_error(e))
+        _DatabaseOutage.ongoing = True
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -68,6 +81,9 @@ async def health_readiness(
                 "version": __version__,
             },
         ) from e
+    if _DatabaseOutage.ongoing:
+        logger.info("Readiness check: database available again")
+        _DatabaseOutage.ongoing = False
     return {
         "status": "healthy",
         "database": db_status,
