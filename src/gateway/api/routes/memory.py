@@ -11,6 +11,7 @@ never from a tool argument, and every result is returned as data with its
 provenance and trust level, for the agent to weigh rather than obey.
 """
 
+import dataclasses
 import functools
 import json
 import uuid
@@ -35,6 +36,10 @@ from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.schemas.memory import (
+    ArmSummaryPublic,
+    DifferencePublic,
+    MemoryCallsPublic,
+    MemoryExperimentPublic,
     OrganizationMemoryPublic,
     OrganizationMemoryUpdate,
     WorkspaceMemoryErased,
@@ -42,7 +47,10 @@ from gateway.schemas.memory import (
     WorkspaceMemoryUpdate,
 )
 from gateway.services.memory import (
+    EXPERIMENT_MIN_SESSIONS,
     MEMORY_INSTRUCTIONS,
+    ArmSummary,
+    Difference,
     MemoryCaller,
     MemoryService,
     SwitchChange,
@@ -161,9 +169,25 @@ def _workspace_public(memory: WorkspaceMemory, config: GatewayConfig) -> Workspa
         hide_external=memory.hide_external,
         retention_days=memory.retention_days,
         deployment_retention_days=config.memory_retention_days,
+        auto_recall=memory.auto_recall,
+        recall_min_similarity=memory.recall_min_similarity,
+        recall_max_entries=memory.recall_max_entries,
+        experiment_holdout_percent=memory.experiment_holdout_percent,
+        experiment_started_at=memory.experiment_started_at,
+        experiment_ended_at=memory.experiment_ended_at,
         entries=memory.entries,
         proposals_waiting=memory.proposals_waiting,
     )
+
+
+def _arm_public(arm: ArmSummary) -> ArmSummaryPublic:
+    return ArmSummaryPublic(**dataclasses.asdict(arm))
+
+
+def _difference_public(difference: Difference | None) -> DifferencePublic | None:
+    if difference is None:
+        return None
+    return DifferencePublic(**dataclasses.asdict(difference), conclusive=difference.conclusive)
 
 
 @workspace_router.get("")
@@ -196,8 +220,42 @@ async def set_workspace_memory(
         offer_to_every_request=body.offer_to_every_request,
         hide_external=body.hide_external,
         retention_days=body.retention_days,
+        auto_recall=body.auto_recall,
+        recall_min_similarity=body.recall_min_similarity,
+        recall_max_entries=body.recall_max_entries,
+        experiment_holdout_percent=body.experiment_holdout_percent,
     )
     return _workspace_public(await service.change_switches(current_identity, workspace_id, change), config)
+
+
+@workspace_router.get("/experiment")
+async def get_memory_experiment(
+    service: MemoryServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+) -> MemoryExperimentPublic:
+    """What memory saves this workspace: its sessions served without memory against those served with it.
+
+    The running savings experiment, or the last one once stopped. The same managers as the switches.
+    """
+    report = await service.experiment_report(current_identity, workspace_id)
+    return MemoryExperimentPublic(
+        workspace_id=workspace_id,
+        holdout_percent=report.holdout_percent,
+        started_at=report.started_at,
+        ended_at=report.ended_at,
+        min_sessions=EXPERIMENT_MIN_SESSIONS,
+        control=_arm_public(report.control),
+        memory=_arm_public(report.memory),
+        tokens=_difference_public(report.tokens),
+        cost=_difference_public(report.cost),
+        memory_calls={
+            endpoint: MemoryCallsPublic(calls=use.calls, input_tokens=use.input_tokens, output_tokens=use.output_tokens)
+            for endpoint, use in report.memory_calls.items()
+        },
+        memory_call_tokens_per_session=report.memory_call_tokens_per_session,
+        recalls=report.recalls,
+        recalls_with_results=report.recalls_with_results,
+        searches=report.searches,
+    )
 
 
 @workspace_router.delete("")

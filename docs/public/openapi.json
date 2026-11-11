@@ -2223,6 +2223,64 @@
         "title": "AppTokenResponse",
         "type": "object"
       },
+      "ArmSummaryPublic": {
+        "description": "One arm of the savings experiment, per session.",
+        "properties": {
+          "cache_read_tokens_per_session": {
+            "title": "Cache Read Tokens Per Session",
+            "type": "number"
+          },
+          "cost_per_session": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD; null where a session's model has no price.",
+            "title": "Cost Per Session"
+          },
+          "input_tokens_per_session": {
+            "title": "Input Tokens Per Session",
+            "type": "number"
+          },
+          "median_tokens_per_session": {
+            "title": "Median Tokens Per Session",
+            "type": "number"
+          },
+          "output_tokens_per_session": {
+            "title": "Output Tokens Per Session",
+            "type": "number"
+          },
+          "requests_per_session": {
+            "title": "Requests Per Session",
+            "type": "number"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          },
+          "tokens_per_session": {
+            "description": "Input and output tokens, cached input counted once.",
+            "title": "Tokens Per Session",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sessions",
+          "requests_per_session",
+          "tokens_per_session",
+          "median_tokens_per_session",
+          "input_tokens_per_session",
+          "output_tokens_per_session",
+          "cache_read_tokens_per_session",
+          "cost_per_session"
+        ],
+        "title": "ArmSummaryPublic",
+        "type": "object"
+      },
       "AudioContent": {
         "description": "Audio provided to or from an LLM.",
         "properties": {
@@ -7925,6 +7983,49 @@
         "title": "DeploymentUsersPublic",
         "type": "object"
       },
+      "DifferencePublic": {
+        "description": "The memory arm's mean less the control arm's, with a 95% interval. Negative is a saving.",
+        "properties": {
+          "absolute": {
+            "title": "Absolute",
+            "type": "number"
+          },
+          "conclusive": {
+            "description": "Whether the interval leaves out no difference at all.",
+            "title": "Conclusive",
+            "type": "boolean"
+          },
+          "high": {
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "title": "Low",
+            "type": "number"
+          },
+          "relative": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As a share of the control arm's mean.",
+            "title": "Relative"
+          }
+        },
+        "required": [
+          "absolute",
+          "relative",
+          "low",
+          "high",
+          "conclusive"
+        ],
+        "title": "DifferencePublic",
+        "type": "object"
+      },
       "DisabledReason": {
         "description": "Represents the reason an API key cannot be enabled.\n\nEvery reason blocks the key's owner. Some also block an operator, which\n``operator_may_clear`` records. A key with no reason set can be enabled by\nits owner.",
         "enum": [
@@ -13473,6 +13574,145 @@
           "role"
         ],
         "title": "MemberWorkspacePlacementPublic",
+        "type": "object"
+      },
+      "MemoryCallsPublic": {
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "MemoryCallsPublic",
+        "type": "object"
+      },
+      "MemoryExperimentPublic": {
+        "description": "What memory saves a workspace: sessions served without it against sessions served with it.\n\nCounts only requests that name their session, made through the gateway while the experiment ran.",
+        "properties": {
+          "control": {
+            "$ref": "#/components/schemas/ArmSummaryPublic"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DifferencePublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per session; null without enough sessions or prices."
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "holdout_percent": {
+            "title": "Holdout Percent",
+            "type": "integer"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ArmSummaryPublic"
+          },
+          "memory_call_tokens_per_session": {
+            "title": "Memory Call Tokens Per Session",
+            "type": "number"
+          },
+          "memory_calls": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MemoryCallsPublic"
+            },
+            "description": "Memory's own model calls, by endpoint.",
+            "title": "Memory Calls",
+            "type": "object"
+          },
+          "min_sessions": {
+            "description": "Sessions each arm needs before the differences are estimated.",
+            "title": "Min Sessions",
+            "type": "integer"
+          },
+          "recalls": {
+            "description": "Turns automatic recall searched for.",
+            "title": "Recalls",
+            "type": "integer"
+          },
+          "recalls_with_results": {
+            "description": "Turns it added something to.",
+            "title": "Recalls With Results",
+            "type": "integer"
+          },
+          "searches": {
+            "description": "Searches agents ran with memory's tool.",
+            "title": "Searches",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DifferencePublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per session, net of memory's own model calls; null until each arm has min_sessions."
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "holdout_percent",
+          "started_at",
+          "ended_at",
+          "min_sessions",
+          "control",
+          "memory",
+          "tokens",
+          "cost",
+          "memory_calls",
+          "memory_call_tokens_per_session",
+          "recalls",
+          "recalls_with_results",
+          "searches"
+        ],
+        "title": "MemoryExperimentPublic",
         "type": "object"
       },
       "Message": {
@@ -30434,6 +30674,11 @@
       "WorkspaceMemoryPublic": {
         "description": "A workspace's memory switches, what the deployment allows, and how much the workspace holds.",
         "properties": {
+          "auto_recall": {
+            "description": "Search memory for each request's newest user turn and add what is alike enough to it, with no tool call.",
+            "title": "Auto Recall",
+            "type": "boolean"
+          },
           "deployment_enabled": {
             "description": "Whether this deployment offers memory at all.",
             "title": "Deployment Enabled",
@@ -30456,6 +30701,37 @@
             "title": "Entries",
             "type": "object"
           },
+          "experiment_ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it stopped; null while it runs.",
+            "title": "Experiment Ended At"
+          },
+          "experiment_holdout_percent": {
+            "description": "The share of sessions the running savings experiment serves without memory; 0 while none runs.",
+            "title": "Experiment Holdout Percent",
+            "type": "integer"
+          },
+          "experiment_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last savings experiment began.",
+            "title": "Experiment Started At"
+          },
           "hide_external": {
             "description": "Keep entries resting on outside content out of recall.",
             "title": "Hide External",
@@ -30475,6 +30751,16 @@
             "description": "Proposals the consolidator has not decided yet.",
             "title": "Proposals Waiting",
             "type": "integer"
+          },
+          "recall_max_entries": {
+            "description": "The most entries automatic recall adds to one turn.",
+            "title": "Recall Max Entries",
+            "type": "integer"
+          },
+          "recall_min_similarity": {
+            "description": "How alike an entry must be to the turn to be added, 0.3-0.99.",
+            "title": "Recall Min Similarity",
+            "type": "number"
           },
           "retention_days": {
             "anyOf": [
@@ -30519,6 +30805,12 @@
           "hide_external",
           "retention_days",
           "deployment_retention_days",
+          "auto_recall",
+          "recall_min_similarity",
+          "recall_max_entries",
+          "experiment_holdout_percent",
+          "experiment_started_at",
+          "experiment_ended_at",
           "entries",
           "proposals_waiting"
         ],
@@ -30528,9 +30820,22 @@
       "WorkspaceMemoryUpdate": {
         "additionalProperties": false,
         "properties": {
+          "auto_recall": {
+            "default": false,
+            "title": "Auto Recall",
+            "type": "boolean"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
+          },
+          "experiment_holdout_percent": {
+            "default": 0,
+            "description": "Serve this share of sessions without memory to measure what it saves. A new share starts the experiment afresh; 0 stops it and keeps its results.",
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Experiment Holdout Percent",
+            "type": "integer"
           },
           "hide_external": {
             "default": false,
@@ -30541,6 +30846,20 @@
             "default": false,
             "title": "Offer To Every Request",
             "type": "boolean"
+          },
+          "recall_max_entries": {
+            "default": 3,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Recall Max Entries",
+            "type": "integer"
+          },
+          "recall_min_similarity": {
+            "default": 0.75,
+            "maximum": 0.99,
+            "minimum": 0.3,
+            "title": "Recall Min Similarity",
+            "type": "number"
           },
           "retention_days": {
             "anyOf": [
@@ -60639,6 +60958,58 @@
           }
         ],
         "summary": "Set Workspace Memory",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/memory/experiment": {
+      "get": {
+        "description": "What memory saves this workspace: its sessions served without memory against those served with it.\n\nThe running savings experiment, or the last one once stopped. The same managers as the switches.",
+        "operationId": "memory-get_memory_experiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryExperimentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Memory Experiment",
         "tags": [
           "memory"
         ]

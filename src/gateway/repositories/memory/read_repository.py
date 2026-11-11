@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryRead
@@ -38,6 +38,16 @@ class ReadRepository(FencedRepository[MemoryRead]):
         self.db.add(row)
         await self.db.flush()
         return row
+
+    async def count_by_tool(self, workspace_id: uuid.UUID, *, since: datetime, until: datetime) -> dict[str, int]:
+        """How many recalls of the workspace each tool made in the window."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryRead.tool, func.count())
+            .where(MemoryRead.workspace_id == workspace_id, MemoryRead.read_at >= since, MemoryRead.read_at < until)
+            .group_by(MemoryRead.tool)
+        )
+        return {tool: count for tool, count in result.all()}
 
     async def delete_older(self, workspace_id: uuid.UUID, *, read_before: datetime) -> int:
         """Delete the workspace's read records made before ``read_before``."""

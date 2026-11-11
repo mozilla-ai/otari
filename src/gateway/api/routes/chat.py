@@ -48,6 +48,7 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
 )
+from gateway.api.routes._recall import recall_query, with_recall
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -668,6 +669,7 @@ async def run_chat_completion(
             web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
             memory_header=raw_request.headers.get(MEMORY_HEADER),
+            recall_query=recall_query(request.messages),
         ),
         backends=ToolBackends(
             ports=tool_ports,
@@ -698,6 +700,7 @@ async def run_chat_completion(
             web_search_declared_name=tools.web_search_declared_name,
         )
         fields.pop("metadata", None)
+        fields["messages"] = with_recall(fields["messages"], tools.memory_recall)
         scope_prompt_cache_key(fields, ctx)
         bind_upstream_user(fields, ctx.upstream_user)
         # Dispatch one cap, under the name any-llm understands and knows how to map to

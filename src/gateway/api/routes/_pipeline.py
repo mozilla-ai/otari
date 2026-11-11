@@ -82,6 +82,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    AdmittedMemory,
     MemoryToolAdmission,
     ToolPorts,
     asks_to_keep_trace_content,
@@ -3745,6 +3746,7 @@ class ToolContext:
         guardrails: RequestGuardrails | None = None,
         memory: MemoryToolBackend | None = None,
         memory_declared: bool = False,
+        memory_recall: str | None = None,
     ) -> None:
         self.config = config
         # The request's guardrails, which the gateway's tools and the answer pass
@@ -3754,6 +3756,8 @@ class ToolContext:
         self.memory_declared = memory_declared
         # Memory's tools for the request's caller, where it asked for them or its workspace offers them unasked.
         self.memory = memory
+        # What automatic recall found for the request's newest turn, for the route to add to it; None for nothing.
+        self.memory_recall = memory_recall
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
@@ -4246,6 +4250,9 @@ class DeclaredTools:
     web_fetch_header: str | None = None
     web_search_header: str | None = None
     memory_header: str | None = None
+    # The text of the request's newest turn when the user wrote it, which automatic recall searches memory for;
+    # None for a turn that hands back tool results, which is no new question.
+    recall_query: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -4286,7 +4293,8 @@ async def prepare_gateway_tools(
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
-        memory = await _admit_memory(adapter, ctx, declared, backends.ports.memory)
+        admitted_memory = await _admit_memory(adapter, ctx, declared, backends.ports.memory)
+        memory = admitted_memory.tools if admitted_memory is not None else None
         code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(adapter, ctx, code, candidates, web_policy=web_policy)
@@ -4323,6 +4331,7 @@ async def prepare_gateway_tools(
 
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
+    memory_recall = await _recall_memory(response, admitted_memory, declared.recall_query)
 
     caps: dict[str, int] = {}
     for answer in admitted.values():
@@ -4363,6 +4372,7 @@ async def prepare_gateway_tools(
             guardrails=guardrails,
             memory=memory,
             memory_declared=any(_declares_memory(tool) for tool in web.remaining_user_tools or []),
+            memory_recall=memory_recall,
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
@@ -4399,16 +4409,39 @@ def _without_memory_declarations(tools: list[dict[str, Any]] | None) -> list[dic
     return [tool for tool in tools if not _declares_memory(tool)]
 
 
+async def _recall_memory(response: Response, admitted: AdmittedMemory | None, query: str | None) -> str | None:
+    """What automatic recall adds to the request's newest turn, saying on ``response`` what memory the request got.
+
+    ``Otari-Memory-Arm`` names the experiment arm of its session, and ``Otari-Memory-Recalled`` how many
+    entries recall handed over, wherever it ran.
+    """
+    if admitted is None:
+        return None
+    if admitted.arm is not None:
+        response.headers[MEMORY_ARM_HEADER] = admitted.arm
+    if admitted.recall is None or not query or not query.strip():
+        return None
+    text, count = await admitted.recall(query[:MEMORY_RECALL_QUERY_MAX])
+    response.headers[MEMORY_RECALLED_HEADER] = str(count)
+    return text
+
+
+MEMORY_ARM_HEADER = "Otari-Memory-Arm"
+MEMORY_RECALLED_HEADER = "Otari-Memory-Recalled"
+# Characters of a turn automatic recall embeds: its start says what it asks.
+MEMORY_RECALL_QUERY_MAX = 2_000
+
+
 async def _admit_memory(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     declared: DeclaredTools,
     admission: MemoryToolAdmission | None,
-) -> MemoryToolBackend | None:
-    """Memory's tools for the request's caller, where it asked for them or its workspace offers them unasked.
+) -> AdmittedMemory | None:
+    """What memory the request's caller gets: its tools, automatic recall, and its session's experiment arm.
 
-    A request asks by declaring ``{"type": "otari_memory"}`` or sending ``Otari-Memory: on``, and opts out
-    of a workspace's offer with ``Otari-Memory: off``. Asking where memory cannot be had is refused.
+    A request asks for the tools by declaring ``{"type": "otari_memory"}`` or sending ``Otari-Memory: on``, and
+    opts out of all of it with ``Otari-Memory: off``. Asking where memory cannot be had is refused.
     """
     header = (declared.memory_header or "").strip().lower()
     if header not in ("", "on", "off"):
@@ -4423,7 +4456,14 @@ async def _admit_memory(
         return None
     model = ctx.resolved_provider.model if ctx.resolved_provider is not None else None
     try:
-        return await admission.admit(ctx.db, ctx.api_key, asked=asked, declined=header == "off", model=model)
+        return await admission.admit(
+            ctx.db,
+            ctx.api_key,
+            asked=asked,
+            declined=header == "off",
+            session_label=ctx.source_label,
+            model=model,
+        )
     except MemoryToolsRefusedError as exc:
         raise domain_error(adapter, exc) from exc
 

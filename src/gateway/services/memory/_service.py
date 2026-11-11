@@ -25,11 +25,34 @@ from gateway.exceptions.memory_exceptions import (
     WorkspaceScopeOffError,
 )
 from gateway.log_config import logger
-from gateway.models.memory import MemoryKind, MemoryScope, MemoryStatus, MemoryTrust, MemoryWritePolicy
+from gateway.models.memory import (
+    MemoryKind,
+    MemoryScope,
+    MemoryStatus,
+    MemoryTrust,
+    MemoryWorkspaceSettings,
+    MemoryWritePolicy,
+)
 from gateway.models.tenancy import User
 from gateway.repositories.memory import MemoryRepositories
+from gateway.services.memory._experiment import (
+    ArmSummary,
+    Difference,
+    ExperimentArm,
+    SessionUsage,
+    assign_arm,
+    compare,
+    summarize,
+)
 from gateway.services.memory._keys import WorkspaceKeys
-from gateway.services.memory._models import Decision, MemoryModelError, MemoryModels, ModelUse
+from gateway.services.memory._models import (
+    EMBEDDING_ENDPOINT,
+    RECALL_ENDPOINT,
+    Decision,
+    MemoryModelError,
+    MemoryModels,
+    ModelUse,
+)
 from gateway.services.memory._scoring import INITIAL_CONFIDENCE, QUARANTINE_FLAGS, confidence, cosine, relevance
 from gateway.services.memory._screening import screen
 from gateway.services.memory._store import (
@@ -50,6 +73,12 @@ COMPARE_FLOOR = 0.75
 SAME_FLOOR = 0.95
 # Passes a proposal may fail on a model before it waits for an admin instead.
 MAX_ATTEMPTS = 5
+# Automatic recall: how alike an entry must be to a request's newest turn, and how many are handed over.
+DEFAULT_RECALL_MIN_SIMILARITY = 0.75
+DEFAULT_RECALL_MAX_ENTRIES = 3
+# The read records automatic recall and the search tool leave, which the experiment counts.
+RECALL_TOOL = "auto_recall"
+SEARCH_TOOL = "memory_search"
 
 _TRUST_RANK: dict[MemoryTrust, int] = {"external": 0, "agent": 1, "reviewed": 2}
 
@@ -76,6 +105,29 @@ class MemoryMeter(Protocol):
 
     async def record(self, workspace_id: uuid.UUID, api_key_id: str | None, use: ModelUse) -> None:
         """Stage one call in the open block."""
+        ...
+
+
+@dataclass(frozen=True)
+class MemoryCallUsage:
+    """What memory's own model calls of one kind used: embedding, recall or consolidation."""
+
+    calls: int
+    input_tokens: int
+    output_tokens: int
+
+
+class UsageLedger(Protocol):
+    """What a workspace's requests used, read for the savings experiment. The builder in ``api/deps`` implements it."""
+
+    async def sessions(self, workspace_id: uuid.UUID, since: datetime, until: datetime) -> dict[str, SessionUsage]:
+        """Each session's usage of the workspace's requests in the window, by its trace id; side calls left out."""
+        ...
+
+    async def memory_calls(
+        self, workspace_id: uuid.UUID, since: datetime, until: datetime
+    ) -> dict[str, MemoryCallUsage]:
+        """Memory's own model calls in the window, by their endpoint."""
         ...
 
 
@@ -125,10 +177,16 @@ class Swept:
 
 @dataclass(frozen=True)
 class MemoryOffer:
-    """What a request through the gateway may get: memory's tools when it asks, or whether it asks or not."""
+    """What a request through the gateway may get: memory's tools when it asks, or whether it asks or not.
+
+    ``auto_recall`` hands it what memory holds on its newest turn, unasked. ``arm`` is the experiment's arm its
+    session is in; the control arm gets none of it.
+    """
 
     on: bool
     every_request: bool
+    auto_recall: bool = False
+    arm: ExperimentArm | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +207,13 @@ class WorkspaceMemory:
     offer_to_every_request: bool
     hide_external: bool
     retention_days: int | None
+    auto_recall: bool
+    recall_min_similarity: float
+    recall_max_entries: int
+    # The running experiment's holdout, zero while none runs; the last one's window is kept once it stops.
+    experiment_holdout_percent: int
+    experiment_started_at: datetime | None
+    experiment_ended_at: datetime | None
     entries: dict[str, int]
     proposals_waiting: int
 
@@ -161,6 +226,31 @@ class SwitchChange:
     offer_to_every_request: bool
     hide_external: bool
     retention_days: int | None
+    auto_recall: bool = False
+    recall_min_similarity: float = DEFAULT_RECALL_MIN_SIMILARITY
+    recall_max_entries: int = DEFAULT_RECALL_MAX_ENTRIES
+    experiment_holdout_percent: int = 0
+
+
+@dataclass(frozen=True)
+class ExperimentReport:
+    """The savings experiment of one workspace: each arm's sessions, and what memory changed, net of its own calls."""
+
+    holdout_percent: int
+    started_at: datetime | None
+    ended_at: datetime | None
+    control: ArmSummary
+    memory: ArmSummary
+    # Tokens and cost per session, the memory arm's mean less the control arm's; None until each arm has enough.
+    tokens: Difference | None
+    cost: Difference | None
+    # Memory's own model calls since the experiment began, by kind, which a memory session costs on top.
+    memory_calls: dict[str, MemoryCallUsage]
+    memory_call_tokens_per_session: float
+    # How often automatic recall found something, and searches agents ran, since the experiment began.
+    recalls: int
+    recalls_with_results: int
+    searches: int
 
 
 @dataclass(frozen=True)
@@ -185,6 +275,7 @@ class MemoryService:
         config: GatewayConfig,
         managers: WorkspaceManagers | None,
         *,
+        ledger: UsageLedger | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._uow = uow
@@ -194,6 +285,7 @@ class MemoryService:
         self._meter = meter
         self._config = config
         self._managers = managers
+        self._ledger = ledger
         self._keys = keys
         self._now = now
 
@@ -327,13 +419,63 @@ class MemoryService:
                 caller.workspace_id, [entry.id, *(version.id for version in versions)]
             )
 
-    async def offer(self, caller: MemoryCaller) -> MemoryOffer:
-        """Whether memory is on for the caller's workspace, and whether it is offered to every request."""
+    async def offer(self, caller: MemoryCaller, session_label: str | None = None) -> MemoryOffer:
+        """What memory the caller's request gets, by its workspace's switches and the experiment arm of its session.
+
+        ``session_label`` is the trace id of the request's session, None where it names none.
+        """
         async with self._uow:
             settings = await self._repos.settings.of_workspace(caller.workspace_id)
             if await self._switches_if_on(caller.workspace_id) is None or settings is None:
                 return MemoryOffer(on=False, every_request=False)
-            return MemoryOffer(on=True, every_request=settings.offer_to_every_request)
+            running = settings.experiment_started_at if settings.experiment_ended_at is None else None
+            arm = assign_arm(caller.workspace_id, running, session_label, settings.experiment_holdout_percent)
+            return MemoryOffer(
+                on=True,
+                every_request=settings.offer_to_every_request,
+                auto_recall=settings.auto_recall,
+                arm=arm,
+            )
+
+    async def recall(self, caller: MemoryCaller, query: str) -> list[Recalled]:
+        """What the caller may recall that is alike enough to ``query``, best first, for a request's newest turn.
+
+        Empty where the workspace does not recall automatically. Only what is handed over is recorded as read.
+
+        Raises:
+            MemoryOffError: the workspace has not turned memory on.
+            MemoryModelUnavailableError: the query could not be embedded.
+        """
+        async with self._uow:
+            switches = await self._switches(caller.workspace_id)
+            settings = await self._repos.settings.of_workspace(caller.workspace_id)
+            if settings is None or not settings.auto_recall:
+                return []
+            floor, most = settings.recall_min_similarity, settings.recall_max_entries
+        [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
+        model = self._models.embedding_model
+        async with self._uow:
+            entries = await self._store.recallable(
+                caller.workspace_id,
+                member_id=caller.member_id,
+                include_workspace=switches.workspace_scope,
+                include_external=not switches.hide_external,
+            )
+            alike = [
+                (similarity, entry)
+                for entry in entries
+                if entry.embedding is not None
+                and entry.embedding_model == model
+                and (similarity := cosine(vector, entry.embedding)) >= floor
+            ]
+            ranked = sorted(
+                (Recalled(entry, relevance(similarity, entry.confidence)) for similarity, entry in alike),
+                key=lambda recalled: recalled.relevance,
+                reverse=True,
+            )[:most]
+            if ranked:
+                await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
+        return ranked
 
     # -- What workspace managers call ----------------------------------------
 
@@ -367,6 +509,7 @@ class MemoryService:
         """
         organization_id = await self._managers_or_fail().require_manager(user, workspace_id)
         async with self._uow:
+            current = await self._repos.settings.of_workspace(workspace_id)
             await self._repos.settings.put(
                 workspace_id,
                 organization_id=organization_id,
@@ -376,8 +519,83 @@ class MemoryService:
                 offer_to_every_request=change.offer_to_every_request,
                 hide_external=change.hide_external,
                 retention_days=change.retention_days,
+                auto_recall=change.auto_recall,
+                recall_min_similarity=change.recall_min_similarity,
+                recall_max_entries=change.recall_max_entries,
+                experiment=self._experiment_after(current, change.experiment_holdout_percent),
             )
             return await self._workspace_memory(workspace_id, organization_id)
+
+    async def experiment_report(self, user: User, workspace_id: uuid.UUID) -> ExperimentReport:
+        """The workspace's savings experiment: the running one, or the last one once it stopped.
+
+        Only sessions and calls inside its window are counted. Reading it takes a manager.
+        """
+        await self._managers_or_fail().require_manager(user, workspace_id)
+        if self._ledger is None:
+            msg = "this memory service was built without a usage ledger"
+            raise RuntimeError(msg)
+        async with self._uow:
+            settings = await self._repos.settings.of_workspace(workspace_id)
+        if settings is None or settings.experiment_started_at is None:
+            empty = summarize([])
+            return ExperimentReport(0, None, None, empty, empty, None, None, {}, 0.0, 0, 0, 0)
+        holdout, started_at, ended_at = (
+            settings.experiment_holdout_percent,
+            settings.experiment_started_at,
+            settings.experiment_ended_at,
+        )
+        until = ended_at or self._now()
+        sessions = await self._ledger.sessions(workspace_id, started_at, until)
+        calls = await self._ledger.memory_calls(workspace_id, started_at, until)
+        arms: dict[ExperimentArm, list[SessionUsage]] = {"control": [], "memory": []}
+        for label, usage in sessions.items():
+            arm = assign_arm(workspace_id, started_at, label, holdout)
+            if arm is not None:
+                arms[arm].append(usage)
+        control, with_memory = arms["control"], arms["memory"]
+        call_tokens = sum(use.input_tokens + use.output_tokens for use in calls.values())
+        per_session = call_tokens / len(with_memory) if with_memory else 0.0
+        async with self._uow:
+            reads = await self._repos.reads.count_by_tool(workspace_id, since=started_at, until=until)
+        recall_calls = calls.get(RECALL_ENDPOINT)
+        return ExperimentReport(
+            holdout_percent=holdout,
+            started_at=started_at,
+            ended_at=ended_at,
+            control=summarize(control),
+            memory=summarize(with_memory),
+            # A memory session is charged its share of memory's own calls, so the difference is net of them.
+            tokens=compare([s.tokens for s in control], [s.tokens + per_session for s in with_memory]),
+            cost=(
+                compare([s.cost or 0.0 for s in control], [s.cost or 0.0 for s in with_memory])
+                if all(s.cost is not None for s in (*control, *with_memory))
+                else None
+            ),
+            memory_calls=calls,
+            memory_call_tokens_per_session=per_session,
+            recalls=recall_calls.calls if recall_calls is not None else 0,
+            recalls_with_results=reads.get(RECALL_TOOL, 0),
+            searches=reads.get(SEARCH_TOOL, 0),
+        )
+
+    def _experiment_after(
+        self, current: MemoryWorkspaceSettings | None, holdout_percent: int
+    ) -> tuple[int, datetime | None, datetime | None]:
+        """The experiment's holdout, start and end once a change sets ``holdout_percent``.
+
+        Zero stops a running experiment and keeps its window, so its results still read. The holdout it runs
+        with keeps it running; another one starts it afresh, dealing every session again.
+        """
+        if current is None or current.experiment_started_at is None:
+            return (holdout_percent, self._now(), None) if holdout_percent > 0 else (0, None, None)
+        kept = (current.experiment_holdout_percent, current.experiment_started_at, current.experiment_ended_at)
+        running = current.experiment_ended_at is None
+        if holdout_percent <= 0:
+            return (*kept[:2], self._now()) if running else kept
+        if running and current.experiment_holdout_percent == holdout_percent:
+            return kept
+        return holdout_percent, self._now(), None
 
     async def erase(self, user: User, workspace_id: uuid.UUID) -> Swept:
         """Delete everything the workspace's memory holds, its data keys last.
@@ -411,6 +629,18 @@ class MemoryService:
             offer_to_every_request=settings is not None and settings.offer_to_every_request,
             hide_external=settings is not None and settings.hide_external,
             retention_days=settings.retention_days if settings is not None else None,
+            auto_recall=settings is not None and settings.auto_recall,
+            recall_min_similarity=(
+                settings.recall_min_similarity if settings is not None else DEFAULT_RECALL_MIN_SIMILARITY
+            ),
+            recall_max_entries=settings.recall_max_entries if settings is not None else DEFAULT_RECALL_MAX_ENTRIES,
+            experiment_holdout_percent=(
+                settings.experiment_holdout_percent
+                if settings is not None and settings.experiment_started_at and settings.experiment_ended_at is None
+                else 0
+            ),
+            experiment_started_at=settings.experiment_started_at if settings is not None else None,
+            experiment_ended_at=settings.experiment_ended_at if settings is not None else None,
             entries=await self._repos.entries.count_by_status(workspace_id),
             proposals_waiting=await self._repos.proposals.count_pending(workspace_id),
         )
@@ -619,9 +849,11 @@ class MemoryService:
             entry_ids=entry_ids,
         )
 
-    async def _embed(self, texts: list[str], workspace_id: uuid.UUID, api_key_id: str | None) -> list[list[float]]:
+    async def _embed(
+        self, texts: list[str], workspace_id: uuid.UUID, api_key_id: str | None, *, endpoint: str = EMBEDDING_ENDPOINT
+    ) -> list[list[float]]:
         try:
-            vectors, use = await self._models.embed(texts)
+            vectors, use = await self._models.embed(texts, endpoint=endpoint)
         except MemoryModelError as exc:
             await self._meter_use(workspace_id, api_key_id, exc.use)
             raise MemoryModelUnavailableError from None

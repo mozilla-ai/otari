@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import time
 import uuid
@@ -28,6 +29,7 @@ from gateway.core.database import DATABASE_ERRORS, create_session, describe_data
 from gateway.core.feature import CoreFeature
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
+from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.exceptions.memory_exceptions import MEMORY_OFF, MemoryToolsRefusedError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
@@ -164,14 +166,19 @@ from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.memory import (
+    MEMORY_ENDPOINT_PREFIX,
+    ExperimentArm,
     MemoryCaller,
+    MemoryCallUsage,
     MemoryModels,
     MemoryService,
     MemoryToolBackend,
     ModelUse,
+    SessionUsage,
     ToolOutcome,
     WorkspaceKeys,
     call_memory_tool,
+    recall_for_turn,
 )
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
@@ -2319,6 +2326,39 @@ class _MemoryUsage:
         )
 
 
+class _MemoryLedger:
+    """A workspace's usage rows, as the savings experiment reads them, in the service's own blocks."""
+
+    def __init__(self, uow: UnitOfWork, usage: UsageLogRepository) -> None:
+        self._uow = uow
+        self._usage = usage
+
+    async def sessions(self, workspace_id: uuid.UUID, since: datetime, until: datetime) -> dict[str, SessionUsage]:
+        async with self._uow:
+            totals = await self._usage.session_totals(
+                workspace_id, since=since, until=until, excluding_endpoints=MEMORY_ENDPOINT_PREFIX
+            )
+        return {
+            row.session: SessionUsage(
+                requests=row.requests,
+                input_tokens=row.input_tokens,
+                output_tokens=row.output_tokens,
+                cache_read_tokens=row.cache_read_tokens,
+                cost=float(row.cost) if row.cost is not None else None,
+            )
+            for row in totals
+        }
+
+    async def memory_calls(
+        self, workspace_id: uuid.UUID, since: datetime, until: datetime
+    ) -> dict[str, MemoryCallUsage]:
+        async with self._uow:
+            totals = await self._usage.endpoint_totals(
+                workspace_id, since=since, until=until, endpoints=MEMORY_ENDPOINT_PREFIX
+            )
+        return {row.endpoint: MemoryCallUsage(row.calls, row.input_tokens, row.output_tokens) for row in totals}
+
+
 class _MemoryManagers:
     """The management checks every workspace and organization policy uses, for memory's switches."""
 
@@ -2361,6 +2401,7 @@ def build_memory_service(
         _MemoryUsage(UsageLogRepository(uow)),
         config,
         managers,
+        ledger=_MemoryLedger(uow, UsageLogRepository(uow)),
     )
 
 
@@ -2439,6 +2480,23 @@ async def get_memory_caller(
     return caller
 
 
+# Longest automatic recall may hold a request up, embedding included.
+MEMORY_RECALL_BUDGET_S = 3.0
+
+
+@dataclass(frozen=True)
+class AdmittedMemory:
+    """What memory one request through the gateway gets.
+
+    ``tools`` are memory's tools for its loop, ``recall`` what memory holds on its newest turn (the text to add,
+    and how many entries), and ``arm`` the experiment arm of its session.
+    """
+
+    tools: MemoryToolBackend | None
+    recall: Callable[[str], Awaitable[tuple[str | None, int]]] | None
+    arm: ExperimentArm | None
+
+
 class MemoryToolAdmission:
     """Decides whether a request through the gateway gets memory's tools, and builds them for its caller.
 
@@ -2459,36 +2517,58 @@ class MemoryToolAdmission:
         *,
         asked: bool,
         declined: bool,
-        session_id: str | None = None,
+        session_label: str | None = None,
         model: str | None = None,
-    ) -> MemoryToolBackend | None:
-        """Memory's tools for this request, or None when it gets none.
+    ) -> AdmittedMemory | None:
+        """What memory this request gets, or None when it gets none.
+
+        ``session_label`` is the trace id of the request's session: its experiment arm, and the session its
+        proposals name. A session in the experiment's control arm gets no memory, even where it asked.
 
         Raises:
-            MemoryToolsRefusedError: the request asked for them and its caller cannot have them.
+            MemoryToolsRefusedError: the request asked for memory's tools and its caller cannot have them.
         """
         if declined:
             return None
-        caller = await memory_caller_for(db, api_key, session_id=session_id, model=model) if api_key else None
+        caller = await memory_caller_for(db, api_key, session_id=session_label, model=model) if api_key else None
         if caller is None:
             if asked:
                 raise MemoryToolsRefusedError(NOT_A_MEMBER)
             return None
         async with create_unit_of_work() as uow:
-            offer = await build_memory_service(uow, self._config, self._keys, self._container).offer(caller)
+            service = build_memory_service(uow, self._config, self._keys, self._container)
+            offer = await service.offer(caller, session_label)
         if not offer.on:
             if asked:
                 raise MemoryToolsRefusedError(MEMORY_OFF)
             return None
-        if not (asked or offer.every_request):
+        if offer.arm == "control":
+            return AdmittedMemory(tools=None, recall=None, arm="control")
+        tools = MemoryToolBackend(caller, self._run) if asked or offer.every_request else None
+        recall = partial(self._recall, caller) if offer.auto_recall else None
+        if tools is None and recall is None and offer.arm is None:
             return None
-        return MemoryToolBackend(caller, self._run)
+        return AdmittedMemory(tools=tools, recall=recall, arm=offer.arm)
 
     async def _run(self, caller: MemoryCaller, name: str, arguments: dict[str, Any]) -> ToolOutcome | None:
         # A Unit of Work per call: the request's own session is released before the provider is called.
         async with create_unit_of_work() as uow:
             service = build_memory_service(uow, self._config, self._keys, self._container)
             return await call_memory_tool(service, caller, name, arguments)
+
+    async def _recall(self, caller: MemoryCaller, query: str) -> tuple[str | None, int]:
+        # Best effort: a request is served without what memory holds rather than failed or held up for it.
+        try:
+            async with asyncio.timeout(MEMORY_RECALL_BUDGET_S), create_unit_of_work() as uow:
+                service = build_memory_service(uow, self._config, self._keys, self._container)
+                return await recall_for_turn(service, caller, query)
+        except TimeoutError:
+            logger.warning("Automatic recall took longer than %ss; the request goes without it", MEMORY_RECALL_BUDGET_S)
+        except TenancyError as exc:
+            logger.info("Automatic recall found nothing to hand over: %s", exc.message)
+        except DATABASE_ERRORS as exc:
+            logger.warning("Automatic recall failed on the database: %s", describe_database_error(exc))
+        return None, 0
 
 
 def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:

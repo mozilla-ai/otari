@@ -106,6 +106,17 @@ class WorkspaceMemoryPublic(BaseModel):
     hide_external: bool = Field(description="Keep entries resting on outside content out of recall.")
     retention_days: int | None = Field(description="Days an unused entry is kept; null keeps the deployment's.")
     deployment_retention_days: int
+    auto_recall: bool = Field(
+        description="Search memory for each request's newest user turn and add what is alike enough to it, "
+        "with no tool call."
+    )
+    recall_min_similarity: float = Field(description="How alike an entry must be to the turn to be added, 0.3-0.99.")
+    recall_max_entries: int = Field(description="The most entries automatic recall adds to one turn.")
+    experiment_holdout_percent: int = Field(
+        description="The share of sessions the running savings experiment serves without memory; 0 while none runs."
+    )
+    experiment_started_at: datetime | None = Field(description="When the last savings experiment began.")
+    experiment_ended_at: datetime | None = Field(description="When it stopped; null while it runs.")
     entries: dict[str, int] = Field(description="Entry versions the workspace holds, by status.")
     proposals_waiting: int = Field(description="Proposals the consolidator has not decided yet.")
 
@@ -119,6 +130,69 @@ class WorkspaceMemoryUpdate(BaseModel):
     offer_to_every_request: bool = False
     hide_external: bool = False
     retention_days: int | None = Field(default=None, ge=1, le=3650)
+    auto_recall: bool = False
+    recall_min_similarity: float = Field(default=0.75, ge=0.3, le=0.99)
+    recall_max_entries: int = Field(default=3, ge=1, le=5)
+    experiment_holdout_percent: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        description="Serve this share of sessions without memory to measure what it saves. A new share starts "
+        "the experiment afresh; 0 stops it and keeps its results.",
+    )
+
+
+class ArmSummaryPublic(BaseModel):
+    """One arm of the savings experiment, per session."""
+
+    sessions: int
+    requests_per_session: float
+    tokens_per_session: float = Field(description="Input and output tokens, cached input counted once.")
+    median_tokens_per_session: float
+    input_tokens_per_session: float
+    output_tokens_per_session: float
+    cache_read_tokens_per_session: float
+    cost_per_session: float | None = Field(description="USD; null where a session's model has no price.")
+
+
+class DifferencePublic(BaseModel):
+    """The memory arm's mean less the control arm's, with a 95% interval. Negative is a saving."""
+
+    absolute: float
+    relative: float | None = Field(description="As a share of the control arm's mean.")
+    low: float
+    high: float
+    conclusive: bool = Field(description="Whether the interval leaves out no difference at all.")
+
+
+class MemoryCallsPublic(BaseModel):
+    calls: int
+    input_tokens: int
+    output_tokens: int
+
+
+class MemoryExperimentPublic(BaseModel):
+    """What memory saves a workspace: sessions served without it against sessions served with it.
+
+    Counts only requests that name their session, made through the gateway while the experiment ran.
+    """
+
+    workspace_id: uuid.UUID
+    holdout_percent: int
+    started_at: datetime | None
+    ended_at: datetime | None
+    min_sessions: int = Field(description="Sessions each arm needs before the differences are estimated.")
+    control: ArmSummaryPublic
+    memory: ArmSummaryPublic
+    tokens: DifferencePublic | None = Field(
+        description="Tokens per session, net of memory's own model calls; null until each arm has min_sessions."
+    )
+    cost: DifferencePublic | None = Field(description="USD per session; null without enough sessions or prices.")
+    memory_calls: dict[str, MemoryCallsPublic] = Field(description="Memory's own model calls, by endpoint.")
+    memory_call_tokens_per_session: float
+    recalls: int = Field(description="Turns automatic recall searched for.")
+    recalls_with_results: int = Field(description="Turns it added something to.")
+    searches: int = Field(description="Searches agents ran with memory's tool.")
 
 
 class WorkspaceMemoryErased(BaseModel):

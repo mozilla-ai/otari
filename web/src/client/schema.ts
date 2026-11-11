@@ -8324,6 +8324,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/memory/experiment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory Experiment
+         * @description What memory saves this workspace: its sessions served without memory against those served with it.
+         *
+         *     The running savings experiment, or the last one once stopped. The same managers as the switches.
+         */
+        get: operations["memory-get_memory_experiment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/provider-keys": {
         parameters: {
             query?: never;
@@ -9673,6 +9695,34 @@ export interface components {
              * @constant
              */
             token_type: "Bearer";
+        };
+        /**
+         * ArmSummaryPublic
+         * @description One arm of the savings experiment, per session.
+         */
+        ArmSummaryPublic: {
+            /** Cache Read Tokens Per Session */
+            cache_read_tokens_per_session: number;
+            /**
+             * Cost Per Session
+             * @description USD; null where a session's model has no price.
+             */
+            cost_per_session: number | null;
+            /** Input Tokens Per Session */
+            input_tokens_per_session: number;
+            /** Median Tokens Per Session */
+            median_tokens_per_session: number;
+            /** Output Tokens Per Session */
+            output_tokens_per_session: number;
+            /** Requests Per Session */
+            requests_per_session: number;
+            /** Sessions */
+            sessions: number;
+            /**
+             * Tokens Per Session
+             * @description Input and output tokens, cached input counted once.
+             */
+            tokens_per_session: number;
         };
         /**
          * AudioContent
@@ -12317,6 +12367,28 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["DeploymentUserPublic"][];
+        };
+        /**
+         * DifferencePublic
+         * @description The memory arm's mean less the control arm's, with a 95% interval. Negative is a saving.
+         */
+        DifferencePublic: {
+            /** Absolute */
+            absolute: number;
+            /**
+             * Conclusive
+             * @description Whether the interval leaves out no difference at all.
+             */
+            conclusive: boolean;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /**
+             * Relative
+             * @description As a share of the control arm's mean.
+             */
+            relative: number | null;
         };
         /**
          * DisabledReason
@@ -14986,6 +15058,69 @@ export interface components {
             workspace_member_id: string;
             /** Workspace Name */
             workspace_name: string;
+        };
+        /** MemoryCallsPublic */
+        MemoryCallsPublic: {
+            /** Calls */
+            calls: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
+         * MemoryExperimentPublic
+         * @description What memory saves a workspace: sessions served without it against sessions served with it.
+         *
+         *     Counts only requests that name their session, made through the gateway while the experiment ran.
+         */
+        MemoryExperimentPublic: {
+            control: components["schemas"]["ArmSummaryPublic"];
+            /** @description USD per session; null without enough sessions or prices. */
+            cost: components["schemas"]["DifferencePublic"] | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Holdout Percent */
+            holdout_percent: number;
+            memory: components["schemas"]["ArmSummaryPublic"];
+            /** Memory Call Tokens Per Session */
+            memory_call_tokens_per_session: number;
+            /**
+             * Memory Calls
+             * @description Memory's own model calls, by endpoint.
+             */
+            memory_calls: {
+                [key: string]: components["schemas"]["MemoryCallsPublic"];
+            };
+            /**
+             * Min Sessions
+             * @description Sessions each arm needs before the differences are estimated.
+             */
+            min_sessions: number;
+            /**
+             * Recalls
+             * @description Turns automatic recall searched for.
+             */
+            recalls: number;
+            /**
+             * Recalls With Results
+             * @description Turns it added something to.
+             */
+            recalls_with_results: number;
+            /**
+             * Searches
+             * @description Searches agents ran with memory's tool.
+             */
+            searches: number;
+            /** Started At */
+            started_at: string | null;
+            /** @description Tokens per session, net of memory's own model calls; null until each arm has min_sessions. */
+            tokens: components["schemas"]["DifferencePublic"] | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * Message
@@ -22535,6 +22670,11 @@ export interface components {
          */
         WorkspaceMemoryPublic: {
             /**
+             * Auto Recall
+             * @description Search memory for each request's newest user turn and add what is alike enough to it, with no tool call.
+             */
+            auto_recall: boolean;
+            /**
              * Deployment Enabled
              * @description Whether this deployment offers memory at all.
              */
@@ -22553,6 +22693,21 @@ export interface components {
             entries: {
                 [key: string]: number;
             };
+            /**
+             * Experiment Ended At
+             * @description When it stopped; null while it runs.
+             */
+            experiment_ended_at: string | null;
+            /**
+             * Experiment Holdout Percent
+             * @description The share of sessions the running savings experiment serves without memory; 0 while none runs.
+             */
+            experiment_holdout_percent: number;
+            /**
+             * Experiment Started At
+             * @description When the last savings experiment began.
+             */
+            experiment_started_at: string | null;
             /**
              * Hide External
              * @description Keep entries resting on outside content out of recall.
@@ -22573,6 +22728,16 @@ export interface components {
              * @description Proposals the consolidator has not decided yet.
              */
             proposals_waiting: number;
+            /**
+             * Recall Max Entries
+             * @description The most entries automatic recall adds to one turn.
+             */
+            recall_max_entries: number;
+            /**
+             * Recall Min Similarity
+             * @description How alike an entry must be to the turn to be added, 0.3-0.99.
+             */
+            recall_min_similarity: number;
             /**
              * Retention Days
              * @description Days an unused entry is kept; null keeps the deployment's.
@@ -22597,8 +22762,19 @@ export interface components {
         };
         /** WorkspaceMemoryUpdate */
         WorkspaceMemoryUpdate: {
+            /**
+             * Auto Recall
+             * @default false
+             */
+            auto_recall: boolean;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Experiment Holdout Percent
+             * @description Serve this share of sessions without memory to measure what it saves. A new share starts the experiment afresh; 0 stops it and keeps its results.
+             * @default 0
+             */
+            experiment_holdout_percent: number;
             /**
              * Hide External
              * @default false
@@ -22609,6 +22785,16 @@ export interface components {
              * @default false
              */
             offer_to_every_request: boolean;
+            /**
+             * Recall Max Entries
+             * @default 3
+             */
+            recall_max_entries: number;
+            /**
+             * Recall Min Similarity
+             * @default 0.75
+             */
+            recall_min_similarity: number;
             /** Retention Days */
             retention_days?: number | null;
             /**
@@ -37245,6 +37431,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMemoryErased"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-get_memory_experiment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryExperimentPublic"];
                 };
             };
             /** @description Validation Error */

@@ -7,6 +7,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
@@ -15,6 +16,7 @@ import {
   useSetWorkspaceMemory,
   useWorkspaceMemory,
 } from "@/shared/api/memory"
+import { MemoryExperimentPanel } from "./MemoryExperimentPanel"
 
 const MEMORY_LABEL = "Agent memory"
 const SHARED_LABEL = "Shared workspace memory"
@@ -22,6 +24,27 @@ const EVERY_REQUEST_LABEL = "Offer memory to every request"
 const REVIEW_LABEL = "Review shared proposals"
 const HIDE_EXTERNAL_LABEL = "Leave outside content out of recall"
 const RETENTION_LABEL = "Keep unused entries for (days)"
+const AUTO_RECALL_LABEL = "Recall automatically"
+const SIMILARITY_LABEL = "How alike an entry must be"
+const MOST_LABEL = "Entries added at most"
+
+const SIMILARITY_OPTIONS = [
+  { value: "0.65", label: "Broad (0.65)" },
+  { value: "0.75", label: "Balanced (0.75)" },
+  { value: "0.85", label: "Strict (0.85)" },
+]
+const MOST_OPTIONS = [1, 2, 3, 4, 5].map((count) => ({
+  value: String(count),
+  label: String(count),
+}))
+
+// The workspace's own threshold, even one set through the API that none of the presets names.
+function similarityOptions(current: number) {
+  const value = current.toFixed(2)
+  return SIMILARITY_OPTIONS.some((option) => option.value === value)
+    ? SIMILARITY_OPTIONS
+    : [...SIMILARITY_OPTIONS, { value, label: `Custom (${value})` }]
+}
 
 type Pending = "on" | "erase"
 
@@ -33,6 +56,10 @@ function switches(memory: WorkspaceMemory): UpdateWorkspaceMemoryRequest {
     offer_to_every_request: memory.offer_to_every_request,
     hide_external: memory.hide_external,
     retention_days: memory.retention_days,
+    auto_recall: memory.auto_recall,
+    recall_min_similarity: memory.recall_min_similarity,
+    recall_max_entries: memory.recall_max_entries,
+    experiment_holdout_percent: memory.experiment_holdout_percent,
   }
 }
 
@@ -198,6 +225,43 @@ export function WorkspaceMemorySection({
             />
           }
         />
+        <SettingRow
+          label={AUTO_RECALL_LABEL}
+          help="Before a request reaches its model, search memory for the member's newest message and add what is alike enough to it, with no tool call. Costs one embedding a message, and adds a few hundred tokens only where something is found. A request can decline with Otari-Memory: off."
+          isNested
+          control={
+            <Toggle
+              isSelected={current.auto_recall}
+              onChange={(next) => change({ auto_recall: next })}
+              label={AUTO_RECALL_LABEL}
+              isDisabled={locked || !current.enabled}
+            />
+          }
+        />
+        {current.auto_recall ? (
+          <div className="flex flex-col gap-2 md:flex-row">
+            <Select
+              label={SIMILARITY_LABEL}
+              value={current.recall_min_similarity.toFixed(2)}
+              onChange={(value) =>
+                change({ recall_min_similarity: Number(value) })
+              }
+              options={similarityOptions(current.recall_min_similarity)}
+              description="Stricter adds less, and less often."
+              isDisabled={locked || !current.enabled}
+            />
+            <Select
+              label={MOST_LABEL}
+              value={String(current.recall_max_entries)}
+              onChange={(value) =>
+                change({ recall_max_entries: Number(value) })
+              }
+              options={MOST_OPTIONS}
+              description="The best matches first."
+              isDisabled={locked || !current.enabled}
+            />
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2 md:flex-row md:items-end">
           <Field
             label={RETENTION_LABEL}
@@ -234,6 +298,13 @@ export function WorkspaceMemorySection({
         </div>
       </SettingsGroup>
       <p className="text-caption">{holdings(current)}</p>
+      <MemoryExperimentPanel
+        workspaceId={workspaceId}
+        memory={current}
+        canManage={canManage}
+        isSaving={save.isPending}
+        onChange={change}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="ghost"

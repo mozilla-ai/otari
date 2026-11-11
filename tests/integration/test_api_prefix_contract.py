@@ -57,6 +57,7 @@ from gateway.main import (
     _under as _main_under,
 )
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
+from gateway.services.memory import _models as memory_models
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -274,6 +275,10 @@ FROZEN_LABELS = frozenset(
         videos.USAGE_ENDPOINT,
         videos.USAGE_ENDPOINT_COMPLETED,
         PLAYGROUND_USAGE_ENDPOINT,
+        # Memory's own model calls, recorded as side calls of their workspace.
+        memory_models.EMBEDDING_ENDPOINT,
+        memory_models.RECALL_ENDPOINT,
+        memory_models.CONSOLIDATION_ENDPOINT,
     }
 )
 # OpenAI's Batch API names the operation each line runs by OpenAI's own path,

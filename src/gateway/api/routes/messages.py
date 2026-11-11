@@ -64,6 +64,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     scope_prompt_cache_key,
 )
+from gateway.api.routes._recall import recall_query, with_recall
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
@@ -1075,6 +1076,7 @@ async def create_message(
             web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
             memory_header=raw_request.headers.get(MEMORY_HEADER),
+            recall_query=recall_query(request.messages),
             # Anthropic's own field, which is where an Anthropic SDK puts the id it
             # read off the last response. Resolved at admission against this caller's
             # leases; the provider never sees it when the sandbox runs the code.
@@ -1112,6 +1114,7 @@ async def create_message(
         )
         # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
         fields.pop("metadata", None)
+        fields["messages"] = with_recall(fields["messages"], tools.memory_recall)
         fields.update(conversation_cache_key(raw_request.headers, session_label=request.session_label))
         scope_prompt_cache_key(fields, ctx)
         scope_prompt_cache_key(fields, ctx, field=CONVERSATION_CACHE_KEY_FIELD)

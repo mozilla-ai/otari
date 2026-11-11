@@ -68,11 +68,13 @@ class _Models:
     def can_decide(self) -> bool:
         return bool(self.decisions)
 
-    async def embed(self, texts: Sequence[str]) -> tuple[list[list[float]], ModelUse]:
+    async def embed(
+        self, texts: Sequence[str], *, endpoint: str = "/v1/memory/embedding"
+    ) -> tuple[list[list[float]], ModelUse]:
         if self.fail:
-            raise MemoryModelError("down", _use("/v1/memory/embedding", succeeded=False))
+            raise MemoryModelError("down", _use(endpoint, succeeded=False))
         self.embedded += len(texts)
-        return [_vector(text) for text in texts], _use("/v1/memory/embedding", prompt=len(texts))
+        return [_vector(text) for text in texts], _use(endpoint, prompt=len(texts))
 
     async def decide(self, proposal: str, existing: Sequence[str]) -> tuple[Decision, ModelUse]:
         return self.decisions.pop(0), _use("/v1/memory/consolidation", prompt=40, completion=8)

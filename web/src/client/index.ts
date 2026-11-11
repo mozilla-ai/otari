@@ -699,6 +699,9 @@ export type UpdateOrganizationMemoryRequest =
 export type WorkspaceMemory = Schemas["WorkspaceMemoryPublic"]
 export type UpdateWorkspaceMemoryRequest = Schemas["WorkspaceMemoryUpdate"]
 export type WorkspaceMemoryErased = Schemas["WorkspaceMemoryErased"]
+export type MemoryExperiment = Schemas["MemoryExperimentPublic"]
+export type MemoryExperimentArm = Schemas["ArmSummaryPublic"]
+export type MemoryExperimentDifference = Schemas["DifferencePublic"]
 
 // The per-workspace web-search configuration over the deployment-wide backend;
 // see `src/gateway/services/tenancy/workspace_web_search_service.py`.

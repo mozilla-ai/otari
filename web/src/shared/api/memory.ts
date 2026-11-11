@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  MemoryExperiment,
   OrganizationMemory,
   UpdateOrganizationMemoryRequest,
   UpdateWorkspaceMemoryRequest,
@@ -15,6 +16,10 @@ import {
 
 function workspaceMemoryKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "memory"]
+}
+
+function memoryExperimentKey(workspaceId: string) {
+  return [WORKSPACES, workspaceId, "memory-experiment"]
 }
 
 // The caller's organization's switch. Read only by its owners and admins, which
@@ -73,7 +78,25 @@ export function useSetWorkspaceMemory() {
       ),
     onSuccess: (data, { workspaceId }) => {
       queryClient.setQueryData(workspaceMemoryKey(workspaceId), data)
+      // Starting, stopping or restarting the experiment changes what it reports.
+      void queryClient.invalidateQueries({
+        queryKey: memoryExperimentKey(workspaceId),
+      })
     },
+  })
+}
+
+// What memory saves the workspace: the running savings experiment, or the last one.
+export function useMemoryExperiment(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: memoryExperimentKey(workspaceId),
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<MemoryExperiment>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/memory/experiment`,
+      ),
+    enabled,
+    staleTime: 30_000,
   })
 }
 

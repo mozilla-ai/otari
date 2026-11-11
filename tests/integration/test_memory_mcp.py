@@ -25,11 +25,13 @@ MCP = f"{API_ROOT}/memory/mcp"
 DEPLOY = "Deploy the api service with make deploy-api from the main branch only"
 
 
-async def _embed(self: MemoryModels, texts: Sequence[str]) -> tuple[list[list[float]], ModelUse]:
+async def _embed(
+    self: MemoryModels, texts: Sequence[str], *, endpoint: str = "/v1/memory/embedding"
+) -> tuple[list[list[float]], ModelUse]:
     """Two words in common make two vectors alike; enough to tell what a search should find."""
     vocabulary = ("deploy", "api", "main", "branch", "test", "push")
     vectors = [[float(word in text.lower()) + 0.01 for word in vocabulary] for text in texts]
-    return vectors, ModelUse("/v1/memory/embedding", "openai:embed", "openai", True, 7 * len(texts), None, 4)
+    return vectors, ModelUse(endpoint, "openai:embed", "openai", True, 7 * len(texts), None, 4)
 
 
 @pytest.fixture

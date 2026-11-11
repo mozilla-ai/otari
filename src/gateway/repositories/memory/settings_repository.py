@@ -5,6 +5,7 @@ Not fenced: the table holds switches, never content, and the sweeps read it acro
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Never
 
 from sqlalchemy import select
@@ -35,8 +36,15 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         offer_to_every_request: bool,
         hide_external: bool,
         retention_days: int | None,
+        auto_recall: bool,
+        recall_min_similarity: float,
+        recall_max_entries: int,
+        experiment: tuple[int, datetime | None, datetime | None],
     ) -> MemoryWorkspaceSettings:
-        """Stage the workspace's switches, creating its row the first time."""
+        """Stage the workspace's switches, creating its row the first time.
+
+        ``experiment`` is the savings experiment's holdout, start and end.
+        """
         row = await self.of_workspace(workspace_id)
         if row is None:
             row = MemoryWorkspaceSettings(workspace_id=workspace_id, organization_id=organization_id)
@@ -48,6 +56,10 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         row.offer_to_every_request = offer_to_every_request
         row.hide_external = hide_external
         row.retention_days = retention_days
+        row.auto_recall = auto_recall
+        row.recall_min_similarity = recall_min_similarity
+        row.recall_max_entries = recall_max_entries
+        row.experiment_holdout_percent, row.experiment_started_at, row.experiment_ended_at = experiment
         await self.db.flush()
         return row
 

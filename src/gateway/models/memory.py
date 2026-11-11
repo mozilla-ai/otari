@@ -271,6 +271,9 @@ class MemoryWorkspaceSettings(Base):
     __table_args__ = (
         CheckConstraint(_one_of("write_policy", MEMORY_WRITE_POLICIES), name="check_memory_settings_write_policy"),
         CheckConstraint("retention_days IS NULL OR retention_days > 0", name="check_memory_settings_retention"),
+        CheckConstraint("recall_min_similarity BETWEEN 0.3 AND 0.99", name="check_memory_settings_recall_similarity"),
+        CheckConstraint("recall_max_entries BETWEEN 1 AND 5", name="check_memory_settings_recall_entries"),
+        CheckConstraint("experiment_holdout_percent BETWEEN 0 AND 50", name="check_memory_settings_experiment_holdout"),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -291,6 +294,16 @@ class MemoryWorkspaceSettings(Base):
     hide_external: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Null keeps the deployment's ``memory_retention_days``.
     retention_days: Mapped[int | None] = mapped_column()
+    # Search memory for each request's newest user turn and hand the model what is alike enough, with no tool call.
+    auto_recall: Mapped[bool] = mapped_column(default=False, server_default=false())
+    recall_min_similarity: Mapped[float] = mapped_column(default=0.75, server_default="0.75")
+    recall_max_entries: Mapped[int] = mapped_column(default=3, server_default="3")
+    # The share of sessions the last experiment served without memory, to measure what it saves; zero is none ever.
+    experiment_holdout_percent: Mapped[int] = mapped_column(default=0, server_default="0")
+    # When it began, which deals the sessions, and when it stopped; it runs while it has begun and not stopped.
+    # Both are kept once it stops, so its results still read until another begins.
+    experiment_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    experiment_ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now(), onupdate=lambda: datetime.now(UTC)
     )

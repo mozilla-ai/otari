@@ -31,6 +31,28 @@ from gateway.schemas.usage_and_telemetry import (
 _REQUEST_STATUSES = ("success", "error", "incomplete")
 
 
+@dataclass(frozen=True)
+class SessionTotals:
+    """What one session's requests used. ``cost`` is None where some request of it has no cost."""
+
+    session: str
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost: Decimal | None
+
+
+@dataclass(frozen=True)
+class EndpointTotals:
+    """The calls to one endpoint, and the tokens they used."""
+
+    endpoint: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+
+
 def new_usage_row(
     *,
     workspace_id: uuid.UUID,
@@ -478,6 +500,78 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             )
         )
         await self.db.flush()
+
+    async def session_totals(
+        self, workspace_id: uuid.UUID, *, since: datetime, until: datetime, excluding_endpoints: str
+    ) -> list[SessionTotals]:
+        """What each session's requests served here in the window used, by the session's trace id.
+
+        Requests that name no session are left out, as are rows whose endpoint starts with
+        ``excluding_endpoints``. Input counts cached tokens once, whichever convention the row was recorded under.
+        """
+        cached = func.coalesce(UsageLog.cache_read_tokens, 0) + func.coalesce(UsageLog.cache_write_tokens, 0)
+        input_tokens = func.coalesce(UsageLog.prompt_tokens, 0) + case(
+            (UsageLog.cache_tokens_in_prompt.is_(False), cached), else_=0
+        )
+        result = await self.db.execute(
+            select(
+                UsageLog.source_label,
+                func.count(),
+                func.sum(input_tokens),
+                func.sum(func.coalesce(UsageLog.completion_tokens, 0)),
+                func.sum(func.coalesce(UsageLog.cache_read_tokens, 0)),
+                func.sum(UsageLog.cost),
+                func.count(UsageLog.cost),
+            )
+            .where(
+                UsageLog.workspace_id == workspace_id,
+                UsageLog.source == SERVED_HERE_SLUG,
+                UsageLog.source_label.is_not(None),
+                UsageLog.status.in_(_REQUEST_STATUSES),
+                UsageLog.timestamp >= since,
+                UsageLog.timestamp < until,
+                ~UsageLog.endpoint.startswith(excluding_endpoints),
+            )
+            .group_by(UsageLog.source_label)
+        )
+        return [
+            SessionTotals(
+                session=str(label),
+                requests=int(count),
+                input_tokens=int(inputs or 0),
+                output_tokens=int(outputs or 0),
+                cache_read_tokens=int(cache_reads or 0),
+                # Unknown where any of its rows has no cost, as for a model with no price.
+                cost=Decimal(cost) if cost is not None and priced == count else None,
+            )
+            for label, count, inputs, outputs, cache_reads, cost, priced in result.all()
+        ]
+
+    async def endpoint_totals(
+        self, workspace_id: uuid.UUID, *, since: datetime, until: datetime, endpoints: str
+    ) -> list[EndpointTotals]:
+        """The calls in the window whose endpoint starts with ``endpoints``, by endpoint."""
+        result = await self.db.execute(
+            select(
+                UsageLog.endpoint,
+                func.count(),
+                func.sum(func.coalesce(UsageLog.prompt_tokens, 0)),
+                func.sum(func.coalesce(UsageLog.completion_tokens, 0)),
+            )
+            .where(
+                UsageLog.workspace_id == workspace_id,
+                UsageLog.timestamp >= since,
+                UsageLog.timestamp < until,
+                UsageLog.endpoint.startswith(endpoints),
+            )
+            .group_by(UsageLog.endpoint)
+        )
+        return [
+            EndpointTotals(
+                endpoint=endpoint, calls=int(count), input_tokens=int(inputs or 0), output_tokens=int(outputs or 0)
+            )
+            for endpoint, count, inputs, outputs in result.all()
+        ]
 
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.

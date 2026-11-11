@@ -27,6 +27,12 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     hide_external: false,
     retention_days: null,
     deployment_retention_days: 180,
+    auto_recall: false,
+    recall_min_similarity: 0.75,
+    recall_max_entries: 3,
+    experiment_holdout_percent: 0,
+    experiment_started_at: null,
+    experiment_ended_at: null,
     entries: { active: 3, quarantined: 1 },
     proposals_waiting: 2,
     ...overrides,
@@ -79,6 +85,31 @@ afterEach(() => {
 })
 
 describe("WorkspaceMemorySection", () => {
+  it("turns on automatic recall with every other switch as it was", async () => {
+    const sent = await renderSection(memory({ offer_to_every_request: true }))
+    expect(screen.queryByLabelText("How alike an entry must be")).toBeNull()
+
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Recall automatically" }),
+    )
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({
+      method: "PUT",
+      body: expect.objectContaining({
+        enabled: true,
+        offer_to_every_request: true,
+        auto_recall: true,
+        recall_min_similarity: 0.75,
+        recall_max_entries: 3,
+        experiment_holdout_percent: 0,
+      }),
+    })
+    expect(
+      await screen.findByText("Stricter adds less, and less often."),
+    ).toBeInTheDocument()
+  })
+
   it("shows the switches and what the workspace holds", async () => {
     await renderSection(memory())
 
@@ -123,6 +154,10 @@ describe("WorkspaceMemorySection", () => {
         offer_to_every_request: false,
         hide_external: false,
         retention_days: null,
+        auto_recall: false,
+        recall_min_similarity: 0.75,
+        recall_max_entries: 3,
+        experiment_holdout_percent: 0,
       },
     })
   })
