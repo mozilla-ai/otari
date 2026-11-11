@@ -707,6 +707,10 @@ class ActiveOrganizationMemberPublic(SQLModel):
     current invitation, which may have expired, so the roster can offer to
     revoke or reissue it.
 
+    ``is_sso_account`` records how the account came about, not whether the
+    connection still admits it: an organization that repoints or drops its
+    connection leaves the account provisioned by one and unable to sign in.
+
     ``attribution_user_id`` is the addition the platform has no counterpart for.
     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
     not to this UUID identity, so this carries the ``user_id`` a caller passes to
@@ -727,6 +731,13 @@ class ActiveOrganizationMemberPublic(SQLModel):
         description="When the invitation in invitation_id expires, or expired. Null when there is none.",
     )
     email: str | None = None
+    is_sso_account: bool = Field(
+        default=False,
+        description=(
+            "Whether an organization's own OIDC connection provisioned this member's account. "
+            "Such an account is created with no sign-in address, so email is null until one is set."
+        ),
+    )
     full_name: str | None = None
     avatar_face: int | None = Field(
         default=None,
