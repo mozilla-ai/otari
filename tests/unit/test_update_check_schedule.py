@@ -33,12 +33,12 @@ def test_a_development_build_has_no_release_version(raw: str) -> None:
 
 
 def test_an_install_keeps_its_time_of_day() -> None:
-    install = uuid.uuid4()
-    first = next_daily_check(install, _NOW)
+    seed = uuid.uuid4()
+    first = next_daily_check(seed, _NOW)
     assert first > _NOW
     assert first - _NOW <= timedelta(days=1)
-    assert next_daily_check(install, first) == first + timedelta(days=1)
-    assert next_daily_check(install, _NOW + timedelta(hours=3)) in {first, first + timedelta(days=1)}
+    assert next_daily_check(seed, first) == first + timedelta(days=1)
+    assert next_daily_check(seed, _NOW + timedelta(hours=3)) in {first, first + timedelta(days=1)}
 
 
 def test_installs_spread_over_the_whole_day() -> None:
@@ -47,30 +47,30 @@ def test_installs_spread_over_the_whole_day() -> None:
 
 
 def test_a_retry_waits_longer_after_each_failure_up_to_six_hours() -> None:
-    install = uuid.UUID(int=(12 * 3600 - 1))  # checks at 11:59:59, so the daily cap is a day away
+    seed = uuid.UUID(int=(12 * 3600 - 1))  # checks at 11:59:59, so the daily cap is a day away
     rng = random.Random(1)
-    waits = [next_retry(install, _NOW, failures, rng=rng) - _NOW for failures in (1, 2, 3, 1000)]
+    waits = [next_retry(seed, _NOW, failures, rng=rng) - _NOW for failures in (1, 2, 3, 1000)]
     assert timedelta(minutes=2, seconds=30) <= waits[0] <= timedelta(minutes=7, seconds=30)
     assert waits[0] < waits[2]
     assert waits[3] <= LONGEST_RETRY * 1.5
 
 
 def test_retries_after_a_shared_outage_do_not_land_together() -> None:
-    install = uuid.UUID(int=(12 * 3600 - 1))
+    seed = uuid.UUID(int=(12 * 3600 - 1))
     rng = random.Random(7)
-    retries = {next_retry(install, _NOW, 3, rng=rng) for _ in range(50)}
+    retries = {next_retry(seed, _NOW, 3, rng=rng) for _ in range(50)}
     assert len(retries) == 50
 
 
 def test_a_servers_retry_after_is_a_floor() -> None:
-    install = uuid.UUID(int=(12 * 3600 - 1))
-    retry = next_retry(install, _NOW, 1, retry_after=timedelta(hours=2), rng=random.Random(1))
+    seed = uuid.UUID(int=(12 * 3600 - 1))
+    retry = next_retry(seed, _NOW, 1, retry_after=timedelta(hours=2), rng=random.Random(1))
     assert retry - _NOW >= timedelta(hours=2)
 
 
 def test_a_retry_is_never_later_than_the_next_daily_check() -> None:
-    install = uuid.UUID(int=(12 * 3600 + 60))  # checks at 12:01, a minute from now
-    assert next_retry(install, _NOW, 10, rng=random.Random(1)) == next_daily_check(install, _NOW)
+    seed = uuid.UUID(int=(12 * 3600 + 60))  # checks at 12:01, a minute from now
+    assert next_retry(seed, _NOW, 10, rng=random.Random(1)) == next_daily_check(seed, _NOW)
 
 
 @pytest.fixture

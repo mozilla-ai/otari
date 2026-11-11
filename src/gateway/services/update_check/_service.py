@@ -122,11 +122,11 @@ class UpdateCheckService:
             row = await self._state.get_or_create()
             if self._enabled(row) is not True:
                 return False
-            install_id = row.install_id
+            install_id, seed = row.install_id, row.schedule_seed
             if row.next_check_at is None:
                 # Turned on by configuration rather than by an answer, so no check is due yet:
                 # the first one waits for the install's time of day like every later one.
-                await self._state.schedule_if_unset(next_daily_check(install_id, now))
+                await self._state.schedule_if_unset(next_daily_check(seed, now))
                 return False
             if await self._state.claim_due_check(now, now + CLAIM_HOLD) is None:
                 return False
@@ -137,7 +137,7 @@ class UpdateCheckService:
         except UpdateCheckFailedError as exc:
             async with self._uow:
                 row = await self._state.get_or_create()
-                retry = next_retry(install_id, now, row.failures + 1, retry_after=exc.retry_after, rng=self._rng)
+                retry = next_retry(seed, now, row.failures + 1, retry_after=exc.retry_after, rng=self._rng)
                 await self._state.record_failure(row, next_check_at=retry)
             logger.info("Update check got no answer (%s); retrying at %s", exc, retry.isoformat())
             return True
@@ -151,7 +151,7 @@ class UpdateCheckService:
                 latest_version=reply.latest_version,
                 release_url=reply.release_url,
                 advisories=[advisory.model_dump() for advisory in reply.advisories],
-                next_check_at=next_daily_check(install_id, now),
+                next_check_at=next_daily_check(seed, now),
             )
         self._log_news(reply)
         return True

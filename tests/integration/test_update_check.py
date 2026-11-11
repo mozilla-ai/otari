@@ -64,6 +64,12 @@ def _service(
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config, version=version, send=server, clock=clock)
 
 
+async def _schedule_seed(db: AsyncSession) -> uuid.UUID:
+    uow = UnitOfWork(db)
+    async with uow:
+        return (await UpdateCheckStateRepository(uow).get_or_create()).schedule_seed
+
+
 def test_nobody_has_answered_on_a_new_install(client: TestClient) -> None:
     response = client.get(_CHECK, headers=_MASTER)
     assert response.status_code == 200
@@ -160,7 +166,7 @@ async def test_a_yes_is_checked_at_once_and_then_once_a_day(async_db: AsyncSessi
     after = await service.get_status()
     assert after.latest_version == "0.31.0"
     assert after.update_available is True
-    assert after.next_check_at == next_daily_check(install_id, clock.now - timedelta(minutes=1))
+    assert after.next_check_at == next_daily_check(await _schedule_seed(async_db), clock.now - timedelta(minutes=1))
 
     clock.now = after.next_check_at
     assert await service.check_if_due() is True
@@ -178,10 +184,31 @@ async def test_config_turns_the_check_on_at_the_installs_own_time_not_at_startup
     assert await service.check_if_due() is False
     assert server.sent == []
     status = await service.get_status()
-    assert status.next_check_at == next_daily_check(uuid.UUID(status.install_id), clock.now)
+    assert status.next_check_at == next_daily_check(await _schedule_seed(async_db), clock.now)
 
     clock.now = status.next_check_at
     assert await service.check_if_due() is True
+
+
+@pytest.mark.asyncio
+async def test_the_time_of_day_comes_from_a_seed_that_never_leaves_the_install(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(test_config, "update_check", True)
+    server, clock = _Server(), _Clock()
+    service = _service(async_db, test_config, server, clock)
+    await service.check_if_due()
+
+    status = await service.get_status()
+    seed = await _schedule_seed(async_db)
+    assert seed != uuid.UUID(status.install_id)
+    assert status.next_check_at == next_daily_check(seed, clock.now)
+    assert str(seed) not in status.model_dump_json()
+
+    clock.now = status.next_check_at
+    await service.check_if_due()
+    [(_, _, install_id)] = server.sent
+    assert install_id != seed
 
 
 @pytest.mark.asyncio

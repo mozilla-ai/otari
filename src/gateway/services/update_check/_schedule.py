@@ -1,9 +1,10 @@
 """When an install checks: one fixed time of day each, and a randomized backoff after a failure.
 
 Installs upgrade and restart together after a release, so a check at startup
-would bring them all at once. Each install checks at the time of day its id
-hashes to instead, which spreads them over the whole day and does not move
-when the install restarts.
+would bring them all at once. Each install checks at the time of day its
+schedule seed picks instead, which spreads them over the whole day and does not
+move when the install restarts. The seed is never sent, so the time a check
+arrives says nothing about which install id it carries.
 """
 
 import random
@@ -31,20 +32,20 @@ def format_version(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
 
 
-def daily_slot(install_id: uuid.UUID) -> timedelta:
+def daily_slot(seed: uuid.UUID) -> timedelta:
     """The install's time of day, as an offset from midnight UTC."""
-    return timedelta(seconds=install_id.int % int(DAY.total_seconds()))
+    return timedelta(seconds=seed.int % int(DAY.total_seconds()))
 
 
-def next_daily_check(install_id: uuid.UUID, now: datetime) -> datetime:
+def next_daily_check(seed: uuid.UUID, now: datetime) -> datetime:
     """The first occurrence of the install's time of day after ``now``."""
     midnight = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    slot = midnight + daily_slot(install_id)
+    slot = midnight + daily_slot(seed)
     return slot if slot > now else slot + DAY
 
 
 def next_retry(
-    install_id: uuid.UUID,
+    seed: uuid.UUID,
     now: datetime,
     failures: int,
     *,
@@ -63,4 +64,4 @@ def next_retry(
     wait = base * (rng.uniform(0.5, 1.5) if rng else random.uniform(0.5, 1.5))
     if retry_after is not None:
         wait = max(wait, retry_after)
-    return min(now + wait, next_daily_check(install_id, now))
+    return min(now + wait, next_daily_check(seed, now))

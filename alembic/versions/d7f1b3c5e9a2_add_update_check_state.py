@@ -1,9 +1,9 @@
 """Add the update check state table.
 
-One row, pinned by a check constraint, holding the install id, the operator's
-answer and the schedule every replica's worker polls; the conditional update
-that moves its ``next_check_at`` forward is what lets exactly one replica send
-a check.
+One row, pinned by a check constraint, holding the install id, the seed that
+picks the install's time of day, the operator's answer and the schedule every
+replica's worker polls; the conditional update that moves its
+``next_check_at`` forward is what lets exactly one replica send a check.
 
 Revision ID: d7f1b3c5e9a2
 Revises: a7f2c91d4e60
@@ -26,6 +26,7 @@ def upgrade() -> None:
         "update_check_state",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("install_id", sa.Uuid(), nullable=False),
+        sa.Column("schedule_seed", sa.Uuid(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=True),
         sa.Column("answered_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("next_check_at", sa.DateTime(timezone=True), nullable=True),

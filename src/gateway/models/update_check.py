@@ -25,6 +25,9 @@ class UpdateCheckState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=STATE_ROW_ID)
     # Random, and never derived from anything about the host. Sent with every check.
     install_id: Mapped[uuid.UUID] = mapped_column(default=uuid.uuid4)
+    # Picks the install's time of day, and is never sent: a time derived from the install id would let
+    # anyone holding otari.ai's access logs match an install id to the address its checks came from.
+    schedule_seed: Mapped[uuid.UUID] = mapped_column(default=uuid.uuid4)
     # What an operator answered in the dashboard. Null until one does; ``update_check`` in config overrides it.
     enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
     answered_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
