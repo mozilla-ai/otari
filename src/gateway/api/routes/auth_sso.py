@@ -54,7 +54,7 @@ from gateway.services.oauth_service import (
     apply_flow_cookie,
     browser_token_for,
     drop_finished_flow,
-    redirect_uri,
+    sso_redirect_uri,
 )
 from gateway.services.tenancy import report_new_account
 
@@ -66,16 +66,6 @@ SSO_FLOW_COOKIE_NAME = "otari_sso_flow"
 SSO_FLOW_COOKIE_PATH = f"{API_ROOT}/auth/sso"
 
 SsoFlowCookie = Annotated[str | None, Cookie(alias=SSO_FLOW_COOKIE_NAME, include_in_schema=False)]
-
-
-def _sso_redirect_uri(config: GatewayConfig) -> str:
-    """This deployment's one fixed callback path for every organization's own connection.
-
-    Every organization's connection registers and is sent back to this one path. The connection a
-    given callback belongs to is resolved from the pending state's own ``state``, never from the
-    path.
-    """
-    return redirect_uri(config, "sso")
 
 
 @router.post("/lookup", response_model=SsoLookupResponse)
@@ -120,7 +110,7 @@ async def authorize_sso(
         bound = await connections.start_sign_in(
             connection,
             metadata,
-            redirect_uri=_sso_redirect_uri(config),
+            redirect_uri=sso_redirect_uri(config),
             allow_private_hosts=config.oidc_allow_private_hosts,
         )
     except DATABASE_ERRORS as exc:
@@ -173,7 +163,7 @@ async def callback_sso(
         client = await connections.client_for_sign_in(
             connection,
             metadata,
-            redirect_uri=_sso_redirect_uri(config),
+            redirect_uri=sso_redirect_uri(config),
             allow_private_hosts=config.oidc_allow_private_hosts,
         )
         external = await exchange_sso_code(
