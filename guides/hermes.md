@@ -1,4 +1,4 @@
-# Use with Hermes Agent
+# Hermes Agent
 
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) is Nous Research's
 agent. The [Otari provider plugin](https://github.com/mozilla-ai/hermes-provider-otari)
@@ -46,5 +46,5 @@ Hermes's `--reasoning` level is sent as `reasoning_effort`, with `max` sent as
 
 ## See also
 
-- [Use with Pydantic AI](use-with-pydantic-ai.md)
-- [Use with LangChain](use-with-langchain.md)
+- [Pydantic AI](pydantic-ai.md)
+- [LangChain](langchain.md)

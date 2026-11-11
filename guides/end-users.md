@@ -50,7 +50,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/36cb1c5b9dc071848345d91b284a0da121350fb2/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/741f0d3d17b01245d774147496efcfc9647bc7f5/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 

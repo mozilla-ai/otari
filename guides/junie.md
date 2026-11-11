@@ -1,4 +1,4 @@
-# Use with Junie
+# Junie
 
 [Junie](https://junie.jetbrains.com) is JetBrains' coding agent. Two JetBrains
 products can route through Otari's OpenAI-compatible API, each with its own
@@ -86,7 +86,7 @@ context window rather than the one Otari reports.
 
 ## See also
 
-- [Use with Claude Code](use-with-claude-code.md)
-- [Use with Codex](use-with-codex.md)
-- [Use with opencode](use-with-opencode.md)
+- [Claude Code](claude-code.md)
+- [Codex](codex.md)
+- [opencode](opencode.md)
 - [How a request is attributed](access-control.md#how-a-request-is-attributed)

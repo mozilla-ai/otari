@@ -162,7 +162,7 @@ skipped because a check once passed.
 
 Each stored server has an access list (ACL) that decides which keys reach it and
 which of its tools they may run. The dashboard steps are in
-[Control who can use it](https://docs.otari.ai/guides/build/configure-an-mcp-server#control-who-can-use-it).
+[Control who can use it](https://docs.otari.ai/guides/build/mcp-servers#control-who-can-use-it).
 
 An ACL has two parts:
 

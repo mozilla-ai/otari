@@ -14,7 +14,7 @@ The Playground lets you test different AI models directly in Otari, experiment w
 2. Make sure **Single** is selected.
 3. Choose a model from the dropdown menu below the prompt box.
 4. Enter your prompt or select one of the suggested **Starting points**.
-5. Optionally, click **Tools** to add tools to your request, such as web search, code execution, or MCP servers, and attach files with the paperclip. Only the MCP servers your [access rules](configure-an-mcp-server.md#control-who-can-use-it) let you reach are listed.
+5. Optionally, click **Tools** to add tools to your request, such as web search, code execution, or MCP servers, and attach files with the paperclip. Only the MCP servers your [access rules](mcp-servers.md#control-who-can-use-it) let you reach are listed.
 6. Press Enter or click the Send button to submit your prompt.
 7. Review the model's response and available usage and performance information.
 

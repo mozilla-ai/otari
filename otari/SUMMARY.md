@@ -4,6 +4,7 @@
 
 * [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
+* [Integrations](integrations.md)
 
 ## What you can do
 
