@@ -47,6 +47,10 @@ goes to Otari unchanged, so write it as Otari spells it:
 See [Model format](https://docs.otari.ai/reference/gateway/models#model-format) and
 [Listing available models](https://docs.otari.ai/reference/gateway/models#listing-available-models).
 
+To list only the open-weight models a key can use, ask the catalog for them:
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 ## See also
 
 - [Use with Claude Code](use-with-claude-code.md)

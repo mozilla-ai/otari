@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.43.0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.44.0/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -1064,6 +1064,7 @@ moderations, rerank) classify a provider failure the same way:
 |---|---|---|---|---|
 | Rejects the request (its own 400 or 422) | 400 | | The provider's sentence | No |
 | OpenAI's 403 with error type `invalid_request_error` (logprobs requested from a model that does not return them, an embedding model sent to chat) | 400 | | OpenAI's sentence | No |
+| The model's output did not match the requested JSON schema (Groq's `json_validate_failed`) | 400 | `structured_output_failed` | The provider's sentence, without its pointer to `failed_generation`, which Otari does not relay | Yes: the failure is stochastic, and the same request usually succeeds |
 | Unknown model | 404 | | | No |
 | The provider has no such operation for the model (rerank on a chat model), or its SDK has no parameter for a field the caller sent | 400 | | Names the operation or the field | No |
 | Refuses the request for its size (its own 413, such as a prompt over a tokens-per-minute limit) | 413 | `request_too_large` | The provider's sentence | No |
@@ -1123,11 +1124,11 @@ at the top level of the body.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
 | `user_not_found` | 404 | The billed user does not exist | |
-| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
@@ -1138,6 +1139,7 @@ at the top level of the body.
 | `request_too_large` | 413 | The provider refused the request for its size, such as a prompt over a tokens-per-minute limit | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `unsupported_parameter` | 400 | The provider cannot express a parameter the request carries for the model, such as `response_format` on a model with no JSON mode. Sent only when Otari's provider library refuses the parameter and names it; a provider's own 400 for it carries the provider's message and no code. A routing policy moves on to its next candidate first, and answers with this code, `detail` naming the parameters, when every candidate refused one | |
+| `structured_output_failed` | 400 | The model failed to produce output matching the request's JSON schema (`response_format` or `text.format`), which the provider reported with its own code (Groq's `json_validate_failed`). Unlike other 400s, resending the same request may succeed, so a client can retry it or send it to another model. The partial output the provider returns is not relayed. A routing policy moves on to its next candidate first, and answers with this code when every candidate failed this way | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |

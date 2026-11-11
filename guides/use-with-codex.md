@@ -46,6 +46,10 @@ served by translating each request to a chat completion, which refuses some
 features Codex may use, such as tool types other than `function`; see
 [Responses on providers without a Responses API](https://docs.otari.ai/reference#responses-on-providers-without-a-responses-api).
 
+To list only the open-weight models, ask the catalog for
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 Codex looks up context windows, reasoning options and tool support by exact model
 name. An Otari model name may not match, and then Codex uses fallback values. If
 that matters, set `model_catalog_json` as the Codex configuration reference

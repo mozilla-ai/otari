@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.43.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.44.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -93,8 +93,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
-| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_audiences` | The audiences this deployment answers to, one of which an identity token must name in its `aud` claim. Required once `federation_issuers` or `federation_member_rules` is set. See [How a token is checked](workload-identity.md#how-a-token-is-checked). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
@@ -102,6 +103,9 @@ the corresponding startup value after the database is available.
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
 | `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. When set, a country file stored from the Settings page is not read. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
+| `closed_model_providers` | Providers whose models are closed, so a plan for open-weight models does not cover them, except a model in `closed_model_open_families`. A model on any other provider is open-weight unless its name is in `closed_model_families`. Defaults to Anthropic, Gemini, Vertex AI, xAI and OpenAI, with their Azure and Vertex variants. |
+| `closed_model_families` | Model name prefixes that are closed on any provider, matched after the last `/` and any vendor prefix (OpenRouter's `anthropic/claude-sonnet-4` and Bedrock's `us.anthropic.claude-sonnet-4` are both `claude`). A prefix matches a whole word unless it ends in `-`: `o3` matches `o3-mini` but not `o3x`, and `gpt-` matches any name it starts. Defaults to `claude`, `gemini`, `grok`, `gpt-`, `chatgpt` and `o1` to `o9`. |
+| `closed_model_open_families` | Model name prefixes that are open-weight even on a closed provider or in a closed family, matched the same way. Defaults to `gpt-oss` and `gemma`. |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](https://docs.otari.ai/reference#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](https://docs.otari.ai/reference#retrying-safely). |
@@ -220,6 +224,13 @@ holds no budget.
 - They count in `rate_limit_store`, so with Redis they hold across replicas.
 - `per: key` does not limit a request without an API key (the master key or a
   dashboard session), and `per: user` does not limit one billed to no user.
+
+A build that bills organizations can also limit how many of an organization's
+calls on the deployment's own provider credentials are in flight at once, which
+no rule here sets. A chat completion, message or response over that limit waits
+up to 10 seconds for a slot, then is refused with a 429 naming the rule
+`organization_concurrency`. Each server process lets at most that many requests
+wait at once; one more is refused straight away with the same 429. It counts in the same store.
 
 `per: model` limits each model in `models`, written as `instance:model`. One
 count is kept per model and shared by every policy, alias and direct call that
@@ -807,7 +818,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.43.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.44.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1800,7 +1811,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.43.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.44.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
