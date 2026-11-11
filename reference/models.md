@@ -128,6 +128,12 @@ aliases, and routing-policy names, and lists each model once however many
 providers serve it (see [Listing available models](#listing-available-models)). A provider's embedding and rerank models are
 offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
+Together lists every model it can deploy, but serves most of them only on a
+dedicated endpoint. Discovery leaves those out: it also asks Together for its
+serverless models (`GET /v1/models?serverless=true`) and keeps only those. If
+that listing fails, or is not shorter than the full listing, discovery keeps
+every model. To serve a model on a dedicated endpoint of your own, add it to the
+roster by hand.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
