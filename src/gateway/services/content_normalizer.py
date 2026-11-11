@@ -40,7 +40,7 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for, uploads_attachments
+from gateway.services.files import FileScope, FileService, StagedFile, uploads_attachments
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.providers import CountryNotServedError
@@ -94,15 +94,14 @@ class NormalizationStats:
     def stage(self, staged: StagedFile) -> StagedFile:
         """Record ``staged`` for the sandbox and return it under its session name.
 
-        A file referenced twice is staged once and keeps the name it got first;
-        the name itself is ``sandbox_path_for``'s, so two uploads named alike do
-        not overwrite each other in the working directory.
+        A file referenced twice is staged once and keeps the name it got first,
+        so two uploads named alike do not overwrite each other in the working
+        directory.
         """
         for existing in self.sandbox_inputs:
             if existing.file_id == staged.file_id:
                 return existing
-        taken = {existing.filename for existing in self.sandbox_inputs}
-        named = replace(staged, filename=sandbox_path_for(staged.filename, taken))
+        named = staged.named_for_sandbox({existing.filename for existing in self.sandbox_inputs})
         self.sandbox_inputs.append(named)
         return named
 

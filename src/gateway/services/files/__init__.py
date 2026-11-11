@@ -19,7 +19,7 @@ from gateway.services.files._service import (
     NewOutput,
     SweepBatch,
 )
-from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile, sandbox_path_for
+from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 from gateway.services.files._sweeper import run_file_sweeper
 from gateway.types.provider_file import ProviderFile
 
@@ -44,7 +44,6 @@ __all__ = [
     "produced_files_for",
     "provider_holds_copies",
     "run_file_sweeper",
-    "sandbox_path_for",
     "store_inline_outputs",
     "uploads_attachments",
 ]

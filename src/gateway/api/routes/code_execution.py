@@ -23,7 +23,6 @@ through the shared :func:`gateway.api.routes._pipeline.log_gateway_rejection`.
 
 import time
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -80,7 +79,7 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.code_execution import ContainerLease
-from gateway.services.files import FileScope, StagedFile, sandbox_path_for
+from gateway.services.files import FileScope
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
@@ -203,7 +202,8 @@ async def execute_code(
             staged = await files.staged_upload(file_id, scope)
             if staged is None:
                 raise await refuse(FILE_NOT_FOUND_DETAIL_TEMPLATE.format(file_id=file_id), status.HTTP_400_BAD_REQUEST)
-            file_bridge.inputs.append(_named_for_the_sandbox(staged, file_bridge.inputs))
+            taken = {existing.filename for existing in file_bridge.inputs}
+            file_bridge.inputs.append(staged.named_for_sandbox(taken))
 
     # Admitted before any reservation, so a refused run costs nothing to be told about.
     try:
@@ -429,11 +429,6 @@ def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) 
     if unit_rate is not None:
         meter["unit_rate"] = float(unit_rate)
     return {TOOL_METER_NAMESPACE: {CODE_EXECUTION_TOOL_NAME: meter}}
-
-
-def _named_for_the_sandbox(staged: StagedFile, taken: list[StagedFile]) -> StagedFile:
-    """``staged`` under the name it gets in the working directory, unique among ``taken``."""
-    return replace(staged, filename=sandbox_path_for(staged.filename, {existing.filename for existing in taken}))
 
 
 def _sandbox_failure(exc: SandboxNotReachableError, claimed: ContainerLease | None) -> HTTPException:
