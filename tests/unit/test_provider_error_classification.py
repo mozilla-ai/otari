@@ -1907,6 +1907,22 @@ def test_a_structured_output_failure_never_relays_the_partial_generation() -> No
     assert "Fixes a" not in mapping.detail
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("See 'failed_generation' for more details.", PROVIDER_BAD_REQUEST_DETAIL),
+        ("Output was not valid JSON for the schema.", "Output was not valid JSON for the schema."),
+    ],
+    ids=["pointer-only", "no-pointer"],
+)
+def test_a_structured_output_failure_detail_without_a_sentence_of_its_own(message: str, expected: str) -> None:
+    """A message that is only the pointer falls back to the generic detail; one without it is kept whole."""
+    exc = _groq_json_validate_failed(message)
+
+    assert classify_provider_error(exc) == (400, expected)
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
+
+
 def test_a_400_with_another_provider_code_carries_no_structured_output_code() -> None:
     exc = _openai_status_error(400, _openai_error(_GROQ_JSON_FAILED_MSG, code="invalid_value"))
 
