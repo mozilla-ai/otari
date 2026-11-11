@@ -163,6 +163,7 @@ from gateway.core.usage import (
     service_tier_of,
 )
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.budget_exceptions import (
     EndUserBudgetWithoutEndUserError,
     ProviderSpendCeilingExceededError,
@@ -453,6 +454,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
@@ -3863,17 +3865,31 @@ async def _declare_claims(
     *,
     beside_sandbox: bool,
 ) -> _DeclaredClaims | _ToolRefusal:
-    """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be."""
+    """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be.
+
+    A tool Otari runs needs the same scope on the request's key as the endpoint that runs it directly.
+    """
     try:
         admitted = await code.admit(claimed=CODE_EXECUTION_TOOL_NAME in claimed, beside_sandbox=beside_sandbox)
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         return _ToolRefusal(domain_error(adapter, exc))
+    if admitted.use_sandbox and (missing := _missing_scope(ctx, KeyScope.CODE_EXECUTE, "running code")):
+        return _ToolRefusal(domain_error(adapter, missing))
     web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
         return _ToolRefusal(domain_error(adapter, exc))
+    if web.declared_any and (missing := _missing_scope(ctx, KeyScope.WEB, "searching or fetching the web")):
+        return _ToolRefusal(domain_error(adapter, missing))
     return _DeclaredClaims(code=admitted, web=web)
+
+
+def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
+    """Why the request's key may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
+    if ctx.api_key is None or ctx.api_key.holds_scope(scope):
+        return None
+    return KeyScopeMissingError(scope.value, what)
 
 
 async def _admit_tool_funding(
@@ -4107,12 +4123,15 @@ async def _admit_mcp_servers(
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
     provider_mcp = declares_provider_mcp(declared.tools)
+    declares_mcp = bool(declared.mcp_servers or declared.mcp_server_ids or provider_mcp)
+    if declares_mcp and (missing := _missing_scope(ctx, KeyScope.MCP_EXECUTE, "calling MCP tools")):
+        raise domain_error(adapter, missing)
     try:
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            if declares_mcp
             else McpAccess()
         )
         return await admit_mcp_servers(

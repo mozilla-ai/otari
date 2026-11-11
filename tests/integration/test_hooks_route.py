@@ -17,6 +17,8 @@ from gateway.models.traces import TraceGuardrailDefinition
 from otari_agent.domain.definitions import GateDefinition, definition_body, definition_digest, gates_from_body
 from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
 
+from .conftest import ALL_KEY_SCOPES
+
 _VALID_POLICY = """\
 schema_version: "1.0"
 policy:
@@ -1502,7 +1504,7 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], *, exempt
     client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
     response = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "hook", "user_id": "alice", "exclude_from_budget": exempt},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "hook", "user_id": "alice", "exclude_from_budget": exempt},
         headers=master_key_header,
     )
     return {"Otari-Key": f"Bearer {response.json()['key']}"}

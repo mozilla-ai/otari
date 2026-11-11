@@ -31,6 +31,8 @@ from gateway.models.files import FileObject, FileProviderCopy
 from gateway.models.users import User
 from gateway.repositories.files import FileProviderCopyRepository
 
+from .conftest import ALL_KEY_SCOPES
+
 _CODE_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _MODEL = "anthropic:claude-sonnet-4-5"
 _PROVIDER_FILE_ID = "file_011CqStubUpload"
@@ -309,7 +311,9 @@ def budgeted_key_header(client: TestClient, master_key_header: dict[str, str]) -
     )
     assert user.status_code == 200, user.text
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "budgeted", "user_id": "budgeted-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "budgeted-user"},
+        headers=master_key_header,
     )
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}

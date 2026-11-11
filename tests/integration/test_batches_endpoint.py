@@ -20,7 +20,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
 from gateway.core.error_details import ProviderDetail
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 from .test_rate_limiting import _make_rate_limit_client
 
 
@@ -1355,7 +1355,7 @@ def test_recorded_batch_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-caller", "user_id": "batch-foreign-caller"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-caller", "user_id": "batch-foreign-caller"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1378,7 +1378,7 @@ def test_recorded_batch_cancel_by_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-canceller", "user_id": "batch-foreign-canceller"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-canceller", "user_id": "batch-foreign-canceller"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1401,7 +1401,7 @@ def test_recorded_batch_results_by_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-results", "user_id": "batch-foreign-results"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-results", "user_id": "batch-foreign-results"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1424,7 +1424,7 @@ def test_recorded_batch_strict_ownership_ignores_missing_metadata(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "other", "user_id": "batch-other-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "batch-other-user"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1449,7 +1449,7 @@ def test_recorded_batch_list_hides_foreign_without_metadata(
     """List filtering uses the records table, so an unmarked foreign batch is hidden."""
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "other-list", "user_id": "batch-list-other"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other-list", "user_id": "batch-list-other"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200

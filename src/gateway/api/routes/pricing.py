@@ -16,6 +16,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -578,7 +579,7 @@ async def set_pricing(
     return PricingResponse.from_model(pricing)
 
 
-@catalog_router.get("")
+@catalog_router.get("", openapi_extra=key_scope(None))
 async def list_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     withheld: WithheldProviders,
@@ -604,7 +605,7 @@ class CurrentPricingPage(BaseModel):
 
 # Declared above the ``{model_key:path}`` routes below, which would otherwise
 # match ``current`` as a model key.
-@catalog_router.get("/current")
+@catalog_router.get("/current", openapi_extra=key_scope(None))
 async def list_current_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     withheld: WithheldProviders,
@@ -634,6 +635,7 @@ async def list_current_pricing(
             "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
         }
     },
+    openapi_extra=key_scope(None),
 )
 async def get_pricing_history(
     model_key: str,
@@ -662,6 +664,7 @@ async def get_pricing_history(
             "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
         }
     },
+    openapi_extra=key_scope(None),
 )
 async def get_pricing(
     model_key: str,

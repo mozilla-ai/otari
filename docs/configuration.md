@@ -376,6 +376,7 @@ the next start. It takes:
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
+| `scopes` | The endpoint groups the key may reach; see [Scopes](api-keys.md#scopes). Unset gives every scope that existed when scopes were introduced (the end-user scopes only to a service key) and never one added since. |
 
 Unknown fields are refused, so a misspelled limit stops the start rather than
 leaving a budget uncapped. A key may name a budget declared here or one that

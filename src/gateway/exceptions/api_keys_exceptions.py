@@ -22,6 +22,13 @@ class DeclaredKeySecretInUseError(TenancyConflictError):
         )
 
 
+class KeyScopeMissingError(TenancyForbiddenError):
+    """The request's API key lacks the scope something the request asked for requires."""
+
+    def __init__(self, scope: str, what: str):
+        super().__init__(f"This API key lacks the '{scope}' scope, which {what} requires.")
+
+
 class FederationIssuerNotAllowedError(TenancyValidationError):
     """A federation rule names an issuer the deployment does not list in ``federation_issuers``."""
 

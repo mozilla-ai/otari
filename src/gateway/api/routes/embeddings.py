@@ -15,6 +15,7 @@ from gateway.api.deps import (
     get_log_writer,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
@@ -27,6 +28,7 @@ from gateway.services.catalog import not_embedding_detail
 from gateway.services.inference import EMBEDDINGS_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["embeddings"])
 
@@ -54,7 +56,7 @@ class EmbeddingRequest(BaseModel):
     )
 
 
-@router.post("/embeddings")
+@router.post("/embeddings", openapi_extra=key_scope(KeyScope.INFERENCE))
 async def create_embedding(
     raw_request: Request,
     response: Response,

@@ -11,8 +11,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from gateway.api.deps import TraceServiceDep, verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.models.api_keys import APIKey
 from gateway.schemas.traces import GuardrailDefinitionRequest, GuardrailDefinitionResponse
+from gateway.types.key_scope import KeyScope
 from otari_agent.domain.definitions import gates_from_body
 
 router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify_api_key_or_master_key)])
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify
             "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
         }
     },
+    openapi_extra=key_scope(KeyScope.AGENTS),
 )
 async def record_guardrail_definition(
     request: GuardrailDefinitionRequest,

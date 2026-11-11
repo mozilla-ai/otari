@@ -129,6 +129,7 @@ class OAuthAppService:
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
                 app_name=self._app_name(request.client_id),
+                scopes=self.apps[request.client_id].scopes,
                 key_format=self.key_format,
             )
 

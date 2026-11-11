@@ -116,7 +116,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("identity_apps", identity_apps.router, verify_master_key),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("calling_key", calling_key.router, verify_api_key),
-    ("hooks", hooks.router, hooks.verify_hook_caller),
+    ("hooks", hooks.router, verify_api_key_or_master_key),
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
@@ -176,7 +176,6 @@ _UNGATED_ROUTERS: dict[str, str] = {
 # then authorize the caller against the organization or workspace themselves.
 _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
-        hooks.verify_hook_caller,
         require_deployment_operator,
         verify_api_key,
         verify_api_key_or_master_key,

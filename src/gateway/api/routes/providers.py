@@ -22,6 +22,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
@@ -174,7 +175,7 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
     )
 
 
-@catalog_router.get("/providers/catalog")
+@catalog_router.get("/providers/catalog", openapi_extra=key_scope(None))
 async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
@@ -186,7 +187,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
 
 
-@catalog_router.get("/providers/catalog/{provider_id}")
+@catalog_router.get("/providers/catalog/{provider_id}", openapi_extra=key_scope(None))
 async def provider_catalog_detail(provider_id: str) -> KnownProviderSchema:
     """Autofill hints for one provider the add-provider form has selected.
 

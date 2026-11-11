@@ -46,6 +46,7 @@ from gateway.api.deps import (
     get_db,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.trace_capture import begin_request_trace
 
 # ``GatewayConfig`` and ``AsyncSession`` are imported at runtime rather than
@@ -107,6 +108,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import McpServerSumma
 from gateway.services.traces import RequestTrace, harness_of, resolve_session
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
+from gateway.types.key_scope import KeyScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -548,6 +550,7 @@ class McpServersResponse(BaseModel):
         500: {"model": McpErrorBody},
         503: {"model": McpErrorBody},
     },
+    openapi_extra=key_scope(KeyScope.MCP_READ),
 )
 async def list_mcp_servers(
     raw_request: Request,
@@ -581,6 +584,7 @@ async def list_mcp_servers(
         502: {"model": McpErrorBody},
         503: {"model": McpErrorBody},
     },
+    openapi_extra=key_scope(KeyScope.MCP_READ),
 )
 async def list_mcp_tools(
     raw_request: Request,
@@ -697,6 +701,7 @@ async def list_mcp_tools(
         503: {"model": McpErrorBody},
         504: {"model": McpErrorBody},
     },
+    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
 )
 async def execute_mcp_tool(
     raw_request: Request,

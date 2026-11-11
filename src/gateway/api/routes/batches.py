@@ -24,6 +24,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import (
     country_gate_for,
     country_not_supported,
@@ -93,6 +94,7 @@ from gateway.services.workspace_scope import (
     resolve_workspace_id,
     workspace_for_key_id,
 )
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
@@ -313,7 +315,7 @@ async def _retrieve_batch_or_502(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=None)
+@router.post("", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_WRITE))
 async def create_batch(
     raw_request: Request,
     response: Response,
@@ -578,7 +580,7 @@ async def create_batch(
     return response_data
 
 
-@router.get("/{batch_id}", response_model=None)
+@router.get("/{batch_id}", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_READ))
 async def retrieve_batch(
     batch_id: str,
     provider: str,
@@ -611,7 +613,7 @@ async def retrieve_batch(
     return response_data
 
 
-@router.post("/{batch_id}/cancel", response_model=None)
+@router.post("/{batch_id}/cancel", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_WRITE))
 async def cancel_batch(
     batch_id: str,
     provider: str,
@@ -656,7 +658,7 @@ async def cancel_batch(
     return response_data
 
 
-@router.get("", response_model=None)
+@router.get("", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_READ))
 async def list_batches(
     provider: str,
     raw_request: Request,
@@ -728,6 +730,7 @@ async def list_batches(
         status.HTTP_409_CONFLICT: {"description": "Batch is not yet complete"},
         status.HTTP_502_BAD_GATEWAY: {"description": "LLM provider error"},
     },
+    openapi_extra=key_scope(KeyScope.BATCHES_READ),
 )
 async def retrieve_batch_results(
     batch_id: str,

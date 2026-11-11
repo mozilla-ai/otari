@@ -46,6 +46,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader_or_public,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
 from gateway.core.metered_pricing import effective_rates
 from gateway.models.api_keys import APIKey
@@ -627,7 +628,7 @@ async def _merged_for(
     )
 
 
-@router.get("/models")
+@router.get("/models", openapi_extra=key_scope(None))
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -677,7 +678,7 @@ async def list_catalog(
     )
 
 
-@router.get("/models/{model_id:path}")
+@router.get("/models/{model_id:path}", openapi_extra=key_scope(None))
 async def get_catalog_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

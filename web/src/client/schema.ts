@@ -11483,6 +11483,11 @@ export interface components {
              */
             reject_user_mismatch?: boolean | null;
             /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
+            /**
              * User Id
              * @description Optional user ID to associate with this key
              */
@@ -11541,6 +11546,8 @@ export interface components {
             };
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
         };
@@ -11612,6 +11619,11 @@ export interface components {
              * @description Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.
              */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
             /**
              * Workspace Id
              * @description Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.
@@ -14365,6 +14377,8 @@ export interface components {
             operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
             /**
@@ -14426,6 +14440,12 @@ export interface components {
              */
             used_usd: number | null;
         };
+        /**
+         * KeyScope
+         * @description One group of endpoints an API key may be granted.
+         * @enum {string}
+         */
+        KeyScope: "inference" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents" | "usage:read" | "usage:write" | "end_users:read" | "end_users:write" | "end_users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -20725,6 +20745,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateMaintenanceModeRequest
@@ -20775,6 +20800,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateProfileRequest

@@ -19,44 +19,24 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
-from gateway.core.config import GatewayConfig
+from gateway.api.deps import verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
+from gateway.types.key_scope import KeyScope
 from otari_agent.domain.check import PolicyCheckError, run_policy_check
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
 from otari_agent.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict, RunsAt
-
-
-# ``AsyncSession`` and ``GatewayConfig`` are imported at runtime rather than
-# under ``TYPE_CHECKING``, for the reason mcp.py spells out: this module uses
-# postponed annotations, and FastAPI resolves a dependency's signature at
-# import time to decide what each parameter is. Left as strings it cannot
-# resolve, it reads both as query parameters and every request 422s before the
-# handler runs.
-async def verify_hook_caller(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> None:
-    """Authenticate a Hook Server caller.
-
-    Validates an API key or the master key against the local database, exactly
-    as ``POST /api/v1/usage/external-events`` does.
-    """
-    await verify_api_key_or_master_key(request, db, config)
-
 
 # The gate lives on the router, not the route: matches usage.key_router, so
 # a route added here later inherits it rather than needing to remember it.
 router = APIRouter(
     prefix="/hooks",
     tags=["hooks"],
-    dependencies=[Depends(verify_hook_caller)],
+    dependencies=[Depends(verify_api_key_or_master_key)],
 )
 
 # A submitted evidence list is caller-observed, not Otari-observed, but it is
@@ -241,7 +221,7 @@ class PolicyCheckResponse(BaseModel):
     blocked: bool
 
 
-@router.post("/check")
+@router.post("/check", openapi_extra=key_scope(KeyScope.AGENTS))
 async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     """Evaluate a submitted policy against submitted evidence.
 

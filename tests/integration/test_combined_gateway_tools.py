@@ -53,7 +53,7 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
@@ -71,7 +71,7 @@ from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
 
-from .conftest import MODEL_NAME, admitted_search_spy
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, admitted_search_spy
 
 _MCP_TOOL = "lookup"
 # The hit carries its page text, so a search reads no page and every page read is a fetch call.
@@ -904,3 +904,71 @@ def test_responses_stream_runs_all_four_and_announces_the_builtins(
     assert done == ["web_search_call", "code_interpreter_call"], (
         "a gateway-run call leaked, or a built-in went unannounced"
     )
+
+
+# ---------- Key scopes ----------
+
+_TOOL_SCOPES = {
+    "search": ([_SEARCH], False, "web"),
+    "fetch": ([_FETCH], False, "web"),
+    "code": ([_CODE], False, "code:execute"),
+    "MCP": ([], True, "mcp:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_run_it_through_a_completion(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    """A tool Otari runs inside a completion needs the scope of the endpoint that runs it directly."""
+    tools, with_mcp, scope = _TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+    body = _messages_body(tools, with_mcp)
+
+    with _scripted("gateway.services.mcp_loop_messages.amessages", [_done_message()]) as sent:
+        refused = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
+
+    assert refused.status_code == 403, refused.text
+    assert f"'{scope}'" in refused.json()["error"]["message"]
+    assert not sent
+    assert not _ran(backends)
+
+
+_CHAT_TOOL_SCOPES = {
+    "search": ({"tools": [{"type": "otari_web_search"}]}, "web"),
+    "MCP": ({"mcp_servers": [_MCP_SERVER]}, "mcp:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_CHAT_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_run_it_through_a_chat_completion(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    extra, scope = _CHAT_TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    with _scripted("gateway.services.mcp_loop.acompletion", [_completion(None)]) as sent:
+        refused = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "research"}], **extra},
+            headers=headers,
+        )
+
+    assert refused.status_code == 403, refused.text
+    body = refused.json()
+    message = body["detail"] if "detail" in body else body["error"]["message"]
+    assert f"'{scope}'" in message
+    assert not sent
+    assert not _ran(backends)

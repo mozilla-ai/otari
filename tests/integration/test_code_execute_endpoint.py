@@ -34,6 +34,8 @@ from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReacha
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
+from .conftest import ALL_SERVICE_KEY_SCOPES
+
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ENDPOINT = f"{API_ROOT}/code/execute"
 _USAGE_LABEL = "/v1/code/execute"
@@ -454,6 +456,7 @@ def test_a_service_key_bills_the_end_user_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "code-service",
             "user_id": "code-service",
             "is_service_key": True,

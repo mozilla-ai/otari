@@ -2229,6 +2229,99 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(patch?.[1]?.body)).exclude_from_budget).toBe(true)
   })
 
+  it("creates a key that calls models alone unless a preset says more", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await pickOption(user, "Access", "Coding agent")
+    await submitTheCreateDialog(user)
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(JSON.parse(String(post?.[1]?.body)).scopes).toEqual([
+      "inference",
+      "telemetry:write",
+      "agents",
+    ])
+  })
+
+  it("sends the default scope when the picker is left alone", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await submitTheCreateDialog(user)
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(JSON.parse(String(post?.[1]?.body)).scopes).toEqual(["inference"])
+  })
+
+  it("narrows an existing key's scopes via PATCH", async () => {
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "ci-bot",
+          scopes: ["inference", "usage:read"],
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    // Two scopes no preset holds, so the list is already open.
+    await user.click(
+      await screen.findByRole("checkbox", { name: /Read its own budget/ }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const patch = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).includes(`${API_ROOT}/keys/key-1`) &&
+        (init?.method ?? "") === "PATCH",
+    )
+    expect(JSON.parse(String(patch?.[1]?.body)).scopes).toEqual(["inference"])
+  })
+
+  it("will not save a key with no scope", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "ci-bot", scopes: ["web"] })],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    await user.click(
+      await screen.findByRole("checkbox", { name: /Search and fetch the web/ }),
+    )
+
+    expect(screen.getByText("Choose at least one")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
   it("sets reject_user_mismatch on an existing key via PATCH", async () => {
     const fetchMock = mockApi({
       keys: [

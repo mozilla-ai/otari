@@ -48,8 +48,20 @@ from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
+from gateway.types.key_scope import END_USER_SCOPES, KeyScope
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+# Every scope a key that is not a service key may hold, for a test of something other than scopes.
+ALL_KEY_SCOPES = [scope.value for scope in KeyScope if scope not in END_USER_SCOPES]
+# Every scope, which only a service key may hold.
+ALL_SERVICE_KEY_SCOPES = [scope.value for scope in KeyScope]
+
+
+def all_scopes(settings: dict[str, Any]) -> list[str]:
+    """Every scope a key created with ``settings`` may hold."""
+    return ALL_SERVICE_KEY_SCOPES if settings.get("is_service_key") else ALL_KEY_SCOPES
+
+
 # The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
 # enrich its hits through.
 FAKE_SEARCH = "fake-search"
@@ -571,10 +583,10 @@ def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
 
 @pytest.fixture
 def api_key_obj(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
-    """Create a test API key and return its details."""
+    """Create a test API key holding every scope a key that is not a service key may, and return its details."""
     response = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "test-key"},
+        json={"key_name": "test-key", "scopes": ALL_KEY_SCOPES},
         headers=master_key_header,
     )
     assert response.status_code == 200

@@ -35,7 +35,7 @@ from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.services.code_execution.container_sweeper import sweep_expired_containers
 from gateway.services.tools import CODE_EXECUTION_HEADER
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _MODEL = "anthropic:claude-3-5-sonnet-20241022"
@@ -431,7 +431,9 @@ def test_with_reuse_off_nothing_is_held_reported_or_resumable(
     container; an id names specific files, so the same deployment refuses it
     rather than handing over an empty sandbox in their place.
     """
-    key = reuse_off_client.post(f"{API_ROOT}/keys", json={"key_name": "k"}, headers=master_key_header)
+    key = reuse_off_client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "k"}, headers=master_key_header
+    )
     assert key.status_code == 200, key.text
     headers = {next(iter(master_key_header)): f"Bearer {key.json()['key']}"}
     port = _FakePort()

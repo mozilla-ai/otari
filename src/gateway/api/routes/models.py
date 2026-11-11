@@ -17,6 +17,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -190,7 +191,7 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
     )
 
 
-@catalog_router.get("/models", response_model_exclude_none=True)
+@catalog_router.get("/models", response_model_exclude_none=True, openapi_extra=key_scope(None))
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -348,7 +349,7 @@ async def list_model_metadata(
     )
 
 
-@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True)
+@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True, openapi_extra=key_scope(None))
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
