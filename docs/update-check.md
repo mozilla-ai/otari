@@ -5,10 +5,12 @@ all when a security fix covers the version they run. Once a day, a deployment
 that has it on asks otari.ai whether a newer release or a security advisory for
 its version exists, and shows the answer in the dashboard and in the logs.
 
-Nothing is sent until somebody decides. The first time a deployment operator
-opens the dashboard, they are asked; the answer is stored and the question does
-not come back. Closing the question without answering sends nothing and asks
-again on the next visit.
+Nothing is sent until somebody decides. A deployment operator is asked when
+they open the dashboard and the deployment already has a provider, so the
+question never stands in the way of setting it up; the answer is stored and the
+question does not come back. Closing the question without answering sends
+nothing and asks again a week later in that browser; **Settings → Update
+check** answers it in the meantime.
 
 ## What is sent
 

@@ -13,7 +13,13 @@ from gateway.exceptions.update_check_exceptions import UpdateCheckSetInConfigErr
 from gateway.log_config import logger
 from gateway.models.update_check import UpdateCheckState
 from gateway.repositories.update_check import UpdateCheckStateRepository
-from gateway.schemas.update_check import UpdateCheckAdvisory, UpdateCheckAnswer, UpdateCheckReply, UpdateCheckStatus
+from gateway.schemas.update_check import (
+    PresetSource,
+    UpdateCheckAdvisory,
+    UpdateCheckAnswer,
+    UpdateCheckReply,
+    UpdateCheckStatus,
+)
 from gateway.services.update_check._client import UpdateCheckFailedError, send_check
 from gateway.services.update_check._schedule import (
     format_version,
@@ -30,17 +36,26 @@ CLAIM_HOLD = timedelta(minutes=10)
 SendCheck = Callable[[str, str, uuid.UUID], Awaitable[UpdateCheckReply]]
 
 
-def preset_answer(config: UpdateCheckSettings) -> bool | None:
-    """The answer the deployment's own configuration gives, or None when an operator is to be asked.
+def preset(config: UpdateCheckSettings) -> tuple[bool, PresetSource] | None:
+    """The answer the deployment's own configuration gives and the setting that gave it, or None to ask an operator.
 
     ``DO_NOT_TRACK`` (https://consoledonottrack.com) and ``CI`` answer no, unless ``update_check`` says otherwise,
     so a CI run and an operator who opts out of every tool at once are neither asked nor counted.
     """
     if config.update_check is not None:
-        return config.update_check
-    if os.environ.get("DO_NOT_TRACK", "").strip().lower() in {"1", "true", "yes"} or os.environ.get("CI"):
-        return False
+        # The environment beats config.yml, so a set variable is the one that answered.
+        return config.update_check, "OTARI_UPDATE_CHECK" if "OTARI_UPDATE_CHECK" in os.environ else "update_check"
+    if os.environ.get("DO_NOT_TRACK", "").strip().lower() in {"1", "true", "yes"}:
+        return False, "DO_NOT_TRACK"
+    if os.environ.get("CI"):
+        return False, "CI"
     return None
+
+
+def preset_answer(config: UpdateCheckSettings) -> bool | None:
+    """The answer the deployment's own configuration gives, or None when an operator is to be asked."""
+    answer = preset(config)
+    return None if answer is None else answer[0]
 
 
 async def _send(url: str, version: str, install_id: uuid.UUID) -> UpdateCheckReply:
@@ -75,7 +90,7 @@ class UpdateCheckService:
         return preset if preset is not None else row.enabled
 
     def _status(self, row: UpdateCheckState) -> UpdateCheckStatus:
-        preset = preset_answer(self._config)
+        answered = preset(self._config)
         enabled = self._enabled(row)
         heard = enabled is True and self._release is not None
         latest = release_version(row.latest_version or "") if heard else None
@@ -83,7 +98,8 @@ class UpdateCheckService:
         current = heard and row.checked_version == format_version(self._release or (0, 0, 0))
         return UpdateCheckStatus(
             enabled=enabled,
-            answered_by="config" if preset is not None else ("operator" if row.enabled is not None else None),
+            answered_by="config" if answered is not None else ("operator" if row.enabled is not None else None),
+            preset_by=None if answered is None else answered[1],
             current_version=self._version,
             checkable=self._release is not None,
             install_id=str(row.install_id),

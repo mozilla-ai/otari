@@ -1051,6 +1051,7 @@ export function updateCheckStatus(
   return {
     enabled: null,
     answered_by: null,
+    preset_by: null,
     current_version: "v0.30.1",
     checkable: true,
     install_id: "2f1c7e0e-8a43-4f53-9a6e-2c1d4f1e9b70",

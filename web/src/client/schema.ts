@@ -20372,6 +20372,11 @@ export interface components {
             latest_version: string | null;
             /** Next Check At */
             next_check_at: string | null;
+            /**
+             * Preset By
+             * @description When the configuration decided, the setting that did: the OTARI_UPDATE_CHECK variable, update_check in config.yml, or DO_NOT_TRACK or CI answering no. Null otherwise.
+             */
+            preset_by: ("OTARI_UPDATE_CHECK" | "update_check" | "DO_NOT_TRACK" | "CI") | null;
             /** Release Url */
             release_url: string | null;
             /** Update Available */

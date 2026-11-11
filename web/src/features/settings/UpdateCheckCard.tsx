@@ -1,3 +1,4 @@
+import type { UpdateCheckStatus } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
@@ -10,6 +11,22 @@ import { useAnswerUpdateCheck, useUpdateCheck } from "@/shared/api/updateCheck"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
+
+const LABEL = "Check for security fixes and new releases"
+
+/** Which setting decided, and how to change it. */
+function presetCaption(presetBy: UpdateCheckStatus["preset_by"]): string {
+  switch (presetBy) {
+    case "OTARI_UPDATE_CHECK":
+      return "Set by OTARI_UPDATE_CHECK in this deployment's environment. Change it there."
+    case "DO_NOT_TRACK":
+      return "Off because DO_NOT_TRACK is set. Set update_check in config.yml to decide otherwise."
+    case "CI":
+      return "Off because CI is set. Set update_check in config.yml to decide otherwise."
+    default:
+      return "Set by update_check in config.yml. Change it there."
+  }
+}
 
 /**
  * Whether this deployment checks otari.ai for new releases and security fixes,
@@ -41,22 +58,20 @@ export function UpdateCheckCard() {
           <>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-body">
-                  Get notified when a new Otari release is available
-                </p>
+                <p className="text-body">{LABEL}</p>
                 <p className="mt-1 max-w-3xl text-caption">
                   {!data.checkable
                     ? `This is a development build (${data.current_version}), which is never checked.`
                     : isLocked
-                      ? "Decided by this deployment's configuration (update_check, OTARI_UPDATE_CHECK, DO_NOT_TRACK or CI). Change it there."
+                      ? presetCaption(data.preset_by)
                       : `Once a day, Otari asks ${endpointHost(data.endpoint)} whether a newer release or a security fix for this version exists, and shows it here and in the logs.`}
                 </p>
               </div>
               <Toggle
                 isSelected={data.enabled === true}
                 onChange={(next) => answer.mutate({ enabled: next })}
-                label="Get notified when a new Otari release is available"
-                isDisabled={isLocked || answer.isPending}
+                label={LABEL}
+                isDisabled={isLocked || !data.checkable || answer.isPending}
               />
             </div>
             <dl className="grid max-w-3xl grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-caption">
@@ -90,6 +105,32 @@ export function UpdateCheckCard() {
                     {data.latest_version ?? "Unknown"}
                     {data.update_available ? " (update available)" : ""}
                   </dd>
+                  {data.advisories.length > 0 ? (
+                    <>
+                      <dt>Advisories</dt>
+                      <dd className="min-w-0">
+                        <ul className="flex flex-col gap-1">
+                          {data.advisories.map((advisory) => (
+                            <li key={advisory.id}>
+                              <a
+                                href={advisory.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline underline-offset-2"
+                              >
+                                {advisory.summary}
+                              </a>{" "}
+                              ({advisory.severity}
+                              {advisory.fixed_in
+                                ? `, fixed in ${advisory.fixed_in}`
+                                : ""}
+                              )
+                            </li>
+                          ))}
+                        </ul>
+                      </dd>
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </dl>
