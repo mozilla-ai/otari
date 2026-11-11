@@ -90,6 +90,7 @@ const URL_DEFAULTS = {
   models_page: "0",
   models_size: String(PAGE_SIZE_OPTIONS[0]),
   models_type: "",
+  models_q: "",
 }
 
 // The organization's own upstream credentials: one BYO key per provider that
@@ -590,6 +591,7 @@ export function OrganizationProvidersPage() {
                     // on every kind of model.
                     models_page: "0",
                     models_type: "",
+                    models_q: "",
                   })
                 }
               />
@@ -793,6 +795,10 @@ export function OrganizationProvidersPage() {
             kind={kindFilterOf(url.get("models_type"))}
             onKindChange={(next) =>
               url.patch({ models_type: next, models_page: "0" })
+            }
+            search={url.get("models_q")}
+            onSearchChange={(next) =>
+              url.patch({ models_q: next, models_page: "0" })
             }
           />
         </section>

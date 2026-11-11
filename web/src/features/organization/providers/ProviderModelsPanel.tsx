@@ -20,7 +20,10 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
+import {
+  OfferedModelFilters,
+  useModelSearchTerm,
+} from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
@@ -77,6 +80,8 @@ export function ProviderModelsPanel({
   onPageSizeChange,
   kind,
   onKindChange,
+  search,
+  onSearchChange,
 }: {
   providerKey: OrgProviderKey
   canEdit: boolean
@@ -93,8 +98,18 @@ export function ProviderModelsPanel({
   /** Which kind of model is shown, empty for every kind. Owned above, in the URL, as the page is. */
   kind: KindFilter
   onKindChange: (kind: KindFilter) => void
+  /** What is typed into the model search. Owned above, in the URL, as the kind is. */
+  search: string
+  onSearchChange: (search: string) => void
 }) {
-  const models = useOrgProviderModels(providerKey.id, page, pageSize, kind)
+  const term = useModelSearchTerm(search)
+  const models = useOrgProviderModels(
+    providerKey.id,
+    page,
+    pageSize,
+    kind,
+    term,
+  )
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
   const clearRate = useDeleteOrganizationPricing()
@@ -286,18 +301,15 @@ export function ProviderModelsPanel({
         </p>
       ) : null}
 
-      {models.data && rows.length + kind.length > 0 ? (
-        <OfferedKindTabs
-          counts={models.data.type_counts}
-          shown={kind}
-          onShow={onKindChange}
-        />
-      ) : null}
-
       {/* A failed list is not an empty one: with a settled error, rendering
-          "no models yet" would tell an admin their catalog is gone. A kind
-          with no models left is an empty table under its tab, not this. */}
-      {!models.error && rows.length === 0 && kind === "" ? (
+          "no models yet" would tell an admin their catalog is gone. A kind or
+          a search with no models left is an empty table, not this, and so is
+          a search's answer still shown while the list it was cleared to loads. */}
+      {!models.error &&
+      !models.isPlaceholderData &&
+      rows.length === 0 &&
+      kind === "" &&
+      term === "" ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -307,6 +319,15 @@ export function ProviderModelsPanel({
         />
       ) : (
         <>
+          <OfferedModelFilters
+            providerName={providerKey.name}
+            counts={models.data?.type_counts}
+            showTabs={models.data !== undefined}
+            kind={kind}
+            onKindChange={onKindChange}
+            search={search}
+            onSearchChange={onSearchChange}
+          />
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
@@ -315,6 +336,7 @@ export function ProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
+              emptyContent={term ? "No models match this search." : undefined}
             />
           </TableScrollFrame>
           <TablePagination

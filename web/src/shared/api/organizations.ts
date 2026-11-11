@@ -1027,13 +1027,22 @@ export function useOrgProviderModels(
   pageSize: number,
   /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
   type = "",
+  /** Only models whose name contains this text; empty for every model. */
+  search = "",
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize, type],
+    queryKey: [
+      ORGANIZATION_PROVIDER_MODELS,
+      keyId,
+      page,
+      pageSize,
+      type,
+      search,
+    ],
     queryFn: () =>
       apiFetch<OrgProviderModels>(
-        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>
