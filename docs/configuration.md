@@ -84,7 +84,7 @@ the corresponding startup value after the database is available.
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
-| `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard; `true` or `false` answers for them. See [Update check](update-check.md). |
+| `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard, except that `DO_NOT_TRACK` (`1`, `true` or `yes`) or a non-empty `CI` then answers `false` and nothing is asked; `true` or `false` answers for them and wins over both. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |

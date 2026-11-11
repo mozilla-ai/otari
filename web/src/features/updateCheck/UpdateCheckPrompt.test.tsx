@@ -23,6 +23,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi(
   status: UpdateCheckStatus,
   context: OrganizationContext = organizationContext(),
+  providerCount = 1,
 ) {
   let current = status
   const answers: boolean[] = []
@@ -32,6 +33,16 @@ function mockApi(
       const url = String(input)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(context)
+      }
+      if (url.endsWith(`${API_ROOT}/providers`)) {
+        return jsonResponse({
+          providers: Array.from({ length: providerCount }, (_p, index) => ({
+            instance: `openai-${index}`,
+          })),
+        })
+      }
+      if (url.includes(`${API_ROOT}/hosted-providers`)) {
+        return jsonResponse({ data: [] })
       }
       if (url.endsWith(`${API_ROOT}/update-check`)) {
         if ((init?.method ?? "GET").toUpperCase() === "PUT") {
@@ -65,11 +76,12 @@ function renderPrompt(surfaces?: string[]) {
   )
 }
 
-const TITLE = "Get notified when a new Otari release is available"
+const TITLE = "Get alerts for security fixes and new releases?"
 
 describe("UpdateCheckPrompt", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    localStorage.clear()
   })
 
   it("asks an operator who has not answered, naming what is sent and where", async () => {
@@ -82,13 +94,16 @@ describe("UpdateCheckPrompt", () => {
       "sends its version and a random install ID",
     )
     expect(dialog).toHaveTextContent("update_check in config.yml")
+    expect(dialog).toHaveTextContent(
+      "otari.ai also uses these checks to count active installs by version",
+    )
     expect(
       screen.getByRole("link", { name: "See exactly what’s sent" }),
     ).toHaveAttribute("href", expect.stringContaining("update-check.md"))
   })
 
   it.each([
-    ["Turn on notifications", true],
+    ["Turn on update checks", true],
     ["No thanks", false],
   ])("stores %s as the answer", async (label, expected) => {
     const { answers } = mockApi(updateCheckStatus())
@@ -103,10 +118,10 @@ describe("UpdateCheckPrompt", () => {
     )
   })
 
-  it("closing without answering answers nothing", async () => {
+  it("closing without answering answers nothing, and snoozes the question for a week", async () => {
     const { answers } = mockApi(updateCheckStatus())
     const user = userEvent.setup()
-    renderPrompt()
+    const first = renderPrompt()
 
     await screen.findByRole("dialog", { name: TITLE })
     await user.keyboard("{Escape}")
@@ -115,6 +130,64 @@ describe("UpdateCheckPrompt", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     )
     expect(answers).toEqual([])
+
+    first.unmount()
+    const later = renderPrompt()
+    await waitFor(() =>
+      expect(
+        later.container.ownerDocument.querySelector("[role=dialog]"),
+      ).toBeNull(),
+    )
+
+    // A week on, the snooze has run out and the question comes back.
+    later.unmount()
+    vi.spyOn(Date, "now").mockReturnValue(
+      Date.now() + 7 * 24 * 60 * 60 * 1000 + 1,
+    )
+    renderPrompt()
+    expect(
+      await screen.findByRole("dialog", { name: TITLE }),
+    ).toBeInTheDocument()
+  })
+
+  it("shows the pressed answer as pending, and blocks the other", async () => {
+    mockApi(updateCheckStatus())
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const served = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation((input, init) =>
+      (init?.method ?? "GET").toUpperCase() === "PUT"
+        ? new Promise<Response>(() => {})
+        : (served?.(input, init) ?? Promise.resolve(jsonResponse({}))),
+    )
+    const user = userEvent.setup()
+    renderPrompt()
+
+    await user.click(await screen.findByRole("button", { name: "No thanks" }))
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /No thanks/ })).toHaveAttribute(
+        "data-pending",
+        "true",
+      ),
+    )
+    expect(
+      screen.getByRole("button", { name: "Turn on update checks" }),
+    ).toBeDisabled()
+  })
+
+  it("does not ask while the deployment has no provider yet", async () => {
+    const { fetchMock } = mockApi(updateCheckStatus(), organizationContext(), 0)
+    renderPrompt()
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(`${API_ROOT}/hosted-providers`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it.each([

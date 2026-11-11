@@ -119,6 +119,7 @@ export function PricingWarning() {
             <Button
               size="sm"
               variant="primary"
+              className="min-h-11 md:min-h-8"
               isDisabled={updateSettings.isPending}
               onPress={() => updateSettings.mutate({ default_pricing: true })}
             >
@@ -129,6 +130,7 @@ export function PricingWarning() {
             <Button
               size="sm"
               variant="ghost"
+              className="min-h-11 md:min-h-8"
               onPress={() => setDismissed(true)}
             >
               Dismiss

@@ -31,6 +31,7 @@ def _nothing_preset(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig)
     """CI sets ``CI``, which answers no; these tests decide the answer themselves."""
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("OTARI_UPDATE_CHECK", raising=False)
     monkeypatch.setattr(test_config, "update_check", None)
 
 
@@ -97,7 +98,8 @@ def test_the_dashboard_cannot_change_what_config_decided(
     client: TestClient, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(test_config, "update_check", False)
-    assert client.get(_CHECK, headers=_MASTER).json()["answered_by"] == "config"
+    body = client.get(_CHECK, headers=_MASTER).json()
+    assert (body["answered_by"], body["preset_by"]) == ("config", "update_check")
     response = client.put(_CHECK, json={"enabled": True}, headers=_MASTER)
     assert response.status_code == 409
     assert "update_check" in response.json()["detail"]
@@ -106,7 +108,7 @@ def test_the_dashboard_cannot_change_what_config_decided(
 def test_do_not_track_answers_no(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DO_NOT_TRACK", "1")
     body = client.get(_CHECK, headers=_MASTER).json()
-    assert (body["enabled"], body["answered_by"]) == (False, "config")
+    assert (body["enabled"], body["answered_by"], body["preset_by"]) == (False, "config", "DO_NOT_TRACK")
 
 
 def test_a_caller_without_a_key_is_refused(client: TestClient) -> None:

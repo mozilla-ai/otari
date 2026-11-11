@@ -1,14 +1,33 @@
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import type { UpdateCheckAdvisory } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import {
   newestVersion,
   useOperatorUpdateCheck,
 } from "@/features/updateCheck/useOperatorUpdateCheck"
+import { docsSourceHref } from "@/shared/helpers/docs"
 
 const DISMISSED_KEY = "otari.updateNotice.dismissed"
 // How long a dismissed release keeps any newer one quiet too.
 const QUIET_MS = 30 * 24 * 60 * 60 * 1000
+
+const SEVERITY_RANK: Record<UpdateCheckAdvisory["severity"], number> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+}
+
+/** The most severe advisory, the first listed among equals. */
+function mostSevere(advisories: UpdateCheckAdvisory[]): UpdateCheckAdvisory {
+  return advisories.reduce((worst, advisory) =>
+    SEVERITY_RANK[advisory.severity] > SEVERITY_RANK[worst.severity]
+      ? advisory
+      : worst,
+  )
+}
 
 interface Dismissed {
   version: string
@@ -93,31 +112,11 @@ export function UpdateNotice() {
       <InfoBanner tone={advisories.length > 0 ? "warning" : "info"}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           {advisories.length > 0 ? (
-            <span>
-              Otari {status.current_version} is affected by{" "}
-              {advisories.length === 1
-                ? "a security advisory"
-                : `${advisories.length} security advisories`}
-              :{" "}
-              {advisories.map((advisory, index) => (
-                <span key={advisory.id}>
-                  {index > 0 ? ", " : ""}
-                  <a
-                    href={advisory.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline underline-offset-2"
-                  >
-                    {advisory.summary}
-                  </a>{" "}
-                  ({advisory.severity})
-                </span>
-              ))}
-              .{" "}
-              {fixedIn !== ""
-                ? `Upgrade to ${fixedIn} or later.`
-                : "Upgrade to the latest release."}
-            </span>
+            <AdvisoryText
+              advisories={advisories}
+              currentVersion={status.current_version}
+              fixedIn={fixedIn}
+            />
           ) : (
             <span>
               Otari {latest} is available. You&rsquo;re running{" "}
@@ -136,6 +135,7 @@ export function UpdateNotice() {
           )}
           <Button
             size="sm"
+            className="min-h-11 md:min-h-8"
             onPress={() => {
               if (advisories.length > 0) {
                 setIsAdvisoryDismissed(true)
@@ -151,5 +151,57 @@ export function UpdateNotice() {
         </div>
       </InfoBanner>
     </div>
+  )
+}
+
+function AdvisoryText({
+  advisories,
+  currentVersion,
+  fixedIn,
+}: {
+  advisories: UpdateCheckAdvisory[]
+  currentVersion: string
+  fixedIn: string
+}) {
+  const worst = mostSevere(advisories)
+  const others = advisories.length - 1
+  return (
+    <span>
+      Otari {currentVersion} is affected by{" "}
+      {advisories.length === 1
+        ? "a security advisory"
+        : `${advisories.length} security advisories`}
+      :{" "}
+      <a
+        href={worst.url}
+        target="_blank"
+        rel="noreferrer"
+        className="underline underline-offset-2"
+      >
+        {worst.summary}
+      </a>{" "}
+      ({worst.severity})
+      {others > 0 ? (
+        <>
+          {" "}
+          and{" "}
+          <Link to="/settings" className="underline underline-offset-2">
+            {others} more
+          </Link>
+        </>
+      ) : null}
+      .{" "}
+      {fixedIn !== ""
+        ? `Upgrade to ${fixedIn} or later.`
+        : "Upgrade to the latest release."}{" "}
+      <a
+        href={docsSourceHref("configuration.md", "upgrading")}
+        target="_blank"
+        rel="noreferrer"
+        className="underline underline-offset-2"
+      >
+        Upgrade notes
+      </a>
+    </span>
   )
 }

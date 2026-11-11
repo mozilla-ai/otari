@@ -11,6 +11,7 @@ import {
   organizationContext,
   updateCheckStatus,
 } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +37,7 @@ function renderNotice(status: UpdateCheckStatus) {
         <UpdateNotice />
       </DeploymentProvider>
     </QueryClientProvider>,
+    { wrapper: withRouter() },
   )
   // Resolves once the status has landed, so an absence asserted after it is not
   // the absence of a page still loading.
@@ -129,6 +131,35 @@ describe("UpdateNotice", () => {
     // 0.30.10 is newer than 0.30.9, which a string sort gets backwards.
     expect(notice).toHaveTextContent("Upgrade to 0.30.10 or later.")
     expect(screen.queryByText(/is available/)).not.toBeInTheDocument()
+  })
+
+  it("names the most severe advisory and counts the rest", async () => {
+    renderNotice({
+      ...NEWER,
+      advisories: [
+        { ...ADVISORY, id: "GHSA-low", summary: "Minor", severity: "low" },
+        {
+          ...ADVISORY,
+          id: "GHSA-crit",
+          summary: "Worst",
+          severity: "critical",
+        },
+        { ...ADVISORY, id: "GHSA-med", summary: "Middle", severity: "medium" },
+      ],
+    })
+
+    expect(await screen.findByRole("link", { name: "Worst" })).toBeVisible()
+    expect(
+      screen.queryByRole("link", { name: "Minor" }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "2 more" })).toHaveAttribute(
+      "href",
+      "/settings",
+    )
+    expect(screen.getByRole("link", { name: "Upgrade notes" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("configuration.md#upgrading"),
+    )
   })
 
   it("shows nothing while the check is off", async () => {

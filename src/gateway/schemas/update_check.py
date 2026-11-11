@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 Severity = Literal["low", "medium", "high", "critical"]
+PresetSource = Literal["OTARI_UPDATE_CHECK", "update_check", "DO_NOT_TRACK", "CI"]
 
 MAX_SUMMARY = 500
 MAX_ADVISORIES = 50
@@ -59,6 +60,12 @@ class UpdateCheckStatus(BaseModel):
         description=(
             "Who decided: config.yml or the environment (the dashboard cannot change it), an operator in the "
             "dashboard, or nobody yet."
+        )
+    )
+    preset_by: PresetSource | None = Field(
+        description=(
+            "When the configuration decided, the setting that did: the OTARI_UPDATE_CHECK variable, update_check "
+            "in config.yml, or DO_NOT_TRACK or CI answering no. Null otherwise."
         )
     )
     current_version: str

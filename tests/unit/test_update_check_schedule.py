@@ -14,7 +14,7 @@ from gateway.services.update_check._schedule import (
     next_retry,
     release_version,
 )
-from gateway.services.update_check._service import preset_answer
+from gateway.services.update_check._service import preset, preset_answer
 
 _NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 
@@ -93,3 +93,25 @@ def test_do_not_track_and_ci_answer_no(clean_env: pytest.MonkeyPatch, name: str,
 def test_update_check_in_config_wins_over_do_not_track(clean_env: pytest.MonkeyPatch) -> None:
     clean_env.setenv("DO_NOT_TRACK", "1")
     assert preset_answer(UpdateCheckSettings(update_check=True)) is True
+
+
+@pytest.mark.parametrize(
+    ("env", "settings", "expected"),
+    [
+        ({}, UpdateCheckSettings(update_check=False), (False, "update_check")),
+        ({"OTARI_UPDATE_CHECK": "true"}, UpdateCheckSettings(update_check=True), (True, "OTARI_UPDATE_CHECK")),
+        ({"DO_NOT_TRACK": "1"}, UpdateCheckSettings(), (False, "DO_NOT_TRACK")),
+        ({"CI": "true"}, UpdateCheckSettings(), (False, "CI")),
+        ({}, UpdateCheckSettings(), None),
+    ],
+)
+def test_the_preset_names_the_setting_that_answered(
+    clean_env: pytest.MonkeyPatch,
+    env: dict[str, str],
+    settings: UpdateCheckSettings,
+    expected: tuple[bool, str] | None,
+) -> None:
+    clean_env.delenv("OTARI_UPDATE_CHECK", raising=False)
+    for name, value in env.items():
+        clean_env.setenv(name, value)
+    assert preset(settings) == expected

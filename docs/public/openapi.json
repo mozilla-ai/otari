@@ -25217,6 +25217,24 @@
             ],
             "title": "Next Check At"
           },
+          "preset_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "OTARI_UPDATE_CHECK",
+                  "update_check",
+                  "DO_NOT_TRACK",
+                  "CI"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the configuration decided, the setting that did: the OTARI_UPDATE_CHECK variable, update_check in config.yml, or DO_NOT_TRACK or CI answering no. Null otherwise.",
+            "title": "Preset By"
+          },
           "release_url": {
             "anyOf": [
               {
@@ -25236,6 +25254,7 @@
         "required": [
           "enabled",
           "answered_by",
+          "preset_by",
           "current_version",
           "checkable",
           "install_id",

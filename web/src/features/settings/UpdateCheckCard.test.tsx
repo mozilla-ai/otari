@@ -7,7 +7,7 @@ import { UpdateCheckCard } from "@/features/settings/UpdateCheckCard"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, updateCheckStatus } from "@/tests/fixtures"
 
-const SWITCH = "Get notified when a new Otari release is available"
+const SWITCH = "Check for security fixes and new releases"
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -71,13 +71,64 @@ describe("UpdateCheckCard", () => {
   })
 
   it("locks the switch where config answered, and says so", async () => {
-    renderCard(updateCheckStatus({ answered_by: "config", enabled: false }))
+    renderCard(
+      updateCheckStatus({
+        answered_by: "config",
+        preset_by: "update_check",
+        enabled: false,
+      }),
+    )
 
     const toggle = await screen.findByRole("switch", { name: SWITCH })
     expect(toggle).toBeDisabled()
     expect(
-      screen.getByText(/Decided by this deployment's configuration/),
+      screen.getByText("Set by update_check in config.yml. Change it there."),
     ).toBeInTheDocument()
+  })
+
+  it.each([
+    ["OTARI_UPDATE_CHECK", /Set by OTARI_UPDATE_CHECK/],
+    ["DO_NOT_TRACK", /Off because DO_NOT_TRACK is set/],
+    ["CI", /Off because CI is set/],
+  ] as const)(
+    "names %s as the one setting that answered",
+    async (presetBy, caption) => {
+      renderCard(
+        updateCheckStatus({
+          answered_by: "config",
+          preset_by: presetBy,
+          enabled: false,
+        }),
+      )
+
+      expect(await screen.findByText(caption)).toBeInTheDocument()
+    },
+  )
+
+  it("lists the advisories that cover the running version", async () => {
+    renderCard(
+      updateCheckStatus({
+        enabled: true,
+        answered_by: "operator",
+        advisories: [
+          {
+            id: "GHSA-1",
+            summary: "A key could be read back",
+            severity: "high",
+            url: "https://github.com/mozilla-ai/otari/security/advisories/GHSA-1",
+            fixed_in: "0.30.2",
+          },
+        ],
+      }),
+    )
+
+    expect(
+      await screen.findByRole("link", { name: "A key could be read back" }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/security/advisories/GHSA-1",
+    )
+    expect(screen.getByText(/high, fixed in 0\.30\.2/)).toBeInTheDocument()
   })
 
   it("says a development build is never checked", async () => {
@@ -88,6 +139,7 @@ describe("UpdateCheckCard", () => {
     expect(
       await screen.findByText(/development build \(0\.0\.0-dev\)/),
     ).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: SWITCH })).toBeDisabled()
   })
 
   it("is absent where the deployment does not publish the check", () => {
