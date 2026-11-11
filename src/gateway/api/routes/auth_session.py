@@ -343,7 +343,7 @@ async def create_session(
         assert body.email is not None and body.password is not None  # guaranteed by the model validator
         identity = await _sign_in_with_password(body.email, body.password, request, db)
     try:
-        signed_in = await identities.sign_in(identity)
+        signed_in = await identities.sign_in(identity, asserted_email=None)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on sign-in", exc) from None
     if body.master_key is None:

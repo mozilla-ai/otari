@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from http import HTTPStatus
@@ -40,7 +40,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.tools import WebTool
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.services.tools._tool_prices import unfunded_tool_detail
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
@@ -56,6 +56,7 @@ from gateway.services.tools._web_search import (
     unpriced_direct_search_detail,
 )
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL, redacted_upstream_detail
+from gateway.types.tool_charges import gateway_tool_pricing_key
 
 if TYPE_CHECKING:
     import httpx
@@ -117,7 +118,8 @@ class DirectToolCall(Generic[ResultT]):
     and ``deployment_paid`` says the deployment's account runs the call, so only
     the operator's prices count and the organization's funds are charged.
     ``unpriced_detail`` is the 402's message when ``require_pricing`` finds no
-    row for the call: the row to add, and where.
+    row for the call: the row to add, and where. ``pricing_key`` names the
+    gateway tool the funding charge pays for.
     """
 
     provider: str
@@ -125,6 +127,7 @@ class DirectToolCall(Generic[ResultT]):
     rate_keys: tuple[RateKey, ...]
     deployment_paid: bool
     unpriced_detail: str
+    pricing_key: str
     run: Callable[[], Awaitable[DirectToolResult[ResultT]]]
 
 
@@ -213,13 +216,24 @@ class DirectToolLedger(Protocol):
         ...
 
     async def admit_funding(
-        self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+        self,
+        *,
+        organization_id: uuid.UUID | None,
+        api_key_id: str | None,
+        user_id: str,
+        request_id: str,
+        tool: str,
     ) -> object | None:
-        """Admit a call the deployment's account runs on the organization's funds, returning what settles it."""
+        """Admit a call of ``tool`` (its pricing key) the deployment's account runs on the organization's funds.
+
+        Returns what settles it.
+        """
         ...
 
-    async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
-        """Charge the organization's funds what a settled ``cost`` owes."""
+    async def settle_funding(
+        self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
+    ) -> None:
+        """Charge the organization's funds what a settled ``cost`` owes, for the gateway tools ``tools`` names."""
         ...
 
     async def release(self) -> bool:
@@ -319,6 +333,7 @@ class DirectToolService:
                 rate_keys=search.resolved.rate_keys,
                 deployment_paid=not search.resolved.on_credential,
                 unpriced_detail=unpriced_direct_search_detail(search),
+                pricing_key=gateway_tool_pricing_key(WebTool.SEARCH.value),
                 run=lambda: run_direct_search(search, client),
             )
 
@@ -354,6 +369,7 @@ class DirectToolService:
                 rate_keys=fetch.resolved.rate_keys,
                 deployment_paid=not fetch.resolved.on_credential,
                 unpriced_detail=unpriced_direct_fetch_detail(fetch),
+                pricing_key=gateway_tool_pricing_key(WebTool.FETCH.value),
                 run=lambda: run_direct_fetch(fetch, client, trust_env_proxy=config.web_retrieval_trust_env_proxy),
             )
 
@@ -584,7 +600,11 @@ class DirectToolService:
         if call.deployment_paid:
             try:
                 funding = await self._ledger.admit_funding(
-                    organization_id=organization_id, api_key_id=api_key_id, user_id=user_id, request_id=request_id
+                    organization_id=organization_id,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    request_id=request_id,
+                    tool=call.pricing_key,
                 )
             except InsufficientFundsError as exc:
                 raise await refused_after_hold(
@@ -675,7 +695,11 @@ class DirectToolService:
         )
         if funding is not None:
             await self._ledger.settle_funding(
-                funding, cost, model=tool.name, description=f"{tool.provider}:{tool.name}"
+                funding,
+                cost,
+                tools={call.pricing_key: ToolUse(calls=1, amount=cost)},
+                model=tool.name,
+                description=f"{tool.provider}:{tool.name}",
             )
         await self._ledger.settle(hold, cost)
         return DirectToolOutcome(result.response, {**headers, **rate_limit_headers})

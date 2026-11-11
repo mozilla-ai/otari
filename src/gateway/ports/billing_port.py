@@ -24,11 +24,42 @@ cannot be confused at a call site.
 """
 
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Protocol
 
 # What a caller is told when the billing port cannot say whether an organization's funds cover a request.
 FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked. Retry later."
+
+
+@dataclass(frozen=True)
+class BilledModel:
+    """The model a deployment-paid call is served on, so an adapter can fund models differently.
+
+    ``open_weights`` is ``False`` only for a closed model (Claude, GPT, Gemini,
+    Grok and their providers); any other model counts as open-weight.
+    """
+
+    provider: str
+    """The any-llm implementation serving the call, by its wire name."""
+    model: str
+    """The model as that provider names it."""
+    open_weights: bool
+
+
+@dataclass(frozen=True)
+class ToolUse:
+    """The successful calls of one gateway-run tool that a charge pays for, and their part of its amount."""
+
+    calls: int
+    amount: Decimal
+    """USD, already included in the charge's ``amount``."""
+
+
+NO_TOOLS: Mapping[str, ToolUse] = MappingProxyType({})
+"""The ``tools`` of a charge that pays for no gateway-run tool call."""
 
 
 class InsufficientFundsError(Exception):
@@ -63,8 +94,15 @@ class BillingPort(Protocol):
         """
         ...
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
-        """Refuse unless the organization has funds paid in.
+    async def require_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
+        """Refuse unless the organization has funds paid in that can pay for ``billed``.
 
         Counts what the organization has paid in and disregards holds, so it
         answers "may this organization be served at all", a question about the
@@ -72,22 +110,50 @@ class BillingPort(Protocol):
         nothing: two callers can pass this gate on the same funds, and
         :meth:`hold` is what settles between them.
 
+        ``billed`` is the model the call is served on, or ``None`` for a call
+        that is not a model's, such as a gateway tool. ``tools`` names, by
+        pricing key, the gateway-run tools a tool's call may run, so funds that
+        pay for some tools and not others can be judged per tool; it is empty
+        for a model's call. ``actor_user_id`` is the
+        user :meth:`charge` will attribute the call to, so funds that pay for
+        one member alone are judged for the member they would pay for.
+
         Raises:
             InsufficientFundsError: If the organization has no funds paid in.
 
         """
         ...
 
-    async def has_funds_on_deposit(self, *, organization_id: uuid.UUID) -> bool:
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
         """Whether :meth:`require_funds_on_deposit` would pass, counting credit owed, while changing nothing.
 
-        For a caller that advertises rather than serves, such as ``GET /tools``:
-        it grants no credit and starts nothing a refusal would, so asking as
-        often as a client lists tools leaves the organization untouched. An
-        adapter that does not override it reads every organization as funded,
-        which only advertises a tool the request's own gate still refuses.
+        Takes the same arguments and judges them the same way. For a caller that
+        advertises rather than serves, such as ``GET /tools``: it grants no
+        credit and starts nothing a refusal would, so asking as often as a client
+        lists tools leaves the organization untouched. An adapter that does not
+        override it reads every organization as funded, which only advertises a
+        tool the request's own gate still refuses.
         """
         return True
+
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
+        """How many of the organization's calls on ``billed`` may be in flight at once, or ``None`` for no limit.
+
+        Asked once a call passes :meth:`require_funds_on_deposit`, for the same
+        ``actor_user_id``. The caller counts every call the port limits under one
+        limit per organization, whichever models they are on, and a call waits
+        briefly for a slot before it is refused.
+        """
+        ...
 
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         """Refuse unless the organization has funds no hold has claimed.
@@ -133,17 +199,26 @@ class BillingPort(Protocol):
         *,
         organization_id: uuid.UUID,
         amount: Decimal,
+        billed: BilledModel | None,
+        tools: Mapping[str, ToolUse],
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
     ) -> None:
-        """Charge ``amount`` for a request already served.
+        """Charge ``amount`` for a request already served on ``billed``.
 
         Records the charge even when the organization cannot cover it: the
         deployment has already paid for that request upstream, so dropping the
         charge would give the compute away. What is charged is bounded by the
         hold taken beforehand, and the gates above refuse the next request.
 
+        ``billed`` is the model the request was served on, or ``None`` for a
+        charge that is not a model's, as at :meth:`require_funds_on_deposit`.
+        ``tools`` holds the gateway-run tool calls the charge pays for, keyed by
+        the tool's pricing name (``otari:web_search``), and is empty when there
+        are none; ``amount`` less their amounts is the model's share. A tool
+        loop settles its model call and its tool calls as one charge, so an
+        adapter that funds tools apart from models reads the split from here.
         ``description``, ``actor_user_id`` and ``api_key_id`` attribute the
         charge, so an adapter that keeps a ledger can trace it back to the
         request that incurred it.

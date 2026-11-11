@@ -24,8 +24,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from gateway.api.deps import (
     CurrentIdentity,
-    GrowthSignalPortDep,
     OrganizationGuardrailServiceDep,
+    PersonGrowthSignalPortDep,
     get_config,
     verify_master_key,
 )
@@ -82,7 +82,7 @@ async def create_organization_guardrail(
     service: OrganizationGuardrailServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationGuardrailCreate,
-    growth: GrowthSignalPortDep,
+    growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> OrganizationGuardrailPublic:
     """Mandate a guardrail across the organization. Organization owners and admins only.

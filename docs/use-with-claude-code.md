@@ -90,6 +90,10 @@ thinking, prompt caching or tool semantics, and Anthropic's server-side context
 editing does not run (Claude Code's own compaction still does). Test your actual
 workflow before making one a default.
 
+To list only the open-weight models a key can use, ask the catalog for them:
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 On a gateway you run, OpenAI reasoning models work better through the Responses
 API: their reasoning carries over between turns, and the codex and pro models
 become reachable. Set `messages_api: responses` on the OpenAI provider; see

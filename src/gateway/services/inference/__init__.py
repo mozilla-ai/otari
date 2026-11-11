@@ -26,8 +26,13 @@ from gateway.services.inference._decisions import (
 from gateway.services.inference._deployment_funding import (
     DeploymentCharge,
     WorkspaceFunding,
+    actor_user_id_for,
     admit_deployment_paid,
+    billed_model,
+    configure_closed_models,
+    deferred_charge,
     describe_port_error,
+    organization_slot_key,
 )
 from gateway.services.inference._idempotency import (
     Admission,
@@ -129,6 +134,11 @@ __all__ = [
     "ESTIMATED_VIDEO_SECONDS",
     "WorkspaceFunding",
     "admit_deployment_paid",
+    "actor_user_id_for",
+    "billed_model",
+    "configure_closed_models",
+    "deferred_charge",
+    "organization_slot_key",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
     "IMAGES_BILLING",

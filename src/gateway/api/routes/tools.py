@@ -20,6 +20,7 @@ workspace and gets the deployment's answer.
 """
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -69,7 +70,7 @@ class ManagedTool(BaseModel):
         description=(
             "Whether a request from this caller may declare the tool: the deployment has "
             "enabled and configured it and, for an API key, the key's workspace allows it "
-            "and its organization can pay for a tool that runs on the deployment's account. "
+            "and its organization can pay for what the tool runs on the deployment's account. "
             "A master key or a dashboard session gets the deployment's answer alone. A "
             "request declaring an unavailable tool is refused."
         )
@@ -81,8 +82,9 @@ class ManagedTool(BaseModel):
             "nothing is set up to run it (for web search, neither the deployment nor the API "
             "key's organization has a search provider). `workspace_disabled`: the API key's "
             "workspace does not allow it, which a workspace admin changes under Tools in the "
-            "dashboard. `insufficient_funds`: the tool runs on the deployment's account and the "
-            "API key's organization has no funds paid in, which adding funds changes."
+            "dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would "
+            "run on the deployment's account and the API key's organization has no funds to pay "
+            "for it, which adding funds changes."
         ),
     )
     accepted_types: list[str] = Field(
@@ -136,7 +138,9 @@ async def _workspace_switches(
             api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
         ),
         search_policy=search_policy,
-        unfunded=await unfunded_tools(config, search_policy, api_key.workspace_id, funding.funded),
+        unfunded=await unfunded_tools(
+            config, search_policy, partial(funding.funded, api_key.workspace_id, api_key.user_id)
+        ),
     )
 
 

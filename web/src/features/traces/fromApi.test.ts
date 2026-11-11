@@ -44,7 +44,30 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
-  it("draws a request that made one LLM call and nothing else as that call", () => {
+  it("says a span took what its row says, not a millisecond more", () => {
+    // 2.539 ms long, so it states 3 ms; its timestamps are 2 ms apart.
+    const detail = traceDetail({
+      spans: [
+        traceSpan({
+          span_id: "call-read",
+          kind: "tool",
+          tool_name: "Read",
+          start_time: "2026-10-07T12:00:00.268400Z",
+          end_time: "2026-10-07T12:00:00.270939Z",
+          duration_ms: 3,
+        }),
+      ],
+    })
+
+    const read = toTrace(traceSummary(), detail).observations.find(
+      (o) => o.id === "call-read",
+    )
+
+    expect((read?.endMs ?? 0) - (read?.startMs ?? 0)).toBe(2)
+    expect(read?.explain?.facts).toContainEqual(["Took", "2 ms"])
+  })
+
+  it("draws a request that made one model request and nothing else as that one", () => {
     const detail = traceDetail()
     const spans = [
       ...detail.spans,
@@ -186,10 +209,7 @@ describe("toTrace", () => {
 
     expect(recovered?.level).toBe("WARNING")
     expect(recovered?.statusMessage).toBe("error, recovered by a fallback")
-    expect(summarizeTrace(trace)).toMatchObject({
-      level: "WARNING",
-      totalCost: 0.01,
-    })
+    expect(summarizeTrace(trace).totalCost).toBe(0.01)
   })
 
   it("draws guardrail checks and MCP connections as their own types", () => {
@@ -296,22 +316,36 @@ describe("toTrace", () => {
     expect(trace.gateway?.isAtApiPrices).toBe(true)
   })
 
-  it("gives a turn its cost without counting it twice in the session's total", () => {
+  it("gives a turn what everything under it cost, a subagent's requests included", () => {
     const detail = traceDetail()
     const [first] = detail.turns
+    const spans = [
+      ...detail.spans,
+      // A request the tool call's subagent made, which the API's own figure
+      // for the turn leaves out.
+      traceSpan({
+        span_id: "llm-sub",
+        parent_span_id: "call-toolu_1",
+        kind: "llm",
+        model: "gpt-5",
+        cost: 0.03,
+      }),
+    ]
     // Turns are drawn as rows once a session has more than one.
     const trace = toTrace(traceSummary(), {
       ...detail,
+      spans,
       turns: [
-        { ...first, cost: 0.04 },
+        { ...first, cost: 0.01 },
         { ...first, index: 1, step_ids: [], cost: 0 },
       ],
     })
+    const [turn, empty] = trace.observations.filter((o) => o.isRollup)
 
-    expect(trace.observations.find((o) => o.isRollup)?.cost).toBe(0.04)
-    expect(summarizeTrace(trace).totalCost).toBe(
-      detail.spans.reduce((sum, span) => sum + (span.cost ?? 0), 0),
-    )
+    expect(turn.cost).toBeCloseTo(0.04)
+    expect(empty.cost).toBeUndefined()
+    // Counted once in the session's total, not again on the turn's row.
+    expect(summarizeTrace(trace).totalCost).toBeCloseTo(0.04)
   })
 
   it("does not say a session the gateway served is at API prices", () => {
@@ -598,7 +632,7 @@ describe("toTrace", () => {
       sentence: "A request that continues a turn keeps nothing of its own.",
     })
     expect(byId.get("llm-1")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
     expect(byId.get("fetch-1")?.noInput).toEqual({
       sentence: "Otari keeps no content for this tool.",
@@ -636,7 +670,7 @@ describe("toTrace", () => {
       sentence: "A request that continues a turn keeps nothing of its own.",
     })
     expect(byId.get("llm-2")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
   })
 
@@ -662,7 +696,7 @@ describe("toTrace", () => {
     })
     expect(byId.has("req-2")).toBe(false)
     expect(byId.get("llm-2")?.noInput).toEqual({
-      sentence: "Otari never keeps what a model call sent or got back.",
+      sentence: "Otari never keeps what a model request sent or got back.",
     })
   })
 
@@ -750,7 +784,7 @@ describe("toTrace", () => {
     )
   })
 
-  it("says what a permission decision, a run and a model call were", () => {
+  it("says what a permission decision, a run and a model request were", () => {
     const trace = toTrace(
       traceSummary(),
       traceDetail({
@@ -768,6 +802,7 @@ describe("toTrace", () => {
             parent_span_id: "tool-1",
             kind: "other",
             operation: "tool.blocked_on_user",
+            end_time: "2026-10-07T12:00:14Z",
             duration_ms: 14_000,
             attributes: {
               "otari.tool.decision": "accept",
@@ -843,7 +878,7 @@ describe("toTrace", () => {
     )
   })
 
-  it("says a model call that errored failed rather than answered", () => {
+  it("says a model request that errored failed rather than answered", () => {
     const trace = toTrace(
       traceSummary(),
       traceDetail({

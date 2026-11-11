@@ -400,6 +400,7 @@ candidate answers as naming that model directly would.
 | rejected the request as invalid (400) | `400 all_candidates_rejected` |
 | found the prompt too long | `context_length_exceeded` |
 | refused image content the request carries, in wording Otari recognizes | `unsupported_content` |
+| failed to produce output matching the requested JSON schema (Groq's `json_validate_failed`) | `structured_output_failed`. Sending the request again may succeed. |
 | refused the request as too large (413) | `413 request_too_large`. Shrink the request; sending it again unchanged does not help. |
 | refused a parameter the request carries (such as `response_format` on a model with no JSON mode), as named by Otari's provider library | `unsupported_parameter`, with `detail` naming the parameters. A parameter a provider refuses with its own 400 counts as an ordinary rejection. |
 | did not know the model (404) | `502` |

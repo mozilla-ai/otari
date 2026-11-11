@@ -464,6 +464,29 @@ async def test_a_hold_larger_than_the_headroom_names_both_amounts(async_db: Any)
 
 
 @pytest.mark.asyncio
+async def test_only_an_end_users_refusal_names_its_budget(async_db: Any) -> None:
+    """``Otari-End-User-Budget`` names the budget an end user was put on; a key's own user gets none."""
+    async_db.add(Budget(budget_id="end-user-cap", max_budget=0.0015))
+    async_db.add(User(user_id="service-owner"))
+    async_db.add(
+        User(user_id="end-user-row", budget_id="end-user-cap", parent_user_id="service-owner", external_id="carol")
+    )
+    async_db.add(User(user_id="plain-user", budget_id="end-user-cap"))
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as end_user_refusal:
+        await reserve_budget(async_db, "end-user-row", Decimal("0.0021"))
+    with pytest.raises(HTTPException) as plain_refusal:
+        await reserve_budget(async_db, "plain-user", Decimal("0.0021"))
+
+    assert end_user_refusal.value.headers is not None
+    assert end_user_refusal.value.headers["Otari-End-User-Budget"] == "end-user-cap"
+    assert plain_refusal.value.headers is not None
+    assert plain_refusal.value.headers["Otari-Budget-Scope"] == "user"
+    assert "Otari-End-User-Budget" not in plain_refusal.value.headers
+
+
+@pytest.mark.asyncio
 async def test_a_spent_budget_keeps_its_exceeded_wording(async_db: Any) -> None:
     """The counterpart: spend at the cap is a budget genuinely exceeded, and reads as one."""
     async_db.add(Budget(budget_id="spent", max_budget=0.0015))

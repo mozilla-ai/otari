@@ -10,7 +10,6 @@ module says which rows to look up, which requests skip the check, and what the
 refusal says, as well as the refusal of a tool the organization's funds cannot pay for.
 """
 
-import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -61,6 +60,7 @@ _TOOL_TYPES = {
     WEB_FETCH_TOOL_NAME: Tool.WEB_FETCH,
     WEB_SEARCH_TOOL_NAME: Tool.WEB_SEARCH,
 }
+_TOOL_NAMES = {tool: name for name, tool in _TOOL_TYPES.items()}
 
 
 def _on_its_own_row(name: str, *, deployment_paid: bool) -> PricedTool:
@@ -139,17 +139,17 @@ def _deployment_paid_web_tools(config: GatewayConfig, policy: ResolvedWebSearchC
 async def unfunded_tools(
     config: GatewayConfig,
     policy: ResolvedWebSearchConfig | None,
-    workspace_id: uuid.UUID,
-    funded: Callable[[uuid.UUID], Awaitable[bool]],
+    funded: Callable[[frozenset[str]], Awaitable[bool]],
 ) -> frozenset[Tool]:
-    """The gateway tools a request from the workspace would be refused for want of funds.
+    """The gateway tools a request would be refused for want of funds, each asked of ``funded`` by pricing key.
 
     The sandbox is always the deployment's; a web tool counts only where
     ``policy`` would run it on the deployment's account.
     """
-    if await funded(workspace_id):
-        return frozenset()
-    return _deployment_paid_web_tools(config, policy) | {Tool.CODE_EXECUTION}
+    paid = sorted(_deployment_paid_web_tools(config, policy) | {Tool.CODE_EXECUTION})
+    return frozenset(
+        [tool for tool in paid if not await funded(frozenset({gateway_tool_pricing_key(_TOOL_NAMES[tool])}))]
+    )
 
 
 def tools_to_price(

@@ -7,10 +7,12 @@
  * names could drift from them silently, and a base call site would then record
  * under a name nothing is listening for.
  *
- * The strings themselves are `otari-ai/frontend/src/shared/helpers/mixpanel.ts`'s
- * `EVENTS`, character for character, because a superset build reports into the
- * same product-analytics workspace the platform already reports into. Renaming
- * one here would split its funnel in two.
+ * The strings the platform already had are
+ * `otari-ai/frontend/src/shared/helpers/mixpanel.ts`'s `EVENTS`, character for
+ * character, because a superset build reports into the same product-analytics
+ * workspace the platform already reports into. Renaming one here would split
+ * its funnel in two. `USE_MODEL_CLICKED` and `SESSION_OPENED` are new names,
+ * for surfaces the platform never had.
  */
 export const TELEMETRY_EVENTS = {
   // The acquisition funnel. Every one of these fires from a page in
@@ -40,28 +42,47 @@ export const TELEMETRY_EVENTS = {
   TAB_CHANGED: "Tab Changed",
 
   /**
-   * The post-sign-in setup guide shown to a new account.
+   * The first-run setup sheet put on screen for a workspace.
    *
-   * Named here and fired by nobody in this build, for the same reason as
-   * `CHECKOUT_CANCELLED` below: the guide is a surface otari.ai's overlay
-   * contributes, and no base page shows it. Naming the step here is what keeps
-   * the activation funnel in one piece. `SIGNUP_STARTED` through
-   * `LOGIN_SUCCESS` are recorded from Otari's own auth pages and the first
-   * settled request is measured server-side, so this is the one step between
-   * them, and an overlay that invented a string for it would split the funnel
-   * this vocabulary is base-owned to hold together.
+   * Recorded by `SetupGuide` once per mount that offers it, which is once per
+   * Overview visit while the workspace has had no request. It is the one
+   * browser step between `LOGIN_SUCCESS` and the first settled request, which
+   * is measured server-side, so the activation funnel reads through it.
    *
-   * The properties the platform sends with it are `workspace_id` and
-   * `presentation_count`.
+   * Carries `workspace_id`. The platform's flow also sent a
+   * `presentation_count`; this one does not, because nothing in the activation
+   * the API answers counts presentations, and a count kept in the browser
+   * would restart in every tab.
    */
   ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
   /**
-   * That guide dismissed, whether by finishing it or by closing it.
+   * That sheet retired, by finishing it or by leaving it.
    *
-   * Overlay-fired and base-named for the reason given on
-   * `ACTIVATION_GUIDE_SHOWN` above, and carries the same two properties.
+   * Carries `workspace_id` and a `reason`: `skipped` (the Skip button),
+   * `left` (a guidance link to another page) or `activated` (the first request
+   * landed while the sheet was offered).
    */
   ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
+
+  /**
+   * "Use this model" pressed on a catalog model's page.
+   *
+   * Carries `model`, the catalog model id, and `signed_in`: false on the
+   * public catalog, where the press leads to signup or sign-in rather than to
+   * the request to copy.
+   */
+  USE_MODEL_CLICKED: "Use This Model Clicked",
+
+  /**
+   * A session's detail opened on Sessions.
+   *
+   * Carries `source`: `list` for a row or the panel's previous and next,
+   * `timeline` for a chart bar holding one session, and `link` for an address
+   * that already named the session, such as "View trace" from Activity or a
+   * shared link. Never the session's id: that is unbounded and the event is
+   * about the habit, not the session.
+   */
+  SESSION_OPENED: "Session Opened",
 
   /**
    * A wallet top-up abandoned at the payment provider.

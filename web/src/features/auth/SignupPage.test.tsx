@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AuthProvider } from "@/features/auth/AuthContext"
 import { SignupPage } from "@/features/auth/SignupPage"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { ApiError, apiFetch } from "@/shared/api/client"
@@ -55,7 +56,9 @@ function renderPage(
         })}
       >
         <ThemeProvider>
-          <SignupPage hash={hash} />
+          <AuthProvider>
+            <SignupPage hash={hash} />
+          </AuthProvider>
         </ThemeProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -110,6 +113,64 @@ describe("SignupPage", () => {
     expect(Object.values({ ...window.sessionStorage })).not.toContain(
       "correct-horse",
     )
+  })
+
+  it("signs an invited address straight in, with no verification email", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      message: "…",
+      verified: true,
+    } as never)
+    const session = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }))
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com&invite=tok")
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/")
+    })
+    const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      email: "ada@example.com",
+      invite: "tok",
+    })
+    expect(String(session.mock.calls[0]?.[0])).toContain("/auth/session")
+    session.mockRestore()
+  })
+
+  it("sends an invited address to sign in when the session cannot start", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      message: "…",
+      verified: true,
+    } as never)
+    const session = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("offline"))
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com&invite=tok")
+
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/")
+    })
+    expect(readSignInAddress()).toBe("ada@example.com")
+    expect(
+      recordEvent.mock.calls.filter(
+        ([name]) => name === TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+      ),
+    ).toEqual([
+      [
+        TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+        { authentication_method: "password", requires_verification: false },
+      ],
+    ])
+    session.mockRestore()
   })
 
   // otari-ai#2100: the same form, reading as registration where the deployment

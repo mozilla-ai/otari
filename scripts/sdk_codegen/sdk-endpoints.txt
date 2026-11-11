@@ -292,6 +292,11 @@ DELETE /api/v1/auth/webauthn/credentials/{credential_id}   # dashboard-only
 # dashboard uses rather than a token an SDK could hold.
 GET /api/v1/auth/oauth/{provider}/authorize         # dashboard-only
 POST /api/v1/auth/oauth/{provider}/callback         # dashboard-only
+# SSO sign-in through an organization's own OIDC connection (otari#879): the same browser
+# redirect and CSRF-state shape as the OAuth sign-in above, so it carries the same reasoning.
+POST /api/v1/auth/sso/lookup                        # dashboard-only
+GET /api/v1/auth/sso/{slug}/authorize               # dashboard-only
+POST /api/v1/auth/sso/callback                      # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /otlp/v1/logs                                  # otel ingest
 POST /otlp/v1/traces                                # otel ingest
@@ -465,6 +470,16 @@ POST /api/v1/organizations/me/guardrail-definitions                    # dashboa
 PATCH /api/v1/organizations/me/guardrail-definitions/{definition_id}   # dashboard-only
 DELETE /api/v1/organizations/me/guardrail-definitions/{definition_id}  # dashboard-only
 POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dashboard-only
+# Scoped by the caller's dashboard session like the organization surfaces
+# above: an SDK caller holding a workspace key has no organization identity to
+# configure sign-in for.
+GET /api/v1/organizations/me/sso                                # dashboard-only
+PUT /api/v1/organizations/me/sso                                 # dashboard-only
+PATCH /api/v1/organizations/me/sso                               # dashboard-only
+POST /api/v1/organizations/me/sso/test                           # dashboard-only
+DELETE /api/v1/organizations/me/sso                              # dashboard-only
+GET /api/v1/organizations/me/sso/preflight                       # dashboard-only
+PUT /api/v1/organizations/me/sso/enforcement                     # dashboard-only
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 POST /api/v1/organizations/me/member-invitations/bulk           # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only

@@ -63,6 +63,7 @@ from gateway.exceptions.identity_exceptions import (
     EmailAlreadyInUseError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
+    PasswordLinkUnavailableError,
     PasswordNotSetError,
     ResetTokenInvalidError,
     SignInAddressRequiredError,
@@ -78,7 +79,7 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
-from gateway.services.organizations import BlockedAddresses
+from gateway.services.organizations import BlockedAddresses, SsoEnforcement
 from gateway.services.password_service import (
     hash_password_async,
     verify_absent_password_async,
@@ -138,6 +139,7 @@ async def update_password(
     *,
     current_password: str,
     new_password: str,
+    sso_enforcement: SsoEnforcement,
     keep_session_token_hash: str | None = None,
 ) -> None:
     """Change a password the caller can prove they already hold.
@@ -156,6 +158,7 @@ async def update_password(
         db,
         identity,
         new_password=new_password,
+        sso_enforcement=sso_enforcement,
         keep_session_token_hash=keep_session_token_hash,
     )
 
@@ -165,6 +168,7 @@ async def set_password(
     identity: User,
     *,
     new_password: str,
+    sso_enforcement: SsoEnforcement,
     email: str | None = None,
     keep_session_token_hash: str | None = None,
 ) -> None:
@@ -207,6 +211,10 @@ async def set_password(
     opened, say) would still work, letting whoever holds it undo the change.
     """
     validate_new_password(new_password)
+    if await sso_enforcement.refuses_every_membership(user=identity):
+        raise PasswordLinkUnavailableError(
+            "Every organization this account belongs to requires sign-in through its own connection."
+        )
     vouches_for_the_address = email is not None or identity.hashed_password is None
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
@@ -372,6 +380,7 @@ async def create_user_for_signup(
     blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
+    address_proven: bool = False,
 ) -> User | None:
     """Claim an identity ``organization_service`` already put on the roster, register a new
     one where the deployment allows it, or do nothing.
@@ -406,6 +415,10 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
+    ``address_proven`` says the caller already proved the mailbox (an invitation
+    sent to it, through ``SignupInvitePort``): the identity is then verified as it
+    is claimed, and no verification email is sent, so the caller can sign in at once.
+
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
     The mail send is scheduled on ``background_tasks`` after the commit rather
@@ -414,7 +427,8 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
-    mailer.require_ready()
+    if not address_proven:
+        mailer.require_ready()
     validate_new_password(password)
     if config.terms_url is not None and not terms_accepted:
         raise TermsNotAcceptedError
@@ -467,12 +481,14 @@ async def create_user_for_signup(
                     return None
 
             token = generate_token()
-            values: dict[str, str | datetime | None] = {
-                "full_name": identity.full_name or full_name,
-                "email_verification_token_hash": hash_token(token),
-                "email_verification_token_expires_at": datetime.now(UTC)
-                + timedelta(hours=config.email_verification_expiry_hours),
-            }
+            values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
+            if address_proven:
+                values["email_verified_at"] = datetime.now(UTC)
+            else:
+                values["email_verification_token_hash"] = hash_token(token)
+                values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
+                    hours=config.email_verification_expiry_hours
+                )
             if terms_accepted:
                 values["terms_accepted_at"] = datetime.now(UTC)
             # NOTE: A provider sign-in or another first password can commit after the check above.
@@ -488,6 +504,8 @@ async def create_user_for_signup(
     except _SignupRaceLostError:
         return None
     await db.refresh(identity)
+    if address_proven:
+        return identity
 
     background_tasks.add_task(
         mailer.send,
@@ -654,6 +672,7 @@ async def request_password_reset(
     *,
     organizations: OrganizationService,
     blocked_addresses: BlockedAddresses,
+    sso_enforcement: SsoEnforcement,
     background_tasks: BackgroundTasks,
     email: str,
 ) -> None:
@@ -672,6 +691,8 @@ async def request_password_reset(
     An unverified identity is held to ``unverified_identity_is_claimable``. A verified
     identity with no password signs in with a provider and adds a password from
     its account, so it gets no link; it is mailed a notice saying how it signs in instead.
+    An identity some organization's own SSO enforcement refuses gets the same silent
+    no-op, rather than a refusal that would confirm which address that is.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -688,6 +709,7 @@ async def request_password_reset(
         identity is None
         or not identity.is_active
         or not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup)
+        or await sso_enforcement.refuses_every_membership(user=identity)
     ):
         await verify_absent_password_async(_TIMING_EQUALIZER)
         return
@@ -715,6 +737,7 @@ async def reset_password(
     *,
     organizations: OrganizationService,
     blocked_addresses: BlockedAddresses,
+    sso_enforcement: SsoEnforcement,
     token: str,
     new_password: str,
     terms_accepted: bool = False,
@@ -764,12 +787,15 @@ async def reset_password(
 
     Where ``open_signup`` is off, an unverified identity is held to signup's
     rule again here, because the roster can drop it after the link was mailed.
-    A link mailed before its address was blocked is refused as invalid.
+    A link mailed before its address was blocked is refused as invalid, and so
+    is one whose identity some organization's own SSO enforcement now refuses.
     """
     users = UserRepository(db)
     # Before the lock: the check reads through its own block, whose commit would release the lock.
     pending = await users.get_by_reset_token_hash(hash_token(token))
     if pending is not None and pending.email is not None and await blocked_addresses.blocked_among([pending.email]):
+        raise ResetTokenInvalidError
+    if pending is not None and await sso_enforcement.refuses_every_membership(user=pending):
         raise ResetTokenInvalidError
     identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     validate_new_password(new_password)

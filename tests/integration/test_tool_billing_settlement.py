@@ -1235,6 +1235,61 @@ async def test_searches_openai_ran_on_responses_are_billed_at_the_models_rate(as
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "searches", "billed", "unit_rate"),
+    [
+        # Gemini 3 bills each query, at $14 per 1,000.
+        ("gemini-3.1-flash-lite", 2, 2, 0.014),
+        # Gemini 2.5 bills a grounded prompt once, at $35 per 1,000, however many queries it ran.
+        ("gemini-2.5-flash", 3, 1, 0.035),
+    ],
+)
+async def test_searches_gemini_grounding_ran_are_billed_as_google_bills_them(
+    async_db: AsyncSession, model: str, searches: int, billed: int, unit_rate: float
+) -> None:
+    configure_default_pricing(True)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model=model,
+        provider="gemini",
+        provider_type="gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=GatewayUsage(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15, provider_web_searches=searches
+        ),
+    )
+
+    [row] = writer.logs
+    [line] = [entry for entry in row.pricing_breakdown or [] if entry.get("label") == "gemini:web_search"]
+    assert (line["units"], line["unit_rate"]) == (billed, unit_rate)
+    assert line["cost"] == pytest.approx(billed * unit_rate)
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_2_5_prompt_bills_once_on_a_provider_with_a_name_of_its_own(async_db: AsyncSession) -> None:
+    """A hosted provider or organization key serving Gemini has its own name, which must not lift the per-prompt cap."""
+    configure_default_pricing(True)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model="gemini-2.5-flash",
+        provider="team-gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=GatewayUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15, provider_web_searches=3),
+    )
+
+    [row] = writer.logs
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession) -> None:
     configure_default_pricing(True)
     async_db.add(

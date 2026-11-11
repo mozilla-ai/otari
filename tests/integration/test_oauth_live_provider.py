@@ -32,8 +32,11 @@ To run it for Google::
     #    cookie (otari_oauth_flow) it sets is kept, open the URL it returns and
     #    complete the consent screen. The browser lands on
     #    /#/auth/google/callback?code=...&state=...; copy both out of the
-    #    address bar, and the cookie value out of the jar. The state finds the
-    #    verifier; the cookie is what the row is bound to.
+    #    address bar, and the whole cookie value out of the jar. The state
+    #    finds the verifier. The cookie holds one browser token per sign-in the
+    #    browser has in flight, keyed by state, and this test selects the one
+    #    for that state the way the callback route does, so copy it whole
+    #    rather than picking a token out of it.
     # 3. Run immediately, since the code expires in minutes and is single-use,
     #    and the pending state expires in ten.
     OTARI_OAUTH_LIVE_TESTS=1 \\
@@ -43,7 +46,7 @@ To run it for Google::
     OTARI_OAUTH_GOOGLE_CLIENT_SECRET=... \\
     OTARI_OAUTH_LIVE_GOOGLE_CODE='4/0Ax...' \\
     OTARI_OAUTH_LIVE_GOOGLE_STATE='...' \\
-    OTARI_OAUTH_LIVE_GOOGLE_FLOW_SECRET='...' \\
+    OTARI_OAUTH_LIVE_GOOGLE_FLOW_COOKIE='...' \\
     uv run pytest tests/integration/test_oauth_live_provider.py -k google -v
 
 GitHub is the same with ``GITHUB`` in place of ``GOOGLE``. The redirect URI is
@@ -88,12 +91,24 @@ def _live_state(provider: str) -> str:
     return state
 
 
-def _live_flow_secret(provider: str) -> str:
-    """The flow cookie ``/authorize`` set, or skip: the row answers to nothing else."""
-    secret = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET", "")
-    if not secret:
-        pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET is required")
-    return secret
+def _live_browser_token(provider: str, state: str) -> str:
+    """The browser token the flow cookie holds for ``state``, or skip.
+
+    The cookie carries one token per sign-in the browser has in flight, keyed
+    by state, so the token is selected from it rather than used whole. Selected
+    through the same function the callback route uses, because a test that read
+    the cookie its own way would stop proving the route can read it.
+    """
+    cookie = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE", "")
+    if not cookie:
+        pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE is required")
+    token = oauth_service.browser_token_for(cookie, state)
+    if token is None:
+        pytest.skip(
+            f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE holds no token for that state. "
+            "Copy the cookie value whole, and take the state from the same round trip."
+        )
+    return token
 
 
 def _live_config(provider: str) -> GatewayConfig:
@@ -122,12 +137,12 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
     config = _live_config(provider)
     code = _live_code(provider)
     state = _live_state(provider)
-    flow_secret = _live_flow_secret(provider)
+    browser_token = _live_browser_token(provider, state)
 
     init_db(config)
     async with create_session() as db:
         identity = await oauth_service.exchange_code(
-            config, provider, code=code, state=state, flow_secret=flow_secret, db=db
+            config, provider, code=code, state=state, browser_token=browser_token, db=db
         )
         # Committed, because the state was consumed for real: leaving it
         # spendable would contradict what this module is checking.

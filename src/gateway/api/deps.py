@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -18,6 +18,7 @@ from gateway.container import Container
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    OAUTH_PROVIDERS,
     TRACE_CONTENT_HEADER,
     TRACE_CONTENT_KEEP,
     X_API_KEY_HEADER,
@@ -41,6 +42,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import (
     BillingPort,
     InsufficientFundsError,
+    ToolUse,
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
@@ -51,6 +53,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
@@ -63,7 +66,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -132,12 +135,13 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.catalog import served_context_window
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
-from gateway.services.identity import IdentityService
+from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -150,11 +154,12 @@ from gateway.services.inference import (
 )
 from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import InvitationMailLimit, UserAccess
+from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
@@ -162,7 +167,6 @@ from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.pricing_service import (
     RequestPrices,
     ResolvedPricing,
-    model_context_window,
     pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
@@ -196,6 +200,7 @@ from gateway.services.tenancy import (
     MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
+    VerifiedDomainLookup,
     organization_guardrail_runner,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
@@ -454,11 +459,13 @@ def _federated_token_verifier(request: Request, config: GatewayConfig) -> Federa
     if (
         verifier is None
         or verifier.issuers != tuple(config.federation_issuers)
+        or verifier.audiences != tuple(config.federation_audiences)
         or verifier.allow_private_hosts != config.federation_allow_private_hosts
         or verifier.member_issuers != config.federation_member_rules
     ):
         verifier = FederatedTokenVerifier(
             config.federation_issuers,
+            audiences=config.federation_audiences,
             allow_private_hosts=config.federation_allow_private_hosts,
             member_issuers=config.federation_member_rules,
         )
@@ -1004,7 +1011,7 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
 
 def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
     """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
-    return TraceService(uow, TracesRepositories.on(uow), content, owners, model_context_window)
+    return TraceService(uow, TracesRepositories.on(uow), content, owners, served_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -1100,6 +1107,14 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> bool:
+    """Return whether new dashboard sign-ins are frozen right now."""
+    return await is_maintenance_mode(db)
+
+
+MaintenanceModeDep = Annotated[bool, Depends(get_maintenance_mode)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
@@ -1339,12 +1354,34 @@ def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> Entitle
     return container.resolve(EntitlementPort, db)
 
 
+def get_signup_invite_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> SignupInvitePort:
+    """Resolve the signup-invite adapter this build bound at startup."""
+    return container.resolve(SignupInvitePort, db)
+
+
 def get_growth_signal_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     container: ContainerDep,
 ) -> GrowthSignalPort:
     """Resolve the growth-signal adapter this build bound at startup."""
     return container.resolve(GrowthSignalPort, db)
+
+
+def get_person_growth_signal_port(
+    growth: Annotated[GrowthSignalPort, Depends(get_growth_signal_port)],
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+) -> GrowthSignalPort | None:
+    """The growth-signal adapter for a write a person made, or ``None`` when a header master key made it.
+
+    A header master key is the deployment's credential, not a person's, even once
+    the bootstrap operator it resolves to holds an address, so automation and
+    smoke traffic on a tenant route report nothing. ``verify_master_key`` answers
+    the raw key only for a header credential, and ``None`` for a dashboard session.
+    """
+    return None if master_key is not None else growth
 
 
 # The adapter writes and does not commit, so it shares the session of the Unit of Work whose block commits its writes.
@@ -1628,6 +1665,8 @@ def get_workspace_funding(db: PortSessionDep, billing: BillingPortDep) -> Worksp
 WorkspaceFundingDep = Annotated[WorkspaceFunding, Depends(get_workspace_funding)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
+SignupInvitePortDep = Annotated[SignupInvitePort, Depends(get_signup_invite_port)]
+PersonGrowthSignalPortDep = Annotated[GrowthSignalPort | None, Depends(get_person_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
@@ -1683,18 +1722,29 @@ OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depend
 
 
 def get_identity_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     identity_provider: IdentityProviderPortDep,
-    organizations: OrganizationServiceDep,
+    membership_listener: MembershipListenerDep,
 ) -> IdentityService:
-    """Build the identity service on the request's Unit of Work."""
+    """Build the identity service on the request's Unit of Work.
+
+    Its own organization service is built on the same Unit of Work, not the deployment's shared
+    read-only one, because provisioning an SSO sign-in's account writes through it. It carries
+    the membership listener because the sign-in paths built here grant a workspace membership,
+    which has to be announced.
+    """
+    organizations = OrganizationService(db, membership_listener=membership_listener, uow=uow)
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=identity_provider,
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=config.dashboard_session_ttl_hours,
         terms_url=config.terms_url,
         mailer=Mailer(config),
@@ -1704,6 +1754,34 @@ def get_identity_service(
 
 
 IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
+
+
+def get_oidc_connection_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    organizations: OrganizationServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OIDCConnectionService:
+    """Build the organization OIDC connection service on the request's Unit of Work.
+
+    ``sign_in_states`` is the one repository built on the session instead, for the reason the
+    service's own attribute gives: the sign-in client is used after the block that built it.
+    """
+    return OIDCConnectionService(
+        uow,
+        IdentityRepositories.on(uow),
+        organizations=organizations,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
+        allow_private_hosts=config.oidc_allow_private_hosts,
+        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
+        offered_providers=frozenset(
+            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
+        ),
+    )
+
+
+OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
 
 
 def get_org_provider_model_service(
@@ -2173,6 +2251,10 @@ class DatabaseSessionOwners:
             return WorkspaceContent()
         return WorkspaceContent(keeps=True, tool_output=workspace.trace_content_tool_output)
 
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        workspace = await WorkspaceRepository(self._db).get(workspace_id)
+        return workspace.organization_id if workspace is not None else None
+
 
 class NoSessionOwners:
     """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
@@ -2187,6 +2269,9 @@ class NoSessionOwners:
 
     async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
         return WorkspaceContent()
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        return None
 
 
 async def workspace_keeps_trace_content(
@@ -2423,9 +2508,15 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
-def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
+def get_routing_service(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organizations: OrganizationServiceDep,
+) -> RoutingService:
     """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
-    return RoutingService(config, get_usage_service(uow), get_api_key_service(uow))
+    return RoutingService(
+        config, get_usage_service(uow), get_api_key_service(uow), uow=uow, organizations=organizations
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -2807,16 +2898,24 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
             await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
 
         async def admit_funding(
-            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+            self,
+            *,
+            organization_id: uuid.UUID | None,
+            api_key_id: str | None,
+            user_id: str,
+            request_id: str,
+            tool: str,
         ) -> object | None:
             try:
                 return await admit_deployment_paid(
                     billing,
                     deployment_paid=True,
+                    billed=None,
                     organization_id=organization_id,
                     api_key_id=api_key_id,
                     user_id=user_id,
                     request_id=request_id,
+                    tools=frozenset({tool}),
                 )
             except InsufficientFundsError:
                 raise
@@ -2826,9 +2925,11 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 await release_session(db)
                 raise FundsCheckFailedError(describe_port_error(exc)) from exc
 
-        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+        async def settle_funding(
+            self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
+        ) -> None:
             await cast(DeploymentCharge, funding).settle(
-                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+                cost, tools=tools, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
             )
 
         async def release(self) -> bool:
@@ -2919,9 +3020,13 @@ __all__ = [
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",
+    "SignupInvitePortDep",
+    "PersonGrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "MaintenanceModeDep",
+    "OIDCConnectionServiceDep",
     "ModelProviderPortDep",
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",

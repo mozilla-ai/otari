@@ -121,11 +121,13 @@ share the estimate equally. A subagent's own requests are counted exactly.
 ## The context map
 
 The context map shows what fills the model's context window, as blocks sized by
-tokens, with the unused part as **Free**. It reads the session's last LLM call,
-and also names the fullest call when that was an earlier one. Hover, focus or tap
-a block to see its tokens and share of the window.
+tokens, with the unused part as **Free**. It reads the session's last model
+request, and also names the fullest request when that was an earlier one. Hover,
+focus or tap a block to see its tokens and share of the window. The window is
+the one the model's vLLM or SGLang server reports, where it does, and
+models.dev's otherwise (see [Models](models.md)).
 
-- **Every call** is split into cache reads, cache writes and fresh input.
+- **Every request** is split into cache reads, cache writes and fresh input.
 - **A request Otari served itself** is also split into system prompt, tool
   definitions, files, messages and tool results. That split is an estimate
   (Otari counts characters, then scales them to the exact token count), and the
@@ -145,8 +147,8 @@ limits under [Settings](trace-storage.md#settings). Its sessions are grouped by
 the OTLP attributes in [What makes a session](#what-makes-a-session). Span names
 and attribute values are kept only when they look like identifiers.
 
-Each LLM call a span reports is priced like imported usage and counted in the
-session's cost. When two instrumentations report the same call (the same
+Each model request a span reports is priced like imported usage and counted in
+the session's cost. When two instrumentations report the same request (the same
 `gen_ai.response.id`), both spans are kept but the cost counts once. Exported
 spans keep their `otel_trace_id` and `otel_span_id`, so you can join them to the
 same trace in another backend.
@@ -157,7 +159,7 @@ Claude Code can export its own spans, so a session is traced without routing
 its model traffic through Otari. Set it up with
 [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
 
-- Each prompt becomes a turn, with its model calls and tool calls.
+- Each prompt becomes a turn, with its model requests and tool calls.
 - A tool call a Claude Code hook refused shows as `blocked`. Blocked calls and
   tool errors (a command exiting non-zero, a `grep` finding nothing) do not
   count as session errors.

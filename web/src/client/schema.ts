@@ -402,17 +402,12 @@ export interface paths {
          * Authorize
          * @description Start an OAuth sign-in: where to send the browser, and the state to keep.
          *
-         *     A GET that writes, which is the one thing to know about it. It records the
-         *     authorization it is about to start (the state's hash, the PKCE verifier the
-         *     exchange will need, and the digest of a flow secret it sets as an HttpOnly
-         *     cookie) so the callback has something to check against, and that record is
-         *     the whole reason the callback can refuse a code this deployment never asked
-         *     for, or one presented from a browser other than the one that asked.
+         *     Safe to repeat. Each call keeps the sign-ins the browser already has in
+         *     flight, up to a few at once, after which the oldest is dropped.
          *
-         *     Still safe to repeat: each call mints its own state, and only the one the
-         *     browser kept is the one it sends back. The rows the others leave expire on
-         *     their own and are swept by the next call. The cookie is reused when the
-         *     browser already holds one, so a second tab does not break the first.
+         *     NOTE: This GET writes. It records the authorization and sets an HttpOnly
+         *     cookie, and that pair is what lets the callback refuse a code this
+         *     deployment never asked for, or one presented from another browser.
          */
         get: operations["auth-authorize"];
         put?: never;
@@ -726,8 +721,88 @@ export interface paths {
          *
          *     Refused with a 400 where the deployment publishes terms and ``terms_accepted``
          *     is not set, whatever the address.
+         *
+         *     With an ``invite`` that names this address, the account is verified as it is
+         *     created and ``verified`` says so: the invitation reached the mailbox, so a
+         *     verification email would prove nothing more. Only the token's holder learns that.
          */
         post: operations["auth-signup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Callback Sso
+         * @description Exchange an authorization code and set the HttpOnly session cookie.
+         *
+         *     The session is bound to the identity the organization's connection resolves to. A refusal is
+         *     counted as a failed sign-in, and a sign-in that creates the account, or is the first way in to
+         *     one, is reported to ``GrowthSignalPort`` once it has committed.
+         *
+         *     **Maintenance mode freezes this.** A frozen deployment makes no outbound call and spends
+         *     nobody's authorization code.
+         */
+        post: operations["auth-callback_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lookup Sso
+         * @description Say whether an organization's own connection admits a sign-in at this address.
+         *
+         *     An unknown domain, one no organization has proven, and a proven one whose organization holds
+         *     no enabled connection all answer alike: ``found`` is false and nothing else is named.
+         */
+        post: operations["auth-lookup_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorize Sso
+         * @description Start a sign-in through the organization's own connection at ``slug``.
+         *
+         *     An unknown slug and a slug naming an organization with no enabled connection answer alike
+         *     (404), so this surface cannot be read as a directory of which organizations use Otari.
+         *
+         *     NOTE: This GET writes. It records a pending authorization and sets an HttpOnly cookie, both
+         *     scoped to this router's own path.
+         */
+        get: operations["auth-authorize_sso"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2975,8 +3050,10 @@ export interface paths {
          *     whose workspaces still hold usage, API keys, aliases or routing policies, so
          *     a deletion never takes spend history with it.
          *
-         *     Answers with the caller's context in the organization they are moved to,
-         *     their oldest other one.
+         *     Answers with the caller's context in the organization they are moved to: the
+         *     oldest of their other memberships that admits them. One requiring sign-in
+         *     through its own connection admits a member who holds a link to it, and the
+         *     account its enforcement exempts, and nobody else.
          */
         delete: operations["organizations-delete_active_organization"];
         options?: never;
@@ -3766,7 +3843,7 @@ export interface paths {
          *     organizations: this is what an organization switcher renders, and one row
          *     carries ``is_active_organization`` so it can mark the current one. Not to be
          *     confused with ``GET /me/members``, which is the active organization's
-         *     roster.
+         *     memberships. An organization whose own SSO enforcement refuses the caller is left off.
          */
         get: operations["organizations-list_caller_organization_memberships"];
         put?: never;
@@ -4368,6 +4445,122 @@ export interface paths {
         patch: operations["organization-budgets-update_organization_spend_ceiling"];
         trace?: never;
     };
+    "/api/v1/organizations/me/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Sso
+         * @description Read the caller's organization's own sign-in connection. Owners and admins only.
+         *
+         *     ``connection`` is null until the organization saves one.
+         */
+        get: operations["organization-sso-get_organization_sso"];
+        /**
+         * Put Organization Sso
+         * @description Discover the submitted issuer and save the caller's organization's own sign-in connection.
+         *
+         *     Owners and admins only. Replaces any existing connection. The client secret is
+         *     encrypted at rest and never served back.
+         */
+        put: operations["organization-sso-put_organization_sso"];
+        post?: never;
+        /**
+         * Delete Organization Sso
+         * @description Remove the caller's organization's own sign-in connection. Owners and admins only.
+         *
+         *     Refused with 404 when the organization has not saved a connection yet, and with 400 while
+         *     the organization still requires sign-in through it: turn that requirement off first.
+         */
+        delete: operations["organization-sso-delete_organization_sso"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Organization Sso
+         * @description Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Writes the one field, so the issuer is neither re-read nor re-submitted and the stored client
+         *     secret stands. Refused with 404 when the organization has not saved a connection yet, and with
+         *     409 when pausing a connection the organization still requires sign-in through: stop requiring
+         *     it first.
+         */
+        patch: operations["organization-sso-patch_organization_sso"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Organization Sso Enforcement
+         * @description Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
+         *     and with 400 before anybody has signed in through the connection, when it names no owner who keeps
+         *     another way in and waives none, or when the account it names could not sign in while the
+         *     connection is unavailable. An account named at all must be one of the organization's own active
+         *     owners, whether or not sign-in is being required. Turning enforcement off has no other
+         *     precondition.
+         */
+        put: operations["organization-sso-put_organization_sso_enforcement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Sso Preflight
+         * @description Report who requiring sign-in through the caller's organization's own connection would affect.
+         *
+         *     Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
+         */
+        get: operations["organization-sso-get_organization_sso_preflight"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Organization Sso
+         * @description Re-discover the caller's organization's own issuer and store the result. Owners and admins only.
+         *
+         *     Refused with 404 when the organization has not saved a connection yet.
+         */
+        post: operations["organization-sso-test_organization_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/switch": {
         parameters: {
             query?: never;
@@ -4385,7 +4578,7 @@ export interface paths {
          *     This changes which organization every later request is scoped to, so
          *     workspaces, keys, budgets and usage all follow it. Answers 404 for an
          *     organization the caller holds no active membership in, whether or not it
-         *     exists.
+         *     exists, and for one whose own SSO enforcement refuses the caller.
          */
         post: operations["organizations-switch_active_organization"];
         delete?: never;
@@ -14020,7 +14213,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for a tool that runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for what the tool runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -14055,7 +14248,7 @@ export interface components {
             object: "tool";
             /**
              * Reason
-             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool runs on the deployment's account and the API key's organization has no funds paid in, which adding funds changes.
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would run on the deployment's account and the API key's organization has no funds to pay for it, which adding funds changes.
              */
             reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
         };
@@ -14688,10 +14881,8 @@ export interface components {
          *     what this server sends to a provider.
          *
          *     ``state`` is required, and is what binds this callback to an authorization
-         *     request this deployment actually made: it is claimed from
-         *     ``oauth_pending_state`` before the code is sent anywhere, and the row it
-         *     claims is what carries the PKCE verifier the exchange needs. The flow
-         *     cookie ``/authorize`` set travels alongside and binds it to the browser.
+         *     request this deployment actually made. The flow cookie carries the token
+         *     that state names, so it binds the callback to the browser as well.
          */
         OAuthCallbackRequest: {
             /**
@@ -14728,8 +14919,9 @@ export interface components {
          * OAuthSessionResponse
          * @description A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
          *
-         *     The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
-         *     dashboard's sign-in path does not care which credential got it here.
+         *     The three fields ``POST /api/v1/auth/session`` answers, deliberately, so the
+         *     dashboard's sign-in path does not care which credential got it here, and two
+         *     only a provider sign-in can produce: ``password_removed`` and ``new_account``.
          */
         OAuthSessionResponse: {
             /**
@@ -14744,6 +14936,12 @@ export interface components {
              */
             expires_at: string;
             /**
+             * New Account
+             * @description Whether this sign-in created the account, or is the first way in to one nobody had claimed. False for a sign-in to an account that was already usable.
+             * @default false
+             */
+            new_account: boolean;
+            /**
              * Password Removed
              * @description Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then. The person can set a new one from Account settings.
              * @default false
@@ -14755,6 +14953,115 @@ export interface components {
              * @description The identity this session speaks for.
              */
             user_id: string;
+        };
+        /**
+         * OIDCConnectionDomain
+         * @description One of the organization's email domains.
+         */
+        OIDCConnectionDomain: {
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @description Whether the domain's claim is turned on.
+             */
+            enabled: boolean;
+            /**
+             * Proof Expires At
+             * @description When the domain's DNS proof stops being acted on, or None when it has never been verified.
+             */
+            proof_expires_at: string | null;
+        };
+        /**
+         * OIDCConnectionEnabledRequest
+         * @description What an organization administrator submits to pause or resume sign-in through its connection.
+         */
+        OIDCConnectionEnabledRequest: {
+            /**
+             * Enabled
+             * @description Whether this connection admits sign-in.
+             */
+            enabled: boolean;
+        };
+        /**
+         * OIDCConnectionPublic
+         * @description An organization's own sign-in connection, as its admins see it.
+         *
+         *     Carries ``client_secret_last4`` and never the secret itself.
+         */
+        OIDCConnectionPublic: {
+            /** Client Id */
+            client_id: string;
+            /** Client Secret Last4 */
+            client_secret_last4: string;
+            /** Default Role */
+            default_role: string;
+            /**
+             * Discovered At
+             * Format: date-time
+             * @description When the provider's configuration was last read.
+             */
+            discovered_at: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Domains
+             * @description Every one of the organization's email domains, each with its DNS proof's expiry and whether its claim is enabled. Only a domain that is both enabled and has an unexpired proof admits a sign-in.
+             */
+            domains: components["schemas"]["OIDCConnectionDomain"][];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer
+             * @description The organization's own claim.
+             */
+            issuer: string;
+            /**
+             * Resolved Issuer
+             * @description What discovery confirmed the issuer to be.
+             */
+            resolved_issuer: string;
+        };
+        /**
+         * OIDCConnectionRequest
+         * @description What an organization administrator submits to configure its own sign-in connection.
+         *
+         *     Whether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only
+         *     way to change it, so storing a connection can neither pause nor resume one.
+         */
+        OIDCConnectionRequest: {
+            /**
+             * Client Id
+             * @description The OAuth client ID this deployment authenticates with.
+             */
+            client_id: string;
+            /**
+             * Client Secret
+             * @description The OAuth client secret. Stored encrypted and never served back. Leave it out to keep the one already stored, which is refused unless the issuer and the client ID are both unchanged.
+             */
+            client_secret?: string | null;
+            /**
+             * Default Role
+             * @description The role given to a person's first sign-in through this connection.
+             * @default member
+             * @enum {string}
+             */
+            default_role: "member" | "viewer";
+            /**
+             * Display Name
+             * @description The identity provider's name, as shown to people signing in.
+             */
+            display_name: string;
+            /**
+             * Issuer
+             * @description The identity provider's issuer URL, as the organization's own claim.
+             */
+            issuer: string;
         };
         /**
          * OfferingUsage
@@ -16247,6 +16554,124 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
+        };
+        /**
+         * OrganizationSsoEnforcementPublic
+         * @description The caller's organization's current sign-in enforcement, as its admins see it.
+         */
+        OrganizationSsoEnforcementPublic: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route, where the organization named one.
+             */
+            break_glass_user_id: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization has explicitly waived naming a break-glass owner.
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
+        };
+        /**
+         * OrganizationSsoEnforcementRequest
+         * @description What an organization administrator submits to require, or stop requiring, sign-in through its own connection.
+         */
+        OrganizationSsoEnforcementRequest: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route when required is true.
+             */
+            break_glass_user_id?: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization explicitly waives a break-glass owner when enforcement is required.
+             * @default false
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
+        };
+        /**
+         * OrganizationSsoPreflightMemberPublic
+         * @description One active member who holds no sign-in link to the caller's organization's own connection.
+         */
+        OrganizationSsoPreflightMemberPublic: {
+            /**
+             * Email
+             * @description The member's sign-in address, or null for an identity with none.
+             */
+            email: string | null;
+            /**
+             * Full Name
+             * @description The member's display name, or null when none is set.
+             */
+            full_name: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * OrganizationSsoPreflightPublic
+         * @description What requiring sign-in through the caller's organization's own connection would cost today.
+         *
+         *     ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+         *     would get a new account the first time they use it. ``affected_members`` samples those people,
+         *     bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+         *
+         *     ``break_glass_candidates`` is who may be named as the exception, so naming one of them is never
+         *     refused. It leaves out the deployment's own operator, who is never subject to enforcement and so
+         *     needs no exception.
+         */
+        OrganizationSsoPreflightPublic: {
+            /**
+             * Affected Count
+             * @description How many active members hold no sign-in link to this connection.
+             */
+            affected_count: number;
+            /**
+             * Affected Members
+             * @description A sample of the affected members, for recognizing who they are.
+             */
+            affected_members: components["schemas"]["OrganizationSsoPreflightMemberPublic"][];
+            /**
+             * Affected Members Truncated
+             * @description Whether affected_members leaves out some of the members affected_count counts.
+             */
+            affected_members_truncated: boolean;
+            /**
+             * Break Glass Candidates
+             * @description The owners who may be named to keep a route in that does not depend on this connection. An owner this connection provisioned is not among them, because exempting an account that cannot sign in without the connection keeps no route open.
+             */
+            break_glass_candidates: components["schemas"]["OrganizationSsoPreflightMemberPublic"][];
+            /**
+             * Total Members
+             * @description The organization's active membership count.
+             */
+            total_members: number;
+        };
+        /**
+         * OrganizationSsoPublic
+         * @description An organization's own OIDC connection, and what to register at the provider.
+         */
+        OrganizationSsoPublic: {
+            /** @description The organization's own connection, or null until one is saved. */
+            connection: components["schemas"]["OIDCConnectionPublic"] | null;
+            /** @description The organization's current sign-in enforcement. Independent of whether a connection exists. */
+            enforcement: components["schemas"]["OrganizationSsoEnforcementPublic"];
+            /**
+             * Redirect Uri
+             * @description The absolute callback address to register at the identity provider, whether or not a connection is saved yet. Null where this deployment has no public address of its own configured, because there is no address to register until it has one.
+             */
+            redirect_uri: string | null;
         };
         /**
          * OutputShape
@@ -18697,6 +19122,11 @@ export interface components {
              */
             full_name?: string | null;
             /**
+             * Invite
+             * @description An invitation token from a link emailed to this address. Where it names the same address, the account is verified at once and no verification email is sent.
+             */
+            invite?: string | null;
+            /**
              * Password
              * @description The password to sign in with once verified. At least 8 characters, at most 72 bytes.
              */
@@ -18718,6 +19148,12 @@ export interface components {
              * @description What the caller should do next.
              */
             message: string;
+            /**
+             * Verified
+             * @description The account is verified already, through its invitation, so the caller can sign in now.
+             * @default false
+             */
+            verified: boolean;
         };
         /**
          * SpanPublic
@@ -18829,6 +19265,117 @@ export interface components {
             tool_name: string | null;
             /** Tool Type */
             tool_type: string | null;
+        };
+        /**
+         * SsoAuthorizeResponse
+         * @description Where to send the browser, and the state to check when it comes back.
+         */
+        SsoAuthorizeResponse: {
+            /**
+             * Authorization Url
+             * @description The identity provider's consent screen to navigate to.
+             */
+            authorization_url: string;
+            /**
+             * State
+             * @description An opaque CSRF value to keep for the length of the redirect and send back with the authorization code. The response also sets an HttpOnly cookie that the callback requires, so the exchange can only be completed from the browser this call was made from.
+             */
+            state: string;
+        };
+        /**
+         * SsoCallbackRequest
+         * @description The authorization code a provider handed the browser, for a sign-in through one organization's own connection.
+         *
+         *     No ``slug``: the pending authorization the ``state`` names already resolves to one connection,
+         *     so a browser cannot redeem a code against a connection other than the one that minted the state.
+         */
+        SsoCallbackRequest: {
+            /**
+             * Code
+             * @description The authorization code from the provider's redirect.
+             */
+            code: string;
+            /**
+             * Iss
+             * @description The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this connection's issuer when its discovery document advertises the parameter; a provider that does not advertise it sends none.
+             */
+            iss?: string | null;
+            /**
+             * State
+             * @description The 'state' from the provider's redirect, as issued by /authorize.
+             */
+            state: string;
+            /**
+             * Terms Accepted
+             * @description Whether the person accepted this deployment's terms before going to the provider. Required where the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has claimed yet; ignored otherwise.
+             * @default false
+             */
+            terms_accepted: boolean;
+        };
+        /**
+         * SsoLookupRequest
+         * @description An address to resolve an organization's own sign-in connection from.
+         */
+        SsoLookupRequest: {
+            /**
+             * Email
+             * @description The address to resolve an organization from.
+             */
+            email: string;
+        };
+        /**
+         * SsoLookupResponse
+         * @description Whether an organization's own connection admits a sign-in at this address.
+         *
+         *     An unknown domain, one no organization has proven, and a proven one whose organization holds
+         *     no enabled connection all answer alike: ``found`` is false and the other two fields are null,
+         *     so the response cannot be read as a directory of which organizations use Otari.
+         */
+        SsoLookupResponse: {
+            /**
+             * Found
+             * @description Whether an organization's own connection admits a sign-in at this address.
+             */
+            found: boolean;
+            /**
+             * Organization Name
+             * @description The organization's own name, set only when found.
+             */
+            organization_name?: string | null;
+            /**
+             * Slug
+             * @description The organization's slug, to start the sign-in with, set only when found.
+             */
+            slug?: string | null;
+        };
+        /**
+         * SsoSessionPublic
+         * @description A dashboard session minted by signing in through an organization's own connection.
+         */
+        SsoSessionPublic: {
+            /**
+             * Active Organization Id
+             * @description The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none.
+             */
+            active_organization_id: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the session cookie stops being accepted.
+             */
+            expires_at: string;
+            /**
+             * Password Removed
+             * @description Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then.
+             * @default false
+             */
+            password_removed: boolean;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The identity this session speaks for.
+             */
+            user_id: string;
         };
         /**
          * StoredCountryDatabasePublic
@@ -22571,6 +23118,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-callback_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoCallbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSessionPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-lookup_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-authorize_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoAuthorizeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -28915,6 +29559,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-get_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+        };
+    };
+    "organization-sso-put_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-delete_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "organization-sso-patch_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCConnectionEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-put_organization_sso_enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationSsoEnforcementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-get_organization_sso_preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPreflightPublic"];
+                };
+            };
+        };
+    };
+    "organization-sso-test_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
                 };
             };
         };
