@@ -584,10 +584,11 @@ def check_identity(
     A remote check is its profile, endpoint, credential and arguments, so two
     organizations reach the same verdict only by asking the same service the
     same question. An in-process check is the version of the definition it was
-    built from, which a guardrail that does not say returns ``None`` for.
+    built from and its arguments, and ``None`` for a guardrail that does not say.
     """
     if cfg.profile in in_process:
-        return getattr(in_process[cfg.profile], "identity", None)
+        identity = getattr(in_process[cfg.profile], "identity", None)
+        return None if identity is None else json.dumps([identity, cfg.validate_kwargs], sort_keys=True, default=str)
     if not base_url:
         return None
     secret = hashlib.sha256((credential or "").encode()).hexdigest()

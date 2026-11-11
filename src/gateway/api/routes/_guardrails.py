@@ -54,6 +54,10 @@ if TYPE_CHECKING:
     from gateway.services.traces import RequestTrace
 
 
+# How many pieces of one request are checked at a time.
+_CONCURRENT_CHECKS = 8
+
+
 class AnswerRefused(HTTPException):
     """A guardrail refused the model's answer, after the model ran.
 
@@ -306,10 +310,15 @@ class RequestGuardrails:
         caller answers in its own terms. :meth:`admit` answers it with a 502.
         """
         reading = [c for c in contents if self._entries(c.reads)]
+        # A long history on a worker that has kept no verdicts yet would otherwise check every piece at once.
+        slots = asyncio.Semaphore(_CONCURRENT_CHECKS)
+
+        async def verdict(content: _Content) -> GuardrailVerdict:
+            async with slots:
+                return await self._verdict(content.target.text, self._entries(content.reads))
+
         started = datetime.now(UTC)
-        outcomes = await asyncio.gather(
-            *(self._verdict(c.target.text, self._entries(c.reads)) for c in reading), return_exceptions=True
-        )
+        outcomes = await asyncio.gather(*(verdict(c) for c in reading), return_exceptions=True)
         ended = datetime.now(UTC)
         for outcome in outcomes:
             if isinstance(outcome, BaseException) and not isinstance(outcome, GuardrailsNotReachableError):

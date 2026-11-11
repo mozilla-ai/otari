@@ -174,6 +174,60 @@ async def test_a_held_messages_stream_does_not_read_a_call_the_provider_runs(mon
     assert seen == ['{"to": "a@b"}']
 
 
+def test_answer_parts_of_a_responses_answer_include_a_custom_tool_call() -> None:
+    result = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="function_call", name="send_mail", arguments='{"to": "a@b"}'),
+            SimpleNamespace(type="custom_tool_call", name="run_sql", input="DROP TABLE users"),
+        ]
+    )
+
+    assert [(p.kind, p.text, p.tool) for p in answer_parts("responses", result)] == [
+        ("tool_call", '{"to": "a@b"}', "send_mail"),
+        ("tool_call", "DROP TABLE users", "run_sql"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_held_responses_stream_reads_each_call_once_however_its_arguments_arrive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A call's arguments may come as deltas, as a custom tool's input deltas, or only on the finished item."""
+    seen: list[str] = []
+
+    async def _record(guardrails: list[GuardrailConfig], text: str, **kwargs: object) -> GuardrailVerdict:
+        seen.append(text)
+        return await _flag(guardrails, text, **kwargs)
+
+    def _item(event: str, item_id: str, kind: str, name: str, **arguments: str) -> SimpleNamespace:
+        return SimpleNamespace(type=event, item=SimpleNamespace(type=kind, id=item_id, name=name, **arguments))
+
+    def _delta(event: str, item_id: str, text: str) -> SimpleNamespace:
+        return SimpleNamespace(type=event, item_id=item_id, delta=text)
+
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _record)
+    guardrails = RequestGuardrails(
+        [GuardrailConfig(profile="mod", mode="block", on=["tool_calls"])], response=Response()
+    )
+    events = [
+        _item("response.output_item.added", "fc_1", "function_call", "send_mail", arguments=""),
+        _delta("response.function_call_arguments.delta", "fc_1", '{"to": '),
+        _delta("response.function_call_arguments.delta", "fc_1", '"a@b"}'),
+        _item("response.output_item.done", "fc_1", "function_call", "send_mail", arguments='{"to": "a@b"}'),
+        _item("response.output_item.added", "ct_1", "custom_tool_call", "run_sql", input=""),
+        _delta("response.custom_tool_call_input.delta", "ct_1", "SELECT 1"),
+        _item("response.output_item.done", "ct_1", "custom_tool_call", "run_sql", input="SELECT 1"),
+        _item("response.output_item.done", "fc_2", "function_call", "delete", arguments='{"id": "forbidden"}'),
+    ]
+    out: list[Any] = []
+
+    with pytest.raises(AnswerRefused):
+        out.extend([event async for event in guarded_stream(_events(*events), guardrails, "responses", lambda _: None)])
+
+    assert out == []
+    assert sorted(seen) == sorted(['{"to": "a@b"}', "SELECT 1", '{"id": "forbidden"}'])
+
+
 @pytest.mark.asyncio
 async def test_finish_result_runs_the_guardrails_on_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _flag)

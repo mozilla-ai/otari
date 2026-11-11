@@ -168,3 +168,27 @@ def test_a_malformed_tool_call_names_no_tool_rather_than_failing() -> None:
     ]
 
     assert _shape(chat_targets(messages))[-1] == ("after_tool", _INJECTION, None, True)
+
+
+def test_a_call_id_that_is_not_a_string_names_no_tool_rather_than_failing() -> None:
+    chat: list[dict[str, Any]] = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "tool_calls": [{"id": [], "function": {"name": "search"}}]},
+        {"role": "tool", "tool_call_id": {}, "content": _INJECTION},
+    ]
+    messages = SimpleNamespace(
+        messages=[
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": [], "name": "search", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": {}, "content": _INJECTION}]},
+        ]
+    )
+    responses = SimpleNamespace(
+        input=[
+            {"type": "function_call", "call_id": [], "name": "search", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": {}, "output": _INJECTION},
+        ]
+    )
+
+    for targets in (chat_targets(chat), messages_targets(messages), responses_targets(responses)):
+        assert _shape(targets)[-1] == ("after_tool", _INJECTION, None, True)

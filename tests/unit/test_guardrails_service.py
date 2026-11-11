@@ -746,4 +746,13 @@ def test_a_check_without_a_verdict_or_an_identity_is_not_kept() -> None:
 
     unnamed = cast(Any, _Unnamed())
     assert check_identity(cfg, base_url="", credential=None, in_process={"pi": unnamed}) is None
+
+    class _Named(_Unnamed):
+        identity = "pi@1"
+
+    named = cast(Any, _Named())
+    stricter = GuardrailConfig(profile="pi", validate_kwargs={"threshold": 0.1})
+    assert check_identity(cfg, base_url="", credential=None, in_process={"pi": named}) != check_identity(
+        stricter, base_url="", credential=None, in_process={"pi": named}
+    )
     assert check_identity(cfg, base_url="", credential=None, in_process={}) is None

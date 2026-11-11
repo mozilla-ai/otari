@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Callable
+from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
@@ -237,6 +238,38 @@ def test_a_streamed_answer_a_guardrail_refuses_ends_in_an_error_and_is_still_bil
     assert "Answer blocked by guardrail policy." in response.text
     [row] = db_session.scalars(select(UsageLog)).all()
     assert (row.prompt_tokens, row.completion_tokens, row.status_code) == (11, 7, 403)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_an_answer_a_guardrail_refuses_still_owes_a_flat_price(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    db_session: Session,
+    stream: bool,
+) -> None:
+    priced = client.post(
+        f"{API_ROOT}/pricing", json={"model_key": MODEL_NAME, "price_per_request": 0.005}, headers=master_key_header
+    )
+    assert priced.status_code == 200, priced.text
+    answer = _chunks("a forbidden answer") if stream else _completion("a forbidden answer")
+
+    with patch(_RUNNER, new=_guardrails), patch("gateway.api.routes.chat.acompletion", new=_provider(answer)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": stream,
+                "guardrails": [_ON_OUTPUT],
+            },
+            headers=api_key_header,
+        )
+        response.read()
+
+    assert "guardrail_violation" in response.text
+    [row] = db_session.scalars(select(UsageLog)).all()
+    assert (row.status_code, row.cost) == (403, Decimal("0.005"))
 
 
 @pytest.mark.parametrize("endpoint", list(_STREAMS))

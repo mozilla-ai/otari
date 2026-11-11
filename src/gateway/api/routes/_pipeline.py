@@ -5119,6 +5119,7 @@ async def record_usage(
     request_facts: PriceFacts = NO_FACTS,
     result_tier: str | None = None,
     stream_cut_by: StreamCutBy | None = None,
+    answered: bool = False,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -5190,6 +5191,8 @@ async def record_usage(
         request_facts: What the request says about itself that a price's rules
             ask (``RequestContext.price_facts``). The row is priced at the tier
             the provider reports, never the one the request asked for.
+        answered: The provider answered in full and ``error`` is the gateway's
+            refusal of the answer, so the call is billed and counted as a success.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -5253,7 +5256,7 @@ async def record_usage(
     # rate is resolved for a success even without usage. A model priced per token
     # is priced only from reported usage, as it always has been. An incomplete
     # row did not finish, so it is billed on its estimated tokens alone.
-    succeeded = error is None and not incomplete
+    succeeded = (error is None or answered) and not incomplete
     resolved: ResolvedPricing | None = None
     # The tier the provider served at: its usage's, else its result's or a streamed chunk's, never the one asked for.
     served_tier = service_tier_of(usage_data) if usage_data else None
@@ -5370,7 +5373,7 @@ async def record_usage(
         record_attempt(
             str(provider or ""),
             model,
-            failed=error is not None or incomplete,
+            failed=not succeeded,
             status_code=status_code,
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
@@ -6486,6 +6489,7 @@ def build_streaming_response(
             error=failure_error_message(exc),
             status_code=failure_status_code(exc),
             stream_cut_by="provider" if provider_cut else None,
+            answered=isinstance(exc, AnswerRefused),
             latency_ms=_elapsed_ms(started_at),
             ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
@@ -7367,6 +7371,7 @@ async def run_non_stream(
                 usage_override=usage_data,
                 error=failure_error_message(refused) if refused is not None else None,
                 status_code=refused.status_code if refused is not None else None,
+                answered=refused is not None,
                 latency_ms=_elapsed_ms(ctx.started_at),
                 counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                 attribution=attribution,

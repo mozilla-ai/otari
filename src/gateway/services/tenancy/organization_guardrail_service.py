@@ -154,11 +154,6 @@ class OrganizationGuardrailCreate(BaseModel):
     ``http://`` sidecar) and this row cannot see what it is set to, so an entry
     that fell back to it could not promise the bearer was sent over https. See
     `_require_url_for_credential`.
-
-    ``on`` is not offered. This plane mandates input-direction checks, which is
-    the only direction the request path enforces
-    (`services.guardrails.run_input_guardrails`); an organization that could
-    store an output-direction mandate would be storing one nothing runs.
     """
 
     # A body that would actually be accepted, which the derived one is not: the

@@ -36,7 +36,7 @@ Each guardrail can be applied across the entire organization or to specific work
 1. In **Guardrails**, click **Mandate a guardrail**.
 2. Choose whether you want to use a guardrail configured from the catalog or your own guardrail service.
 3. Choose **What it checks**: user input, tool results, tool calls, answers, or any of them.
-4. Choose the **Mode**: whether the guardrail should block requests or monitor them only. A blocked tool result or tool call is replaced with a note saying why, so the agent can carry on.
+4. Choose the **Mode**: whether the guardrail should block requests or monitor them only. A blocked tool result, or a blocked call to a tool Otari runs, is replaced with a note saying why, so the agent can carry on. A blocked call to a tool your client runs refuses the answer with a `403`.
 5. Choose what should happen **If unreachable**: refuse the request or serve it unchecked. Only blocking guardrails can refuse requests; monitoring guardrails will always serve them.
 6. Select where the guardrail should run: every workspace, including new ones, or selected workspaces.
 7. Click **Mandate a guardrail** to save your settings.

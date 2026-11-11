@@ -82,15 +82,20 @@ class _Collector:
         return self.targets
 
 
+def _call_id(value: Any) -> str | None:
+    """A tool call's id, to look its name up by. The request is not validated this deep, so it can be any JSON."""
+    return value if isinstance(value, str) else None
+
+
 def chat_targets(messages: Sequence[Any]) -> list[RequestTarget]:
     """The targets of a Chat Completions ``messages`` list."""
     last_turn = _last_turn(messages, lambda m: m.get("role") == "assistant")
     names = {
-        call.get("id"): call["function"].get("name")
+        call["id"]: call["function"].get("name")
         for message in messages
         if isinstance(message, dict) and message.get("role") == "assistant"
         for call in message.get("tool_calls") or []
-        if isinstance(call, dict) and isinstance(call.get("function"), dict)
+        if isinstance(call, dict) and isinstance(call.get("id"), str) and isinstance(call.get("function"), dict)
     }
     found = _Collector()
     for i, message in enumerate(messages):
@@ -98,7 +103,7 @@ def chat_targets(messages: Sequence[Any]) -> list[RequestTarget]:
             continue
         role, new = message.get("role"), i > last_turn
         if role in ("tool", "function"):
-            tool = names.get(message.get("tool_call_id")) if role == "tool" else message.get("name")
+            tool = names.get(_call_id(message.get("tool_call_id"))) if role == "tool" else message.get("name")
             found.result(text_from_content(message.get("content")), tool, _setter(message, "content"), new=new)
         elif role == "user" and new:
             found.input(text_from_content(message.get("content")))
@@ -110,11 +115,11 @@ def messages_targets(request: Any) -> list[RequestTarget]:
     messages: Sequence[Any] = request.messages
     last_turn = _last_turn(messages, lambda m: m.get("role") == "assistant")
     names = {
-        block.get("id"): block.get("name")
+        block["id"]: block.get("name")
         for message in messages
         if isinstance(message, dict) and message.get("role") == "assistant" and isinstance(message.get("content"), list)
         for block in message["content"]
-        if isinstance(block, dict) and block.get("type") == "tool_use"
+        if isinstance(block, dict) and block.get("type") == "tool_use" and isinstance(block.get("id"), str)
     }
     found = _Collector()
     for i, message in enumerate(messages):
@@ -131,7 +136,7 @@ def messages_targets(request: Any) -> list[RequestTarget]:
             if block.get("type") == "tool_result":
                 found.result(
                     text_from_content(block.get("content")),
-                    names.get(block.get("tool_use_id")),
+                    names.get(_call_id(block.get("tool_use_id"))),
                     _setter(block, "content", also={"is_error": True}),
                     new=new,
                 )
@@ -163,9 +168,11 @@ def responses_targets(request: Any) -> list[RequestTarget]:
         value, lambda item: item.get("role") == "assistant" or item.get("type") in _RESPONSES_MODEL_ITEMS
     )
     names = {
-        item.get("call_id"): item.get("name")
+        item["call_id"]: item.get("name")
         for item in value
-        if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call")
+        if isinstance(item, dict)
+        and item.get("type") in ("function_call", "custom_tool_call")
+        and isinstance(item.get("call_id"), str)
     }
     for i, item in enumerate(value):
         if not isinstance(item, dict):
@@ -174,7 +181,7 @@ def responses_targets(request: Any) -> list[RequestTarget]:
         if kind in _RESPONSES_TOOL_OUTPUTS:
             found.result(
                 text_from_content(item.get("output")),
-                names.get(item.get("call_id")),
+                names.get(_call_id(item.get("call_id"))),
                 _setter(item, "output"),
                 new=new,
             )

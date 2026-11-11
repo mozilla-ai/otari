@@ -19,6 +19,16 @@ from gateway.api.routes._guardrail_targets import AnswerPart
 from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
 from gateway.streaming import close_stream_quietly, merge_stream_usage
 
+# The Responses items that are a call the client runs, each with the field its arguments are in.
+_RESPONSES_CALLS = {"function_call": "arguments", "custom_tool_call": "input"}
+
+
+def _call_arguments(item: Any) -> str | None:
+    """A Responses output item's arguments, where it is a call the client runs."""
+    field = _RESPONSES_CALLS.get(getattr(item, "type", None) or "")
+    arguments = getattr(item, field, None) if field is not None else None
+    return arguments if isinstance(arguments, str) else None
+
 
 def answer_parts(dialect: str, result: Any) -> list[AnswerPart]:
     """The text and the tool calls of a complete answer, in ``dialect`` (``chat``, ``messages`` or ``responses``)."""
@@ -48,8 +58,8 @@ def answer_parts(dialect: str, result: Any) -> list[AnswerPart]:
                     for content in item.content or []
                     if getattr(content, "type", None) == "output_text" and content.text
                 )
-            elif kind == "function_call" and isinstance(item.arguments, str):
-                parts.append(AnswerPart("tool_call", item.arguments, tool=item.name))
+            elif (arguments := _call_arguments(item)) is not None:
+                parts.append(AnswerPart("tool_call", arguments, tool=item.name))
     return parts
 
 
@@ -99,7 +109,7 @@ def _deltas(dialect: str, event: Any) -> list[_Delta]:
         kind = getattr(event, "type", None)
         if kind == "response.output_text.delta":
             deltas.append(_Delta(("text", event.item_id, event.content_index), event.delta))
-        elif kind == "response.function_call_arguments.delta":
+        elif kind in ("response.function_call_arguments.delta", "response.custom_tool_call_input.delta"):
             deltas.append(_Delta(("call", event.item_id), event.delta))
     return deltas
 
@@ -117,9 +127,22 @@ def _tool_name(dialect: str, event: Any) -> tuple[tuple[Any, ...], str] | None:
             return ("call", event.index), block.name
     else:
         item = getattr(event, "item", None)
-        if item is not None and item.type == "function_call" and event.type == "response.output_item.added":
+        if item is not None and item.type in _RESPONSES_CALLS and event.type == "response.output_item.added":
             return ("call", item.id), item.name
     return None
+
+
+def _complete_call(dialect: str, event: Any) -> tuple[tuple[Any, ...], str, str] | None:
+    """A Responses call the stream hands over whole, keyed as its deltas are, with its name and arguments.
+
+    A provider may send a call's arguments only here, without deltas, so they
+    replace whatever the deltas assembled rather than adding to it.
+    """
+    item = getattr(event, "item", None)
+    if dialect != "responses" or item is None or getattr(event, "type", None) != "response.output_item.done":
+        return None
+    arguments = _call_arguments(item)
+    return None if arguments is None else (("call", item.id), item.name, arguments)
 
 
 def _provider_call(dialect: str, event: Any) -> tuple[Any, ...] | None:
@@ -162,6 +185,9 @@ async def guarded_stream(
                 provider_calls.add(provider_call)
             for delta in _deltas(dialect, event):
                 texts[delta.channel] = texts.get(delta.channel, "") + delta.text
+            if (complete := _complete_call(dialect, event)) is not None:
+                key, name, arguments = complete
+                names[key], texts[key] = name, arguments
         parts = [
             AnswerPart("tool_call" if key[0] == "call" else "text", text, tool=names.get(key))
             for key, text in texts.items()
