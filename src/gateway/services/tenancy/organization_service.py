@@ -39,6 +39,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNotFoundError,
     InvitationPasswordNotAcceptedError,
     LastOrganizationError,
+    MembershipActivationNeedsAcceptanceError,
     MembershipUpdateError,
     NoActiveOrganizationError,
     NotAuthorizedError,
@@ -2545,6 +2546,9 @@ class OrganizationService:
                 raise OrganizationMemberDeactivatedError(invitation.email)
             if await blocked_addresses.blocked_among([invitation.email]):
                 raise BlockedEmailError(invitation.email)
+            # A domain proven since the first invitation refuses the new link, as it would a new invitation.
+            if not await self.is_deployment_operator(user):
+                await self._refuse_address_at_domain_proven_elsewhere(invitation.email, organization)
             invitation = await self.invitations.update_status(
                 invitation,
                 {
@@ -2641,6 +2645,16 @@ class OrganizationService:
             return
         raise OrganizationMemberDomainClaimedError(email)
 
+    async def _membership_was_accepted(self, membership: OrganizationMember) -> bool:
+        """Whether a membership's holder ever agreed to it.
+
+        An accepted invitation says they did. A membership never invited at all
+        came from sign-in, domain auto-join, SSO or a direct add, each of which
+        the holder or an operator vouched for, so it counts too.
+        """
+        statuses = await self.invitations.get_statuses_by_organization_member(membership.id)
+        return not statuses or "accepted" in statuses
+
     async def _identity_for_address(self, email: str, organization: Organization) -> User:
         """The identity holding an address, created claimable if none does, refusing a deactivated one.
 
@@ -2666,8 +2680,13 @@ class OrganizationService:
         organization_member_id: uuid.UUID,
         request: ActiveOrganizationMemberUpdateRequest,
         sso_enforcement: SsoEnforcement,
+        open_signup: bool,
     ) -> ActiveOrganizationMemberPublic:
         """Change a member's role or status.
+
+        Under ``open_signup``, only a deployment operator may make active a membership
+        whose holder never accepted it, for the reason only an operator may add one
+        directly there. Reactivating someone who once accepted is anyone's.
 
         NOTE: A role or status this organization's own enforcement refuses also ends the member's
         live session, because no later request re-asks and the session was minted while it admitted
@@ -2694,6 +2713,14 @@ class OrganizationService:
             update_data=update_data,
             organization_id=organization.id,
         )
+        if (
+            open_signup
+            and update_data.get("status") == "active"
+            and target.status != "active"
+            and not await self._membership_was_accepted(target)
+            and not await self.is_deployment_operator(user)
+        ):
+            raise MembershipActivationNeedsAcceptanceError
 
         async with self._require_unit_of_work():
             # Suspension may move the identity's active-organization pointer.

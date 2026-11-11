@@ -43081,7 +43081,7 @@
         ]
       },
       "patch": {
-        "description": "Change a member's role or status. Organization owners and admins only.",
+        "description": "Change a member's role or status. Organization owners and admins only.\n\nOn a deployment with ``open_signup`` on, only a deployment operator may make\nactive a member who never accepted an invitation (403 for anyone else).",
         "operationId": "organizations-update_active_organization_member",
         "parameters": [
           {

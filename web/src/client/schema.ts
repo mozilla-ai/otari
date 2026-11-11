@@ -3932,6 +3932,9 @@ export interface paths {
         /**
          * Update Active Organization Member
          * @description Change a member's role or status. Organization owners and admins only.
+         *
+         *     On a deployment with ``open_signup`` on, only a deployment operator may make
+         *     active a member who never accepted an invitation (403 for anyone else).
          */
         patch: operations["organizations-update_active_organization_member"];
         trace?: never;

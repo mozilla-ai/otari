@@ -310,13 +310,19 @@ async def update_active_organization_member(
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     body: ActiveOrganizationMemberUpdateRequest,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ActiveOrganizationMemberPublic:
-    """Change a member's role or status. Organization owners and admins only."""
+    """Change a member's role or status. Organization owners and admins only.
+
+    On a deployment with ``open_signup`` on, only a deployment operator may make
+    active a member who never accepted an invitation (403 for anyone else).
+    """
     return await service.update_active_organization_member_for_user(
         user=current_identity,
         organization_member_id=organization_member_id,
         request=body,
         sso_enforcement=connections,
+        open_signup=config.open_signup,
     )
 
 

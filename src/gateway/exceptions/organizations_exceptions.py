@@ -130,6 +130,16 @@ class DirectMemberAddUnavailableError(TenancyForbiddenError):
         super().__init__("Members join an organization on this deployment by invitation. Invite the address instead.")
 
 
+class MembershipActivationNeedsAcceptanceError(TenancyForbiddenError):
+    """Making active a membership its holder never accepted, on a deployment where anyone may create an organization."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This member never accepted an invitation, and members join an organization on this deployment "
+            "by accepting one. Invite the address again instead."
+        )
+
+
 class OrganizationDomainNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_domain_id: object):
         super().__init__(f"Organization domain {organization_domain_id} not found")
@@ -437,6 +447,7 @@ __all__ = [
     "InvitationPasswordNotAcceptedError",
     "LastOrganizationError",
     "LastWorkspaceError",
+    "MembershipActivationNeedsAcceptanceError",
     "MembershipUpdateError",
     "NoActiveOrganizationError",
     "NotAnOrganizationMemberError",

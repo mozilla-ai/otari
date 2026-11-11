@@ -123,7 +123,9 @@ address added that way has no password and must sign up, reset its password, or
 use Google or GitHub. Invite instead when you can, since the link sets the first
 password. Where [signup is open](configuration.md#signup), anyone can create an
 organization, so only a deployment operator can add members this way, and
-everyone else invites.
+everyone else invites. For the same reason, only an operator can set to active
+someone who never accepted an invitation, such as one whose invitation was
+revoked; anyone who once joined can be reactivated as usual.
 
 **Which organization you act in.** After signing in, it is the one you last used,
 or the oldest you still belong to if you were removed from it. Being removed,
@@ -148,8 +150,9 @@ so it is deliberately limited.
 - **The workspace named Default workspace is granted** to a new member, at the same role, so they have somewhere to work. An organization that has no workspace of that name grants none, and an owner or admin assigns one from **Members & roles**.
 - **Joining does not change** the person's active organization.
 - **Public email providers** cannot be claimed.
-- **Other organizations cannot add or invite** an address at a proven domain
-  while its proof is current. Only a deployment operator can.
+- **Other organizations cannot add, invite or reissue an invitation to** an
+  address at a proven domain while its proof is current. Only a deployment
+  operator can.
 
 A proof expires after the deployment's set time, since domains change hands.
 Otari does not re-check DNS between verifications, so until then a transferred

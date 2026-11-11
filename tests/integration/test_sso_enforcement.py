@@ -493,6 +493,7 @@ async def test_demoting_the_break_glass_owner_ends_the_session_the_exception_kep
         organization_member_id=membership.id,
         request=ActiveOrganizationMemberUpdateRequest(role="member"),
         sso_enforcement=_connection_service(async_db),
+        open_signup=False,
     )
 
     assert await _live_session_count(async_db, exempt.id) == 0
@@ -542,6 +543,7 @@ async def test_a_demotion_whose_revocation_fails_does_not_stand(
             organization_member_id=membership.id,
             request=ActiveOrganizationMemberUpdateRequest(role="member"),
             sso_enforcement=enforcement,
+            open_signup=False,
         )
 
     kept = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(organization_id, exempt_id)
