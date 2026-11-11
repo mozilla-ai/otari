@@ -2173,6 +2173,22 @@ async def test_a_code_execution_that_exits_non_zero_is_reported_failed(monkeypat
     assert (entry["status"], entry["exit_code"]) == ("failed", 1)
 
 
+@pytest.mark.asyncio
+async def test_a_native_code_call_with_unparsable_arguments_is_refused_not_reported_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = _FakeSandboxPool()
+    result = await _answer(
+        monkeypatch,
+        pool,
+        ("c1", CODE_EXECUTION_TOOL_NAME, '{"code": "print(1'),
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
+    )
+
+    assert pool.calls == []
+    assert all(entry["status"] != "completed" for entry in _reported(result))
+
+
 def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> None:
     call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {"code": "print(1)"})
 
