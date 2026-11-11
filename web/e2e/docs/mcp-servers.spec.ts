@@ -2,8 +2,14 @@ import { expect, type Page, test } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
 
-import { authHeaders, dismissComboBox, expectOk, login } from "../helpers"
-import { call, docScreenshot, listed, openNestedPage } from "./fixtures"
+import {
+  authHeaders,
+  dismissComboBox,
+  expectOk,
+  login,
+  openNested,
+} from "../helpers"
+import { call, docScreenshot, listed } from "./fixtures"
 
 const SERVER = "github"
 const KEY = "docs-mcp-reader"
@@ -45,7 +51,7 @@ test("configure an MCP server", async ({ page }) => {
   const keyId = await createKey(page)
   try {
     await login(page)
-    await openNestedPage(page, "Tools", "MCP servers")
+    await openNested(page, "Tools", "MCP servers")
     await page.getByRole("button", { name: "Add MCP server" }).click()
 
     const dialog = page.getByRole("dialog")
