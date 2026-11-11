@@ -178,6 +178,7 @@ def _held_tool_ctx(hold_ms: int) -> Any:
         max_tool_iterations=10,
         use_budget=None,
         native_tools=lambda _name: frozenset(),
+        guardrails=None,
     )
 
 

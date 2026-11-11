@@ -648,6 +648,7 @@ export function organizationGuardrail(
     has_credential: false,
     definition_id: null,
     mode: "monitor",
+    on: ["input"],
     on_unavailable: "block",
     validate_kwargs: null,
     enabled: true,

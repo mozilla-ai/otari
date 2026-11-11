@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from functools import partial
 from http import HTTPStatus
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from any_llm import AnyLLM
 from any_llm.types.completion import CompletionUsage
@@ -36,7 +36,9 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.error_body import BodyHTTPException
-from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
+from gateway.api.routes._guardrail_targets import messages_targets
+from gateway.api.routes._guardrails import AnswerRefused
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -788,6 +790,10 @@ class _MessagesAdapter:
         return _reached_message_stop()
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        if isinstance(exc, AnswerRefused):
+            # The same type and fields the refusal has as a 403 before the stream commits.
+            refused = {"type": "error", "error": {"type": _ERR_PERMISSION, **cast("dict[str, Any]", exc.detail)}}
+            return f"event: error\ndata: {json.dumps(refused)}\n\n"
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:
@@ -1063,7 +1069,7 @@ async def create_message(
         response=response,
         declared=DeclaredTools(
             guardrails=request.guardrails,
-            guardrail_text=latest_user_text(request.messages),
+            guardrail_targets=lambda: messages_targets(request),
             tools=request.tools,
             mcp_servers=request.mcp_servers,
             mcp_server_ids=request.mcp_server_ids,

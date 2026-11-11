@@ -197,6 +197,29 @@ def test_an_mcp_tool_call_names_the_server_that_owns_the_tool() -> None:
     assert [span.attributes.get("otari.mcp.server") for span in trace.spans] == ["github", None, None]
 
 
+def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
+    trace = _trace()
+    trace.record_guardrail(
+        profile="pii",
+        mode="block",
+        valid=False,
+        started=_T0,
+        ended=_T0,
+        event="after_tool",
+        tool="web_search",
+        withheld=True,
+    )
+
+    [span] = trace.spans
+    assert span.attributes == {
+        "otari.guardrail.profile": "pii",
+        "otari.guardrail.mode": "block",
+        "otari.guardrail.event": "after_tool",
+        "otari.guardrail.tool": "web_search",
+        "otari.guardrail.action": "withheld",
+    }
+
+
 def test_spans_past_the_cap_are_counted_not_kept() -> None:
     trace = _trace(max_spans=2)
 

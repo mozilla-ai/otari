@@ -130,6 +130,7 @@ from gateway.services.tools._sandbox_credential import (
     sandbox_credential_status,
     store_sandbox_api_key,
 )
+from gateway.services.tools._screened_backend import ScreenedToolBackend, ToolCallGuard, screened_backend
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
 from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
@@ -251,6 +252,9 @@ __all__ = [
     "CODE_EXECUTION_TOOL",
     "CODE_INTERPRETER_CALL_ID_PREFIX",
     "CombinedToolBackend",
+    "ScreenedToolBackend",
+    "ToolCallGuard",
+    "screened_backend",
     "CONTAINER_GONE_DETAIL_TEMPLATE",
     "MAX_USES_EXCEEDED_ERROR",
     "OTARI_TOOL_CALLS_FIELD",

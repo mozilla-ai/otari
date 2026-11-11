@@ -55,7 +55,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
 from functools import partial, reduce
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, cast
 
 import httpx
 import httpx2
@@ -99,9 +99,11 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
+from gateway.api.routes._guardrail_answers import finish_result, guarded_stream
+from gateway.api.routes._guardrail_targets import RequestTarget
+from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
 from gateway.api.routes._helpers import (
     GUARDRAILS_RESULT_HEADER,
-    apply_input_guardrails,
     country_gate_for,
     country_not_supported,
 )
@@ -434,6 +436,7 @@ from gateway.services.tools import (
     read_web_fetch_max_uses,
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
+    screened_backend,
     tools_to_price,
     unfunded_tool_detail,
     unpriced_tool_detail,
@@ -1059,6 +1062,8 @@ def stream_error_message(exc: BaseException) -> str | None:
     provider failure it leaves to the 502), since that detail is already safe
     for the caller to read.
     """
+    if isinstance(exc, AnswerRefused):
+        return str(cast("dict[str, Any]", exc.detail)["message"])
     if isinstance(exc, HTTPException):
         return None
     mapping = classify_provider_error(exc)
@@ -1123,6 +1128,8 @@ def failure_status_code(exc: BaseException, *, request_params: Collection[str] =
     """
     if isinstance(exc, MaxToolIterationsExceeded):
         return status.HTTP_422_UNPROCESSABLE_CONTENT
+    if isinstance(exc, AnswerRefused):
+        return exc.status_code
     # Before the wrapper's own status: a wrapper can carry a 500 around a
     # credential any-llm never found, and the row records what the caller saw.
     missing = missing_credential(exc)
@@ -3725,8 +3732,12 @@ class ToolContext:
         sandbox_files: SandboxFileBridge | None = None,
         shared: SharedToolUse | None = None,
         web_provider_client: httpx.AsyncClient | None = None,
+        guardrails: RequestGuardrails | None = None,
     ) -> None:
         self.config = config
+        # The request's guardrails, which the gateway's tools and the answer pass
+        # through; None where the request runs none.
+        self.guardrails = guardrails
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
@@ -4018,6 +4029,8 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
     below may *add* guardrails and may tighten one, but can never weaken what a
     layer above mandated. `block` beats `monitor` for both `mode` and
     `on_unavailable`, since each is a choice between enforcing and observing.
+    What a guardrail reads (`on`) is the union of the layers, so a layer below
+    can widen it and never narrow it.
 
     The mandating entry also owns the URL and the validate kwargs for a profile
     it names, so a caller cannot point a mandated check at a service of their
@@ -4031,6 +4044,7 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
         merged[guardrail.profile] = guardrail.model_copy(
             update={
                 "mode": "block" if "block" in (guardrail.mode, below.mode) else "monitor",
+                "on": list(dict.fromkeys([*guardrail.on, *below.on])),
                 "on_unavailable": (
                     "block" if "block" in (guardrail.on_unavailable, below.on_unavailable) else "monitor"
                 ),
@@ -4089,7 +4103,7 @@ def merge_guardrail_layers(
 
     Returns the caller's own list unchanged, `None` included, when no layer
     mandated anything, alongside the caller's credentials, an empty mandated set
-    and no in-process entries: that is the shape `apply_input_guardrails` treats
+    and no in-process entries: that is the shape `RequestGuardrails` treats
     as "no guardrails ran", and it is what keeps a deployment that configures
     nothing behaving exactly as it did.
     """
@@ -4196,7 +4210,8 @@ class DeclaredTools:
 
     code_execution_header: str | None = None
     container_id: str | None = None
-    guardrail_text: str
+    # Read only when a guardrail checks content, so a request without one pays nothing for them.
+    guardrail_targets: Callable[[], Sequence[RequestTarget]]
     guardrails: list[GuardrailConfig] | None
     max_tool_iterations: int | None
     mcp_server_ids: list[uuid.UUID] | None
@@ -4243,7 +4258,7 @@ async def prepare_gateway_tools(
     unpriced_tool: PricedTool | None = None
     try:
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
-        await _admit_guardrails(adapter, ctx, response, declared)
+        guardrails = await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
@@ -4318,6 +4333,7 @@ async def prepare_gateway_tools(
             sandbox_files=backends.sandbox_files,
             shared=shared,
             web_provider_client=backends.ports.web_provider_client,
+            guardrails=guardrails,
         )
 
     contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
@@ -4645,16 +4661,17 @@ class _RequestWebPolicy:
 
 async def _admit_guardrails(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, response: Response, declared: DeclaredTools
-) -> None:
-    """Run the request's input guardrails, with its organization's and its policy's merged in.
+) -> RequestGuardrails:
+    """Run the request's guardrails over what it carries, with its organization's and its policy's merged in.
 
-    A ``block`` flag refuses the request, and a ``monitor`` flag annotates ``response``.
+    A ``block`` flag on its input refuses the request, a flag on a tool result
+    withholds that result, and a ``monitor`` flag annotates ``response``. The
+    answer goes on checking the results of the tools the gateway runs.
     """
     # Merged here rather than in each route, so no completion endpoint can skip a mandate.
     effective = merge_guardrail_layers(ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx))
-    await apply_input_guardrails(
+    guardrails = RequestGuardrails(
         effective.configs,
-        declared.guardrail_text,
         response=response,
         config=ctx.config,
         credentials=effective.credentials,
@@ -4662,6 +4679,8 @@ async def _admit_guardrails(
         in_process=_in_process_guardrails(ctx, effective),
         trace=ctx.trace,
     )
+    await guardrails.admit(declared.guardrail_targets() if guardrails.reads_request else ())
+    return guardrails
 
 
 async def _admit_mcp_servers(
@@ -5104,6 +5123,7 @@ async def record_usage(
     request_facts: PriceFacts = NO_FACTS,
     result_tier: str | None = None,
     stream_cut_by: StreamCutBy | None = None,
+    answered: bool = False,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -5175,6 +5195,8 @@ async def record_usage(
         request_facts: What the request says about itself that a price's rules
             ask (``RequestContext.price_facts``). The row is priced at the tier
             the provider reports, never the one the request asked for.
+        answered: The provider answered in full and ``error`` is the gateway's
+            refusal of the answer, so the call is billed and counted as a success.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -5238,7 +5260,7 @@ async def record_usage(
     # rate is resolved for a success even without usage. A model priced per token
     # is priced only from reported usage, as it always has been. An incomplete
     # row did not finish, so it is billed on its estimated tokens alone.
-    succeeded = error is None and not incomplete
+    succeeded = (error is None or answered) and not incomplete
     resolved: ResolvedPricing | None = None
     # The tier the provider served at: its usage's, else its result's or a streamed chunk's, never the one asked for.
     served_tier = service_tier_of(usage_data) if usage_data else None
@@ -5355,7 +5377,7 @@ async def record_usage(
         record_attempt(
             str(provider or ""),
             model,
-            failed=error is not None or incomplete,
+            failed=not succeeded,
             status_code=status_code,
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
@@ -5885,6 +5907,8 @@ async def _open_tool_backends(
         backends.append(sandbox)
     if mcp is not None:
         backends.append(mcp)
+    if (guardrails := tool_ctx.guardrails) is not None and guardrails.guards_tools:
+        backends = [screened_backend(backend, guardrails) for backend in backends]
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
 
 
@@ -6079,7 +6103,23 @@ async def open_stream(
     in the SSE channel after a 200 OK. With a hold, opening counts toward its
     window, so a slow MCP server cannot keep the headers waiting past it; a backend
     slower than that still opens, and its failure arrives as an error event.
+
+    When a guardrail reads the answer, the stream is held for it on its way
+    out (:func:`guarded_stream`).
     """
+    stream = await _open_unguarded_stream(adapter, tool_ctx, call_kwargs, on_first_response)
+    guardrails = tool_ctx.guardrails
+    if guardrails is None or not guardrails.reads_answer:
+        return stream
+    return guarded_stream(stream, guardrails, adapter.name, adapter.extract_stream_usage)
+
+
+async def _open_unguarded_stream(
+    adapter: FormatAdapter[Any, ChunkT],
+    tool_ctx: ToolContext,
+    call_kwargs: dict[str, Any],
+    on_first_response: Callable[[], None] | None,
+) -> AsyncIterator[ChunkT]:
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
@@ -6434,6 +6474,9 @@ def build_streaming_response(
             else None
         )
         billed_usage = cut if cut is not None else reported_usage
+        if isinstance(exc, AnswerRefused) and exc.usage is not None:
+            # The provider answered in full and a guardrail refused it; the answer is owed.
+            billed_usage = exc.usage
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(billed_usage))
         logged = await record_usage(
@@ -6450,6 +6493,7 @@ def build_streaming_response(
             error=failure_error_message(exc),
             status_code=failure_status_code(exc),
             stream_cut_by="provider" if provider_cut else None,
+            answered=isinstance(exc, AnswerRefused),
             latency_ms=_elapsed_ms(started_at),
             ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
@@ -7286,6 +7330,15 @@ async def run_non_stream(
         for key, value in _container_headers(served_tools.container_lease).items():
             response.headers[key] = value
         usage_data = adapter.extract_usage(result)
+        # Before the row is written, so an answer a guardrail refuses is recorded as
+        # refused, and still billed: the provider answered in full.
+        refused: AnswerRefused | None = None
+        guardrails = served_tools.guardrails
+        if guardrails is not None and guardrails.reads_answer:
+            try:
+                await finish_result(guardrails, adapter.name, result)
+            except AnswerRefused as exc:
+                refused = exc
         if ctx.rate_limit_grant is not None:
             await ctx.rate_limit_grant.settle(_settled_tokens(usage_data))
         logged = LoggedUsage(None, None)
@@ -7294,6 +7347,7 @@ async def run_non_stream(
         # ``log_success_without_usage = False`` would otherwise suppress.
         if (
             usage_data is not None
+            or refused is not None
             or adapter.log_success_without_usage
             or not tool_ctx.tally.is_empty()
             # A model priced per request owes for the call whatever it reported.
@@ -7319,6 +7373,9 @@ async def run_non_stream(
                 endpoint=adapter.endpoint,
                 user_id=ctx.user_id,
                 usage_override=usage_data,
+                error=failure_error_message(refused) if refused is not None else None,
+                status_code=refused.status_code if refused is not None else None,
+                answered=refused is not None,
                 latency_ms=_elapsed_ms(ctx.started_at),
                 counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                 attribution=attribution,
@@ -7345,6 +7402,8 @@ async def run_non_stream(
             await reconcile_reservation(
                 ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
+        if refused is not None:
+            raise refused
         _attach_settled_cost(adapter, result, logged)
         if (bridge := tool_ctx.sandbox_files) is not None:
             await bridge.store_inline_outputs(adapter.name, result)
@@ -7352,6 +7411,9 @@ async def run_non_stream(
         if display_model is not None:
             relabel_model(result, display_model)
         return result
+    except AnswerRefused:
+        # Settled above, as the answer it refused.
+        raise
     except HTTPException:
         await release_reservation(ctx)
         raise
