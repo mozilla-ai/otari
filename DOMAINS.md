@@ -287,9 +287,9 @@ polls, and the conditional update on the settings row decides which one runs.
 Whether a deployment checks otari.ai for new releases and the security fixes in
 them, and what the last check heard. Nothing is sent until an operator answers
 in the dashboard or `update_check` answers in config. A check sends the version
-and a random install id, once a day at the time of day the id hashes to. Every
-replica polls, and the conditional update on the state row decides which one
-sends.
+and a random install id, once a day at a time of day picked by a seed that is
+never sent. Every replica polls, and the conditional update on the state row
+decides which one sends.
 
 ### alerts
 
