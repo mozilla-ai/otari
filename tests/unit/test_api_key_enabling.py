@@ -4,7 +4,7 @@ import pytest
 
 from gateway.exceptions.api_keys_exceptions import KeyEnableRefusedError
 from gateway.models.api_keys import APIKey, DisabledReason
-from gateway.services.api_keys._enabling import OPERATOR_CLEARABLE, operator_set_active
+from gateway.services.api_keys._enabling import operator_enable_refusal, operator_set_active
 
 
 def _key(reason: DisabledReason | None) -> APIKey:
@@ -20,8 +20,10 @@ def test_every_reason_states_whether_an_operator_can_clear_it() -> None:
     assert DisabledReason.REVOKED.operator_may_clear is False
 
 
-def test_an_operator_can_clear_their_own_reason_and_no_other() -> None:
-    assert OPERATOR_CLEARABLE == {DisabledReason.OPERATOR}
+def test_an_operator_is_blocked_only_by_a_reason_they_cannot_clear() -> None:
+    assert operator_enable_refusal(_key(None)) is None
+    assert operator_enable_refusal(_key(DisabledReason.OPERATOR)) is None
+    assert operator_enable_refusal(_key(DisabledReason.REVOKED)) is DisabledReason.REVOKED
 
 
 def test_an_operator_enabling_a_key_clears_its_reason() -> None:
@@ -58,5 +60,7 @@ def test_the_refusal_names_an_operator_only_where_one_can_act() -> None:
     revoked = str(KeyEnableRefusedError(DisabledReason.REVOKED))
 
     assert "operator" in operator_reason
+    # Chosen by clearability, so it must hold for any reason an operator cannot
+    # clear, not only for the revocation that is the one such reason today.
     assert "operator" not in revoked
-    assert "revoked" in revoked
+    assert "revoked" not in revoked

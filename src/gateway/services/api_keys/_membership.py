@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from gateway.models.api_keys import DisabledReason
 from gateway.models.tenancy import OrganizationMember, WorkspaceMember
 from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.services.api_keys._enabling import OPERATOR_CLEARABLE
 
 _VIEWER = "viewer"
 
@@ -29,11 +28,7 @@ class ApiKeyMembershipListener:
     async def member_removed(self, member: WorkspaceMember) -> None:
         """Disable the keys billed to this member in the workspace they leave."""
         await self._keys.disable_owned_in_workspaces_with_reason(
-            str(member.user_id),
-            [member.workspace_id],
-            self_service_only=False,
-            reason=DisabledReason.OPERATOR,
-            replacing=OPERATOR_CLEARABLE,
+            str(member.user_id), [member.workspace_id], self_service_only=False, reason=DisabledReason.OPERATOR
         )
 
     async def member_role_changed(self, member: WorkspaceMember) -> None:
@@ -49,11 +44,7 @@ class ApiKeyMembershipListener:
         """Disable a suspended member's keys in the organization, or a viewer's own."""
         if membership.status == "suspended":
             await self._keys.disable_owned_in_workspaces_with_reason(
-                str(membership.user_id),
-                workspace_ids,
-                self_service_only=False,
-                reason=DisabledReason.OPERATOR,
-                replacing=OPERATOR_CLEARABLE,
+                str(membership.user_id), workspace_ids, self_service_only=False, reason=DisabledReason.OPERATOR
             )
         elif membership.role == _VIEWER:
             await self._keys.disable_owned_in_workspaces(str(membership.user_id), workspace_ids, self_service_only=True)

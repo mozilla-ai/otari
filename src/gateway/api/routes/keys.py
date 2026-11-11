@@ -29,7 +29,12 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.api_keys import operator_max_end_users, operator_set_active, refuse_service_key_flag_change
+from gateway.services.api_keys import (
+    operator_enable_refusal,
+    operator_max_end_users,
+    operator_set_active,
+    refuse_service_key_flag_change,
+)
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -218,6 +223,9 @@ class KeyInfo(BaseModel):
     # The reason the owner cannot enable this key. Null for every other key,
     # including one the owner disabled.
     disabled_reason: DisabledReason | None
+    # Whether an operator can enable this key, which some reasons also block.
+    # True wherever there is no reason, since nothing then blocks enabling it.
+    operator_can_enable: bool
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
     exclude_from_budget: bool
@@ -252,6 +260,7 @@ class KeyInfo(BaseModel):
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
             disabled_reason=key.disabled_reason,
+            operator_can_enable=operator_enable_refusal(key) is None,
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),

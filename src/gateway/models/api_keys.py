@@ -20,9 +20,11 @@ MAX_FEDERATION_RULES_PER_KEY = 20
 
 
 class DisabledReason(StrEnum):
-    """Represents the reason an API key cannot be enabled by its owner.
+    """Represents the reason an API key cannot be enabled.
 
-    A key with no reason set can be enabled by its owner.
+    Every reason blocks the key's owner. Some also block an operator, which
+    ``operator_may_clear`` records. A key with no reason set can be enabled by
+    its owner.
     """
 
     OPERATOR = ("operator", True)

@@ -7635,7 +7635,7 @@
         "type": "object"
       },
       "DisabledReason": {
-        "description": "Represents the reason an API key cannot be enabled by its owner.\n\nA key with no reason set can be enabled by its owner.",
+        "description": "Represents the reason an API key cannot be enabled.\n\nEvery reason blocks the key's owner. Some also block an operator, which\n``operator_may_clear`` records. A key with no reason set can be enabled by\nits owner.",
         "enum": [
           "operator",
           "revoked"
@@ -12156,6 +12156,10 @@
             "title": "Metadata",
             "type": "object"
           },
+          "operator_can_enable": {
+            "title": "Operator Can Enable",
+            "type": "boolean"
+          },
           "reject_user_mismatch": {
             "anyOf": [
               {
@@ -12195,6 +12199,7 @@
           "expires_at",
           "is_active",
           "disabled_reason",
+          "operator_can_enable",
           "allowed_models",
           "allowed_tools",
           "exclude_from_budget",

@@ -71,7 +71,7 @@ class KeyEnableRefusedError(TenancyForbiddenError):
         super().__init__(
             "This key is disabled and only an operator can enable it."
             if reason.operator_may_clear
-            else "This key was revoked and cannot be enabled. Create a new key."
+            else "This key is disabled and cannot be enabled again. Create a new key."
         )
 
 

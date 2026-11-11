@@ -994,7 +994,7 @@ def test_a_revoked_key_refuses_an_operator_too(
     code, body = _request(client, world, "alpha_operator", "PATCH", path, json={"is_active": True})
     assert code == status.HTTP_403_FORBIDDEN, body
     assert "operator" not in body["detail"]
-    assert "revoked" in body["detail"]
+    assert "cannot be enabled again" in body["detail"]
 
     code, body = _request(client, world, "alpha_operator", "PATCH", path, json={"is_active": False})
     assert code == status.HTTP_403_FORBIDDEN, body
@@ -1023,12 +1023,12 @@ def test_a_revoked_key_refuses_its_owner_without_naming_an_operator(
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{mine['id']}", json={"is_active": True})
     assert code == status.HTTP_403_FORBIDDEN, body
     assert "operator" not in body["detail"]
-    assert "revoked" in body["detail"]
+    assert "cannot be enabled again" in body["detail"]
 
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{held['id']}", json={"is_active": True})
     assert code == status.HTTP_403_FORBIDDEN, body
     assert "operator" in body["detail"]
-    assert "revoked" not in body["detail"]
+    assert "cannot be enabled again" not in body["detail"]
 
     assert _key_row(db_session_factory, mine["id"]).disabled_reason is DisabledReason.REVOKED
 

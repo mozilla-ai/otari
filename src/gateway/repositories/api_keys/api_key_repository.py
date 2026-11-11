@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Never
 
-from sqlalchemy import Update, case, or_, select, update
+from sqlalchemy import Update, case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,22 +63,20 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         *,
         self_service_only: bool,
         reason: DisabledReason,
-        replacing: Collection[DisabledReason],
     ) -> None:
         """Disable every key billed to ``user_id`` in these workspaces and record ``reason`` on it.
 
         Reaches a key the owner had already disabled, since the reason is what the
-        owner cannot clear. A key whose stored reason is absent or in ``replacing``
-        takes ``reason``, and any other key keeps the reason it has.
+        owner cannot clear. A key that already carries a reason keeps it, so this
+        never replaces one with a reason that is easier to clear.
         ``self_service_only`` narrows it to the keys the owner created themselves.
         """
         if not workspace_ids:
             return
-        replaceable = or_(APIKey.disabled_reason.is_(None), APIKey.disabled_reason.in_(sorted(replacing)))
         await self.db.execute(
             self._owned_in_workspaces(user_id, workspace_ids, self_service_only=self_service_only).values(
                 is_active=False,
-                disabled_reason=case((replaceable, reason), else_=APIKey.disabled_reason),
+                disabled_reason=case((APIKey.disabled_reason.is_(None), reason), else_=APIKey.disabled_reason),
             )
         )
 
