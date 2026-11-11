@@ -82,16 +82,21 @@ print(response.choices[0].message.content)
 
 Three refusals are common once an app goes past its first request:
 
-- **A built-in tool is refused**, or `GET /api/v1/tools` lists it with `"available": false` and
-  the reason `workspace_disabled`: the workspace does not allow that tool yet. A workspace admin
-  turns it on under **Tools** in the dashboard. See [Built-in tools](tools.md).
+- **A built-in tool is refused**: check its `reason` in `GET /api/v1/tools`. If it is
+  `workspace_disabled`, the workspace does not allow that tool yet, and a workspace admin turns
+  it on under **Tools** in the dashboard. Other reasons, such as `not_configured` or
+  `insufficient_funds`, are explained in [Built-in tools](tools.md).
 - **`403 'user' field does not match the authenticated API key's user`**: in Otari, `user` names
-  who a request is billed to, so a regular key may name only its own user. To give each person
-  in your app a budget of their own, use a [service key](end-users.md). To tag a request with a
-  free-form ID, put it in `metadata`. See [Mismatched `user` fields](api-keys.md#mismatched-user-fields).
-- **`400 unsupported_parameter` naming `response_format`**: the model's provider has no JSON
-  mode through Otari. A model's `supported_parameters` in [Models](models.md#model-discovery)
-  says whether it takes `response_format`; otherwise, ask for JSON in the prompt.
+  who a request is billed to, so by default a regular key may name only its own user. To give
+  each person in your app a budget of their own, use a [service key](end-users.md). To tag a
+  request with a free-form ID, put it in `metadata`. A key can also be set to accept other values,
+  with spend staying on the key's user: see [Mismatched `user` fields](api-keys.md#mismatched-user-fields).
+- **`400 unsupported_parameter` naming `response_format`**: the model's provider has no JSON mode
+  through Otari. A model's `supported_parameters` in [Models](models.md#model-discovery) says
+  whether it takes `response_format`. When you need valid structured output, choose a model that
+  supports it. Asking for JSON in the prompt works as a fallback, but validate the output, since
+  it is not guaranteed.
+
 
 ## What's next?
 
