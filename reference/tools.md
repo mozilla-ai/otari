@@ -29,6 +29,11 @@ Unavailable but recognized tools remain in the response with
   organization search key counts for an API key on that organization.
 - `workspace_disabled`: the API key's workspace does not allow it (a workspace
   admin turns it on under Tools in the dashboard).
+- `insufficient_funds`: the tool would run on the deployment's account and the
+  API key's organization has no funds paid in (see
+  [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A web search on
+  the organization's own search key is not affected, unless the pages it reads
+  are fetched on the deployment's account.
 
 A master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.
@@ -262,7 +267,10 @@ deployment's search tool is charged for the searches, and one on a hosted model
 that searches on the organization's own key is charged for the model alone. A
 request that may run a tool on the deployment's account is refused with `402`
 (`insufficient_funds`) before the model is called when the organization has no
-funds paid in, and so is a direct search on one of the deployment's tools.
+funds paid in, and so is a direct search on one of the deployment's tools. The
+`detail` names the tool, which tells it apart from the refusal of a model the
+deployment pays for, and `GET /api/v1/tools` lists the tool as unavailable with
+the same reason.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
