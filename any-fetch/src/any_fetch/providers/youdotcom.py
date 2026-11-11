@@ -9,11 +9,13 @@ counts as not passed. You.com has no length cap, so ``max_chars`` cuts the text.
 ``final_url`` is the URL as asked, even after a redirect. You.com reports
 neither a content type, a publish date, nor a cost.
 
-A 422, 500, 502, 503 or 504 is tagged with ``error.code`` (``invalid_url``,
-``site_blocked``, ``site_unreachable``, ``unsupported_content``, ``timeout``);
-the message and details are not read. 401 and 403 are tagged by status, and a
-402 from its ``error``, else ``payment_required``. Any other status is
-``http_error``. A site's own error page comes back as that page's text.
+401 and 403 are tagged by status (``unauthorized``, ``forbidden``): those
+bodies are the gateway's. Any other status is tagged with ``error.code`` when it
+carries one (``invalid_url``, ``site_blocked``, ``site_unreachable``,
+``unsupported_content``, ``timeout``); the message and details are not read. A
+402 without one is tagged from its flat ``error``, else ``payment_required``.
+Anything else is ``http_error``. A site's own error page comes back as that
+page's text.
 
 A body without ``contents`` is ``FetchedPage.error``: ``not_cached`` when the
 request asked for the cache only, else ``nothing_extracted``.
@@ -98,10 +100,10 @@ class YouDotComProvider(AnyFetch):
                 default=DEFAULT_PARSE_EFFORT,
                 cost_tier=True,
                 description=(
-                    "Parse effort, when fetching PDFs. lite runs at the same listed price, "
-                    "and reads text-focused pages. "
-                    "standard uses an advanced model to parse complex pages with components "
-                    "like charts, tables and images. Additional charge per PDF fetched."
+                    "Parse effort for PDFs; no effect on web pages. lite, sent unless passed, reads the text "
+                    "embedded in each page and adds no charge. standard, You.com's own default, handles complex "
+                    "pages, such as charts, tables and images, through an advanced model, and adds a charge per "
+                    "page in the PDF file."
                 ),
             ),
         ],

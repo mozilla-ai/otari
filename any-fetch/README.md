@@ -68,7 +68,9 @@ redirects without saying where they led, so a caller cannot check a redirect it 
 deployment's operator should set, and `cost_tier`, for the option whose values are the provider's
 cost tiers, each billed at a price per call of its own; the library accepts both from anyone, and
 acting on them is the host's job). A cost tier option's `enum` lists the tiers and its `default` is
-the one the provider uses when the option is not sent; the metadata records no amount.
+the one a call is billed at when the option is not passed: the provider's own, unless the adapter
+sends another. For example `youdotcom`'s any-fetch adapter sends `lite` by default, even though the API default
+is `standard`. The metadata records no amount.
 
 ## The builtin provider
 
@@ -232,10 +234,11 @@ A body without `contents` is `FetchedPage.error`: `not_cached` when the fetch as
 only, else `nothing_extracted`. A site's own error page, such as a 404, comes back as that page's
 text, which can be empty.
 
-A failed call raises `ProviderError`. A 422, 500, 502, 503 or 504 is tagged with `error.code`
-(`invalid_url`, `site_blocked`, `site_unreachable`, `unsupported_content`, `timeout`); the message
-and details are not read. 401 is `unauthorized`, a refused key's 403 is `forbidden`, and a 402
-takes the code in `error`, else `payment_required`. Any other status is `http_error`.
+A failed call raises `ProviderError`. 401 is `unauthorized` and a refused key's 403 is
+`forbidden`, by status, since those bodies are the gateway's. Any other status is tagged with
+`error.code` when it carries one (`invalid_url`, `site_blocked`, `site_unreachable`,
+`unsupported_content`, `timeout`); the message and details are not read. A 402 without one takes
+the code in its flat `error`, else `payment_required`. Anything else is `http_error`.
 
 A `url` or `title` that is not a string, or `contents` that does not hold `full_page.markdown` as
 a string, raises `ProviderError` with the tag `unexpected_response`. Both are optional: without

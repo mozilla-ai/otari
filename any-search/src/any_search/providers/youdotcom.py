@@ -7,7 +7,8 @@ native options passed. ``None`` is not sent, which turns those defaults off.
 highlights. ``time_range`` becomes ``freshness`` and wins over that option.
 
 Joined highlights are the snippet, or ``description`` when there are none.
-``contents.markdown``, only under ``full_page``, is the text. ``page_age`` is
+``contents.markdown``, only under ``full_page``, is the text, so ``markdown`` is
+added to ``full_page.extraction_formats`` when they lack it. ``page_age`` is
 the date when it parses as ISO 8601, taken as UTC; another form stays in
 ``raw``.
 
@@ -177,8 +178,10 @@ class YouDotComProvider(AnySearch):
                 type="object",
                 default={"extraction_mode": "highlights"},
                 description=(
-                    "Sent as given. highlights, sent unless passed, returns the passages that become the snippet; "
-                    "full_page returns Markdown as the text and bills each page crawled live. null sends none."
+                    "Sent as given. highlights, sent unless passed, returns the query relevant passages "
+                    "that become the snippet; "
+                    "full_page returns Markdown as the text and bills per page fetched. "
+                    "HTML copy always fetched and made available in raw output. null sends none."
                 ),
             ),
             OptionSpec(
@@ -206,6 +209,8 @@ class YouDotComProvider(AnySearch):
                 payload[name] = value
         if time_range is not None:
             payload["freshness"] = time_range
+        if "extraction" in payload:
+            payload["extraction"] = _with_markdown(payload["extraction"])
         extraction = payload.get("extraction")
         highlights = isinstance(extraction, dict) and extraction.get("extraction_mode") == "highlights"
         count = min(DEFAULT_COUNT if max_results is None else max_results, MAX_RESULTS)
@@ -229,6 +234,20 @@ class YouDotComProvider(AnySearch):
             if hit is not None:
                 hits.append(hit)
         return SearchResult(provider=self.METADATA.name, hits=hits, cost_source="none", raw=body)
+
+
+def _with_markdown(extraction: Any) -> Any:
+    """``extraction`` as given, with ``markdown`` among the full page's formats, since the text is the Markdown.
+    """
+    if not isinstance(extraction, dict) or extraction.get("extraction_mode") != "full_page":
+        return extraction
+    full_page = extraction.get("full_page")
+    if not isinstance(full_page, dict):
+        return extraction
+    formats = full_page.get("extraction_formats")
+    if not isinstance(formats, list) or not formats or "markdown" in formats:
+        return extraction
+    return {**extraction, "full_page": {**full_page, "extraction_formats": ["markdown", *formats]}}
 
 
 def _body(response: httpx.Response) -> dict[str, Any]:
