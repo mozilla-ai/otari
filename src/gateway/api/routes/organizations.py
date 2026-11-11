@@ -282,6 +282,7 @@ async def create_active_organization_member(
     current_identity: CurrentIdentity,
     body: ActiveOrganizationMemberCreateRequest,
     identities: IdentityServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ActiveOrganizationMemberCreateResultPublic:
     """Add a member to the caller's active organization, by email address.
 
@@ -292,9 +293,13 @@ async def create_active_organization_member(
     GitHub sign-in; on a deployment with no mail and no provider it waits for
     an operator's password link, so invite it instead
     (``POST /me/member-invitations``), whose link can set its first password.
+
+    On a deployment with ``open_signup`` on, only a deployment operator may add
+    members this way (403 for anyone else, who invites instead). An address at an
+    email domain another organization has verified is refused with 409.
     """
     return await service.create_active_organization_member_for_user(
-        user=current_identity, request=body, blocked_addresses=identities
+        user=current_identity, request=body, blocked_addresses=identities, open_signup=config.open_signup
     )
 
 

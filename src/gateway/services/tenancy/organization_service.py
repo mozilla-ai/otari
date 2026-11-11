@@ -25,11 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
+from gateway.core.email_domains import email_domain
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
+    DirectMemberAddUnavailableError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     InvitationClosedError,
@@ -45,6 +47,7 @@ from gateway.exceptions.organizations_exceptions import (
     OrganizationMemberAddressUnresolvedError,
     OrganizationMemberAlreadyExistsError,
     OrganizationMemberDeactivatedError,
+    OrganizationMemberDomainClaimedError,
     OrganizationMemberNotFoundError,
     OrganizationNameInvalidError,
     OrganizationNameRequiredError,
@@ -101,6 +104,7 @@ from gateway.models.tenancy import (
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
     InvitationRepository,
+    OrganizationDomainRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
@@ -416,6 +420,7 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
+        self.domains = OrganizationDomainRepository(db)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -1391,6 +1396,7 @@ class OrganizationService:
         user: User,
         request: ActiveOrganizationMemberCreateRequest,
         blocked_addresses: BlockedAddresses,
+        open_signup: bool,
     ) -> ActiveOrganizationMemberCreateResultPublic:
         """Add someone to the caller's organization, by address.
 
@@ -1405,12 +1411,19 @@ class OrganizationService:
 
         Any workspace assignments are applied in the same transaction rather than
         parked, since there is no acceptance to park them until.
+
+        Under ``open_signup`` only a deployment operator may add this way. Anyone can
+        create an organization there, so a membership nobody accepted would let a
+        stranger put any address on their roster; everyone else invites instead.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
             user=user,
             organization=organization,
         )
+        operator = await self.is_deployment_operator(user)
+        if open_signup and not operator:
+            raise DirectMemberAddUnavailableError
 
         email = _validated_email(request.email)
         assignments = request.workspace_assignments or []
@@ -1421,6 +1434,8 @@ class OrganizationService:
                 # Inside the block, so the blocklist lock it holds lasts until the membership commits.
                 if await blocked_addresses.blocked_among([email]):
                     raise BlockedEmailError(email)
+                if not operator:
+                    await self._refuse_address_at_domain_proven_elsewhere(email, organization)
                 target = await self._identity_for_address(email, organization)
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
@@ -1808,9 +1823,12 @@ class OrganizationService:
     ) -> tuple[Invitation, OrganizationMember, str]:
         """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
 
-        Refuses an address that already holds an active membership, or one with
-        a still-unexpired invitation pending.
+        Refuses an address that already holds an active membership, one with
+        a still-unexpired invitation pending, and, unless the caller is a
+        deployment operator, one at a domain another organization has proven.
         """
+        if not await self.is_deployment_operator(user):
+            await self._refuse_address_at_domain_proven_elsewhere(email, organization)
         target = await self._identity_for_address(email, organization)
 
         # Locked before the status check that decides create/revive/refuse,
@@ -2607,6 +2625,21 @@ class OrganizationService:
         if identity is None or identity.active_organization_id != membership.organization_id:
             return
         await self.users.set_active_organization(identity, None)
+
+    async def _refuse_address_at_domain_proven_elsewhere(self, email: str, organization: Organization) -> None:
+        """Refuse an address at an email domain another organization holds a current DNS proof for.
+
+        A proven domain is its organization's to admit people from, at sign-in or by
+        invitation, so no other organization may put one of its addresses on a roster.
+        Checked before the address's identity is looked up, so a refusal creates none.
+        """
+        domain = email_domain(email)
+        if domain is None:
+            return
+        claim = await self.domains.get_verified_by_domain(domain)
+        if claim is None or claim.organization_id == organization.id or claim.proof_expired(now=datetime.now(UTC)):
+            return
+        raise OrganizationMemberDomainClaimedError(email)
 
     async def _identity_for_address(self, email: str, organization: Organization) -> User:
         """The identity holding an address, created claimable if none does, refusing a deactivated one.

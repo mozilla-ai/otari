@@ -109,6 +109,27 @@ class OrganizationMemberAddressUnprovenError(TenancyConflictError):
         )
 
 
+class OrganizationMemberDomainClaimedError(TenancyConflictError):
+    """An address at an email domain another organization has proven, added or invited by a different one.
+
+    The message names neither the other organization nor how to reach it, which
+    is another tenant's business.
+    """
+
+    def __init__(self, identifier: object):
+        super().__init__(
+            f"{identifier} is at an email domain another organization has verified, so only that "
+            "organization can add or invite it"
+        )
+
+
+class DirectMemberAddUnavailableError(TenancyForbiddenError):
+    """Adding a member without an invitation, on a deployment where anyone may create an organization."""
+
+    def __init__(self) -> None:
+        super().__init__("Members join an organization on this deployment by invitation. Invite the address instead.")
+
+
 class OrganizationDomainNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_domain_id: object):
         super().__init__(f"Organization domain {organization_domain_id} not found")
@@ -405,6 +426,7 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 __all__ = [
     "DefaultOrganizationDeletionError",
+    "DirectMemberAddUnavailableError",
     "ForeignTenancyError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
@@ -428,6 +450,7 @@ __all__ = [
     "OrganizationMemberAddressUnresolvedError",
     "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberDeactivatedError",
+    "OrganizationMemberDomainClaimedError",
     "OrganizationMemberNotFoundError",
     "OrganizationNameInvalidError",
     "OrganizationNameRequiredError",

@@ -269,6 +269,7 @@ async def test_an_admin_cannot_add_a_new_owner(async_db: AsyncSession) -> None:
         await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=admin,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="owner"),
+            open_signup=False,
             blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
@@ -300,6 +301,7 @@ async def test_a_plain_member_cannot_add_members(async_db: AsyncSession) -> None
         await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=member,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+            open_signup=False,
             blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
@@ -313,6 +315,7 @@ async def test_an_admin_can_add_members(async_db: AsyncSession) -> None:
     ).create_active_organization_member_for_user(
         user=admin,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="member"),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
@@ -330,6 +333,7 @@ async def test_an_added_member_lands_in_the_adding_organization_only(async_db: A
     result = await service.create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
