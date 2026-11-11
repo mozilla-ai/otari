@@ -33,6 +33,7 @@
   * [Models](api-endpoints/models.md)
   * [Moderations](api-endpoints/moderations.md)
   * [Oauth](api-endpoints/oauth.md)
+  * [Oauth apps](api-endpoints/oauth-apps.md)
   * [Organization budgets](api-endpoints/organization-budgets.md)
   * [Organization guardrail definitions](api-endpoints/organization-guardrail-definitions.md)
   * [Organization guardrails](api-endpoints/organization-guardrails.md)
