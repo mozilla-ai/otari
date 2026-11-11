@@ -62,12 +62,15 @@ admitting people.
 **Delivery.** Where mail is set up, Otari emails the accept link. When the email
 does not go out (no mail, a failed send, or a mail limit), the dashboard shows the
 link to share by hand. A link that was emailed is never shown to the inviter. The
-email names the inviter by name and address.
+email names the inviter by name and address. Where
+[signup is open](configuration.md#signup), only a deployment operator is shown a
+link: opening one accepts for the invitee, so anyone else's invitee signs in with
+that address and accepts from their pending invitations instead.
 
 **Mail limits.** Over any 24 hours, an organization can send only so many
 invitation emails, and an address can receive only so many from all organizations
 together. An invitation over a limit is still created, and its link is shown to
-share, so a bulk invite never stops partway. Self-hosted deployments set the
+share where links are shown at all, so a bulk invite never stops partway. Self-hosted deployments set the
 limits under [Mail](configuration.md#invitations).
 
 **Accepting.**

@@ -1708,6 +1708,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
+            share_link=await self._may_share_accept_links(user, config),
         )
         # Last, so nothing an adapter does can stand between a committed invitation and its email.
         await _report_invitations(
@@ -1787,6 +1788,8 @@ class OrganizationService:
                     failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
 
         mailer = Mailer(config)
+        # Decided once, before the emails go out concurrently on one session.
+        share_link = await self._may_share_accept_links(user, config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.
         limit = asyncio.Semaphore(_BULK_INVITE_MAIL_CONCURRENCY)
 
@@ -1803,6 +1806,7 @@ class OrganizationService:
                     token=token,
                     config=config,
                     mail_limit=mail_limit,
+                    share_link=share_link,
                 )
 
         invited = await asyncio.gather(*(mail(*one) for one in staged))
@@ -1902,6 +1906,15 @@ class OrganizationService:
         )
         return invitation, membership, token
 
+    async def _may_share_accept_links(self, inviter: User, config: GatewayConfig) -> bool:
+        """Whether an accept link that was not emailed may be returned to its inviter.
+
+        Opening the link accepts for the invitee, so under ``open_signup``, where anyone
+        can create an organization, handing it to an inviter who is not a deployment
+        operator would let them add an address without its owner, as a direct add would.
+        """
+        return not config.open_signup or await self.is_deployment_operator(inviter)
+
     async def _mail_invitation(
         self,
         *,
@@ -1913,6 +1926,7 @@ class OrganizationService:
         token: str,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        share_link: bool,
     ) -> InviteOrganizationMemberResultPublic:
         """Email a committed invitation's accept link, where links can be mailed, and report whether it went.
 
@@ -1921,6 +1935,9 @@ class OrganizationService:
         also sitting with an admin who could open it as them. An email over
         ``mail_limit`` is held back the same way: the link costs the deployment
         nothing, and its sender's standing is what the limit protects.
+
+        Without ``share_link`` (see ``_may_share_accept_links``) the link is never
+        returned, and the invitee accepts from their pending invitations once signed in.
         """
         email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
@@ -1956,7 +1973,7 @@ class OrganizationService:
             role=membership.role,
             mail_sent=mail_sent,
             mail_limited=mail_limited,
-            accept_link=None if mail_sent else accept_link,
+            accept_link=None if mail_sent or not share_link else accept_link,
             expires_at=invitation.expires_at,
             created_at=invitation.created_at,
         )
@@ -2519,7 +2536,7 @@ class OrganizationService:
         ``invitation_expiry_hours``. The invitation keeps its id, role and
         workspace assignments; whoever reissues it becomes its inviter. This is
         how a lost link is recovered, including on a deployment with no mail,
-        where the new link is returned to share.
+        where the new link is returned to share where ``_may_share_accept_links`` allows.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -2547,7 +2564,8 @@ class OrganizationService:
             if await blocked_addresses.blocked_among([invitation.email]):
                 raise BlockedEmailError(invitation.email)
             # A domain proven since the first invitation refuses the new link, as it would a new invitation.
-            if not await self.is_deployment_operator(user):
+            operator = await self.is_deployment_operator(user)
+            if not operator:
                 await self._refuse_address_at_domain_proven_elsewhere(invitation.email, organization)
             invitation = await self.invitations.update_status(
                 invitation,
@@ -2568,6 +2586,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
+            share_link=operator or not config.open_signup,
         )
 
     async def _update_membership(

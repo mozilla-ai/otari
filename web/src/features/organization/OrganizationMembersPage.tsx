@@ -185,7 +185,9 @@ function invitationExpired(member: OrganizationMember): boolean {
 }
 
 // After an invite or a reissue: whether it was emailed, and the link to share
-// when it was not. A delivered link goes to the invitee's mailbox alone.
+// when it was not. A delivered link goes to the invitee's mailbox alone. Where
+// signup is open, only an operator gets an unsent link back; anyone else's
+// invitee accepts from their pending invitations once signed in.
 function InvitationLinkDialog({
   result,
   isOpen,
@@ -207,10 +209,9 @@ function InvitationLinkDialog({
         if (!open) onClose()
       }}
       title={title}
-      // Dismissable only once the email carried the link. When it did not,
-      // this is the only place the link is shown, so the acknowledgement is
-      // the way out rather than one of two.
-      isDismissable={result.mail_sent}
+      // Dismissable unless this is the only place the link is shown, in which
+      // case the acknowledgement is the way out rather than one of two.
+      isDismissable={!acceptLink}
       submitLabel="Done"
       hideCancel
       onSubmit={onClose}
@@ -221,6 +222,14 @@ function InvitationLinkDialog({
           <>
             An email with an accept link was sent to{" "}
             <strong>{result.email}</strong>.
+          </>
+        ) : !acceptLink ? (
+          <>
+            {result.mail_limited
+              ? "Otari held the email back: this organization or this address has had its share of invitation emails for today. "
+              : "Otari did not send the email. "}
+            <strong>{result.email}</strong> will find the invitation once they
+            sign in with that address.
           </>
         ) : result.mail_limited ? (
           <>
@@ -260,7 +269,8 @@ function InvitationLinkDialog({
 // link is emailed where mail can be sent, and comes back to share only when
 // the email did not go out: the only way in on a deployment without mail,
 // since claiming an identity through signup needs mail and accepting with a
-// password does not.
+// password does not. Where signup is open that is an operator's alone (see
+// InvitationLinkDialog).
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -270,7 +280,9 @@ function InviteMemberForm({
 }) {
   const invite = useInviteOrganizationMember()
   const bulkInvite = useBulkInviteOrganizationMembers()
-  const { mail_ready } = useDeployment()
+  const { mail_ready, open_signup } = useDeployment()
+  const { isOperator } = useDeploymentOperator()
+  const sharesLinks = !open_signup || isOperator
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
@@ -347,6 +359,9 @@ function InviteMemberForm({
   if (outcomes) {
     const { invited, failed } = outcomes
     const unsent = invited.filter((one) => !one.mail_sent).length
+    const unshared = invited.filter(
+      (one) => !one.mail_sent && one.accept_link,
+    ).length
     const limited = invited.some((one) => one.mail_limited)
     return (
       <FormDialog
@@ -357,7 +372,7 @@ function InviteMemberForm({
         title="Invitations"
         // Same rule as the single result: a link that was not emailed is shown
         // only here, so the acknowledgement is the way out.
-        isDismissable={unsent === 0}
+        isDismissable={unshared === 0}
         submitLabel="Done"
         hideCancel
         onSubmit={onClose}
@@ -366,7 +381,7 @@ function InviteMemberForm({
         <InfoBanner>
           Invited {invited.length} of {invited.length + failed.length}.
           {unsent > 0
-            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; share those links yourself.`
+            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; ${unshared > 0 ? "share those links yourself." : "those people find the invitation once they sign in."}`
             : null}
           {limited
             ? " Some were held back because this organization or an address has had its share of invitation emails for today."
@@ -382,8 +397,12 @@ function InviteMemberForm({
           {invited.map((one) => (
             <li key={one.invitation_id} className="flex flex-col gap-1">
               <strong className="break-all text-sm">{one.email}</strong>
-              {one.mail_sent || !one.accept_link ? (
+              {one.mail_sent ? (
                 <span className="text-xs text-muted">Email sent.</span>
+              ) : !one.accept_link ? (
+                <span className="text-xs text-muted">
+                  Not emailed. They find the invitation once they sign in.
+                </span>
               ) : (
                 <CopyableValue
                   value={absoluteDashboardLink(one.accept_link)}
@@ -442,7 +461,9 @@ function InviteMemberForm({
           description={
             mail_ready
               ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
-              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+              : sharesLinks
+                ? "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+                : "One or more, separated by commas or new lines. This deployment sends no mail, so they find the invitation once they sign in with that address. The membership becomes active once they accept it."
           }
         />
         <Select

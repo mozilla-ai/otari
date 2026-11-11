@@ -281,3 +281,24 @@ async def test_an_owner_can_reactivate_a_member_who_had_joined_under_open_signup
     )
 
     assert updated.status == "active"
+
+
+@pytest.mark.parametrize(("config", "shared"), [(_OPEN_SIGNUP_CONFIG, False), (_TEST_CONFIG, True)])
+async def test_an_unsent_accept_link_goes_back_to_an_owner_only_where_signup_is_closed(
+    async_db: AsyncSession, config: GatewayConfig, shared: bool
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+
+    invited = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_member_for_user(
+        user=owner,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=config,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    assert invited.mail_sent is False
+    assert (invited.accept_link is not None) is shared
