@@ -18,7 +18,9 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``provider_attempt_kwargs`` gives it back to each attempt that goes to Gemini.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``tools_to_price`` and ``configured_tools_to_price`` say which pricing rows ``require_pricing`` checks for a
-request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says.
+request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says;
+``unfunded_tool_detail`` is the refusal of tools the organization's funds cannot pay for.
+``unfunded_tools`` says which of them a workspace's organization cannot pay for when the deployment's account runs them.
 ``deployment_tool_rate_keys`` names the own price row of each of the deployment's search and fetch tools.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
@@ -145,6 +147,8 @@ from gateway.services.tools._tool_prices import (
     deployment_tool_rate_keys,
     enriching_fetch_tool,
     tools_to_price,
+    unfunded_tool_detail,
+    unfunded_tools,
     unpriced_tool_detail,
 )
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
@@ -274,6 +278,8 @@ __all__ = [
     "enriching_fetch_tool",
     "enrichment_for",
     "tools_to_price",
+    "unfunded_tool_detail",
+    "unfunded_tools",
     "unpriced_tool_detail",
     "NO_WEB_TOOLS",
     "WebAccessGrant",

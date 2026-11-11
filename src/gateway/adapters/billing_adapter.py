@@ -39,6 +39,16 @@ class NullBillingAdapter(BillingPort):
         # ever refused for want of funds.
         return None
 
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
+        return True
+
     async def concurrency_limit(
         self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
     ) -> int | None:

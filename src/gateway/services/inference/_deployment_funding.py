@@ -7,7 +7,7 @@ that leaves, and the next request is refused.
 """
 
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -248,3 +248,38 @@ async def admit_deployment_paid(
         billed=billed,
         concurrency_limit=limit,
     )
+
+
+@dataclass(frozen=True)
+class WorkspaceFunding:
+    """Whether a workspace's organization passes the gate :func:`admit_deployment_paid` applies.
+
+    ``organization_for`` names a workspace's organization, ``None`` for one with
+    none, which that gate admits.
+    """
+
+    billing: BillingPort
+    organization_for: Callable[[uuid.UUID], Awaitable[uuid.UUID | None]]
+
+    async def funded(self, workspace_id: uuid.UUID, user_id: str | None, tools: frozenset[str]) -> bool:
+        """Whether a call of ``tools`` from the workspace, billed to ``user_id``, would be admitted.
+
+        ``tools`` names gateway-run tools by pricing key, as the gate takes them.
+        Asked without the gate's side effects. A port that fails to answer is
+        logged and reads as funded: this answers what to advertise, and the
+        request's own gate still decides.
+        """
+        organization_id = await self.organization_for(workspace_id)
+        if organization_id is None:
+            return True
+        try:
+            return await self.billing.has_funds_on_deposit(
+                organization_id=organization_id, billed=None, tools=tools, actor_user_id=actor_user_id_for(user_id)
+            )
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to read an organization's funds: organization=%s: %s",
+                organization_id,
+                describe_port_error(exc),
+            )
+            return True

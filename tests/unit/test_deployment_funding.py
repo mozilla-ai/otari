@@ -17,7 +17,13 @@ from any_llm import LLMProvider
 
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError
-from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model, deferred_charge
+from gateway.services.inference import (
+    DeploymentCharge,
+    WorkspaceFunding,
+    admit_deployment_paid,
+    billed_model,
+    deferred_charge,
+)
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 IDENTITY_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
@@ -25,9 +31,10 @@ BILLED = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
 
 
 class _Billing:
-    def __init__(self, *, refuse: bool = False, limit: int | None = None) -> None:
+    def __init__(self, *, refuse: bool = False, limit: int | None = None, fail: bool = False) -> None:
         self.refuse = refuse
         self.limit = limit
+        self.fail = fail
         self.calls: list[tuple[Any, ...]] = []
 
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
@@ -44,6 +51,19 @@ class _Billing:
         self.calls.append(("require_funds_on_deposit", organization_id, billed, tools, actor_user_id))
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
+
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
+        self.calls.append(("has_funds_on_deposit", organization_id, billed, tools, actor_user_id))
+        if self.fail:
+            raise RuntimeError("billing down")
+        return not self.refuse
 
     async def concurrency_limit(
         self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
@@ -356,3 +376,42 @@ def test_the_deployments_settings_decide_which_models_are_closed() -> None:
             closed_families=DEFAULT_CLOSED_MODEL_FAMILIES,
             open_families=DEFAULT_OPEN_MODEL_FAMILIES,
         )
+
+
+WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+SANDBOX = frozenset({"otari:code_execution"})
+
+
+def _funding(billing: _Billing, organization_id: uuid.UUID | None = ORGANIZATION_ID) -> WorkspaceFunding:
+    async def organization_for(workspace_id: uuid.UUID) -> uuid.UUID | None:
+        assert workspace_id == WORKSPACE_ID
+        return organization_id
+
+    return WorkspaceFunding(cast(BillingPort, billing), organization_for)
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_is_funded_on_the_read_alone() -> None:
+    billing = _Billing()
+    assert await _funding(billing).funded(WORKSPACE_ID, str(IDENTITY_ID), SANDBOX)
+    # Neither gate method: one grants credit and the other starts what a refusal starts.
+    assert billing.calls == [("has_funds_on_deposit", ORGANIZATION_ID, None, SANDBOX, IDENTITY_ID)]
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_whose_organization_has_no_funds_is_not_funded() -> None:
+    assert not await _funding(_Billing(refuse=True)).funded(WORKSPACE_ID, None, SANDBOX)
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_with_no_organization_is_funded_without_asking_the_port() -> None:
+    billing = _Billing(refuse=True)
+    assert await _funding(billing, organization_id=None).funded(WORKSPACE_ID, None, SANDBOX)
+    assert billing.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_port_that_fails_reads_as_funded_and_is_logged(gateway_logs: pytest.LogCaptureFixture) -> None:
+    assert await _funding(_Billing(fail=True)).funded(WORKSPACE_ID, None, SANDBOX)
+    assert "BillingPort failed to read an organization's funds" in gateway_logs.text
+    assert "billing down" not in gateway_logs.text

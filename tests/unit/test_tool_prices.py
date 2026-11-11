@@ -17,6 +17,7 @@ from gateway.services.tools import (
     WEB_SEARCH_TOOL_NAME,
     AdmittedWebTools,
     PricedTool,
+    Tool,
     admitted_tools,
     builtin_fetch_resolved,
     configured_tools_to_price,
@@ -25,6 +26,7 @@ from gateway.services.tools import (
     resolve_fetch,
     resolve_in_loop_search,
     tools_to_price,
+    unfunded_tool_detail,
     unpriced_tool_detail,
 )
 from gateway.services.web_retrieval_policy import DomainPolicy
@@ -271,3 +273,22 @@ def test_the_code_execution_refusal_names_its_own_dashboard_page() -> None:
 
     assert "model_key 'otari:code_execution'" in detail
     assert "Code execution pricing page" in detail
+
+
+def test_an_unfunded_tool_detail_names_the_tool_after_the_ports_refusal() -> None:
+    detail = unfunded_tool_detail([Tool.CODE_EXECUTION], "Insufficient funds ($0.00).", declared=True)
+    assert detail == (
+        "Insufficient funds ($0.00). The gateway tool 'otari_code_execution' runs on this deployment's account, "
+        "which this organization's funds pay for. Add funds, or leave it out of tools[]."
+    )
+
+
+def test_an_unfunded_tool_detail_lists_several_tools() -> None:
+    names = [Tool.CODE_EXECUTION, Tool.WEB_FETCH, Tool.WEB_SEARCH]
+    detail = unfunded_tool_detail(names, "No funds.", declared=True)
+    assert "tools 'otari_code_execution', 'otari_web_fetch' and 'otari_web_search' run on" in detail
+    assert detail.endswith("leave them out of tools[].")
+
+
+def test_an_unfunded_tool_detail_offers_no_tools_list_to_a_direct_call() -> None:
+    assert unfunded_tool_detail(["fake-search"], "No funds.", declared=False).endswith("Add funds to run it.")

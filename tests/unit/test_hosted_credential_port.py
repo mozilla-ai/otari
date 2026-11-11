@@ -813,6 +813,16 @@ class RecordingBilling:
         if self.refuse is not None:
             raise self.refuse
 
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
+        raise AssertionError("the completion path reads funds through its gate")
+
     async def concurrency_limit(
         self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
     ) -> int | None:

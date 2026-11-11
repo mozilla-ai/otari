@@ -85,7 +85,13 @@ from gateway.services.inference import DeploymentCharge, admit_deployment_paid, 
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
-from gateway.services.tools import CONTAINER_GONE_DETAIL_TEMPLATE, declare_code_execution, unpriced_tool_detail
+from gateway.services.tools import (
+    CONTAINER_GONE_DETAIL_TEMPLATE,
+    Tool,
+    declare_code_execution,
+    unfunded_tool_detail,
+    unpriced_tool_detail,
+)
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
 
@@ -285,7 +291,9 @@ async def execute_code(
         )
     except InsufficientFundsError as exc:
         raise await refused_after_reservation(
-            exc.public_message, status.HTTP_402_PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
+            unfunded_tool_detail([Tool.CODE_EXECUTION], exc.public_message, declared=False),
+            status.HTTP_402_PAYMENT_REQUIRED,
+            error_headers(INSUFFICIENT_FUNDS),
         ) from exc
     except Exception as exc:
         logger.error(

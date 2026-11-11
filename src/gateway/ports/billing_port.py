@@ -124,6 +124,25 @@ class BillingPort(Protocol):
         """
         ...
 
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
+        """Whether :meth:`require_funds_on_deposit` would pass, counting credit owed, while changing nothing.
+
+        Takes the same arguments and judges them the same way. For a caller that
+        advertises rather than serves, such as ``GET /tools``: it grants no
+        credit and starts nothing a refusal would, so asking as often as a client
+        lists tools leaves the organization untouched. An adapter that does not
+        override it reads every organization as funded, which only advertises a
+        tool the request's own gate still refuses.
+        """
+        return True
+
     async def concurrency_limit(
         self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
     ) -> int | None:

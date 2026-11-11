@@ -435,6 +435,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
     tools_to_price,
+    unfunded_tool_detail,
     unpriced_tool_detail,
     validate_web_declarations,
 )
@@ -4453,7 +4454,8 @@ async def _admit_tool_funding(
     and sandboxes on the deployment's account with nothing paid in. The gate is
     the same one, asked once per distinct set of tools, so a fallback whose tools
     cannot be funded is skipped (returned as refused) without refusing a head
-    that needs none of them. Refuses the request only where no answer is left.
+    that needs none of them. Refuses the request only where no answer is left;
+    the refusal names the tools, so a caller can tell it from the model's.
     Sets ``ctx.tool_funding``, which settlement charges those calls through.
     """
     paid_by_answer: dict[frozenset[str], list[Any]] = {}
@@ -4470,7 +4472,7 @@ async def _admit_tool_funding(
     funding: DeploymentCharge | None = None
     verdicts: dict[frozenset[str], InsufficientFundsError | None] = {}
     unfunded: dict[frozenset[str], _ToolRefusal] = {}
-    last_refusal: tuple[str, InsufficientFundsError] | None = None
+    last_refusal: tuple[str, InsufficientFundsError, str] | None = None
     for claimed, paid in paid_by_answer.items():
         tool_keys = frozenset(gateway_tool_pricing_key(tool.name) for tool in paid)
         if tool_keys not in verdicts:
@@ -4509,22 +4511,23 @@ async def _admit_tool_funding(
                 raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
         refusal = verdicts[tool_keys]
         if refusal is not None:
-            last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal)
+            detail = unfunded_tool_detail(
+                list(dict.fromkeys(tool.type for tool in paid)), refusal.public_message, declared=True
+            )
+            last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal, detail)
             unfunded[claimed] = _ToolRefusal(
-                adapter.error(
-                    402, refusal.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
-                )
+                adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS))
             )
     if last_refusal is not None and len(unfunded) == len(admitted):
-        tool_key, refused = last_refusal
+        tool_key, refused, detail = last_refusal
         logger.info(
             "Gateway tools refused for insufficient funds: organization=%s request_id=%s",
             ctx.organization_id,
             ctx.request_id,
         )
-        await _refuse_tool_funding(ctx, adapter, tool_key, refused.public_message, status.HTTP_402_PAYMENT_REQUIRED)
+        await _refuse_tool_funding(ctx, adapter, tool_key, detail, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, refused.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+            402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
         ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.

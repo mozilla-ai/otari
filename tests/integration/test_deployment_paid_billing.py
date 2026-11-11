@@ -54,6 +54,7 @@ from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BilledModel, ToolUse
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import FAKE_SEARCH, build_test_client, price_fake_search
 
@@ -106,6 +107,11 @@ class ProbeBilling:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
+
+    async def has_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
+        GATES.append(("has_funds_on_deposit", str(organization_id)))
+        GATE_TOOLS.append(tools)
+        return FUNDS["available"] > 0
 
     async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
         return LIMIT["concurrency"]
@@ -199,6 +205,14 @@ def billed_in_loop_search(
     """``billed``, with the in-loop search on a search tool on the deployment's account that its own row prices."""
     tools = {FAKE_SEARCH: {"provider": "fake", "options": {"hits": [{"url": "https://otari.example"}]}}}
     yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools, web_search_extract=False)
+
+
+@pytest.fixture
+def billed_sandbox(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, with a sandbox on the deployment's account that no test reaches."""
+    yield from _billed(postgres_url, tmp_path, monkeypatch, sandbox_url="http://sandbox.invalid")
 
 
 def _billed(
@@ -799,11 +813,86 @@ def test_a_search_on_the_deployments_account_is_refused_without_funds_before_the
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    # Named, so it reads apart from the refusal of a model the deployment pays for.
+    assert response.json()["detail"] == (
+        "Insufficient funds ($0.00) to serve this request. The gateway tool 'otari_web_search' runs on this "
+        "deployment's account, which this organization's funds pay for. Add funds, or leave it out of tools[]."
+    )
     provider.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
     assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "otari:web_search")]
+
+
+def _tool_reasons(client: TestClient, headers: dict[str, str]) -> dict[str, tuple[bool, str | None]]:
+    response = client.get(f"{API_ROOT}/tools", headers=headers)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    return {tool["id"]: (tool["available"], tool["reason"]) for tool in response.json()["data"]}
+
+
+def test_tools_lists_a_search_on_the_deployments_account_as_unavailable_without_funds(
+    billed_in_loop_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_in_loop_search
+    key = _key(client)
+
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (True, None)
+
+    probe.FUNDS["available"] = Decimal("0")
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (False, "insufficient_funds")
+    # A master key belongs to no organization the gate would read, so it gets the deployment's answer.
+    assert _tool_reasons(client, MASTER)["otari_web_search"] == (True, None)
+    # Listing grants no credit and refuses nothing, so it starts none of what a refusal starts.
+    assert {gate for gate, _ in probe.GATES} == {"has_funds_on_deposit"}
+
+
+def test_tools_lists_a_search_on_the_organizations_key_as_available_without_funds(
+    billed_in_loop_search: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed_in_loop_search
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key(client)
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "tavily", "name": "ours", "api_key": "tvly-ours"},
+        headers=MASTER,
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    starred = client.post(f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=MASTER)
+    assert starred.status_code == status.HTTP_200_OK, starred.text
+    probe.FUNDS["available"] = Decimal("0")
+
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (True, None)
+
+
+def test_code_execution_on_a_key_the_organization_brought_is_refused_by_name_without_funds(
+    billed_sandbox: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_sandbox
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    assert _tool_reasons(client, _auth(key))["otari_code_execution"] == (False, "insufficient_funds")
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock()) as provider:
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "anthropic:claude-opus-4",
+                "messages": [{"role": "user", "content": "compute 17*23"}],
+                "tools": [{"type": "otari_code_execution"}],
+            },
+            headers=_auth(key),
+        )
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert "The gateway tool 'otari_code_execution' runs on this deployment's account" in response.json()["detail"]
+    provider.assert_not_called()
+
+    probe.FUNDS["available"] = Decimal("10")
+    assert _tool_reasons(client, _auth(key))["otari_code_execution"] == (True, None)
 
 
 def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
@@ -863,6 +952,10 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert response.json()["detail"] == (
+        "Insufficient funds ($0.00) to serve this request. The gateway tool 'fake-search' runs on this "
+        "deployment's account, which this organization's funds pay for. Add funds to run it."
+    )
     searched.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)
