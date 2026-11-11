@@ -32,9 +32,9 @@ import {
   useWithdrawOrgProviderModel,
 } from "@/shared/api/organizations"
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
-
+import { CatalogUpdateButton, useCanUpdateCatalog } from "./CatalogUpdateButton"
+import { NewerPricesNote } from "./NewerPricesNote"
 import { OfferModelDialog } from "./OfferModelDialog"
-import { PriceCatalogNote } from "./PriceCatalogNote"
 import { refreshOutcome } from "./refreshOutcome"
 
 // One provider key's models.
@@ -114,6 +114,7 @@ export function ProviderModelsPanel({
   const refreshPricing = useRefreshOrgProviderModelPricing(providerKey.id)
   // Only where Refresh pricing is offered, which is what the note explains.
   const priceCatalog = useOrgProviderPriceCatalog(canEdit)
+  const canUpdateCatalog = useCanUpdateCatalog()
 
   const [isOffering, setIsOffering] = useState(false)
   const [offerOpenCount, setOfferOpenCount] = useState(0)
@@ -251,6 +252,7 @@ export function ProviderModelsPanel({
         </div>
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-2">
+            {canUpdateCatalog ? <CatalogUpdateButton /> : null}
             <Button
               size="sm"
               variant="ghost"
@@ -291,7 +293,10 @@ export function ProviderModelsPanel({
       </div>
 
       {canEdit && priceCatalog.data ? (
-        <PriceCatalogNote catalog={priceCatalog.data} />
+        <NewerPricesNote
+          catalog={priceCatalog.data}
+          canUpdate={canUpdateCatalog}
+        />
       ) : null}
 
       <ErrorBanner

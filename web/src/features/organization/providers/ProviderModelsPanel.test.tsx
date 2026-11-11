@@ -6,7 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrgProviderModel, OrgProviderPriceCatalog } from "@/client"
 import type { KindFilter } from "@/features/models/offeredKinds"
 import { formatDate } from "@/shared/helpers/format"
-import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import {
+  bootstrap,
+  organizationContext,
+  orgProviderKey,
+  orgProviderModel,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
@@ -27,6 +33,18 @@ interface MockOpts {
   listFails?: boolean
   /** What the price catalog read answers. */
   priceCatalog?: OrgProviderPriceCatalog
+  /** Whether the caller operates the deployment; not, by default. */
+  operator?: boolean
+}
+
+const DIGEST = "d".repeat(64)
+const EMPTY_SWEEP = {
+  providers: [],
+  removed: [],
+  removed_count: 0,
+  removed_price_rows: 0,
+  removed_override_rows: 0,
+  kept: [],
 }
 
 const PRICES_FROM = "2026-11-10T13:32:00+00:00"
@@ -43,11 +61,45 @@ function typeCounts(models: OrgProviderModel[]): Record<string, number> {
 
 function mockApi(opts: MockOpts = {}) {
   const models = opts.models ?? [orgProviderModel()]
-  const requests: { url: string; method: string }[] = []
+  const requests: { url: string; method: string; body?: unknown }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
-    requests.push({ url, method })
+    requests.push({
+      url,
+      method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    })
+
+    if (url.endsWith("/organizations/me")) {
+      return jsonResponse(
+        organizationContext({ deployment_operator: opts.operator ?? false }),
+      )
+    }
+    if (url.includes("/catalog-update/preview")) {
+      return jsonResponse({
+        prices: {
+          fetched_at: NEWER_AT,
+          added_count: 24,
+          changed_count: 0,
+          removed_count: 0,
+          changes: [],
+          changes_truncated: false,
+          digest: DIGEST,
+          needs_review: false,
+          review_reason: null,
+        },
+        price_error: null,
+        catalog: EMPTY_SWEEP,
+      })
+    }
+    if (url.includes("/catalog-update")) {
+      return jsonResponse({
+        prices_applied: true,
+        organization_models_repriced: 24,
+        catalog: EMPTY_SWEEP,
+      })
+    }
 
     if (url.includes("/price-catalog")) {
       return jsonResponse(
@@ -108,19 +160,21 @@ function renderPanel(
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <QueryClientProvider client={client}>
-      <ProviderModelsPanel
-        providerKey={KEY}
-        canEdit={canEdit}
-        onEditRate={onEditRate}
-        page={pager.page ?? 0}
-        pageSize={pager.pageSize ?? 25}
-        onPageChange={pager.onPageChange ?? vi.fn()}
-        onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
-        kind={pager.kind ?? ""}
-        onKindChange={pager.onKindChange ?? vi.fn()}
-      />
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <ProviderModelsPanel
+          providerKey={KEY}
+          canEdit={canEdit}
+          onEditRate={onEditRate}
+          page={pager.page ?? 0}
+          pageSize={pager.pageSize ?? 25}
+          onPageChange={pager.onPageChange ?? vi.fn()}
+          onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
+          kind={pager.kind ?? ""}
+          onKindChange={pager.onKindChange ?? vi.fn()}
+        />
+      </QueryClientProvider>
+    </DeploymentProvider>,
   )
 }
 
@@ -158,15 +212,12 @@ describe("ProviderModelsPanel", () => {
     expect(screen.getByText("Default")).toBeInTheDocument()
   })
 
-  it("says which models.dev catalog the default prices come from", async () => {
+  it("says nothing about the catalog while no newer prices wait", async () => {
     mockApi()
     await renderPanel()
 
-    expect(
-      await screen.findByText(
-        `Default prices come from the models.dev catalog of ${formatDate(PRICES_FROM)}.`,
-      ),
-    ).toBeInTheDocument()
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(screen.queryByText(/models\.dev/)).not.toBeInTheDocument()
   })
 
   it("says newer prices wait for an operator, so Refresh pricing finding nothing is explained", async () => {
@@ -181,27 +232,78 @@ describe("ProviderModelsPanel", () => {
 
     expect(
       await screen.findByText(
-        `Default prices come from the models.dev catalog of ${formatDate(PRICES_FROM)}. Newer prices, fetched ${formatDate(NEWER_AT)}, are not in force yet.`,
+        `Newer models.dev prices, fetched ${formatDate(NEWER_AT)}, are not in force yet. A deployment operator must update the catalog before Refresh pricing can use them.`,
       ),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(
-        "A deployment operator must update the catalog before Refresh pricing can use them.",
-      ),
-    ).toBeInTheDocument()
+      screen.queryByRole("button", { name: "Update catalog" }),
+    ).not.toBeInTheDocument()
   })
 
-  it("names the packaged catalog while no update has been accepted", async () => {
-    mockApi({
-      priceCatalog: { prices_from: PRICES_FROM, bundled: true, newer_at: null },
+  it("puts Update catalog first among an operator's buttons", async () => {
+    mockApi({ operator: true })
+    await renderPanel()
+
+    await screen.findByRole("button", { name: "Update catalog" })
+    const labels = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim())
+      .filter((label) =>
+        [
+          "Update catalog",
+          "Refresh models",
+          "Refresh pricing",
+          "Add model",
+        ].includes(label ?? ""),
+      )
+    expect(labels).toEqual([
+      "Update catalog",
+      "Refresh models",
+      "Refresh pricing",
+      "Add model",
+    ])
+  })
+
+  it("lets an operator update the catalog here, without the cleanup", async () => {
+    const requests = mockApi({
+      operator: true,
+      priceCatalog: {
+        prices_from: PRICES_FROM,
+        bundled: false,
+        newer_at: NEWER_AT,
+      },
     })
+    const user = userEvent.setup()
     await renderPanel()
 
     expect(
       await screen.findByText(
-        `Default prices come from the models.dev catalog packaged with Otari, made ${formatDate(PRICES_FROM)}.`,
+        `Newer models.dev prices, fetched ${formatDate(NEWER_AT)}, are not in force yet. Update catalog applies them.`,
       ),
     ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Update catalog" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText("models.dev has 24 new prices to apply."),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument()
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Update catalog" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.find(
+          (request) =>
+            request.method === "POST" &&
+            request.url.endsWith("/hosted-providers/catalog-update"),
+        )?.body,
+      ).toEqual({ digest: DIGEST, cleanup: false }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    )
   })
 
   it("names each rung of the ladder rather than calling them all the same", async () => {

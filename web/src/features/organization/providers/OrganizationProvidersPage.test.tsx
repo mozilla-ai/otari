@@ -12,7 +12,9 @@ import type {
 } from "@/client"
 import { OrganizationProvidersPage } from "@/features/organization/providers/OrganizationProvidersPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   organizationContext,
   organizationPricingOverride,
   orgProviderKey,
@@ -65,6 +67,13 @@ function mockApi(opts: MockOpts = {}) {
 
     // Ahead of the key routes, because every one of these is nested under a key
     // and `/provider-keys` matches their URLs too.
+    if (url.includes("/price-catalog")) {
+      return jsonResponse({
+        prices_from: "2026-11-10T13:32:00+00:00",
+        bundled: false,
+        newer_at: null,
+      })
+    }
     if (url.includes("/models") || url.includes("/available-models")) {
       return jsonResponse({ count: models.length, data: models, models: [] })
     }
@@ -134,7 +143,9 @@ function renderPage(ui: ReactElement, url = "/organization/provider-keys") {
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
     { url },
   )
 }

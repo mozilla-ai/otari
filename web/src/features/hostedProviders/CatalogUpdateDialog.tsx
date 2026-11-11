@@ -24,10 +24,12 @@ function CatalogUpdatePreview({
   preview,
   cleanup,
   onCleanupChange,
+  offerCleanup,
 }: {
   preview: ReturnType<typeof useHostedCatalogUpdatePreview>
   cleanup: boolean
   onCleanupChange: (cleanup: boolean) => void
+  offerCleanup: boolean
 }) {
   const body = () => {
     if (preview.error) {
@@ -83,9 +85,11 @@ function CatalogUpdatePreview({
   return (
     <div className="flex flex-col gap-3">
       {body()}
-      <Checkbox isSelected={cleanup} onChange={onCleanupChange}>
-        Also remove the prices of models no provider serves
-      </Checkbox>
+      {offerCleanup ? (
+        <Checkbox isSelected={cleanup} onChange={onCleanupChange}>
+          Also remove the prices of models no provider serves
+        </Checkbox>
+      ) : null}
       {cleanup ? (
         <p className="text-caption">
           Removing a model takes its rate history and the overrides of
@@ -103,18 +107,21 @@ function CatalogUpdatePreview({
  * `opening` counts the openings, and the caller remounts this per opening
  * (`key={opening}`), so each one asks afresh and starts with the cleanup off.
  * The caller owns `update`, so it can report what the update did after this
- * closes.
+ * closes. `offerCleanup` is off where the page is about something else, such
+ * as an organization's keys, because the cleanup deletes deployment prices.
  */
 export function CatalogUpdateDialog({
   opening,
   isOpen,
   onClose,
   update,
+  offerCleanup = true,
 }: {
   opening: number
   isOpen: boolean
   onClose: () => void
   update: ReturnType<typeof useHostedCatalogUpdate>
+  offerCleanup?: boolean
 }) {
   const [cleanup, setCleanup] = useState(false)
   // Asked only while the dialog is open, because answering dials every
@@ -137,6 +144,7 @@ export function CatalogUpdateDialog({
           preview={preview}
           cleanup={cleanup}
           onCleanupChange={setCleanup}
+          offerCleanup={offerCleanup}
         />
       }
       confirmLabel={cleanup ? "Update and remove" : "Update catalog"}

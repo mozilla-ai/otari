@@ -1004,7 +1004,8 @@ dashboard does not show a price for a model it still calls unknown. Storing it
 is best effort: a database error there is logged and the price update goes
 on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
 
-**Update catalog** on the Hosted providers page runs it at once, after a preview
+**Update catalog** on the Hosted providers page, or beside **Refresh models**
+on an organization key's models, runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then
 `POST /api/v1/hosted-providers/catalog-update` with the preview's `digest`).
