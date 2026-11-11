@@ -572,7 +572,8 @@ class OrgProviderModelService:
             )
 
         added = sorted({model.id for model in discovery.models} - offered)
-        repriced = await self._reprice(user=user, key_id=key_id, added=added)
+        repriced = await self._reprice(lambda: self._key_for_user(user, key_id), key_id=key_id, added=added)
+        await self.refresh_overlay()
         return OrgProviderModelsRefreshPublic(added=added, repriced=repriced, count=len(offered) + len(added))
 
     async def refresh_pricing(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
@@ -588,22 +589,26 @@ class OrgProviderModelService:
         async with self.uow:
             await self._key_for_user(user, key_id)
             count = len(await self.models.names_for_key(key_id))
-        repriced = await self._reprice(user=user, key_id=key_id, added=[])
+        repriced = await self._reprice(lambda: self._key_for_user(user, key_id), key_id=key_id, added=[])
+        await self.refresh_overlay()
         return OrgProviderModelsRefreshPublic(added=[], repriced=repriced, count=count)
 
     # ------------------------------------------------------------------
     # The two rules
     # ------------------------------------------------------------------
 
-    async def _reprice(self, *, user: User, key_id: uuid.UUID, added: Sequence[str]) -> list[str]:
+    async def _reprice(
+        self, load_key: Callable[[], Awaitable[OrgProviderKey]], *, key_id: uuid.UUID, added: Sequence[str]
+    ) -> list[str]:
         """Reseed every still-seeded rate, then offer ``added``. Returns what moved.
 
+        ``load_key`` reads the key and authorizes the caller, inside each block.
         The community lookup is synchronous and walks its dataset per model, so
         it runs off the loop and outside any transaction, which is why this is
-        three phases rather than one block.
+        three phases rather than one block. The caller refreshes the overlay.
         """
         async with self.uow:
-            key = await self._key_for_user(user, key_id)
+            key = await load_key()
             prefix = key.selector_prefix
             organization_id = key.organization_id
             offered_rows = list(await self.models.list_all_for_key(key_id))
@@ -623,7 +628,7 @@ class OrgProviderModelService:
             # Re-authorized and re-read rather than carried across: the block
             # above ended, so nothing read there is still under a transaction,
             # and the rates are exactly what a concurrent edit moves.
-            await self._key_for_user(user, key_id)
+            await load_key()
             now = normalize_effective_at(None)
             offered_rows = list(await self.models.list_all_for_key(key_id))
             keys_by_model = {row.model: f"{prefix}:{row.model}" for row in offered_rows}
@@ -666,7 +671,6 @@ class OrgProviderModelService:
                     models=added,
                     defaults=defaults,
                 )
-        await self.refresh_overlay()
         return sorted(repriced)
 
     async def _offer(

@@ -1784,13 +1784,10 @@ def get_oidc_connection_service(
 OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
 
 
-def get_org_provider_model_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: RequestSessionModelProviderPortDep,
+def build_org_provider_model_service(
+    db: AsyncSession, uow: UnitOfWork, *, config: GatewayConfig, model_provider: ModelProviderPort | None
 ) -> OrgProviderModelService:
-    """Build the offered-models service on the request's session and unit of work.
+    """Build the offered-models service on ``db`` and the unit of work over it.
 
     The service itself names neither the session nor SQLAlchemy, so its
     repositories and its cache-refresh callable are assembled here. The unit of
@@ -1807,6 +1804,16 @@ def get_org_provider_model_service(
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
+
+
+def get_org_provider_model_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    model_provider: RequestSessionModelProviderPortDep,
+) -> OrgProviderModelService:
+    """Build the offered-models service on the request's session and unit of work."""
+    return build_org_provider_model_service(db, uow, config=config, model_provider=model_provider)
 
 
 OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
