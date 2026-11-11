@@ -13,9 +13,13 @@ provider, including Otari.
      "provider": {
        "otari": {
          "npm": "@ai-sdk/openai-compatible",
+         "name": "Otari",
          "options": {
            "baseURL": "https://api.otari.ai/api/v1",
            "apiKey": "{env:OTARI_API_KEY}"
+         },
+         "models": {
+           "openai:gpt-4o": {}
          }
        }
      }
@@ -29,7 +33,10 @@ provider, including Otari.
    opencode --model otari/openai:gpt-4o
    ```
 
-`baseURL` ends in `/api/v1`; opencode adds `/chat/completions` itself. EU
+`models` lists the models opencode offers from this provider, keyed by the name
+after `otari/`. A provider with none is not loaded, and opencode answers
+`Provider not found: otari`. `baseURL` ends in `/api/v1`; opencode adds
+`/chat/completions` itself. EU
 accounts use `https://eu.api.otari.ai/api/v1`, and a gateway you run uses its
 URL plus `/api/v1`. See [Base URL](api-reference.md#base-url).
 
