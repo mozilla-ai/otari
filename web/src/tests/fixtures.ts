@@ -336,6 +336,8 @@ export function organizationMember(
     // up does. Both shapes have to render, so the builder ships neither and a
     // test names the one it is about.
     email: null,
+    // False by default; a test about an SSO member says so.
+    is_sso_account: false,
     full_name: "Operator",
     role: "owner",
     status: "active",
