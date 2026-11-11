@@ -22,6 +22,7 @@ for a blob that is not there, so an adapter over a remote store translates its
 own client's exceptions before they reach a caller.
 A malformed ``storage_ref`` is a ``ValueError`` instead, because a ref that
 escapes the store's root is a caller error rather than a storage failure.
+``FILE_STORE_ERRORS`` names both, for a caller that answers either the same way.
 
 An adapter reaches its backend through ``asyncio.to_thread`` rather than an
 AnyIO primitive. ``delete`` runs while a cancellation unwinds, and an AnyIO
@@ -34,7 +35,9 @@ Overlay authors should pin a released tag and expect the shape to move.
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Protocol
 
-__all__ = ["FileStoragePort"]
+__all__ = ["FILE_STORE_ERRORS", "FileStoragePort"]
+
+FILE_STORE_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError)
 
 
 class FileStoragePort(Protocol):

@@ -43,6 +43,7 @@ from gateway.ports.code_execution_port import (
     SandboxSessionGoneError,
     SandboxUnavailableError,
 )
+from gateway.ports.file_storage_port import FILE_STORE_ERRORS
 from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally, is_tool_error
 from gateway.services.traces import RequestTrace, ToolSpans
@@ -378,7 +379,7 @@ class SandboxBackend:
         for staged in self._files.inputs:
             try:
                 data = await self._files.read_input(staged)
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 raise SandboxNotReachableError(f"could not read attachment {staged.file_id} for the sandbox") from exc
             try:
                 await self._session.put_file(staged.filename, data, mime_type=staged.mime_type)
