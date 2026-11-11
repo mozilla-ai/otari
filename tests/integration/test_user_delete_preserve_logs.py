@@ -363,4 +363,4 @@ def test_a_second_delete_keeps_the_first_deletion_time(
 
     assert response.status_code == 204, response.text
     stored = db_session.execute(text("SELECT deleted_at FROM users WHERE user_id = 'race-user'")).scalar_one()
-    assert stored.replace(tzinfo=UTC) == first_deleted_at
+    assert stored == first_deleted_at
