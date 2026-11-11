@@ -282,10 +282,13 @@ unit is shown under the side it bills, so an image price, or a video model's
 per-second price, is under **Output**, and hovering it names what it prices and
 its unit ("Video output, $0.045/second"). A per-second price on any other kind
 of model is audio, shown on the side it is stored on. On a phone, which cannot
-hover, the unit is shown beside the amount. The list endpoint,
+hover, the unit is shown beside the amount. The search box beside the tabs
+keeps the models whose name contains what is typed, in any case, and the tab
+counts then count only those. The list endpoint,
 `GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
-kind as `type` (`unknown` included), returns each model's `type`, and counts
-every kind in `type_counts` whichever one it returns.
+kind as `type` (`unknown` included) and the search as `search`, returns each
+model's `type`, and counts every kind the search keeps in `type_counts`
+whichever one it returns.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
