@@ -114,7 +114,8 @@ def _consolidate(client: TestClient) -> int:
     keys = app.state.memory_keys
     portal = client.portal
     assert portal is not None
-    return portal.call(consolidate_once, lambda uow: build_memory_service(uow, config, keys))
+    container = app.state.container
+    return portal.call(consolidate_once, lambda uow: build_memory_service(uow, config, keys, container))
 
 
 @pytest.fixture

@@ -3,7 +3,10 @@
 Both are the deployment's own (``memory_embedding_model``,
 ``memory_consolidation_model``), reached through its providers like any other
 side call, so a hosted deployment keeps them in its region by naming a model of
-that region.
+that region. A provider ``config.yml`` declares serves them first, then one of
+the deployment's hosted providers, as on a request's own path; being the
+deployment's, they are asked for on behalf of no organization, so a hosted
+provider restricted to one organization does not serve them.
 
 The consolidation model answers with a decision and an index, never with text:
 what is stored is built from the proposal and the decision, so an instruction
@@ -18,8 +21,9 @@ from typing import Literal, cast, get_args
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
-from gateway.services.providers import acompletion, aembedding
+from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.services.provider_kwargs import ResolvedProvider, require_declared_credential, resolve_provider_selector
+from gateway.services.providers import acompletion, aembedding, serve_on_hosted_provider
 
 DecisionAction = Literal["add", "update", "no_change", "conflict"]
 DECISION_ACTIONS = get_args(DecisionAction)
@@ -74,10 +78,14 @@ class Decision:
 
 
 class MemoryModels:
-    """Calls the deployment's memory models. Holds no state between calls."""
+    """Calls the deployment's memory models. Holds no state between calls.
 
-    def __init__(self, config: GatewayConfig) -> None:
+    ``hosted`` is the deployment's hosted providers; None reaches ``config.yml``'s providers alone.
+    """
+
+    def __init__(self, config: GatewayConfig, hosted: ModelProviderPort | None = None) -> None:
         self._config = config
+        self._hosted = hosted
 
     @property
     def embedding_model(self) -> str | None:
@@ -96,16 +104,17 @@ class MemoryModels:
         model = self._config.memory_embedding_model
         if model is None:
             raise MemoryModelError("no memory embedding model is configured")
-        resolved = resolve_provider_selector(self._config, model)
         started = monotonic()
+        provider: str | None = None
         try:
-            require_declared_credential(self._config, resolved.instance, resolved.provider, resolved.kwargs)
+            resolved = await self._resolve(model)
+            provider = str(resolved.provider)
             response = await aembedding(resolved.model, list(texts), provider=resolved.provider, **resolved.kwargs)
         except Exception as exc:  # noqa: BLE001 - any provider failure means no vector, and nothing is stored
             logger.warning("Memory embedding via %s failed (%s)", model, type(exc).__name__)
-            failed = _use(EMBEDDING_ENDPOINT, model, str(resolved.provider), started, None, succeeded=False)
+            failed = _use(EMBEDDING_ENDPOINT, model, provider, started, None, succeeded=False)
             raise MemoryModelError("the memory embedding call failed", failed) from None
-        use = _use(EMBEDDING_ENDPOINT, model, str(resolved.provider), started, getattr(response, "usage", None))
+        use = _use(EMBEDDING_ENDPOINT, model, provider, started, getattr(response, "usage", None))
         vectors = [list(item.embedding) for item in sorted(response.data, key=lambda item: item.index)]
         if len(vectors) != len(texts) or any(not isinstance(v, list) or not v for v in vectors):
             raise MemoryModelError("the memory embedding model answered with the wrong number of vectors", use)
@@ -121,10 +130,11 @@ class MemoryModels:
         if model is None:
             raise MemoryModelError("no memory consolidation model is configured")
         notes = "\n".join(f"{index}. {json.dumps(text)}" for index, text in enumerate(existing, start=1))
-        resolved = resolve_provider_selector(self._config, model)
         started = monotonic()
+        provider: str | None = None
         try:
-            require_declared_credential(self._config, resolved.instance, resolved.provider, resolved.kwargs)
+            resolved = await self._resolve(model)
+            provider = str(resolved.provider)
             completion = await acompletion(
                 resolved.model,
                 provider=resolved.provider,
@@ -139,14 +149,30 @@ class MemoryModels:
             content = completion.choices[0].message.content  # type: ignore[union-attr]
         except Exception as exc:  # noqa: BLE001 - a failed call leaves the proposal for the next pass
             logger.warning("Memory consolidation via %s failed (%s)", model, type(exc).__name__)
-            failed = _use(CONSOLIDATION_ENDPOINT, model, str(resolved.provider), started, None, succeeded=False)
+            failed = _use(CONSOLIDATION_ENDPOINT, model, provider, started, None, succeeded=False)
             raise MemoryModelError("the memory consolidation call failed", failed) from None
-        use = _use(CONSOLIDATION_ENDPOINT, model, str(resolved.provider), started, getattr(completion, "usage", None))
+        use = _use(CONSOLIDATION_ENDPOINT, model, provider, started, getattr(completion, "usage", None))
         return parse_decision(content if isinstance(content, str) else "", len(existing)), use
+
+    async def _resolve(self, model: str) -> ResolvedProvider:
+        """``model``'s provider and credential: one ``config.yml`` declares, else a hosted provider's.
+
+        Raises:
+            MissingApiKeyError: neither serves it.
+        """
+        resolved = resolve_provider_selector(self._config, model)
+        if self._hosted is not None:
+            served = await serve_on_hosted_provider(
+                self._config, self._hosted, resolved, organization_id=None, workspace_id=None
+            )
+            if served is not None:
+                return served
+        require_declared_credential(self._config, resolved.instance, resolved.provider, resolved.kwargs)
+        return resolved
 
 
 def _use(
-    endpoint: str, model: str, provider: str, started: float, usage: object, *, succeeded: bool = True
+    endpoint: str, model: str, provider: str | None, started: float, usage: object, *, succeeded: bool = True
 ) -> ModelUse:
     prompt = getattr(usage, "prompt_tokens", None)
     completion = getattr(usage, "completion_tokens", None)

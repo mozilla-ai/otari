@@ -11,6 +11,7 @@ never from a tool argument, and every result is returned as data with its
 provenance and trust level, for the agent to weigh rather than obey.
 """
 
+import functools
 import json
 import uuid
 from typing import Annotated, Any
@@ -22,6 +23,7 @@ from gateway.api.deps import (
     CurrentIdentity,
     MemoryCallerDep,
     MemoryServiceDep,
+    build_hosted_provider_service,
     build_memory_service,
     get_config,
     memory_keys_for,
@@ -257,9 +259,14 @@ async def _consolidate(config: GatewayConfig) -> None:
     # overlay included: memory is sealed and opened under the same key source either way.
     from gateway.container import build_container  # noqa: PLC0415 - the composition root, needed by this worker only
 
-    keys = memory_keys_for(config, build_container(config.bootstrap, config=config).resolve(ContentKeyPort, None))
+    container = build_container(
+        config.bootstrap,
+        config=config,
+        hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
+    )
+    keys = memory_keys_for(config, container.resolve(ContentKeyPort, None))
     try:
-        await run_consolidator(lambda uow: build_memory_service(uow, config, keys))
+        await run_consolidator(lambda uow: build_memory_service(uow, config, keys, container))
     finally:
         keys.clear()
 

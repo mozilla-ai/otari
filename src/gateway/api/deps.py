@@ -2338,10 +2338,15 @@ class _MemoryManagers:
 
 
 def build_memory_service(
-    uow: UnitOfWork, config: GatewayConfig, keys: WorkspaceKeys, db: AsyncSession | None = None
+    uow: UnitOfWork,
+    config: GatewayConfig,
+    keys: WorkspaceKeys,
+    container: Container,
+    db: AsyncSession | None = None,
 ) -> MemoryService:
     """Build the memory service on a request's Unit of Work, or the consolidator's own.
 
+    ``container`` serves the hosted providers memory's models may run on, read on the same Unit of Work.
     ``db`` is the request's session, for the management checks; the consolidator has no caller to check.
     """
     managers = None
@@ -2352,7 +2357,7 @@ def build_memory_service(
         uow,
         MemoryRepositories.on(uow),
         keys,
-        MemoryModels(config),
+        MemoryModels(config, container.resolve(ModelProviderPort, db, uow=uow)),
         _MemoryUsage(UsageLogRepository(uow)),
         config,
         managers,
@@ -2374,9 +2379,10 @@ def get_memory_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
+    container: ContainerDep,
 ) -> MemoryService:
     """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
-    return build_memory_service(uow, config, keys, db)
+    return build_memory_service(uow, config, keys, container, db)
 
 
 NOT_A_MEMBER = "Memory is for workspace members, and this key names none of its workspace."
@@ -2441,9 +2447,10 @@ class MemoryToolAdmission:
     Asking where memory cannot be had is refused; not asking never is.
     """
 
-    def __init__(self, config: GatewayConfig, keys: WorkspaceKeys) -> None:
+    def __init__(self, config: GatewayConfig, keys: WorkspaceKeys, container: Container) -> None:
         self._config = config
         self._keys = keys
+        self._container = container
 
     async def admit(
         self,
@@ -2468,7 +2475,7 @@ class MemoryToolAdmission:
                 raise MemoryToolsRefusedError(NOT_A_MEMBER)
             return None
         async with create_unit_of_work() as uow:
-            offer = await build_memory_service(uow, self._config, self._keys).offer(caller)
+            offer = await build_memory_service(uow, self._config, self._keys, self._container).offer(caller)
         if not offer.on:
             if asked:
                 raise MemoryToolsRefusedError(MEMORY_OFF)
@@ -2480,7 +2487,8 @@ class MemoryToolAdmission:
     async def _run(self, caller: MemoryCaller, name: str, arguments: dict[str, Any]) -> ToolOutcome | None:
         # A Unit of Work per call: the request's own session is released before the provider is called.
         async with create_unit_of_work() as uow:
-            return await call_memory_tool(build_memory_service(uow, self._config, self._keys), caller, name, arguments)
+            service = build_memory_service(uow, self._config, self._keys, self._container)
+            return await call_memory_tool(service, caller, name, arguments)
 
 
 def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:
@@ -2488,7 +2496,7 @@ def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:
     config: GatewayConfig = request.app.state.config
     if not config.memory_enabled:
         return None
-    return MemoryToolAdmission(config, get_memory_keys(request))
+    return MemoryToolAdmission(config, get_memory_keys(request), get_container(request))
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
