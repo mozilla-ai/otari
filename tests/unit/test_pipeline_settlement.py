@@ -1927,7 +1927,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
 
     declared: dict[str, Any] = {
         "guardrails": None,
-        "guardrail_text": "",
+        "guardrail_targets": tuple,
         "tools": None,
         "mcp_servers": None,
         "mcp_server_ids": None,
@@ -2557,7 +2557,7 @@ async def test_guardrail_block_releases_reservation(monkeypatch: pytest.MonkeyPa
     async def blocking_guardrails(*args: Any, **kwargs: Any) -> None:
         raise HTTPException(status_code=403, detail="blocked")
 
-    monkeypatch.setattr(pipeline, "apply_input_guardrails", blocking_guardrails)
+    monkeypatch.setattr("gateway.api.routes._guardrails.RequestGuardrails.admit", blocking_guardrails)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:

@@ -25,6 +25,7 @@ import {
   ServedUncheckedBanner,
 } from "@/features/guardrails/GuardrailStatus"
 import {
+  checksLabel,
   credentialsLabel,
   definitionChecks,
   guardrailLabel,
@@ -209,6 +210,11 @@ export function OrganizationGuardrailsPage() {
       ),
     },
     {
+      id: "checks",
+      header: "Checks",
+      cell: (row) => <span className="text-muted">{checksLabel(row)}</span>,
+    },
+    {
       id: "mode",
       header: "Mode",
       cell: (row) => (
@@ -303,10 +309,10 @@ export function OrganizationGuardrailsPage() {
           ) : null
         }
       >
-        The organization&rsquo;s own checks on what users send to a model, such
+        The organization&rsquo;s own checks on what models read and answer, such
         as prompt injection or personal data. Each one runs in the workspaces
-        you choose, and can block a request or only record it. Vendor keys are
-        encrypted at rest and never shown again.
+        you choose, and can block what it flags or only record it. Vendor keys
+        are encrypted at rest and never shown again.
       </PageIntro>
 
       <ErrorBanner

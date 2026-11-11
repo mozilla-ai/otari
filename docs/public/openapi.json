@@ -9483,7 +9483,7 @@
         "type": "string"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
           "credential": {
             "anyOf": [
@@ -9502,8 +9502,8 @@
           "mode": {
             "default": "monitor",
             "enum": [
-              "block",
-              "monitor"
+              "monitor",
+              "block"
             ],
             "title": "Mode",
             "type": "string"
@@ -9512,10 +9512,13 @@
             "items": {
               "enum": [
                 "input",
+                "tool_results",
+                "tool_calls",
                 "output"
               ],
               "type": "string"
             },
+            "minItems": 1,
             "title": "On",
             "type": "array"
           },
@@ -16089,13 +16092,28 @@
           },
           "mode": {
             "default": "monitor",
-            "description": "block rejects a flagged request with 403; monitor annotates the response and forwards it",
+            "description": "monitor records the verdict and forwards the request; block refuses flagged input or a flagged answer with 403 and withholds a flagged tool result or tool call",
             "enum": [
-              "block",
-              "monitor"
+              "monitor",
+              "block"
             ],
             "title": "Mode",
             "type": "string"
+          },
+          "on": {
+            "description": "What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call before it runs or reaches the client), output (the model's answer)",
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "On",
+            "type": "array"
           },
           "on_unavailable": {
             "default": "block",
@@ -16452,6 +16470,19 @@
             "title": "Mode",
             "type": "string"
           },
+          "on": {
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "title": "On",
+            "type": "array"
+          },
           "on_unavailable": {
             "title": "On Unavailable",
             "type": "string"
@@ -16510,6 +16541,7 @@
           "has_credential",
           "definition_id",
           "mode",
+          "on",
           "on_unavailable",
           "validate_kwargs",
           "enabled",
@@ -16636,16 +16668,30 @@
           },
           "mode": {
             "enum": [
-              "block",
-              "monitor"
+              "monitor",
+              "block"
             ],
             "title": "Mode",
             "type": "string"
           },
+          "on": {
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "minLength": 1,
+            "title": "On",
+            "type": "array"
+          },
           "on_unavailable": {
             "enum": [
-              "block",
-              "monitor"
+              "monitor",
+              "block"
             ],
             "title": "On Unavailable",
             "type": "string"

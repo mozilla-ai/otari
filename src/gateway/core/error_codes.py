@@ -27,6 +27,8 @@ ERROR_TAG_HEADER = "Otari-Error-Tag"
 ERROR_RETRYABLE_HEADER = "Otari-Error-Retryable"
 
 BUDGET_EXCEEDED = "budget_exceeded"
+# A guardrail refused the request's input or the model's answer.
+GUARDRAIL_VIOLATION = "guardrail_violation"
 USER_BLOCKED = "user_blocked"
 USER_NOT_FOUND = "user_not_found"
 RATE_LIMITED = "rate_limited"

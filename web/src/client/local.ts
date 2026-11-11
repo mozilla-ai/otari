@@ -66,6 +66,8 @@ export interface PolicyGuardrail {
   /** Required: the per-request field defaults to "monitor", so an omitted mode
    *  here would look like a mandate and behave as shadow mode. */
   mode: "block" | "monitor"
+  /** What it reads; the gateway's default is the input alone. */
+  on?: ("input" | "tool_results" | "tool_calls" | "output")[]
   on_unavailable?: "block" | "monitor"
   url?: string | null
 }

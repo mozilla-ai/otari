@@ -12741,7 +12741,7 @@ export interface components {
          * @description A single guardrail check the caller wants the gateway to enforce.
          *
          *     URL safety: when ``url`` is supplied it is validated by
-         *     :func:`gateway.services.guardrails.run_input_guardrails` (not here at parse
+         *     :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
          *     time — the check does a DNS lookup that must be awaited) with the same
          *     SSRF guard used for MCP server URLs (loopback allowed by default for
          *     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
@@ -12756,9 +12756,9 @@ export interface components {
              * @default monitor
              * @enum {string}
              */
-            mode: "block" | "monitor";
+            mode: "monitor" | "block";
             /** On */
-            on?: ("input" | "output")[];
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @default block
@@ -15807,11 +15807,16 @@ export interface components {
             enabled: boolean;
             /**
              * Mode
-             * @description block rejects a flagged request with 403; monitor annotates the response and forwards it
+             * @description monitor records the verdict and forwards the request; block refuses flagged input or a flagged answer with 403 and withholds a flagged tool result or tool call
              * @default monitor
              * @enum {string}
              */
-            mode: "block" | "monitor";
+            mode: "monitor" | "block";
+            /**
+             * On
+             * @description What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call before it runs or reaches the client), output (the model's answer)
+             */
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @description What a block-mode entry does when the guardrails service cannot be reached or gives no verdict
@@ -16052,6 +16057,8 @@ export interface components {
             id: string;
             /** Mode */
             mode: string;
+            /** On */
+            on: ("input" | "tool_results" | "tool_calls" | "output")[];
             /** On Unavailable */
             on_unavailable: string;
             /**
@@ -16155,12 +16162,14 @@ export interface components {
              * Mode
              * @enum {string}
              */
-            mode?: "block" | "monitor";
+            mode?: "monitor" | "block";
+            /** On */
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @enum {string}
              */
-            on_unavailable?: "block" | "monitor";
+            on_unavailable?: "monitor" | "block";
             /** Profile */
             profile?: string;
             /** Url */

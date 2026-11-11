@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 
 import { CodeBlock } from "@/design-system/content/CodeBlock"
-
+import { checksLabel } from "@/features/guardrails/guardrailRows"
 import { routerLabelOf, selectorText } from "./PolicyCells"
 import { PolicyGroup } from "./PolicyGroup"
 import {
@@ -94,7 +94,8 @@ export function PolicyReadOnly({ row }: { row: RoutingRow }) {
           <ul className="flex flex-col gap-1 text-sm text-foreground">
             {guardrails.map((guardrail) => (
               <li key={guardrail.profile}>
-                {guardrail.profile} ({guardrail.mode}, if the service is down:{" "}
+                {guardrail.profile} ({guardrail.mode}, checks{" "}
+                {checksLabel(guardrail).toLowerCase()}, if the service is down:{" "}
                 {guardrail.on_unavailable ?? "block"})
               </li>
             ))}

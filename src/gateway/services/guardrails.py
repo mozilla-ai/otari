@@ -14,10 +14,11 @@ The guardrails service is any HTTP service the operator points
 
 ``result.valid is False`` means the guardrail flagged the input.
 
-Unlike the sandbox / web-search backends, this does **not** duck-type the MCP
-tool-loop ``pool`` protocol: guardrails never enter the tool loop. It is a flat
-pre-provider interceptor — see :func:`run_input_guardrails`, which the three
-route handlers call right after auth and before dispatching to the provider.
+A request's guardrails check each :class:`GuardrailTarget`: the caller's new
+input before the model is called, and each tool result before the model reads
+it, whether the client ran the tool or the gateway did inside its tool loop.
+:func:`run_input_guardrails` checks one text; the routes fan it out over a
+request's targets.
 
 The service URL is operator-controlled (``OTARI_GUARDRAILS_URL``); callers may
 override it per-guardrail via :attr:`GuardrailConfig.url`, which is SSRF-checked
@@ -29,7 +30,11 @@ lookup that must be awaited, and Pydantic validators can't await — see
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import time
+from collections import OrderedDict
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -37,11 +42,49 @@ from typing import Any, Literal, Protocol
 import httpx
 
 from gateway.models.guardrails import GuardrailConfig
+from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_S = 30.0
+
+GuardrailEvent = Literal["before_model", "after_tool", "before_tool", "after_model"]
+"""Where a guardrail runs: on what the model is about to read, a tool result, a tool call, or the answer."""
+
+ToolExecutor = Literal["client", "gateway"]
+
+
+@dataclass(frozen=True)
+class GuardrailTarget:
+    """One piece of content a request's guardrails check, and where it came from.
+
+    A ``block`` flag on ``before_model`` content refuses the request. A flag on
+    an ``after_tool`` result withholds that result instead, so the agent can
+    carry on without it. ``executor`` says who ran the tool: the client, whose
+    results arrive in the request, or the gateway, inside its tool loop.
+    """
+
+    event: GuardrailEvent
+    text: str
+    tool: str | None = None
+    executor: ToolExecutor = "client"
+
+
+def withheld_tool_result(profile: str, *, unchecked: bool = False) -> str:
+    """What the model reads in place of a tool result a guardrail withheld.
+
+    The same words for the same profile every time: a client resends the
+    original on its next request, and an identical replacement keeps the
+    provider's prompt cache matching. It reads as a tool error, so a gateway
+    tool's activity reports the call as failed.
+    """
+    why = "could not be checked by" if unchecked else "was flagged by"
+    return (
+        f"{TOOL_ERROR_SENTINEL} This tool result was withheld by Otari: it {why} the {profile!r} guardrail. "
+        "Continue without it, or tell the user it was withheld."
+    )
+
 
 UnavailableReason = Literal["not_configured", "evaluation_failed"]
 """Why a guardrail could not run, in words safe to send back to the caller.
@@ -90,6 +133,8 @@ class GuardrailsNotReachableError(RuntimeError):
         super().__init__(message)
         self.public_detail = public_detail if public_detail is not None else message
         self.reason: UnavailableReason = reason
+        # The profile that failed closed, set by `run_input_guardrails` as it raises.
+        self.profile: str | None = None
 
 
 @dataclass
@@ -292,6 +337,42 @@ async def _check_in_process(
     )
 
 
+async def check_guardrail_urls(
+    guardrails: list[GuardrailConfig],
+    *,
+    credentials: Mapping[str, str] | None = None,
+    mandated: Collection[str] | None = None,
+) -> dict[str, UnsafeURLError]:
+    """SSRF-check every entry's ``url``, returning the mandated profiles whose URL failed.
+
+    A caller's own URL that fails raises :class:`UnsafeURLError`, which is a
+    malformed request. A mandated entry's failure is returned instead, for
+    :func:`run_input_guardrails` to treat as that profile being unevaluable.
+    Separate so a request checked over several targets resolves each URL once.
+
+    Raises:
+        UnsafeURLError: a caller-supplied ``url`` failed the check.
+    """
+    credentials = credentials or {}
+    mandated = frozenset(mandated or ())
+    unsafe: dict[str, UnsafeURLError] = {}
+    # Paired with its URL rather than filtered in place, so what reaches
+    # `validate_mcp_url` is a `str` and not a `str | None` narrowed by
+    # inspection.
+    checked = [(g.profile, g.url) for g in guardrails if g.url is not None]
+    outcomes = await asyncio.gather(
+        *(validate_mcp_url(url, has_authorization_token=bool(credentials.get(profile))) for profile, url in checked),
+        return_exceptions=True,
+    )
+    for (profile, _), outcome in zip(checked, outcomes, strict=True):
+        if not isinstance(outcome, BaseException):
+            continue
+        if not isinstance(outcome, UnsafeURLError) or profile not in mandated:
+            raise outcome
+        unsafe[profile] = outcome
+    return unsafe
+
+
 async def run_input_guardrails(
     guardrails: list[GuardrailConfig],
     input_text: str,
@@ -301,8 +382,12 @@ async def run_input_guardrails(
     mandated: Collection[str] | None = None,
     in_process: Mapping[str, InProcessGuardrail | None] | None = None,
     allow_no_verdict: bool = False,
+    unsafe: Mapping[str, UnsafeURLError] | None = None,
 ) -> GuardrailVerdict:
-    """Run every input-direction guardrail and return the aggregate verdict.
+    """Run every guardrail in ``guardrails`` over ``input_text`` and return the aggregate verdict.
+
+    Which entries apply to a piece of content (its ``on``) is the caller's
+    choice, made before this is called; every entry handed in is evaluated.
 
     ``mandated`` names the profiles that came from a layer above the caller (an
     organization entry or a routing policy) rather than from the request body.
@@ -332,28 +417,16 @@ async def run_input_guardrails(
     value of ``None`` is a profile whose definition this worker holds nothing
     for, and is unevaluable rather than a reason to try the remote path.
 
-    Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` are
-    *evaluated* here (``"output"`` is accepted but not yet enforced — see the
-    model docstring). Each guardrail's URL is ``cfg.url or default_url``.
-
-    URL *safety* is checked for every entry in ``guardrails`` up front,
-    regardless of direction — not narrowed to ``input_guardrails`` — so an
-    output-direction guardrail's ``url`` override is SSRF-checked here too,
-    even though it isn't evaluated yet. This intentionally preserves the
-    coverage the removed parse-time Pydantic validator had (see
-    :mod:`gateway.models.guardrails`): when output enforcement is built, its
-    code path can assume a *caller's* URL was already validated instead of
-    needing to remember to add the check itself. A ``mandated`` entry's failure
-    is the exception, because it is not an outright rejection: it is held until
-    the per-entry loop below reaches that profile, so an output-only mandate's
-    failure has nowhere to land yet and is dropped. Output enforcement has to
-    consume it the way the input loop does rather than assume it never happened.
+    Each guardrail's URL is ``cfg.url or default_url``, and is SSRF-checked up
+    front (see :func:`check_guardrail_urls`) unless ``unsafe`` says it already
+    was. A ``mandated`` entry's failure is not an outright rejection: it is held
+    until the per-entry loop below reaches that profile.
 
     Failure handling depends on the guardrail's ``mode`` and its
     ``on_unavailable``:
 
-    * ``block`` guardrails with ``on_unavailable="block"`` (the default) **fail
-      closed** — if one can't be evaluated (service unreachable, no URL
+    * ``block`` guardrails with ``on_unavailable="block"`` (the
+      default) **fail closed** — if one can't be evaluated (service unreachable, no URL
       configured, malformed response) we raise
       :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502)
       rather than let an unchecked request through.
@@ -370,6 +443,9 @@ async def run_input_guardrails(
     either, so it takes the same paths. ``allow_no_verdict`` returns that answer
     instead, for a caller that runs a check only to show what the service says.
 
+    ``unsafe`` is :func:`check_guardrail_urls`'s answer when the caller already
+    ran it, which skips the check here.
+
     Returns:
         A :class:`GuardrailVerdict` aggregating every input guardrail's result.
 
@@ -378,11 +454,7 @@ async def run_input_guardrails(
             ``on_unavailable="block"`` can't be evaluated.
     """
     # A `url` override is SSRF-checked here rather than at request-body-parse
-    # time (the check does a DNS lookup that must be awaited). Covers every
-    # configured guardrail regardless of `on` direction (see docstring above):
-    # deliberately runs before the input-only filter/early-return below, so an
-    # output-only guardrail's url is validated even though it isn't evaluated
-    # yet.
+    # time (the check does a DNS lookup that must be awaited).
     #
     # What a failure *means* then depends on where the URL came from.
     # `return_exceptions=True` is what lets that be decided per entry rather
@@ -399,35 +471,16 @@ async def run_input_guardrails(
     #
     # Either way the unsafe endpoint is never actually called.
     credentials = credentials or {}
-    mandated = frozenset(mandated or ())
     in_process = in_process or {}
-    unsafe: dict[str, UnsafeURLError] = {}
-    if guardrails:
-        # Paired with its URL rather than filtered in place, so what reaches
-        # `validate_mcp_url` is a `str` and not a `str | None` narrowed by
-        # inspection.
-        checked = [(g.profile, g.url) for g in guardrails if g.url is not None]
-        outcomes = await asyncio.gather(
-            *(
-                validate_mcp_url(url, has_authorization_token=bool(credentials.get(profile)))
-                for profile, url in checked
-            ),
-            return_exceptions=True,
-        )
-        for (profile, _), outcome in zip(checked, outcomes, strict=True):
-            if not isinstance(outcome, BaseException):
-                continue
-            if not isinstance(outcome, UnsafeURLError) or profile not in mandated:
-                raise outcome
-            unsafe[profile] = outcome
+    if unsafe is None:
+        unsafe = await check_guardrail_urls(guardrails, credentials=credentials, mandated=mandated)
 
-    input_guardrails = [g for g in guardrails if "input" in g.on]
-    if not input_guardrails:
+    if not guardrails:
         return GuardrailVerdict()
 
     results: list[GuardrailResult] = []
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
-        for cfg in input_guardrails:
+        for cfg in guardrails:
             fails_closed = cfg.mode == "block" and cfg.on_unavailable == "block"
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
@@ -456,9 +509,10 @@ async def run_input_guardrails(
                     )
             except GuardrailsNotReachableError as exc:
                 if fails_closed:
+                    exc.profile = cfg.profile
                     raise  # fail closed: an enforcing guardrail must not be skipped
                 # The reason belongs here and nowhere else: the fail-closed arm
-                # above hands its message to `apply_input_guardrails`, which logs
+                # above hands its message to `RequestGuardrails`, which logs
                 # it, but this arm serves the request, so this line is the only
                 # record that a check an organization mandated did not run. It
                 # names the endpoint for the same reason that one does, and for
@@ -481,10 +535,12 @@ async def run_input_guardrails(
                 )
                 continue
             if result.valid is None and fails_closed and not allow_no_verdict:
-                raise GuardrailsNotReachableError(
+                no_verdict = GuardrailsNotReachableError(
                     f"guardrail profile {cfg.profile!r} returned no verdict",
                     public_detail=_unevaluated_detail(cfg.profile),
                 )
+                no_verdict.profile = cfg.profile
+                raise no_verdict
             if result.flagged:
                 logger.info(
                     "guardrail flagged input: profile=%s mode=%s score=%s",
@@ -495,3 +551,84 @@ async def run_input_guardrails(
             results.append(result)
 
     return GuardrailVerdict(results=results)
+
+
+# A client resends every tool result it holds on each request of an agent loop,
+# and a withheld one has to be withheld again every time, so each request checks
+# all of them. Keeping the verdicts makes a repeat cost a lookup rather than a
+# vendor call. Per worker: another worker checks the same text once itself.
+_VERDICT_CACHE_SIZE = 4096
+_VERDICT_CACHE_TTL_S = 3600.0
+
+
+@dataclass(frozen=True)
+class _CachedVerdict:
+    valid: bool | None
+    explanation: object | None
+    score: object | None
+    expires_at: float
+
+
+_verdicts: OrderedDict[tuple[str, str], _CachedVerdict] = OrderedDict()
+
+
+def check_identity(
+    cfg: GuardrailConfig,
+    *,
+    base_url: str,
+    credential: str | None,
+    in_process: Mapping[str, InProcessGuardrail | None],
+) -> str | None:
+    """What decides one check's verdict on a given text, or ``None`` when it cannot be told apart.
+
+    A remote check is its profile, endpoint, credential and arguments, so two
+    organizations reach the same verdict only by asking the same service the
+    same question. An in-process check is the version of the definition it was
+    built from, which a guardrail that does not say returns ``None`` for.
+    """
+    if cfg.profile in in_process:
+        return getattr(in_process[cfg.profile], "identity", None)
+    if not base_url:
+        return None
+    secret = hashlib.sha256((credential or "").encode()).hexdigest()
+    return json.dumps([cfg.profile, base_url, secret, cfg.validate_kwargs], sort_keys=True, default=str)
+
+
+def cached_result(identity: str, text: str, cfg: GuardrailConfig) -> GuardrailResult | None:
+    """The verdict this worker already holds for ``identity`` on ``text``, under ``cfg``'s mode."""
+    key = (identity, hashlib.sha256(text.encode()).hexdigest())
+    entry = _verdicts.get(key)
+    if entry is None:
+        return None
+    if entry.expires_at <= time.monotonic():
+        del _verdicts[key]
+        return None
+    _verdicts.move_to_end(key)
+    return GuardrailResult(
+        profile=cfg.profile,
+        mode=cfg.mode,
+        valid=entry.valid,
+        explanation=entry.explanation,
+        score=entry.score,
+    )
+
+
+def remember_result(identity: str, text: str, result: GuardrailResult) -> None:
+    """Keep an evaluated verdict. One without a verdict is asked again next time."""
+    if result.status != "evaluated":
+        return
+    key = (identity, hashlib.sha256(text.encode()).hexdigest())
+    _verdicts[key] = _CachedVerdict(
+        valid=result.valid,
+        explanation=result.explanation,
+        score=result.score,
+        expires_at=time.monotonic() + _VERDICT_CACHE_TTL_S,
+    )
+    _verdicts.move_to_end(key)
+    while len(_verdicts) > _VERDICT_CACHE_SIZE:
+        _verdicts.popitem(last=False)
+
+
+def clear_verdict_cache() -> None:
+    """Drop every kept verdict."""
+    _verdicts.clear()

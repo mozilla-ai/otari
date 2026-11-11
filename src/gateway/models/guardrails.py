@@ -27,18 +27,29 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 
-GuardrailDirection = Literal["input", "output"]
+GuardrailDirection = Literal["input", "tool_results", "tool_calls", "output"]
+"""What a guardrail reads: the caller's input, tool results, the tool calls the model makes, or its answer."""
+
+GuardrailMode = Literal["monitor", "block"]
+"""What a guardrail does when it fires: record it, or refuse or withhold the content."""
+
+DEFAULT_DIRECTIONS: tuple[GuardrailDirection, ...] = ("input",)
 
 
 def _default_directions() -> list[GuardrailDirection]:
-    return ["input"]
+    return list(DEFAULT_DIRECTIONS)
+
+
+def distinct_directions(value: list[GuardrailDirection]) -> list[GuardrailDirection]:
+    """``value`` with each direction once, in the order first named."""
+    return list(dict.fromkeys(value))
 
 
 class GuardrailConfig(BaseModel):
     """A single guardrail check the caller wants the gateway to enforce.
 
     URL safety: when ``url`` is supplied it is validated by
-    :func:`gateway.services.guardrails.run_input_guardrails` (not here at parse
+    :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
     time — the check does a DNS lookup that must be awaited) with the same
     SSRF guard used for MCP server URLs (loopback allowed by default for
     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
@@ -52,16 +63,20 @@ class GuardrailConfig(BaseModel):
     url: str | None = Field(default=None, min_length=1)
     """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``."""
 
-    on: list[GuardrailDirection] = Field(default_factory=_default_directions)
-    """Which directions to check. v1 enforces ``input`` only; ``output`` is
-    accepted but not yet enforced (the response-direction check is a planned
-    follow-up that needs streaming handling)."""
+    on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
+        default_factory=_default_directions, min_length=1
+    )
+    """What the guardrail reads. ``input`` is the caller's input, ``tool_results``
+    every tool result whoever ran the tool, ``tool_calls`` each call the model
+    makes before it runs or reaches the client, and ``output`` the model's
+    answer. Defaults to ``input`` alone."""
 
-    mode: Literal["block", "monitor"] = "monitor"
+    mode: GuardrailMode = "monitor"
     """``monitor`` (default) → forward the request anyway and annotate the
     response with the verdict (shadow mode); good for observing without
-    disrupting workflows on false positives. ``block`` → reject the request
-    with a 403 and never call the provider when the guardrail flags it."""
+    disrupting workflows on false positives. ``block`` → refuse flagged input or
+    a flagged answer with a 403, and withhold a flagged tool result or tool call
+    so the agent can recover."""
 
     on_unavailable: Literal["block", "monitor"] = "block"
     """What to do when the check cannot be evaluated: the guardrails service
@@ -75,7 +90,8 @@ class GuardrailConfig(BaseModel):
     fallback chain, so an operator mandating one on a routing policy is choosing
     to make that service a hard dependency. ``monitor`` is the escape hatch: the
     request is served and the skipped check is recorded, trading enforcement for
-    availability."""
+    availability. A tool result that a failing-closed check cannot evaluate is
+    withheld rather than refused, as a flagged one is."""
 
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
     """Extra kwargs for the check itself. Forwarded to the guardrails service
@@ -274,6 +290,11 @@ class OrganizationGuardrail(Base):
     definition_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
     mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
     on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
+    # What the mandate reads, as `GuardrailConfig.on` names it. The column is not
+    # called `on`, which SQL reserves.
+    on: Mapped[list[str]] = mapped_column(
+        "directions", JSON, default=_default_directions, server_default='["input"]', nullable=False
+    )
     validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # The organization's own kill switch. A disabled entry runs nowhere,
     # whatever its scope says, so an organization can stop a guardrail without
