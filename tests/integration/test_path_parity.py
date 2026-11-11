@@ -290,7 +290,8 @@ def test_every_path_reports_and_settles_the_same_request_alike(
 
     if backend.live:
         assert provider.rounds, "the request reached the provider"
-        if tools and len(provider.rounds) < 2:
+        # Requests are recorded before they are forwarded, so a follow-up that failed still counts.
+        if tools and len(provider.requests) < 2:
             pytest.skip("the live model answered without searching, so no tool loop ran")
     else:
         rounds = 2 if tools else 1
