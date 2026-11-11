@@ -12,7 +12,7 @@ from gateway.exceptions.api_keys_exceptions import (
     FederationRuleExistsError,
     FederationRuleLimitError,
     FederationRuleNotFoundError,
-    OperatorDisabledKeyError,
+    KeyEnableRefusedError,
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
@@ -210,13 +210,13 @@ class ApiKeyService:
         than written over. A changed access list must fit the owner's own.
 
         Raises:
-            OperatorDisabledKeyError: the changes switch on a key an operator switched off.
+            KeyEnableRefusedError: the changes enable a key disabled for a reason the owner cannot clear.
             ValueError: a changed access list names something unknown, or grants more than the owner's.
         """
         async with self._uow:
             await self._keys.reload_locked(key)
-            if changes.get("is_active") is True and key.operator_disabled:
-                raise OperatorDisabledKeyError
+            if changes.get("is_active") is True and key.disabled_reason is not None:
+                raise KeyEnableRefusedError(key.disabled_reason)
             stored = AccessLists(key.allowed_models, key.allowed_tools)
             access = await self.check_access_lists(
                 config,

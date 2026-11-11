@@ -10,7 +10,7 @@ from gateway.services.api_keys._access_tokens import (
     mint_access_token,
     read_access_token,
 )
-from gateway.services.api_keys._admission import key_refusal, operator_set_active
+from gateway.services.api_keys._admission import key_refusal
 from gateway.services.api_keys._billed_user import (
     API_KEY_NO_USER_DETAIL,
     API_KEY_VALIDATION_FAILED_DETAIL,
@@ -19,6 +19,7 @@ from gateway.services.api_keys._billed_user import (
     names_end_user,
     resolve_user_id,
 )
+from gateway.services.api_keys._enabling import operator_enable_refusal, operator_set_active
 from gateway.services.api_keys._federation import (
     FederatedIdentity,
     FederatedTokenVerifier,
@@ -71,6 +72,7 @@ __all__ = [
     "match_federation_rules",
     "mint_access_token",
     "names_end_user",
+    "operator_enable_refusal",
     "operator_max_end_users",
     "operator_set_active",
     "organization_key_changes",

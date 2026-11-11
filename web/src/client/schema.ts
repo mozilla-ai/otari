@@ -11831,6 +11831,16 @@ export interface components {
             data: components["schemas"]["DeploymentUserPublic"][];
         };
         /**
+         * DisabledReason
+         * @description Represents the reason an API key cannot be enabled.
+         *
+         *     Every reason blocks the key's owner. Some also block an operator, which
+         *     ``operator_may_clear`` records. A key with no reason set can be enabled by
+         *     its owner.
+         * @enum {string}
+         */
+        DisabledReason: "operator" | "revoked";
+        /**
          * DiscoverableModel
          * @description A model one provider instance reports as available.
          */
@@ -13910,6 +13920,7 @@ export interface components {
             config_name?: string | null;
             /** Created At */
             created_at: string;
+            disabled_reason: components["schemas"]["DisabledReason"] | null;
             /** End User Budget Id */
             end_user_budget_id: string | null;
             /** End User Budget Ids */
@@ -13943,11 +13954,8 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
-            /**
-             * Operator Disabled
-             * @default false
-             */
-            operator_disabled: boolean;
+            /** Operator Can Enable */
+            operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */

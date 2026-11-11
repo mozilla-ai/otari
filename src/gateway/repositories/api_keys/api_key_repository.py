@@ -2,12 +2,12 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Never
 
-from sqlalchemy import select, update
+from sqlalchemy import Update, case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.repositories.base_repository import BaseRepository
 
 _NAMES_BATCH = 10_000
@@ -36,31 +36,49 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Re-read ``key`` from the database and lock its row until the commit."""
         await self.db.refresh(key, with_for_update=True)
 
-    async def deactivate_owned_in_workspaces(
+    def _owned_in_workspaces(
+        self, user_id: str, workspace_ids: Collection[uuid.UUID], *, self_service_only: bool
+    ) -> Update:
+        """An UPDATE over the keys billed to ``user_id`` in these workspaces."""
+        statement = update(APIKey).where(APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids))
+        return statement.where(APIKey.self_service.is_(True)) if self_service_only else statement
+
+    async def disable_owned_in_workspaces(
+        self, user_id: str, workspace_ids: Collection[uuid.UUID], *, self_service_only: bool
+    ) -> None:
+        """Disable the keys billed to ``user_id`` that are still enabled in these workspaces.
+
+        Records no reason, so the owner can enable them again.
+        ``self_service_only`` narrows it to the keys the owner created themselves.
+        """
+        if not workspace_ids:
+            return
+        statement = self._owned_in_workspaces(user_id, workspace_ids, self_service_only=self_service_only)
+        await self.db.execute(statement.where(APIKey.is_active.is_(True)).values(is_active=False))
+
+    async def disable_owned_in_workspaces_with_reason(
         self,
         user_id: str,
         workspace_ids: Collection[uuid.UUID],
         *,
         self_service_only: bool,
-        by_operator: bool,
+        reason: DisabledReason,
     ) -> None:
-        """Switch off the keys billed to ``user_id`` in these workspaces.
+        """Disable every key billed to ``user_id`` in these workspaces and record ``reason`` on it.
 
-        ``self_service_only`` narrows it to keys the user minted for themselves;
-        ``by_operator`` marks them as not theirs to switch back on, including the
-        ones they had already switched off themselves.
+        Reaches a key the owner had already disabled, since the reason is what the
+        owner cannot clear. A key that already carries a reason keeps it, so this
+        never replaces one with a reason that is easier to clear.
+        ``self_service_only`` narrows it to the keys the owner created themselves.
         """
         if not workspace_ids:
             return
-        statement = update(APIKey).where(APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids))
-        if not by_operator:
-            statement = statement.where(APIKey.is_active.is_(True))
-        if self_service_only:
-            statement = statement.where(APIKey.self_service.is_(True))
-        values: dict[str, bool] = {"is_active": False}
-        if by_operator:
-            values["operator_disabled"] = True
-        await self.db.execute(statement.values(**values))
+        await self.db.execute(
+            self._owned_in_workspaces(user_id, workspace_ids, self_service_only=self_service_only).values(
+                is_active=False,
+                disabled_reason=case((APIKey.disabled_reason.is_(None), reason), else_=APIKey.disabled_reason),
+            )
+        )
 
     async def names_by_id(
         self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
