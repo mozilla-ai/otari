@@ -248,10 +248,32 @@ def _vendor_prefixed(model: str) -> list[tuple[str, str]]:
     return attempts
 
 
+def _scoped_attempts(provider: str | None, model: str, implementation: str | None) -> list[tuple[str, str]]:
+    """The ``(provider_id, model_id)`` pairs a request names, most specific first.
+
+    A HuggingFace pinned-backend selector against the backend's own provider;
+    the provider and the implementation behind it; for an ``otari`` provider,
+    the vendor its ``vendor/model`` or ``vendor:model`` id names.
+    """
+    scoped = [p for p in (provider, implementation) if p]
+    attempts: list[tuple[str, str]] = []
+    if "huggingface" in scoped and ":" in model:
+        base, backend = model.rsplit(":", 1)
+        attempts += [(provider_id, base) for provider_id in _HF_BACKEND_PROVIDER_IDS.get(backend, (backend,))]
+    for name in scoped:
+        attempts += [(provider_id, model) for provider_id in dict.fromkeys((*models_dev_provider_ids(name), name))]
+    if _OTARI_PROVIDER in scoped and (split := _OTARI_MODEL_ID.match(model)) is not None:
+        vendor, vendor_model = split.groups()
+        attempts += [
+            (provider_id, vendor_model) for provider_id in dict.fromkeys((*models_dev_provider_ids(vendor), vendor))
+        ]
+    return attempts
+
+
 class ModelsDevPriceIndex:
     """Immutable lookup over one models.dev catalog."""
 
-    __slots__ = ("_by_canonical", "_by_model_id", "_by_provider")
+    __slots__ = ("_by_canonical", "_by_model_id", "_by_provider", "_by_provider_folded")
 
     def __init__(self, entries: Iterable[ModelsDevPrice]) -> None:
         by_provider: dict[str, dict[str, ModelsDevPrice]] = {}
@@ -266,6 +288,12 @@ class ModelsDevPriceIndex:
                 if tail != entry.canonical_model_id.casefold():
                     by_canonical.setdefault(tail, []).append(entry)
         self._by_provider = by_provider
+        by_provider_folded: dict[str, dict[str, ModelsDevPrice]] = {}
+        for provider_id, models in by_provider.items():
+            folded = by_provider_folded[provider_id] = {}
+            for model_id, entry in models.items():
+                folded.setdefault(model_id.casefold(), entry)
+        self._by_provider_folded = by_provider_folded
         self._by_model_id = by_model_id
         self._by_canonical = by_canonical
 
@@ -308,32 +336,32 @@ class ModelsDevPriceIndex:
         the Otari behind it charges; a model id that is unambiguous in
         price across every provider; then the vendor-prefixed spellings of the
         id. Serving providers differ in rate, so the scoped lookups precede the
-        agnostic one.
+        agnostic one. Every scoped lookup is tried by its exact id before any
+        is tried by an id that differs only in case, because models.dev
+        lowercases some providers' ids (OVHcloud's) that the provider itself
+        lists in mixed case.
         """
-        scoped = [p for p in (provider, implementation) if p]
-        if "huggingface" in scoped and ":" in model:
-            base, backend = model.rsplit(":", 1)
-            for provider_id in _HF_BACKEND_PROVIDER_IDS.get(backend, (backend,)):
-                if (found := self.get(provider_id, base)) is not None:
-                    return found
-        for name in scoped:
-            for provider_id in dict.fromkeys((*models_dev_provider_ids(name), name)):
-                if (found := self._scoped(provider_id, model)) is not None:
-                    return found
-        if _OTARI_PROVIDER in scoped and (split := _OTARI_MODEL_ID.match(model)) is not None:
-            vendor, vendor_model = split.groups()
-            for provider_id in dict.fromkeys((*models_dev_provider_ids(vendor), vendor)):
-                if (found := self._scoped(provider_id, vendor_model)) is not None:
+        attempts = _scoped_attempts(provider, model, implementation)
+        for folded in (False, True):
+            for provider_id, name in attempts:
+                if (found := self._scoped(provider_id, name, folded=folded)) is not None:
                     return found
         if (found := self._agnostic(model)) is not None:
             return found
         for head, rest in _vendor_prefixed(model):
             provider_id = models_dev_provider_id(head)
             if provider_id in self._by_provider:
-                return self._scoped(provider_id, rest) or self._agnostic(rest) or self._agnostic(_strip_suffix(rest))
+                return (
+                    self._scoped(provider_id, rest)
+                    or self._scoped(provider_id, rest, folded=True)
+                    or self._agnostic(rest)
+                    or self._agnostic(_strip_suffix(rest))
+                )
         return None
 
-    def _scoped(self, provider_id: str, model: str) -> ModelsDevPrice | None:
+    def _scoped(self, provider_id: str, model: str, *, folded: bool = False) -> ModelsDevPrice | None:
+        if folded:
+            return self._by_provider_folded.get(provider_id, {}).get(model.casefold())
         if (found := self.get(provider_id, model)) is not None:
             return found
         if provider_id == _BEDROCK_PROVIDER_ID:
