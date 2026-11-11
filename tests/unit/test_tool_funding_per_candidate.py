@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from gateway.api.routes import _pipeline as pipeline
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.services.tools import PricedTool
 
 HEAD = frozenset({"head"})
 FALLBACK = frozenset({"fallback"})
@@ -45,7 +46,7 @@ def gate(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(
         pipeline,
         "admitted_tools",
-        lambda *, code_execution, web: [SimpleNamespace(name=name, deployment_paid=True) for name in web],
+        lambda *, code_execution, web: [PricedTool(name, None, (), deployment_paid=True) for name in web],
     )
     monkeypatch.setattr(pipeline, "release_session", AsyncMock(return_value=True))
     refused = AsyncMock()
@@ -82,6 +83,7 @@ async def test_the_request_is_refused_when_no_candidate_can_fund_its_tools(gate:
         )
 
     assert raised.value.status_code == 402
+    assert "The gateway tool 'otari_web_search' runs on this deployment's account" in raised.value.detail
     assert billing.asked == [frozenset({"otari:web_search"})]
     refused.assert_awaited_once()
 
