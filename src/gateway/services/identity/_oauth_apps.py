@@ -50,13 +50,13 @@ class OAuthAppService:
         if app is None or not any(redirect_matches(uri, redirect_uri) for uri in app.redirect_uris):
             raise OAuthAppGrantError("invalid_request", "Unknown app or redirect URI")
 
-    def app_name(self, client_id: str) -> str:
-        """The operator's display name for a registered client."""
+    def _app_name(self, client_id: str) -> str:
+        """The operator's display name for a client ``require_registered_redirect`` has admitted."""
         return self.apps[client_id].name
 
     def details(self, client_id: str, redirect_uri: str) -> AppDetails:
         self.require_registered_redirect(client_id, redirect_uri)
-        return AppDetails(name=self.app_name(client_id), redirect_uri=redirect_uri, issuer=self.issuer)
+        return AppDetails(name=self._app_name(client_id), redirect_uri=redirect_uri, issuer=self.issuer)
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
@@ -123,7 +123,7 @@ class OAuthAppService:
                 user=user,
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
-                app_name=self.app_name(request.client_id),
+                app_name=self._app_name(request.client_id),
                 key_format=self.key_format,
             )
 

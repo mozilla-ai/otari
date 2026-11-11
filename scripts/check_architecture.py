@@ -1327,10 +1327,6 @@ class ModelAccess(TypedDict):
 # or None where no repository holds its queries yet.
 # Its baseline names the other modules that still use the model, and a baseline only shrinks.
 MODEL_ACCESS: dict[str, ModelAccess] = {
-    "gateway.models.identity.OAuthAppGrant": {
-        "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
-        "baseline": (),
-    },
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (
@@ -1427,6 +1423,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.identity.BlockedEmail": {
         "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.identity.OAuthAppGrant": {
+        "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),
     },
     "gateway.models.identity.OAuthIdentityLink": {

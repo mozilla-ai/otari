@@ -56,9 +56,6 @@ class ApiKeyMembershipListener:
         """Nothing here: ``organization_member_changed`` already disabled what the change takes away."""
 
 
-__all__ = ["ApiKeyMembershipListener", "ApiKeyDeactivationListener"]
-
-
 class ApiKeyDeactivationListener:
     """Account deactivation switches off self-service keys without permanently revoking them."""
 
