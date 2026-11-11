@@ -22,7 +22,6 @@ import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -42,7 +41,6 @@ import { useDeploymentAdminAccess } from "@/shared/api/deployment"
 import {
   useDeleteHostedProvider,
   useHostedCatalogUpdate,
-  useHostedCatalogUpdatePreview,
   useHostedProviders,
   usePlatformConnectStatus,
   useTestHostedProvider,
@@ -55,16 +53,14 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
+import { CatalogUpdateDialog } from "./CatalogUpdateDialog"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
 import {
-  catalogPreviewOutcome,
   catalogRefreshFailures,
   catalogRefreshOutcome,
-  modelsPreviewOutcome,
   organizationRepricedOutcome,
-  pricePreviewOutcome,
 } from "./refreshOutcome"
 import { formatCountries } from "./supportedCountries"
 
@@ -165,88 +161,6 @@ function CatalogUpdateReport({
 }
 
 /**
- * What a catalog update is about to do: the price changes, the models each
- * provider newly lists, and, when the cleanup is ticked, the models it removes,
- * named before anything is removed.
- */
-function CatalogUpdatePreview({
-  preview,
-  cleanup,
-  onCleanupChange,
-}: {
-  preview: ReturnType<typeof useHostedCatalogUpdatePreview>
-  cleanup: boolean
-  onCleanupChange: (cleanup: boolean) => void
-}) {
-  const body = () => {
-    if (preview.error) {
-      // The confirm refuses to fire in this state, so the banner is the answer.
-      return <ErrorBanner error={preview.error} />
-    }
-    if (preview.isPending || preview.isFetching) {
-      return <p>Asking models.dev and every provider what changed…</p>
-    }
-    const { catalog, prices } = preview.data
-    const failures = catalogRefreshFailures(catalog)
-    return (
-      <>
-        <p>{pricePreviewOutcome(preview.data)}</p>
-        {prices?.needs_review ? (
-          <p className="text-caption text-warning">
-            Unusual: {prices.review_reason}. A scheduled update would wait for a
-            person.
-          </p>
-        ) : null}
-        <p>{modelsPreviewOutcome(catalog)}</p>
-        {failures.map((failure) => (
-          <p key={failure.provider} className="text-caption">
-            {failure.message}
-          </p>
-        ))}
-        {cleanup ? (
-          <>
-            <p>{catalogPreviewOutcome(catalog)}</p>
-            {catalog.removed.length > 0 ? (
-              <ul className="max-h-48 overflow-y-auto font-mono text-caption">
-                {catalog.removed.map((modelKey) => (
-                  <li key={modelKey}>{modelKey}</li>
-                ))}
-              </ul>
-            ) : null}
-            {catalog.removed_count > catalog.removed.length ? (
-              <p className="text-caption">
-                … and {catalog.removed_count - catalog.removed.length} more.
-              </p>
-            ) : null}
-            {catalog.kept.map((group) => (
-              <p key={group.reason} className="text-caption">
-                Keeping {group.count} {group.count === 1 ? "model" : "models"}:{" "}
-                {group.reason}.
-              </p>
-            ))}
-          </>
-        ) : null}
-      </>
-    )
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {body()}
-      <Checkbox isSelected={cleanup} onChange={onCleanupChange}>
-        Also remove the prices of models no provider serves
-      </Checkbox>
-      {cleanup ? (
-        <p className="text-caption">
-          Removing a model takes its rate history and the overrides of
-          organizations with no key of their own for the provider. Requests
-          already billed keep the cost they were billed at.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-/**
  * A row's actions, with the stored provider's test verdict beneath them.
  *
  * A component of its own so each row holds its own test: one mutation shared
@@ -341,17 +255,6 @@ export function HostedProvidersPage() {
   const catalogUpdate = useHostedCatalogUpdate()
   const [isUpdateOpen, setIsUpdateOpen] = useState(false)
   const [updateOpenCount, setUpdateOpenCount] = useState(0)
-  const [cleanup, setCleanup] = useState(false)
-  // Asked only while the dialog is open, because answering dials every
-  // configured provider, and asked afresh on every opening.
-  const preview = useHostedCatalogUpdatePreview(
-    isUpdateOpen ? updateOpenCount : 0,
-    cleanup,
-  )
-  // The confirm waits for a preview this opening read successfully and shows:
-  // never a previous opening's, a failed or an in-flight one, because the
-  // update applies the prices that preview named.
-  const isPreviewShown = preview.isSuccess && !preview.isFetching
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -616,7 +519,6 @@ export function HostedProvidersPage() {
               className="min-h-11 md:min-h-9"
               isPending={catalogUpdate.isPending}
               onPress={() => {
-                setCleanup(false)
                 setUpdateOpenCount((n) => n + 1)
                 setIsUpdateOpen(true)
               }}
@@ -759,35 +661,12 @@ export function HostedProvidersPage() {
         />
       ) : null}
 
-      <ConfirmDialog
+      <CatalogUpdateDialog
+        key={updateOpenCount}
+        opening={updateOpenCount}
         isOpen={isUpdateOpen}
-        onOpenChange={(open) => {
-          if (!open) setIsUpdateOpen(false)
-        }}
-        heading="Update the catalog?"
-        body={
-          <CatalogUpdatePreview
-            preview={preview}
-            cleanup={cleanup}
-            onCleanupChange={setCleanup}
-          />
-        }
-        confirmLabel={cleanup ? "Update and remove" : "Update catalog"}
-        // Danger only once it deletes: without the cleanup it only adds and reprices.
-        confirmVariant={cleanup ? "danger" : "primary"}
-        // The update's own pending state only: the preview dials every provider,
-        // and folding it in would leave Cancel dead for that whole fan-out.
-        isPending={catalogUpdate.isPending}
-        isConfirmDisabled={!isPreviewShown}
-        error={catalogUpdate.error}
-        onConfirm={() => {
-          // Nothing is confirmed against a preview nobody has seen.
-          if (!isPreviewShown) return
-          catalogUpdate.mutate(
-            { digest: preview.data.prices?.digest ?? null, cleanup },
-            { onSuccess: () => setIsUpdateOpen(false) },
-          )
-        }}
+        onClose={() => setIsUpdateOpen(false)}
+        update={catalogUpdate}
       />
       <ConfirmDialog
         isOpen={pendingDelete !== ""}
