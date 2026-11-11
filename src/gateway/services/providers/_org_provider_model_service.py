@@ -336,8 +336,11 @@ class OrgProviderModelService:
         skip: int = 0,
         limit: int = 500,
         model_type: OfferedModelType | None = None,
+        search: str | None = None,
     ) -> OrgProviderKeyModelsPublic:
         """One page of a key's offered models, of one kind or of every kind, each priced as it currently serves.
+
+        ``search`` keeps the models whose name contains it, case-insensitively, and narrows the counts too.
 
         Every row is read, because the kind is not stored and each kind's count covers the whole key.
         """
@@ -345,7 +348,7 @@ class OrgProviderModelService:
             key = await self._key_for_user(user, key_id)
             rows = await self.models.list_all_for_key(key_id)
             kinds = _kinds(key, [row.model for row in rows])
-            page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit)
+            page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit, search=search)
             prices = await self._current_prices(key, page.rows)
         return OrgProviderKeyModelsPublic(
             data=[_model_public(row, prices.get(row.model), kinds.get(row.model)) for row in page.rows],

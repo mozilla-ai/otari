@@ -369,9 +369,17 @@ class HostedProviderService:
         get_model_cache().clear(name)
 
     async def list_models(
-        self, provider: str, *, skip: int = 0, limit: int = 500, model_type: OfferedModelType | None = None
+        self,
+        provider: str,
+        *,
+        skip: int = 0,
+        limit: int = 500,
+        model_type: OfferedModelType | None = None,
+        search: str | None = None,
     ) -> HostedModelsPublic:
         """One page of a provider's offered models, of one kind or of every kind, each priced as it currently serves.
+
+        ``search`` keeps the models whose name contains it, case-insensitively, and narrows the counts too.
 
         Every row is read, because the kind is not stored and each kind's count covers the whole provider.
 
@@ -382,7 +390,7 @@ class HostedProviderService:
             source = await self._provider_or_raise(provider)
             rows = await self.models.list_all_for_provider(source.name)
         kinds = _kinds(source, [row.model for row in rows])
-        page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit)
+        page = page_by_kind(rows, kinds, "model", model_type=model_type, skip=skip, limit=limit, search=search)
         rates = await self.offers.current_rates(source.name, page.rows, implementation=source.implementation)
         return HostedModelsPublic(
             data=[

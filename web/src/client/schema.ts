@@ -25443,6 +25443,8 @@ export interface operations {
                 limit?: number;
                 /** @description Only models of this kind; `unknown` for those no source names a kind for */
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
+                /** @description Only models whose name contains this text, case-insensitively */
+                search?: string | null;
             };
             header?: never;
             path: {
@@ -29073,6 +29075,8 @@ export interface operations {
                 limit?: number;
                 /** @description Only models of this kind; `unknown` for those no source names a kind for */
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
+                /** @description Only models whose name contains this text, case-insensitively */
+                search?: string | null;
             };
             header?: never;
             path: {

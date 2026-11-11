@@ -36516,6 +36516,25 @@
               "description": "Only models of this kind; `unknown` for those no source names a kind for",
               "title": "Type"
             }
+          },
+          {
+            "description": "Only models whose name contains this text, case-insensitively",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models whose name contains this text, case-insensitively",
+              "title": "Search"
+            }
           }
         ],
         "responses": {
@@ -43285,6 +43304,25 @@
               ],
               "description": "Only models of this kind; `unknown` for those no source names a kind for",
               "title": "Type"
+            }
+          },
+          {
+            "description": "Only models whose name contains this text, case-insensitively",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models whose name contains this text, case-insensitively",
+              "title": "Search"
             }
           }
         ],
