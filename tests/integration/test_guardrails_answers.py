@@ -216,7 +216,7 @@ def test_an_answer_a_guardrail_refuses_is_still_billed(
     assert response.json()["detail"]["code"] == "guardrail_violation"
     assert "forbidden answer" not in response.text
     [row] = db_session.scalars(select(UsageLog)).all()
-    assert (row.prompt_tokens, row.completion_tokens) == (11, 7)
+    assert (row.prompt_tokens, row.completion_tokens, row.status, row.status_code) == (11, 7, "error", 403)
 
 
 @pytest.mark.parametrize("endpoint", list(_STREAMS))

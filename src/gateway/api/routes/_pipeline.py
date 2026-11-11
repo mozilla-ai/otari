@@ -7320,6 +7320,15 @@ async def run_non_stream(
         for key, value in _container_headers(served_tools.container_lease).items():
             response.headers[key] = value
         usage_data = adapter.extract_usage(result)
+        # Before the row is written, so an answer a guardrail refuses is recorded as
+        # refused, and still billed: the provider answered in full.
+        refused: AnswerRefused | None = None
+        guardrails = served_tools.guardrails
+        if guardrails is not None and guardrails.reads_answer:
+            try:
+                await finish_result(guardrails, adapter.name, result)
+            except AnswerRefused as exc:
+                refused = exc
         if ctx.rate_limit_grant is not None:
             await ctx.rate_limit_grant.settle(_settled_tokens(usage_data))
         logged = LoggedUsage(None, None)
@@ -7328,6 +7337,7 @@ async def run_non_stream(
         # ``log_success_without_usage = False`` would otherwise suppress.
         if (
             usage_data is not None
+            or refused is not None
             or adapter.log_success_without_usage
             or not tool_ctx.tally.is_empty()
             # A model priced per request owes for the call whatever it reported.
@@ -7353,6 +7363,8 @@ async def run_non_stream(
                 endpoint=adapter.endpoint,
                 user_id=ctx.user_id,
                 usage_override=usage_data,
+                error=failure_error_message(refused) if refused is not None else None,
+                status_code=refused.status_code if refused is not None else None,
                 latency_ms=_elapsed_ms(ctx.started_at),
                 counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                 attribution=attribution,
@@ -7379,19 +7391,20 @@ async def run_non_stream(
             await reconcile_reservation(
                 ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
+        if refused is not None:
+            raise refused
         _attach_settled_cost(adapter, result, logged)
         if tool_ctx.sandbox_files is not None:
             await store_inline_outputs(adapter.name, result, tool_ctx.sandbox_files.store_provider_output)
         await _copy_provider_files(
             ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
         )
-        # After settlement, so an answer a guardrail refuses is still billed.
-        guardrails = served_tools.guardrails
-        if guardrails is not None and guardrails.reads_answer:
-            await finish_result(guardrails, adapter.name, result)
         if display_model is not None:
             relabel_model(result, display_model)
         return result
+    except AnswerRefused:
+        # Settled above, as the answer it refused.
+        raise
     except HTTPException:
         await release_reservation(ctx)
         raise
