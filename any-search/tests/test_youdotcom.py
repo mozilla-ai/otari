@@ -93,6 +93,38 @@ async def test_native_options_are_sent_as_given() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extraction", "sent"),
+    [
+        (
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": ["html"]}},
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": ["markdown", "html"]}},
+        ),
+        (
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": ["html", "markdown"]}},
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": ["html", "markdown"]}},
+        ),
+        # An empty list and no list at all are You.com's ["markdown"].
+        (
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": []}},
+            {"extraction_mode": "full_page", "full_page": {"extraction_formats": []}},
+        ),
+        ({"extraction_mode": "full_page"}, {"extraction_mode": "full_page"}),
+        # Formats mean nothing under highlights, so they are left as given.
+        (
+            {"extraction_mode": "highlights", "full_page": {"extraction_formats": ["html"]}},
+            {"extraction_mode": "highlights", "full_page": {"extraction_formats": ["html"]}},
+        ),
+    ],
+)
+async def test_full_page_always_asks_for_markdown(extraction: dict[str, Any], sent: dict[str, Any]) -> None:
+    given = json.loads(json.dumps(extraction))
+    _, request = await _search(extraction=extraction)
+    assert json.loads(request.content)["extraction"] == sent
+    assert extraction == given
+
+
+@pytest.mark.asyncio
 async def test_include_domains_is_sent_as_given() -> None:
     _, request = await _search(include_domains=["python.org"])
     assert json.loads(request.content)["include_domains"] == ["python.org"]

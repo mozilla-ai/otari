@@ -73,7 +73,8 @@ the library accepts both from anyone, and acting on them is the host's job).
 
 A provider's cost tiers are the values of one option for which its pricing lists a price per call
 of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
-`default` is the tier the provider uses when the option is not sent. The metadata records no
+`default` is the tier a call is billed at when the option is not passed: the provider's own,
+unless the adapter sends another. The metadata records no
 amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
 that bills searches at a price per call for a provider that does not report its cost can let only
 whoever set that price choose the tier.
@@ -378,7 +379,7 @@ await engine.search(query, extraction=None)  # each result's description as its 
 |---|---|
 | `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
 | `snippet` | `contents.highlights`, joined; `description` when there are none |
-| `text` | `contents.markdown`, only under `extraction_mode` `full_page` |
+| `text` | `contents.markdown`, only under `extraction_mode` `full_page`; `markdown` is added to `full_page.extraction_formats` when they lack it, and an HTML copy stays in `raw` |
 | `published` | `page_age` when it is ISO 8601, taken as UTC; another form stays in `raw` |
 
 You.com reports no cost. `max_results` becomes `count`, 10 when unset, at most 100, and at most 50

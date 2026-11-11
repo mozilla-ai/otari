@@ -326,6 +326,7 @@ def _error(code: Any, **details: Any) -> dict[str, Any]:
             "payment_required",
         ),
         (402, {"message": SENTINEL}, "payment_required"),
+        (429, _error("rate_limited"), "rate_limited"),
         (429, {"message": SENTINEL}, "http_error"),
         (502, _error(f"not a code {SENTINEL}"), "http_error"),
         (502, _error(None), "http_error"),

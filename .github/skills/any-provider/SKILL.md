@@ -29,8 +29,9 @@ certain, as otari's domain policy, checks the results itself.
    reads it from, if any, the limits, and the native options under the provider's own names and
    enums. Note the pricing, with the date you read it, in the module's docstring. When the
    provider charges a call one of a few prices chosen by an option, mark that option `cost_tier`,
-   with the tiers as its `enum` and the provider's own as its `default`; set `reports_cost` when
-   its answer says what each call cost. Record no amount in the metadata.
+   with the tiers as its `enum` and, as its `default`, the tier a call is billed at when the
+   option is not passed: the provider's own, unless the adapter sends another (step 2). Set
+   `reports_cost` when its answer says what each call cost. Record no amount in the metadata.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
@@ -38,10 +39,12 @@ certain, as otari's domain policy, checks the results itself.
      names the library in the request's `User-Agent` (`any-search/<version>` or
      `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
      text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
-     itself: that header is the one exception to the next rule.
+     itself: that header is one of two exceptions to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
+     The other exception is a default tier that adds a charge per page: send the cheaper tier
+     unless the option is passed (You.com, any-fetch, in the learnings).
    - A shared parameter wins over the native option it maps to.
    - Refuse a reserved key: the query and the key. A native option that a shared parameter also
      sets stays offered, so its whole range stays reachable (Perplexity's `search_recency_filter`
@@ -387,9 +390,9 @@ The first provider whose price per call depends on an option.
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
 
-### 2026-11-09, You.com (any-search)
+### 2026-11-01, You.com (any-search)
 
-The first provider whose SDK sends defaults on options that have a list of values.
+The first provider that sends defaults on options that have a list of values.
 
 - A default the adapter sends must be one a host can turn off. You.com's SDK sends `language`
   `EN` and `knowledge` `core`, and null turns each off, as it does `extraction`. otari refuses a
@@ -414,15 +417,16 @@ The first provider whose SDK sends defaults on options that have a list of value
   `empty` with `include_domains` naming a domain that does not exist; `error` with a made-up key,
   a 403.
 
-### 2026-11-10, You.com (any-fetch)
+### 2026-11-11, You.com (any-fetch)
 
 The first fetch provider with a cost tier.
 
-- Two efforts available under `parse_effort`: `lite` and `standard`.
-  Note: these only have an effect when fetching PDFs. There is no effect when fetching standard web pages.
-- Defaults to `standard`, which bills each PDF page on top of the URL.
-  Check the [docs](https://you.com/docs) for the latest on configurations and pricing. 
-  In any-fetch, `lite` is the default due to the cost implication of `standard`.
+- When a provider's default tier adds a charge per page on top of the call, the adapter sends the
+  cheaper tier unless the option is passed. It marks the option `cost_tier` with that tier as its
+  `default`, since that is what a call without it is billed at, and says so in the option's
+  description. A host that bills a flat price per call cannot see how many pages a call read, so
+  the provider's default would bill it for pages its price never covered. You.com's
+  `parse_effort` defaults to `standard`, which adds $0.50 per 1,000 PDF pages; `lite` adds none.
 - An empty response can be a cache miss rather than an empty page: under
   `extraction_source: cache`, You.com returns `{}` for a page it has no copy of, which its
   documentation calls "nothing extracted". It is a `FetchError` (`not_cached`), not an empty page
@@ -437,9 +441,10 @@ The first fetch provider with a cost tier.
   provider only through `fetch`. Say so in the option's description rather than renaming it, and
   say which of the two must be the longer.
 - A provider can document error codes as stable. You.com's `error.code` (`invalid_url`,
-  `site_unreachable`) is one, so it is the tag, while its `details.reason` can name the host and
-  is not read. The gateway in front of the API still returns 401, 403 and a key-less 402 with
-  bodies of its own, so those are tagged by status as the search adapter does.
+  `site_unreachable`) is one, so it is the tag at any status that carries it, while its
+  `details.reason` can name the host and is not read. The gateway in front of the API still
+  returns 401, 403 and a key-less 402 with bodies of its own, so those are tagged by status as
+  the search adapter does.
 - Fixture recipes: `normal` with `https://example.com/` and `extraction_source=fetch`; `empty`
   with an httpbin `base64` URL holding HTML whose body is empty; `in_body_error` with
   `extraction_source=cache` and a path nobody has fetched; `error` with a made-up key, a 403.
