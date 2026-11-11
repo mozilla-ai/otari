@@ -1,7 +1,3 @@
----
-icon: basketball
----
-
 # Playground
 
 The Playground lets you test different AI models directly in Otari, experiment with prompts, and compare responses. You can evaluate model performance, including response quality, token usage, latency, and cost, to help you choose the best model for your needs.

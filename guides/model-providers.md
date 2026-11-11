@@ -1,6 +1,5 @@
 ---
 description: Where your models come from, Otari's hosted providers or your own provider keys, and which one each workspace uses.
-icon: key
 ---
 
 # Model providers
