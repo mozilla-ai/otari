@@ -7634,6 +7634,15 @@
         "title": "DeploymentUsersPublic",
         "type": "object"
       },
+      "DisabledReason": {
+        "description": "Represents the reason an API key cannot be enabled.\n\nEvery reason blocks the key's owner. Some also block an operator, which\n``operator_may_clear`` records. A key with no reason set can be enabled by\nits owner.",
+        "enum": [
+          "operator",
+          "revoked"
+        ],
+        "title": "DisabledReason",
+        "type": "string"
+      },
       "DiscoverableModel": {
         "description": "A model one provider instance reports as available.",
         "properties": {
@@ -12030,6 +12039,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisabledReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "end_user_budget_id": {
             "anyOf": [
               {
@@ -12140,9 +12159,8 @@
             "title": "Metadata",
             "type": "object"
           },
-          "operator_disabled": {
-            "default": false,
-            "title": "Operator Disabled",
+          "operator_can_enable": {
+            "title": "Operator Can Enable",
             "type": "boolean"
           },
           "reject_user_mismatch": {
@@ -12183,6 +12201,8 @@
           "last_used_at",
           "expires_at",
           "is_active",
+          "disabled_reason",
+          "operator_can_enable",
           "allowed_models",
           "allowed_tools",
           "exclude_from_budget",
