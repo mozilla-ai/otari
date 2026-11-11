@@ -178,10 +178,12 @@ class YouDotComProvider(AnySearch):
                 type="object",
                 default={"extraction_mode": "highlights"},
                 description=(
-                    "Sent as given. highlights, sent unless passed, returns the query relevant passages "
-                    "that become the snippet; "
-                    "full_page returns Markdown as the text and bills per page fetched. "
-                    "HTML copy always fetched and made available in raw output. null sends none."
+                    "Sent as given. highlights, sent by default, returns the query relevant passages"
+                    " that are joined and returned as the snippet;"
+                    " full_page returns Markdown as the text and bills per page fetched;"
+                    "Markdown is always included by default in full_page.extraction_formats."
+                    " HTML copy, when also listed here, is contained in raw."
+                    "null sends none."
                 ),
             ),
             OptionSpec(
@@ -237,8 +239,7 @@ class YouDotComProvider(AnySearch):
 
 
 def _with_markdown(extraction: Any) -> Any:
-    """``extraction`` as given, with ``markdown`` among the full page's formats, since the text is the Markdown.
-    """
+    """``extraction`` as given, with ``markdown`` among the full page's formats, since the text is the Markdown."""
     if not isinstance(extraction, dict) or extraction.get("extraction_mode") != "full_page":
         return extraction
     full_page = extraction.get("full_page")
