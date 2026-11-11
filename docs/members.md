@@ -1,7 +1,3 @@
----
-icon: people
----
-
 # Members and invitations
 
 Organization **Admins and Owners** can invite other members to collaborate and control which workspaces they can access. This makes it easy to give each person access only to the areas relevant to their work.

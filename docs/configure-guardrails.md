@@ -1,6 +1,5 @@
 ---
 description: Create guardrails that monitor or block unsafe requests across workspaces.
-icon: shield-halved
 ---
 
 # Configure guardrails

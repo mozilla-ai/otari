@@ -1,7 +1,3 @@
----
-icon: square-dollar
----
-
 # Budgets
 
 A budget caps how much can be spent in a period and blocks requests when the limit is reached. You can set budgets at the organization or workspace level, and narrow them to specific members or providers when you need finer control.

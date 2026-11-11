@@ -1,7 +1,3 @@
----
-icon: chart-simple
----
-
 # Review usage and requests
 
 **Overview** opens with what needs attention, then three tabs over one time

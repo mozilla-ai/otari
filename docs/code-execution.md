@@ -1,7 +1,3 @@
----
-icon: code
----
-
 # Code execution
 
 The **Code execution** settings let you control whether requests from a workspace can run generated code in a sandbox. You can apply more restrictive settings than the deployment to individual workspaces.

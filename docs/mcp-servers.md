@@ -1,7 +1,3 @@
----
-icon: computer-classic
----
-
 # MCP servers
 
 MCP servers allow requests from a workspace to connect to external tools and services. Each server is configured at the **workspace level**, so you can control which MCP tools are available to requests within that workspace. How requests use MCP servers is described in [MCP](mcp.md).
