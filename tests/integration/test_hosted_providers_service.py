@@ -515,6 +515,10 @@ async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
     assert ([model.model for model in chat.data], chat.count) == (["gpt-4o"], 1)
     assert chat.type_counts == listed.type_counts
 
+    searched = await service.list_models("openai", search="DALL")
+    assert ([model.model for model in searched.data], searched.count) == (["dall-e-3"], 1)
+    assert searched.type_counts == {"image": 1}
+
 
 async def test_adding_a_model_prices_it_at_what_was_asked(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch

@@ -41,3 +41,24 @@ def test_a_kind_no_row_has_is_an_empty_page() -> None:
     page = page_by_kind(ROWS, KINDS, "model", model_type="video", skip=0, limit=10)
 
     assert (page.rows, page.count) == ([], 0)
+
+
+def test_a_search_narrows_the_rows_and_the_counts_by_name_case_insensitively() -> None:
+    page = page_by_kind(ROWS, KINDS, "model", model_type=None, skip=0, limit=10, search=" GPT-4O ")
+
+    assert [row.model for row in page.rows] == ["gpt-4o", "gpt-4o-mini"]
+    assert page.count == 2
+    assert page.type_counts == {"chat": 2}
+
+
+def test_a_search_and_a_kind_narrow_together() -> None:
+    page = page_by_kind(ROWS, KINDS, "model", model_type="image", skip=0, limit=10, search="gpt")
+
+    assert (page.rows, page.count) == ([], 0)
+    assert page.type_counts == {"chat": 2}
+
+
+def test_a_blank_search_keeps_every_row() -> None:
+    page = page_by_kind(ROWS, KINDS, "model", model_type=None, skip=0, limit=10, search="  ")
+
+    assert page.count == 4
