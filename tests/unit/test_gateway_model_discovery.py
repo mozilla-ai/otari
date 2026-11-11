@@ -1555,3 +1555,74 @@ class TestHostedProviderDiscovery:
 
         assert await discover_all_models(config) == []
         assert await discover_all_models(config, provider_filter="mistral") == []
+
+
+class TestTogetherServingModes:
+    """Together's listing names the models it serves on a plain key only when asked (issue #3168)."""
+
+    @staticmethod
+    def _listing(serverless: list[str] | Exception, everything: list[str]) -> AsyncMock:
+        async def _list(**kwargs: Any) -> list[Model]:
+            if kwargs.get("serverless"):
+                if isinstance(serverless, Exception):
+                    raise serverless
+                return [_make_model(name, owned_by="together") for name in serverless]
+            return [_make_model(name, owned_by="together") for name in everything]
+
+        return AsyncMock(side_effect=_list)
+
+    @staticmethod
+    async def _test(impl_name: str, listing: AsyncMock) -> ProviderDiscovery:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            return await run_credentials_test(impl_name, api_key="key", declared=True)
+
+    @pytest.mark.asyncio
+    async def test_a_model_served_only_on_a_dedicated_endpoint_is_not_listed(self) -> None:
+        listing = self._listing(["served"], ["served", "dedicated-a", "dedicated-b"])
+
+        result = await self._test("together", listing)
+
+        assert result.error is None
+        assert [model.id for model in result.models] == ["served"]
+        assert [call.kwargs.get("serverless") for call in listing.await_args_list] == [None, True]
+        assert listing.await_args_list[1].kwargs["api_key"] == "key"
+
+    @pytest.mark.asyncio
+    async def test_a_serverless_listing_as_long_as_the_whole_drops_nothing(self) -> None:
+        """Together answers an unknown parameter with the unfiltered listing."""
+        result = await self._test("together", self._listing(["a", "b"], ["a", "b"]))
+
+        assert [model.id for model in result.models] == ["a", "b"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_serverless_listing_drops_nothing(self) -> None:
+        result = await self._test("together", self._listing(RuntimeError("boom"), ["a", "b"]))
+
+        assert result.error is None
+        assert [model.id for model in result.models] == ["a", "b"]
+
+    @pytest.mark.asyncio
+    async def test_another_provider_is_listed_once(self) -> None:
+        listing = self._listing(["a"], ["a", "b"])
+
+        result = await self._test("openai", listing)
+
+        assert [model.id for model in result.models] == ["a", "b"]
+        listing.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_configured_instance_lists_only_what_together_serves_serverless(self) -> None:
+        config = GatewayConfig(providers={"together": {"api_key": "tg-test"}})
+        listing = self._listing(["served"], ["served", "dedicated"])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            result = await discover_all_models(config)
+
+        assert [model.id for _, model in result] == ["served"]

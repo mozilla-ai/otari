@@ -30,6 +30,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
@@ -405,6 +406,15 @@ async def _discover_for_provider(
             )
             return declared, None
         raise
+    models = await _serverless_only(
+        provider_enum,
+        models,
+        timeout=config.model_discovery_timeout_seconds,
+        api_key=api_key,
+        api_base=api_base,
+        client_args=client_args,
+        **kwargs,
+    )
     _warn_about_undiscovered_declared_models(config, provider_name, models)
     return list(models), await read_engine_settings(models, api_base=api_base, api_key=api_key)
 
@@ -659,11 +669,41 @@ async def test_provider_credentials(
             error=_short_error(exc, provider=impl_name),
             discovery_unsupported=_is_missing_models_endpoint(exc),
         )
+    models = await _serverless_only(
+        provider_enum, models, timeout=timeout, api_key=api_key, api_base=api_base, client_args=client_args
+    )
     return ProviderDiscovery(
         provider=impl_name,
-        models=list(models),
+        models=models,
         engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key),
     )
+
+
+async def _serverless_only(
+    provider: LLMProvider, models: Sequence[Model], *, timeout: float, **listing: Any
+) -> list[Model]:
+    """Drop the models Together lists but serves only on a dedicated endpoint.
+
+    Together lists every model it can deploy and refuses most of them on a plain
+    key; ``serverless=true`` narrows the listing to the ones it serves. The
+    parameter is undocumented, and Together answers one it does not know with
+    the whole listing, so a narrowed listing no shorter than the whole, or a
+    failed one, leaves the listing as it came. ``listing`` is what the whole
+    listing was asked with.
+    """
+    if provider is not LLMProvider.TOGETHER:
+        return list(models)
+    try:
+        serverless = await asyncio.wait_for(
+            alist_models(provider=provider, **{**listing, "serverless": True}), timeout=timeout
+        )
+    except Exception as exc:
+        logger.info("Serverless model listing failed for '%s' (%s)", provider, type(exc).__name__)
+        return list(models)
+    served = {model.id for model in serverless}
+    if len(served) >= len({model.id for model in models}):
+        return list(models)
+    return [model for model in models if model.id in served]
 
 
 async def discover_models_with_status(
