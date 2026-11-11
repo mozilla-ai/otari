@@ -51,8 +51,6 @@ from gateway.schemas.files import (
 )
 from gateway.services.api_keys import resolve_user_id
 from gateway.services.files import (
-    DEFAULT_LIST_LIMIT,
-    MAX_LIST_LIMIT,
     FileDialect,
     FileListing,
     FileScope,
@@ -265,7 +263,7 @@ async def list_files(
     user: str | None = None,
     purpose: str | None = None,
     workspace_id: uuid.UUID | None = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
+    limit: Annotated[int, Query(ge=1, le=FileListing.MAX_LIMIT)] = FileListing.DEFAULT_LIMIT,
     after: str | None = None,
     order: Literal["asc", "desc"] = "desc",
     page: str | None = None,

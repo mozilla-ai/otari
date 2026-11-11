@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import ClassVar
 
 from any_llm import LLMProvider
 
@@ -36,11 +37,6 @@ from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
 # organizations domain, so files receives it rather than looking it up.
 DefaultWorkspace = Callable[[], Awaitable[uuid.UUID]]
-
-# Page bounds. The default is OpenAI's; the ceiling is well under OpenAI's 10000
-# because a page is one query and one JSON body.
-DEFAULT_LIST_LIMIT = 100
-MAX_LIST_LIMIT = 1000
 
 # How long a reserved row keeps its bytes before the sweep reclaims it. It has
 # to outlast the slowest write a deployment will accept, because a row younger
@@ -106,10 +102,15 @@ class NewOutput:
 class FileListing:
     """One page of a caller's files, as the request asked for it."""
 
+    # Page bounds. The default is OpenAI's; the ceiling is well under OpenAI's 10000
+    # because a page is one query and one JSON body.
+    DEFAULT_LIMIT: ClassVar[int] = 100
+    MAX_LIMIT: ClassVar[int] = 1000
+
     scope: FileScope
     dialect: FileDialect
-    # Clamped to ``MAX_LIST_LIMIT``, so a caller that does not bound it cannot ask for the whole table.
-    limit: int = DEFAULT_LIST_LIMIT
+    # Clamped to ``MAX_LIMIT``, so a caller that does not bound it cannot ask for the whole table.
+    limit: int = DEFAULT_LIMIT
     ascending: bool = False
     purpose: str | None = None
     # The files a caller named outright, which replaces paging through them.
@@ -218,7 +219,7 @@ class FileService:
             UnknownPageCursorError: an Anthropic page token names no position this gateway issued.
             FileNotServedError: an OpenAI cursor names no file the caller owns.
         """
-        limit = min(listing.limit, MAX_LIST_LIMIT)
+        limit = min(listing.limit, FileListing.MAX_LIMIT)
         anthropic = listing.dialect is FileDialect.ANTHROPIC
         cursor_id = listing.cursor
         if anthropic and cursor_id is not None:
