@@ -1,17 +1,14 @@
 """The provider the path-parity tests point a provider instance at, reached over real HTTP.
 
-A request to any of the gateway's inference endpoints runs the gateway's own
-dispatch, the any-llm provider and its conversions, and arrives here. It runs in
-one of two modes:
+It runs in one of two modes:
 
 - Scripted, with no ``upstream``: it answers chat completions itself. With the
   gateway's ``web_search`` function offered and no tool result in the
   conversation yet, it calls that function once; otherwise it answers with text.
-  Each round reports ``ROUND_USAGE[n]`` for the round that follows ``n`` tool
-  results, so a total that leaves out a round, or counts one twice, cannot come
-  out right by accident.
-- Recording, with an ``upstream`` root: it forwards each call to that provider
-  unchanged and passes the answer back, streamed or not.
+  The round after ``n`` tool results reports ``ROUND_USAGE[n]``, so a total that
+  leaves out a round, or counts one twice, cannot come out right by accident.
+- Recording, with an ``upstream`` root: it forwards each call there unchanged
+  and passes the answer back, streamed or not.
 
 Either way it records the tokens each call reported in ``rounds``, which is what
 the gateway's totals are checked against.
@@ -34,8 +31,10 @@ REPLY = "The parity provider answered."
 SEARCH_FUNCTION = "web_search"
 # (prompt_tokens, completion_tokens) per round.
 ROUND_USAGE: tuple[tuple[int, int], ...] = ((1000, 10), (2000, 20))
-# Request headers a provider authenticates or versions a call with, forwarded upstream.
-_FORWARDED_HEADERS = ("Authorization", "x-api-key", "anthropic-version", "anthropic-beta", "Content-Type", "Accept")
+# Headers that describe this hop rather than the call, so they are not forwarded.
+_HOP_HEADERS = frozenset({"host", "content-length", "connection", "accept-encoding", "transfer-encoding"})
+# The events after which a Responses or Messages stream sends nothing more; a chat stream ends at [DONE].
+_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed", "message_stop"})
 
 
 class ParityProvider(ThreadingHTTPServer):
@@ -44,7 +43,6 @@ class ParityProvider(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, upstream: str | None = None) -> None:
-        """Listen on a free port on localhost, forwarding to ``upstream`` when one is given."""
         super().__init__(("127.0.0.1", 0), _Handler)
         self.upstream = upstream.rstrip("/") if upstream else None
         self.requests: list[dict[str, Any]] = []
@@ -53,22 +51,17 @@ class ParityProvider(ThreadingHTTPServer):
 
     @property
     def root(self) -> str:
-        """The address the server listens on, with no path."""
         host, port = self.server_address[:2]
         return f"http://{host!s}:{port}"
 
-    def record(self, body: dict[str, Any]) -> None:
-        """Keep one request body for a test to inspect."""
+    def record(self, body: dict[str, Any] | None = None, usage: tuple[int, int] | None = None) -> None:
         with self._lock:
-            self.requests.append(body)
-
-    def record_round(self, usage: tuple[int, int]) -> None:
-        """Keep the prompt and completion tokens one call reported."""
-        with self._lock:
-            self.rounds.append(usage)
+            if body is not None:
+                self.requests.append(body)
+            if usage is not None:
+                self.rounds.append(usage)
 
     def reset(self) -> None:
-        """Forget what was seen so far."""
         with self._lock:
             self.requests.clear()
             self.rounds.clear()
@@ -79,180 +72,126 @@ class ParityProvider(ThreadingHTTPServer):
             return sum(p for p, _ in self.rounds), sum(c for _, c in self.rounds)
 
 
-class _UsageReader:
-    """The tokens one call reports, read from a JSON body or from each event of a stream.
+def _reported(payload: Any, so_far: tuple[int, int] = (0, 0)) -> tuple[int, int]:
+    """The tokens reported so far, updated by one body or stream event of any of the three API shapes.
 
-    It reads the OpenAI chat shape (``prompt_tokens``), the Responses and Messages
-    shapes (``input_tokens``), and the places a stream carries them: a final usage
-    chunk, ``response.completed``, or Anthropic's ``message_start`` and cumulative
-    ``message_delta``.
+    A count an event leaves out, or reports as 0, keeps its earlier value, since an
+    Anthropic stream reports input tokens on ``message_start`` and output tokens on
+    the cumulative ``message_delta``.
     """
-
-    def __init__(self) -> None:
-        self.prompt = 0
-        self.completion = 0
-
-    def feed(self, payload: Any) -> None:
-        if not isinstance(payload, dict):
-            return
-        for holder in (payload, payload.get("response"), payload.get("message")):
-            usage = holder.get("usage") if isinstance(holder, dict) else None
-            if isinstance(usage, dict):
-                self.prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or self.prompt
-                self.completion = usage.get("completion_tokens") or usage.get("output_tokens") or self.completion
-
-
-# The events after which a Responses or Messages stream sends nothing more.
-_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed", "message_stop"})
-
-
-def _ends_stream(event: Any) -> bool:
-    return isinstance(event, dict) and event.get("type") in _TERMINAL_EVENTS
+    if not isinstance(payload, dict):
+        return so_far
+    holder = payload.get("response") or payload.get("message") or payload
+    usage = holder.get("usage") if isinstance(holder, dict) else None
+    if not isinstance(usage, dict):
+        return so_far
+    prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or so_far[0]
+    completion = usage.get("completion_tokens") or usage.get("output_tokens") or so_far[1]
+    return int(prompt), int(completion)
 
 
 def _round(body: dict[str, Any]) -> int:
     return sum(1 for m in body.get("messages") or [] if m.get("role") == "tool")
 
 
-def _answer(body: dict[str, Any]) -> dict[str, Any]:
+def _scripted(body: dict[str, Any]) -> tuple[dict[str, Any], Iterator[dict[str, Any]]]:
+    """The completion for ``body``, and the chunks that stream it."""
     offered = {t["function"]["name"] for t in body.get("tools") or [] if t.get("type") == "function"}
+    delta: dict[str, Any]
     if SEARCH_FUNCTION in offered and _round(body) == 0:
-        return {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call_parity_0",
-                    "type": "function",
-                    "function": {"name": SEARCH_FUNCTION, "arguments": json.dumps({"query": "otari"})},
-                }
-            ],
-        }
-    return {"role": "assistant", "content": REPLY}
-
-
-def _usage(body: dict[str, Any]) -> dict[str, int]:
-    prompt, completion = ROUND_USAGE[_round(body)]
-    return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
-
-
-def _finish_reason(message: dict[str, Any]) -> str:
-    return "tool_calls" if message.get("tool_calls") else "stop"
-
-
-def _completion(body: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": f"chatcmpl-parity-{_round(body)}",
-        "object": "chat.completion",
-        "created": 1_700_000_000,
-        "model": body.get("model", "parity-model"),
-        "choices": [{"index": 0, "message": message, "finish_reason": _finish_reason(message)}],
-        "usage": _usage(body),
-    }
-
-
-def _chunks(body: dict[str, Any], message: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    base = {
-        "id": f"chatcmpl-parity-{_round(body)}",
-        "object": "chat.completion.chunk",
-        "created": 1_700_000_000,
-        "model": body.get("model", "parity-model"),
-    }
-    yield {**base, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}
-    if message.get("tool_calls"):
-        for index, call in enumerate(message["tool_calls"]):
-            delta = {"tool_calls": [{"index": index, **call}]}
-            yield {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+        function = {"name": SEARCH_FUNCTION, "arguments": json.dumps({"query": "otari"})}
+        call: dict[str, Any] = {"id": "call_parity_0", "type": "function", "function": function}
+        message: dict[str, Any] = {"role": "assistant", "content": None, "tool_calls": [call]}
+        finish, delta = "tool_calls", {"tool_calls": [{"index": 0, **call}]}
     else:
-        yield {**base, "choices": [{"index": 0, "delta": {"content": message["content"]}, "finish_reason": None}]}
-    yield {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": _finish_reason(message)}]}
+        message = {"role": "assistant", "content": REPLY}
+        finish, delta = "stop", {"content": REPLY}
+    prompt, completion = ROUND_USAGE[_round(body)]
+    usage = {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+    base = {"id": f"chatcmpl-parity-{_round(body)}", "created": 1_700_000_000, "model": body.get("model")}
+    whole = {
+        **base,
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+        "usage": usage,
+    }
+    chunk = {**base, "object": "chat.completion.chunk"}
+    chunks = [
+        {**chunk, "choices": [{"index": 0, "delta": {"role": "assistant", **delta}, "finish_reason": None}]},
+        {**chunk, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+    ]
     if (body.get("stream_options") or {}).get("include_usage"):
-        yield {**base, "choices": [], "usage": _usage(body)}
+        chunks.append({**chunk, "choices": [], "usage": usage})
+    return whole, iter(chunks)
 
 
 class _Handler(BaseHTTPRequestHandler):
     server: ParityProvider
 
     def do_POST(self) -> None:  # noqa: N802
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) or b"{}"
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
         body = json.loads(raw)
         self.server.record(body)
         if self.server.upstream is not None:
             self._forward(raw)
-        else:
-            self._script(body)
-
-    def _script(self, body: dict[str, Any]) -> None:
+            return
         if not self.path.endswith("/chat/completions"):
-            self._json(404, {"error": {"message": f"the parity provider has no route {self.path}"}})
+            self._send(404, "application/json", json.dumps({"error": {"message": f"no route {self.path}"}}).encode())
             return
-        message = _answer(body)
-        prompt, completion = ROUND_USAGE[_round(body)]
-        self.server.record_round((prompt, completion))
+        whole, chunks = _scripted(body)
+        self.server.record(usage=_reported(whole))
         if not body.get("stream"):
-            self._json(200, _completion(body, message))
+            self._send(200, "application/json", json.dumps(whole).encode())
             return
-        self._open_stream(200, "text/event-stream")
-        for chunk in _chunks(body, message):
+        self._send(200, "text/event-stream")
+        for chunk in chunks:
             self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
         self.wfile.write(b"data: [DONE]\n\n")
-        self.wfile.flush()
 
     def _forward(self, raw: bytes) -> None:
         request = urllib.request.Request(f"{self.server.upstream}{self.path}", data=raw, method="POST")
-        for name in _FORWARDED_HEADERS:
-            if value := self.headers.get(name):
+        for name, value in self.headers.items():
+            if name.lower() not in _HOP_HEADERS:
                 request.add_header(name, value)
-        reader = _UsageReader()
         try:
-            upstream = urllib.request.urlopen(request, timeout=120)  # noqa: S310 - the upstream is the test's own provider root
+            upstream = urllib.request.urlopen(request, timeout=120)  # noqa: S310 - the test's own provider root
         except urllib.error.HTTPError as error:
-            payload = error.read()
-            self._raw(error.code, error.headers.get("Content-Type", "application/json"), payload)
+            self._send(error.code, error.headers.get("Content-Type", "application/json"), error.read())
             return
         with upstream:
             content_type = upstream.headers.get("Content-Type", "application/json")
             if "text/event-stream" not in content_type:
                 payload = upstream.read()
-                reader.feed(json.loads(payload or b"{}"))
-                self.server.record_round((reader.prompt, reader.completion))
-                self._raw(upstream.status, content_type, payload)
+                self.server.record(usage=_reported(json.loads(payload or b"{}")))
+                self._send(upstream.status, content_type, payload)
                 return
-            self._open_stream(upstream.status, content_type)
-            recorded = False
+            self._send(upstream.status, content_type)
+            usage, recorded = (0, 0), False
             for line in upstream:
-                text = line.decode(errors="replace").strip()
-                data = text.removeprefix("data:").strip() if text.startswith("data:") else ""
-                event = json.loads(data) if data and data != "[DONE]" else None
-                reader.feed(event)
-                # A client stops reading at the event that ends the stream, so the
-                # round is recorded before that event reaches it, not at EOF.
-                if not recorded and (data == "[DONE]" or _ends_stream(event)):
-                    self.server.record_round((reader.prompt, reader.completion))
+                data = line.decode(errors="replace").strip().removeprefix("data:").strip()
+                event = json.loads(data) if data.startswith("{") else None
+                usage = _reported(event, usage)
+                # A client stops reading at the event that ends the stream, so the round
+                # is recorded before that event reaches it rather than at EOF.
+                if not recorded and (data == "[DONE]" or (event or {}).get("type") in _TERMINAL_EVENTS):
+                    self.server.record(usage=usage)
                     recorded = True
                 self.wfile.write(line)
                 self.wfile.flush()
-        if not recorded:
-            self.server.record_round((reader.prompt, reader.completion))
+            if not recorded:
+                self.server.record(usage=usage)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Keep the test output quiet."""
 
-    def _open_stream(self, status: int, content_type: str) -> None:
+    def _send(self, status: int, content_type: str, data: bytes | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if data is not None:
+            self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-
-    def _json(self, status: int, payload: dict[str, Any]) -> None:
-        self._raw(status, "application/json", json.dumps(payload).encode())
-
-    def _raw(self, status: int, content_type: str, data: bytes) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        if data is not None:
+            self.wfile.write(data)
 
 
 @contextmanager
