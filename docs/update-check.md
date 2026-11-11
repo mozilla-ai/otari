@@ -67,11 +67,13 @@ Turning the check off forgets what the last check heard. The install id is kept.
 
 ## When it runs
 
-A deployment checks once a day, at a time of day its install id picks, so
-installs spread over the whole day rather than checking together, and an
-install that restarts keeps its time. An operator who turns the check on gets
-a first check within a minute; a deployment turned on by configuration waits
-for its time of day. Every replica polls, and the replica whose update claims
+A deployment checks once a day, at a time of day picked at random when its
+install id is created, so installs spread over the whole day rather than
+checking together, and an install that restarts keeps its time. The time is
+not derived from the install id, and what picks it is never sent, so the time
+a check arrives does not tell which install sent it. An operator who turns the
+check on gets a first check within a minute; a deployment turned on by
+configuration waits for its time of day. Every replica polls, and the replica whose update claims
 the due check is the only one that sends it.
 
 A check that fails is retried after a randomized wait that doubles from five
