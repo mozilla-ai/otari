@@ -187,20 +187,35 @@ def _gemini_body(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _gemini_answer(answer: dict[str, Any], model: str) -> dict[str, Any]:
+def _gemini_answer(answer: dict[str, Any], model: str, *, status_code: int) -> dict[str, Any]:
     """Gemini's answer in TypeSafe's shape: the model named, and the token counts under TypeSafe's keys.
 
     Gemini's own usage fields stay alongside, as extra fields the response schema keeps.
+    Gemini generates no output tokens, so ``total_tokens`` stands in for a missing
+    input count; an answer with neither is refused rather than settled as free.
+
+    Raises:
+        DecisionProviderError: If the answer reports no input token count.
+
     """
-    normalized = {"model": model, **answer}
     usage = answer.get("usage")
-    if isinstance(usage, dict):
-        normalized["usage"] = {
+    usage = usage if isinstance(usage, dict) else {}
+    input_tokens = usage.get("total_input_tokens")
+    if input_tokens is None:
+        input_tokens = usage.get("total_tokens")
+    if input_tokens is None:
+        msg = "gemini decisions returned an answer with no input token count"
+        raise DecisionProviderError(msg, status_code=status_code)
+    output_tokens = usage.get("total_output_tokens")
+    return {
+        "model": model,
+        **answer,
+        "usage": {
             **usage,
-            "input_tokens": usage.get("total_input_tokens", 0),
-            "output_tokens": usage.get("total_output_tokens", 0),
-        }
-    return normalized
+            "input_tokens": input_tokens,
+            "output_tokens": 0 if output_tokens is None else output_tokens,
+        },
+    }
 
 
 def _auth_headers(provider: DecisionProvider) -> dict[str, str]:
@@ -227,8 +242,9 @@ async def request_decision(
     content the security guidance keeps out of logs.
 
     Raises:
-        DecisionProviderError: On a transport failure, an error status, or a
-            body that is not a JSON object.
+        DecisionProviderError: On a transport failure, an error status, a
+            body that is not a JSON object, or a Gemini answer with no input
+            token count.
 
     """
     http = client or get_decision_client()
@@ -258,4 +274,6 @@ async def request_decision(
     if not isinstance(answer, dict):
         msg = f"{provider.provider} decisions returned a {type(answer).__name__} body, expected an object"
         raise DecisionProviderError(msg, status_code=response.status_code)
-    return _gemini_answer(answer, str(body.get("model", ""))) if gemini else answer
+    if gemini:
+        return _gemini_answer(answer, str(body.get("model", "")), status_code=response.status_code)
+    return answer

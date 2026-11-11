@@ -162,7 +162,7 @@ async def test_gemini_is_asked_in_its_own_words_with_its_own_key_header() -> Non
             "mood": {"type": "score", "instructions": ["Mood", "?"], "criteria": ["calm", "angry"]},
         },
     }
-    _, request = await _ask_gemini(body, {"answers": {}})
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
     assert request.headers["x-goog-api-key"] == "gkey"
     assert "authorization" not in request.headers
     assert json.loads(request.content) == {
@@ -184,7 +184,7 @@ async def test_gemini_receives_inline_images_as_image_blocks() -> None:
         "questions": QUESTIONS,
         "images": ["data:image/png;base64,AA"],
     }
-    _, request = await _ask_gemini(body, {"answers": {}})
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
     assert json.loads(request.content)["input"] == [
         {"type": "text", "text": "photo"},
         {"type": "image", "mime_type": "image/png", "data": "AA"},
@@ -203,6 +203,28 @@ async def test_gemini_answer_names_the_model_and_counts_tokens_under_typesafe_ke
     assert response.answers["urgent"].noul == 0.97
     assert response.usage is not None
     assert (response.usage.input_tokens, response.usage.output_tokens, response.usage.cost) == (100, 0, None)
+
+
+@pytest.mark.asyncio
+async def test_gemini_answer_without_an_input_count_falls_back_to_the_total() -> None:
+    reply = {"answers": {}, "usage": {"total_tokens": 42}}
+    answer, _ = await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert (answer["usage"]["input_tokens"], answer["usage"]["output_tokens"]) == (42, 0)
+
+
+@pytest.mark.asyncio
+async def test_gemini_answer_reporting_zero_input_tokens_keeps_the_zero() -> None:
+    reply = {"answers": {}, "usage": {"total_input_tokens": 0, "total_tokens": 7}}
+    answer, _ = await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert answer["usage"]["input_tokens"] == 0
+
+
+@pytest.mark.parametrize("reply", [{"answers": {}}, {"answers": {}, "usage": {"total_output_tokens": 0}}])
+@pytest.mark.asyncio
+async def test_gemini_answer_with_no_token_count_is_refused(reply: dict[str, Any]) -> None:
+    with pytest.raises(DecisionProviderError, match="no input token count") as raised:
+        await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert raised.value.status_code == 200
 
 
 @pytest.mark.parametrize("status_code", [401, 422, 429, 501, 529])
