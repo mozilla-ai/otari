@@ -9,6 +9,7 @@ dashboard, in a request and over the API.
 Contents:
 
 - [The `guardrails` request field](#the-guardrails-request-field)
+- [What a guardrail reads](#what-a-guardrail-reads)
 - [Modes](#modes)
 - [Reading the `Otari-Guardrails` header](#reading-the-otari-guardrails-header)
 - [When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable)
@@ -34,24 +35,67 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `validate_kwargs` | Extra arguments for the check, merged on top of the profile's own. |
 | `url` | A guardrails service to send this check to instead of the deployment's. A URL that fails Otari's address safety check is a `400`. |
 | `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`, and an entry carrying one must be the only entry for its profile. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
-| `on` | The directions to check. Defaults to `["input"]`; `output` is accepted but not enforced yet. |
+| `on` | What the guardrail reads: any of `input`, `tool_results`, `tool_calls` and `output`. Defaults to `["input"]`. See [What a guardrail reads](#what-a-guardrail-reads). |
+
+## What a guardrail reads
+
+`on` lists what a guardrail reads, on all three endpoints:
+
+| `on` | What it reads | When |
+| --- | --- | --- |
+| `input` | The user content that arrived since the model's last turn. A final assistant message (a prefill) is not a turn. | Before the provider is called. |
+| `tool_results` | Every tool result in the request (a Chat Completions `tool` message, a Messages `tool_result` block, a Responses `function_call_output`), and each result of a tool Otari runs (MCP, web search, web fetch, code execution) before the model reads it. | Before the provider is called, and inside the tool loop. |
+| `tool_calls` | Each call the model makes: to a tool Otari runs, before it runs, and to one the client runs, before the answer reaches the client. A call's arguments are read as JSON. | Inside the tool loop, and once the answer is complete. |
+| `output` | The text of the model's answer. | Once the answer is complete. |
+
+An older tool result is read again on every request because a client resends
+the results it holds, and a result withheld once has to stay withheld. Otari's
+own `[tool error]` messages are never read.
+
+Each piece of content is its own check, and the checks on one request run
+concurrently. A gateway worker keeps the verdicts it got for about an hour, by the check (profile, endpoint, credential and arguments, or a
+definition's version) and the exact text, so a tool result resent on every turn
+of an agent loop costs one call to the guardrail per worker. A check that gave no
+verdict is asked again.
+
+Images and documents are not read, and neither is a Responses `shell_call_output`,
+whose output is stdout and stderr chunks rather than text. A guardrail on `output`
+or `tool_calls` needs the whole answer, so a streamed answer is held until it is complete and then sent
+at once.
 
 ## Modes
 
-| Mode | Behavior |
+| Mode | What it does when the guardrail fires |
 | --- | --- |
-| `monitor` (default) | Forwards to the provider and surfaces the verdict on the `Otari-Guardrails` response header. |
-| `block` | Returns `403` (`guardrail_violation`) and never calls the provider when the input is flagged. |
+| `monitor` (default) | Records the verdict on the `Otari-Guardrails` response header and the request's trace, and changes nothing. |
+| `block` | Refuses flagged input with `403` (`guardrail_violation`) before the provider is called, and a flagged answer with the same `403` after it ran (the answer is billed). A flagged tool result is withheld: the model reads a `[tool error]` message saying Otari withheld it and which profile flagged it, and the request goes on, so an agent can recover. A flagged call to a tool Otari runs is skipped the same way. A flagged call the client would run refuses the answer. |
+
+The client still holds the original of a tool result Otari withheld; Otari
+replaces it again each time it is sent.
 
 ## Reading the `Otari-Guardrails` header
 
 When input guardrail results are available, both non-streamed and streamed
-responses carry one header entry per result. When no guardrails apply, the header
+responses carry one header entry per profile. When no guardrails apply, the header
 is absent. A `block` guardrail refuses a flagged request before any bytes are sent.
 
 ```json
 [{"profile": "prompt-injection", "mode": "monitor", "valid": null, "score": null, "status": "unavailable", "reason": "not_configured"}]
 ```
+
+A profile that read several pieces of content reports the one that says the
+most: a flag, then a check that could not run, then one with no verdict. A tool
+result read again only so it stays withheld is reported only when it was.
+`withheld` counts the tool results and tool calls the profile withheld, and is
+absent at zero:
+
+```json
+[{"profile": "prompt-injection", "mode": "block", "valid": false, "score": 1.0, "status": "evaluated", "withheld": 1}]
+```
+
+A streamed response's header is sent before the answer, so it does not count what
+the tool loop or the answer's guardrails did; the request's trace records each
+check.
 
 `valid: null` alone cannot tell a check that did not run from one that ran and
 gave no verdict, so `status` says which:
@@ -74,9 +118,11 @@ The guardrail's own explanation is never put in the header.
 ## When the guardrails service is unreachable
 
 A `block` guardrail that cannot be evaluated at all (service down, no URL
-configured, malformed response) **fails closed**: the request is rejected with a
-`502` rather than forwarded unchecked. A `monitor` guardrail fails open, since it
-was never enforcing.
+configured, malformed response) **fails closed**: input it cannot read is
+refused with a `502` rather than forwarded unchecked, and an answer with a `403`.
+A tool result it cannot read is withheld instead, as a flagged one is, with a
+message saying it could not be checked, and a tool call Otari would run is
+skipped. A `monitor` guardrail fails open, since it was never enforcing.
 
 A service that answers with no verdict (`valid: null`) has not evaluated the
 input either, so a `block` guardrail takes the same two paths for it: the
@@ -106,7 +152,8 @@ is told the profile only; details stay in the gateway's log.
 Three layers can name a guardrail: the caller's request, the caller's
 organization, and an operator's [routing policy](routing.md). They are merged by
 profile. Each layer can add or tighten a check but never weaken one: `block` beats
-`monitor`, for both `mode` and `on_unavailable`. A caller who sends `monitor` for
+`monitor`, for both `mode` and `on_unavailable`, and what a guardrail reads (`on`)
+is the union of the layers. A caller who sends `monitor` for
 a profile their organization mandates in `block` mode still gets `block`. An
 organization mandate adds to what callers send; it never replaces it.
 
@@ -122,7 +169,7 @@ session, and an organization owner or admin) carry:
 | Field | Meaning |
 | --- | --- |
 | `profile` | The profile on the guardrails service. One entry per profile per organization. |
-| `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
+| `mode`, `on`, `on_unavailable` | The same three settings a request-body entry has, with the same meanings. `on` defaults to `["input"]`. |
 | `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
 | `definition_id` | One of the organization's own guardrail definitions, for Otari to build and run the check itself. Exclusive with `url` and `credential`, which name a service instead. An explicit `null` clears it. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |

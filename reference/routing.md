@@ -200,9 +200,12 @@ routing:
           on_unavailable: block
 ```
 
-`mode` is required. `on_unavailable: block` fails closed when the guardrail
-service cannot run or gives no verdict; `monitor` lets the request continue and
-records the skipped check. Only input checks can be mandated by a policy.
+`mode` is required: `monitor` or `block`. `on` says what the guardrail
+reads, and defaults to `[input]`; see
+[What a guardrail reads](guardrails-reference.md#what-a-guardrail-reads).
+`on_unavailable: block` fails closed when the guardrail service cannot run or
+gives no verdict; `monitor` lets the request continue and records the skipped
+check.
 
 Organization-mandated and request-provided guardrails compose with policy
 guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
