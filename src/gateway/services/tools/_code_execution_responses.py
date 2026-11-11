@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from openai.types.responses import ResponseCodeInterpreterToolCall
 from openai.types.responses.response_code_interpreter_tool_call import OutputImage, OutputLogs
 
-from gateway.services.files import guess_mime_type
+from gateway.core.media_types import guess_mime_type
 from gateway.services.sandbox_backend import CodeExecution
 from gateway.services.tools._code_execution_declarations import native_code_execution_dialect
 from gateway.services.tools._native import Dialect
