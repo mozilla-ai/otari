@@ -12,6 +12,7 @@ from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.media_types import guess_mime_type
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
@@ -27,7 +28,7 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._attachment_uploads import upload_attachment
 from gateway.services.files._file_ids import file_id_in, page_token
-from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._metadata import expiry_for
 from gateway.services.files._provider_uploads import ProviderCopies
 from gateway.services.files._staging import StagedFile
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential

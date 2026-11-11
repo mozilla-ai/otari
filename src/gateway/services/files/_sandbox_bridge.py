@@ -13,11 +13,12 @@ from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.media_types import guess_mime_type
 from gateway.exceptions.files_exceptions import FileOverBudgetError, ProviderFileUnavailableError
 from gateway.log_config import logger
 from gateway.models.files import new_file_id
 from gateway.ports.provider_file_port import ProviderFileSession
-from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._metadata import expiry_for
 from gateway.services.files._service import FileBackends, FileService, NewOutput
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
