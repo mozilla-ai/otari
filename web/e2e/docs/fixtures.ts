@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
 
-import { authHeaders, expectOk, nav } from "../helpers"
+import { authHeaders, expectOk } from "../helpers"
 import { waitForStable } from "../screenshots/fixtures"
 
 // The docs' images, written in place rather than compared against a baseline:
@@ -59,25 +59,4 @@ export async function call(
     data,
   })
   await expectOk(response, `${method} ${path}`)
-}
-
-/**
- * Open a page nested under a sidebar group.
- *
- * `openNested` in ../helpers matches the child exactly, which misses a row the
- * rail badges ("Web search" reads "Web search Beta"), so this one matches the
- * start of the name.
- */
-export async function openNestedPage(
-  page: Page,
-  group: string,
-  child: string,
-): Promise<void> {
-  const toggle = nav(page).getByRole("button", { name: group, exact: true })
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click()
-  }
-  await nav(page)
-    .getByRole("link", { name: new RegExp(`^${child}`) })
-    .click()
 }
