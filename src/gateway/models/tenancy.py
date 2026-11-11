@@ -529,7 +529,7 @@ class OrganizationMembershipContextPublic(SQLModel):
     # show a row it is about to retract (mozilla-ai/otari#836).
     #
     # The same predicate ``GET /v1/admin/access`` publishes, resolved through
-    # ``DeploymentUserService.has_administration_access`` rather than re-derived,
+    # ``DeploymentAdministrationAccess.has_administration_access`` rather than re-derived,
     # so the two answers cannot come to disagree about who operates the
     # deployment. This does not retire that endpoint; it is a second publisher of
     # one fact. Two publishers is a transitional state rather than a design: the

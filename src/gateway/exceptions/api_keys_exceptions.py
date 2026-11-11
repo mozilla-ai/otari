@@ -94,3 +94,10 @@ class OrganizationServiceKeyUncappedError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("An organization's service key always has a max_end_users.")
+
+
+class AppKeyOwnerInactiveError(TenancyForbiddenError):
+    """The approving identity no longer has an active spend identity."""
+
+    def __init__(self) -> None:
+        super().__init__("Your spend identity has been deactivated")

@@ -12,6 +12,10 @@ class UserAccess:
     def __init__(self, repositories: OrganizationRepositories) -> None:
         self._users = repositories.users
 
+    async def ensure_app_key_owner(self, user_id: str, alias: str) -> bool:
+        """Ensure a live attribution owner exists without reviving a blocked or deleted one."""
+        return await self._users.ensure_app_key_owner(user_id, alias)
+
     async def lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""
         return await self._users.access_lists(user_id)

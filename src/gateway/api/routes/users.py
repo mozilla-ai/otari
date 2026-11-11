@@ -198,6 +198,7 @@ async def _load_user_in_organization(
     organization_id: uuid.UUID,
     *,
     include_deleted: bool = False,
+    for_update: bool = False,
 ) -> User:
     """Load one user the caller's organization can name, or answer 404.
 
@@ -208,6 +209,8 @@ async def _load_user_in_organization(
     statement = select(User).where(User.user_id == user_id, in_organization(organization_id))
     if not include_deleted:
         statement = statement.where(User.deleted_at.is_(None))
+    if for_update:
+        statement = statement.with_for_update()
     user = (await db.execute(statement)).scalar_one_or_none()
     if user is None:
         raise HTTPException(
@@ -437,7 +440,7 @@ async def delete_user(
     organization_id: CallerOrganization,
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
-    user = await _load_user_in_organization(db, user_id, organization_id)
+    user = await _load_user_in_organization(db, user_id, organization_id, for_update=True)
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted

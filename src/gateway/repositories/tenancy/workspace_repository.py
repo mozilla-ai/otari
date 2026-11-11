@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.database import database_refusal
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
@@ -128,6 +129,32 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
             select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
         )
         return list(result.scalars().all())
+
+    async def page_for_contributor(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        member_id: uuid.UUID | None,
+        contributor_roles: Collection[str],
+        search: str,
+        skip: int,
+        limit: int,
+    ) -> tuple[Sequence[Workspace], int]:
+        """Search a page of writable workspaces, restricted to active membership for a non-manager."""
+        query = select(Workspace).where(col(Workspace.organization_id) == organization_id)
+        if member_id is not None:
+            query = query.join(WorkspaceMember, col(WorkspaceMember.workspace_id) == col(Workspace.id)).where(
+                col(WorkspaceMember.user_id) == member_id,
+                col(WorkspaceMember.status) == "active",
+                col(WorkspaceMember.role).in_(contributor_roles),
+            )
+        if term := search.strip():
+            query = query.where(func.lower(col(Workspace.name)).like(contains_pattern(term), escape=LIKE_ESCAPE))
+        count = (await self.db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+        rows = await self.db.execute(
+            query.order_by(func.lower(col(Workspace.name)), col(Workspace.id)).offset(skip).limit(limit)
+        )
+        return list(rows.scalars().all()), count
 
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""

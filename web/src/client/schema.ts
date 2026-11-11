@@ -2965,6 +2965,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/apps/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorization Redirect
+         * @description Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in.
+         */
+        get: operations["oauth-apps-authorization_redirect"];
+        put?: never;
+        /**
+         * Authorize
+         * @description Approve access to the caller's selected workspace, with normal budget enforcement.
+         */
+        post: operations["oauth-apps-authorize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * App Details
+         * @description Validate the app and redirect before the dashboard offers consent.
+         */
+        get: operations["oauth-apps-app_details"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke
+         * @description Revoke the presented app token. Unknown or previously revoked tokens also succeed (RFC 7009).
+         */
+        post: operations["oauth-apps-revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange
+         * @description Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.
+         */
+        post: operations["oauth-apps-exchange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * App Workspaces
+         * @description List workspaces where the signed-in identity may authorize app access.
+         */
+        get: operations["oauth-apps-app_workspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oauth/token": {
         parameters: {
             query?: never;
@@ -9243,6 +9347,87 @@ export interface components {
              * @constant
              */
             type: "file";
+        };
+        /**
+         * AppAuthorizationRequest
+         * @description The dashboard records explicit approval for one workspace.
+         */
+        AppAuthorizationRequest: {
+            /** Client Id */
+            client_id: string;
+            /** Code Challenge */
+            code_challenge: string;
+            /**
+             * Code Challenge Method
+             * @constant
+             */
+            code_challenge_method: "S256";
+            /** Redirect Uri */
+            redirect_uri: string;
+            /**
+             * Response Type
+             * @default code
+             * @constant
+             */
+            response_type: "code";
+            /** State */
+            state: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** AppAuthorizationResponse */
+        AppAuthorizationResponse: {
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppDetails */
+        AppDetails: {
+            /** Issuer */
+            issuer: string;
+            /** Name */
+            name: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppRevocationRequest */
+        AppRevocationRequest: {
+            /** Token */
+            token: string;
+            /** Token Type Hint */
+            token_type_hint?: string | null;
+        };
+        /**
+         * AppTokenRequest
+         * @description Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.
+         */
+        AppTokenRequest: {
+            /** Client Id */
+            client_id: string;
+            /** Code */
+            code: string;
+            /** Code Verifier */
+            code_verifier: string;
+            /**
+             * Grant Type
+             * @constant
+             */
+            grant_type: "authorization_code";
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppTokenResponse */
+        AppTokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default Bearer
+             * @constant
+             */
+            token_type: "Bearer";
         };
         /**
          * AudioContent
@@ -26989,6 +27174,232 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModerationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-authorization_redirect": {
+        parameters: {
+            query: {
+                client_id: string;
+                redirect_uri: string;
+                state: string;
+                code_challenge: string;
+                code_challenge_method: "S256";
+                response_type?: "code";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Continue to dashboard sign-in and consent. */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppAuthorizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppAuthorizationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-app_details": {
+        parameters: {
+            query: {
+                client_id: string;
+                redirect_uri: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["AppRevocationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["AppTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppTokenResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-app_workspaces": {
+        parameters: {
+            query?: {
+                search?: string;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacesPublic"];
                 };
             };
             /** @description Validation Error */
