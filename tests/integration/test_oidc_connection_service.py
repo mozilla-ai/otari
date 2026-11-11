@@ -649,11 +649,26 @@ async def test_pausing_refuses_when_no_connection_is_configured(async_db: AsyncS
 _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object]]] = {
     "delete_for_user": lambda service, user: service.delete_for_user(user=user),
     "get_for_user": lambda service, user: service.get_for_user(user=user),
+    "preflight_sso_enforcement_for_user": lambda service, user: service.preflight_sso_enforcement_for_user(user=user),
     "save_for_user": lambda service, user: service.save_for_user(user=user, request=_request()),
     "set_enabled_for_user": lambda service, user: service.set_enabled_for_user(user=user, enabled=False),
+    "set_sso_enforcement_for_user": lambda service, user: service.set_sso_enforcement_for_user(
+        user=user, required=False, break_glass_user_id=None, break_glass_waived=False
+    ),
     "settings_for_user": lambda service, user: service.settings_for_user(user=user),
     "test_for_user": lambda service, user: service.test_for_user(user=user),
 }
+
+
+def test_the_authority_gate_covers_every_for_user_method() -> None:
+    """``_GATED_CALLS`` is the only proof that every ``*_for_user`` method runs the gate.
+
+    An equality rather than a subset, so a removed or renamed method fails here rather than
+    leaving an entry nothing runs.
+    """
+    declared = {name for name in vars(OIDCConnectionService) if name.endswith("_for_user") and not name.startswith("_")}
+
+    assert declared == set(_GATED_CALLS)
 
 
 @pytest.mark.parametrize("role", ["member", "viewer"])
