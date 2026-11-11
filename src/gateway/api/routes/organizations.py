@@ -499,8 +499,8 @@ async def reissue_active_organization_member_invitation(
 
     The old link stops working. The new one is emailed as an invitation is, and
     returned in ``accept_link`` when it was not, on the terms
-    ``POST /me/member-invitations`` returns one. Where no link is returned, the
-    invitee accepts from their pending invitations once signed in.
+    ``POST /me/member-invitations`` returns one. Where the link was neither emailed
+    nor returned, the invitee accepts from their pending invitations once signed in.
     """
     return await service.reissue_organization_member_invitation_for_user(
         user=current_identity,

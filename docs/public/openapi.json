@@ -42843,7 +42843,7 @@
     },
     "/api/v1/organizations/me/member-invitations/{invitation_id}/reissue": {
       "post": {
-        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, on the terms\n``POST /me/member-invitations`` returns one. Where no link is returned, the\ninvitee accepts from their pending invitations once signed in.",
+        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, on the terms\n``POST /me/member-invitations`` returns one. Where the link was neither emailed\nnor returned, the invitee accepts from their pending invitations once signed in.",
         "operationId": "organizations-reissue_active_organization_member_invitation",
         "parameters": [
           {
