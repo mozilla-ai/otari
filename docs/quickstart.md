@@ -80,6 +80,19 @@ print(response.choices[0].message.content)
 
 **Success**: Once the request appears on the Overview as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
 
+Three refusals are common once an app goes past its first request:
+
+- **A built-in tool is refused**, or `GET /api/v1/tools` lists it with `"available": false` and
+  the reason `workspace_disabled`: the workspace does not allow that tool yet. A workspace admin
+  turns it on under **Tools** in the dashboard. See [Built-in tools](tools.md).
+- **`403 'user' field does not match the authenticated API key's user`**: in Otari, `user` names
+  who a request is billed to, so a regular key may name only its own user. To give each person
+  in your app a budget of their own, use a [service key](end-users.md). To tag a request with a
+  free-form ID, put it in `metadata`. See [Mismatched `user` fields](api-keys.md#mismatched-user-fields).
+- **`400 unsupported_parameter` naming `response_format`**: the model's provider has no JSON
+  mode through Otari. A model's `supported_parameters` in [Models](models.md#model-discovery)
+  says whether it takes `response_format`; otherwise, ask for JSON in the prompt.
+
 ## What's next?
 
 You've sent your first LLM request! Now you can:
