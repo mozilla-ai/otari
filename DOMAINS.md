@@ -249,8 +249,6 @@ tool definitions, messages, tool results, files) as integers, and a read adds
 the model's context window from the pricing domain's catalog lookup. Neither
 keeps text.
 
-Built in the target shape from the start.
-
 ### inference
 
 The request path (the completion dialects, the pass-through endpoints, batches,
@@ -273,8 +271,6 @@ every request, so this domain holds no enforcement. Counting stays in
 `gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
 listed and never edited here.
 
-Built in the target shape from the start.
-
 ### health-checks
 
 The scheduled checks an operator turns on from the Health page: every model the
@@ -285,8 +281,6 @@ usage row and holds no budget. The models come from the providers domain's
 serveable roster, never from the price list, and switching failing models off
 goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
 polls, and the conditional update on the settings row decides which one runs.
-
-Built in the target shape from the start.
 
 ### alerts
 
