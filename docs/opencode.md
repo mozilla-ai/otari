@@ -1,4 +1,4 @@
-# Use with opencode
+# opencode
 
 [opencode](https://opencode.ai) can use any OpenAI-compatible backend as a
 provider, including Otari.
@@ -53,5 +53,5 @@ are the names to configure.
 
 ## See also
 
-- [Use with Claude Code](use-with-claude-code.md)
-- [Use with Codex](use-with-codex.md)
+- [Claude Code](claude-code.md)
+- [Codex](codex.md)

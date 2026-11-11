@@ -1,9 +1,9 @@
-# Use with LangChain
+# LangChain
 
 `langchain-otari` gives LangChain a chat model, `ChatOtari`, that sends
 requests through Otari. Your chains and agents then get Otari's budgets, usage
 tracking, fallback routing and guardrails. For graphs, see
-[Use with LangGraph](use-with-langgraph.md).
+[the LangGraph guide](langgraph.md).
 
 ## Quick start
 
@@ -131,5 +131,5 @@ print(llm.invoke("Say hello in one sentence.").content)
 
 ## See also
 
-- [Use with LangGraph](use-with-langgraph.md): the same model inside your own graph.
-- [Use with Pydantic AI](use-with-pydantic-ai.md).
+- [LangGraph](langgraph.md): the same model inside your own graph.
+- [Pydantic AI](pydantic-ai.md).

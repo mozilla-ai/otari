@@ -255,8 +255,8 @@ harness runs the subagent with its own provider credentials.
 
 The fields and errors are in the
 [API reference](api-reference.md#routing-recommendations), and the Claude Code
-plugin that asks is in
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+plugin that asks is in the
+[Claude Code guide](claude-code.md#let-otari-choose-a-subagents-model).
 
 ### Subagent routers
 

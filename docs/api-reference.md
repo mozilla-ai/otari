@@ -298,7 +298,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](use-with-claude-code.md#tag-claude-code-traffic)), sends
+[its guide](claude-code.md#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```

@@ -1,4 +1,4 @@
-# Use with Claude Code
+# Claude Code
 
 Claude Code speaks the Anthropic Messages API, which Otari serves. Point it at
 Otari to put its requests under your budgets, usage tracking and traces.

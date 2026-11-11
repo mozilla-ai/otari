@@ -32,7 +32,7 @@ off or change how long sessions are kept.
 
 - **Claude Code and Codex** are recognized automatically when they route through
   Otari. Claude Code can also send its sessions without routing its model
-  traffic; see [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
+  traffic; see [Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 - **Your own agent** sends the same `Otari-Conversation-Id` header on every
   request of one run, tool-result follow-ups included. Give each run, and each
   subagent, its own id. A request without the header is a session of its own.
