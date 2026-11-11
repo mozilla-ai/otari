@@ -43,7 +43,8 @@ URL plus `/api/v1`. See [Base URL](api-reference.md#base-url).
 ## Choosing a model
 
 opencode names a model `<provider id>/<model>`, and everything after `otari/`
-goes to Otari unchanged, so write it as Otari spells it:
+goes to Otari unchanged, so write it as Otari spells it. opencode offers only the
+models listed under `models`, so add that part as a key there before you use it:
 
 - On otari.ai, a catalog id such as `otari/deepseek/deepseek-v4.1-flash` lets
   Otari choose the provider, and
