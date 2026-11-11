@@ -258,7 +258,6 @@ def _settlement(client: TestClient, request_id: str, headers: dict[str, str]) ->
 # Strict on the scripted provider, so a fix fails the run until its entry is
 # removed; a live provider may not reproduce one, so there a pass is allowed.
 _KNOWN_GAPS: dict[tuple[str, bool, bool], str] = {
-    ("chat/completions", True, True): "a streamed tool loop passes each round's provider id through",
     ("messages", True, False): "a Messages stream ends with an `event: done` the SDK hands back as a typeless event",
     ("messages", True, True): "a Messages stream ends with an `event: done` the SDK hands back as a typeless event",
 }
