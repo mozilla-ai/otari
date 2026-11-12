@@ -2642,9 +2642,12 @@ class ReservationRoundGate:
 
     @property
     def in_force(self) -> bool:
-        """Whether the request holds a reservation a round could grow; a loop is handed the gate only then."""
+        """Whether the request holds anything a round could grow; a loop is handed the gate only then.
+
+        A hold whose ledger row could not be written still grows and settles on the handle, so it counts too.
+        """
         handle = self._ctx.reservation
-        return handle is not None and handle.counts_toward_budget and handle.reservation_id is not None
+        return handle is not None and handle.counts_toward_budget and (handle.reserved or bool(handle.scoped_budgets))
 
     async def admit(self, prompt_chars: int) -> bool:
         ctx, handle = self._ctx, self._ctx.reservation
