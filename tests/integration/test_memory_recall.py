@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Callable, Collection, Generator, Sequence
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -20,6 +21,7 @@ from gateway.services.memory._tools import RECALL_OPEN
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
+from .test_guardrails_route import _ROUTES, _streamed
 from .test_memory_mcp import DEPLOY, _call, _consolidate, _embed, _key
 from .test_memory_mcp import memory_client as memory_client  # noqa: F401 - the fixture, used by name
 from .test_memory_tool_loop import _chat, _completion, _offered, _provider, _switches
@@ -466,3 +468,20 @@ def test_a_deployment_that_holds_nothing_opens_every_entry_each_turn(
 
     assert opened_embeddings == [1, 1]
     assert _held(uncached_client) == 0
+
+
+def test_a_streamed_answer_says_what_memory_did(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _remembered(memory_client, headers)
+    _switches(memory_client, db_session_factory, master_key_header, auto_recall=True)
+    _, target, _ = _ROUTES["chat"]
+
+    with patch(target, side_effect=_streamed("chat")):
+        response = _chat(memory_client, headers, messages=[{"role": "user", "content": ASK}], stream=True)
+        response.read()
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["Otari-Memory-Recalled"] == "1"

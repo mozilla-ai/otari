@@ -1474,6 +1474,14 @@ def _guardrail_headers(response: Response | None) -> dict[str, str]:
     return {GUARDRAILS_RESULT_HEADER: value} if value else {}
 
 
+def _memory_headers(response: Response | None) -> dict[str, str]:
+    """What memory did, as recall wrote it on the injected ``Response``, carried across to a stream likewise."""
+    if response is None:
+        return {}
+    names = (MEMORY_ARM_HEADER, MEMORY_RECALLED_HEADER)
+    return {name: value for name in names if (value := response.headers.get(name)) is not None}
+
+
 def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
     """``Otari-End-User-Budget`` for a request that billed an end user on a budget."""
     return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
@@ -7163,6 +7171,7 @@ async def run_single_attempt_stream(
             _container_headers(served_tools.container_lease)
             | _end_user_headers(ctx)
             | _guardrail_headers(response)
+            | _memory_headers(response)
             | served_by
         ),
         log_writer=ctx.log_writer,
