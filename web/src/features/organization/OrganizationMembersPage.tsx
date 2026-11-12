@@ -358,7 +358,7 @@ function InviteMemberForm({
   if (outcomes) {
     const { invited, failed } = outcomes
     const unsent = invited.filter((one) => !one.mail_sent).length
-    const unshared = invited.filter(
+    const toShare = invited.filter(
       (one) => !one.mail_sent && one.accept_link,
     ).length
     const limited = invited.some((one) => one.mail_limited)
@@ -371,7 +371,7 @@ function InviteMemberForm({
         title="Invitations"
         // Same rule as the single result: a link that was not emailed is shown
         // only here, so the acknowledgement is the way out.
-        isDismissable={unshared === 0}
+        isDismissable={toShare === 0}
         submitLabel="Done"
         hideCancel
         onSubmit={onClose}
@@ -380,7 +380,7 @@ function InviteMemberForm({
         <InfoBanner>
           Invited {invited.length} of {invited.length + failed.length}.
           {unsent > 0
-            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; ${unshared > 0 ? "share those links yourself." : "those people find the invitation once they sign in."}`
+            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; ${toShare > 0 ? "share those links yourself." : "those people find the invitation once they sign in."}`
             : null}
           {limited
             ? " Some were held back because this organization or an address has had its share of invitation emails for today."
