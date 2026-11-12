@@ -31,6 +31,7 @@ from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, WEB_ACCESS_DISABLED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
+from gateway.exceptions.budget_exceptions import EndUserBudgetWithoutEndUserError
 from gateway.exceptions.tools_exceptions import (
     DirectToolCallError,
     DirectToolFailedError,
@@ -424,6 +425,8 @@ class DirectToolService:
             )
             if end_user_budget_id is not None:
                 headers[END_USER_BUDGET_HEADER] = end_user_budget_id
+        elif caller.end_user_budget_id:
+            raise EndUserBudgetWithoutEndUserError()
         else:
             user_id = self._accounts.billed_user(caller)
             rate_limit_headers = await self._gates.check_rate_limit(user_id)

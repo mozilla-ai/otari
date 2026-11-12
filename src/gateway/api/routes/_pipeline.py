@@ -179,7 +179,11 @@ from gateway.core.usage import (
     service_tier_of,
 )
 from gateway.exceptions import TenancyError
-from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
+from gateway.exceptions.budget_exceptions import (
+    EndUserBudgetWithoutEndUserError,
+    ProviderSpendCeilingExceededError,
+    SpendCeilingExceededError,
+)
 from gateway.exceptions.inference_exceptions import StoredStateOnManagedCredentialError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
@@ -2769,6 +2773,8 @@ async def _resolve_keyed_user_id(
         except TenancyError as exc:
             raise domain_error(adapter, exc) from exc
         return end_user.user_id, end_user.budget_id
+    if raw_request.headers.get(END_USER_BUDGET_HEADER):
+        raise domain_error(adapter, EndUserBudgetWithoutEndUserError())
     try:
         user_id = resolve_user_id(
             user_id_from_request=user_id_from_request,

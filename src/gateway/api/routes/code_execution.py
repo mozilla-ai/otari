@@ -57,6 +57,7 @@ from gateway.core.database import release_session
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
+from gateway.exceptions.budget_exceptions import EndUserBudgetWithoutEndUserError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -160,6 +161,8 @@ async def execute_code(
         user_id = end_user.user_id
         if end_user.budget_id is not None:
             response.headers[END_USER_BUDGET_HEADER] = end_user.budget_id
+    elif raw_request.headers.get(END_USER_BUDGET_HEADER):
+        raise EndUserBudgetWithoutEndUserError()
     else:
         user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
         rate_limit_info = await check_rate_limit(raw_request, user_id)

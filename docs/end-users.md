@@ -80,7 +80,9 @@ Otari-End-User-Budget: <memories budget id>
   actually on, including on a `403` (`budget_exceeded`) from that budget.
 
 A request that names no one, or the key's own user, bills the key's user as on
-any other key.
+any other key. Such a request, or any request on a key that is not a service
+key, is refused with `400` (`end_user_budget_without_end_user`) if it sends
+`Otari-End-User-Budget`, since there is no end user for the budget to apply to.
 
 End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/search` and
 `/v1/messages`. Other endpoints treat a service key as an ordinary key, so a

@@ -441,3 +441,15 @@ def test_a_service_key_bills_the_end_user_it_names(
     (row,) = _rows(client, master_key_header, end_user["user_id"])
     assert row["status"] == "success"
     assert _rows(client, master_key_header, "code-service") == [], "the key's owner is billed for nothing"
+
+
+def test_a_budget_on_a_run_naming_no_end_user_is_refused(
+    client: TestClient, port: _FakePort, api_key_header: dict[str, str]
+) -> None:
+    headers = {**api_key_header, "Otari-End-User-Budget": "any-budget"}
+
+    refused = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=headers)
+
+    assert refused.status_code == 400, refused.text
+    assert refused.headers["Otari-Error-Code"] == "end_user_budget_without_end_user"
+    assert port.executed == []
