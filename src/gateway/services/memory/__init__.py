@@ -2,6 +2,7 @@ from gateway.services.memory._experiment import MIN_SESSIONS as EXPERIMENT_MIN_S
 from gateway.services.memory._experiment import ArmSummary, Difference, ExperimentArm, SessionUsage
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._models import MEMORY_ENDPOINT_PREFIX, MemoryModels, ModelUse
+from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._service import (
     SEARCH_LIMIT_MAX,
     EntryWithHistory,
@@ -61,6 +62,7 @@ __all__ = [
     "MemoryMeter",
     "MemoryOffer",
     "MemoryModels",
+    "RecallVectors",
     "MemoryService",
     "ModelUse",
     "OpenedEntry",

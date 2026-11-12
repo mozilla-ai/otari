@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.memory import MemoryEntry, MemoryKind, MemoryScope, MemoryStatus, MemoryTrust
@@ -33,6 +33,25 @@ class NewEntry:
     source_api_key_id: str | None = None
     source_session_id: str | None = None
     source_model: str | None = None
+
+
+@dataclass(frozen=True)
+class RecallableRef:
+    """An entry a member may recall, as recall ranks it: no sealed column read."""
+
+    id: uuid.UUID
+    confidence: float
+
+
+@dataclass(frozen=True)
+class SealedEmbedding:
+    """An entry's sealed embedding, with what opening it is bound to."""
+
+    id: uuid.UUID
+    scope: MemoryScope
+    owner_user_id: uuid.UUID | None
+    key_id: uuid.UUID
+    embedding_sealed: str
 
 
 class EntryRepository(FencedRepository[MemoryEntry]):
@@ -76,15 +95,68 @@ class EntryRepository(FencedRepository[MemoryEntry]):
         Another member's entries are never among them, whoever asks.
         """
         await self._fence(workspace_id)
-        visible = MemoryEntry.owner_user_id == member_id
-        if include_workspace:
-            visible = or_(visible, MemoryEntry.scope == "workspace")
-        query = select(MemoryEntry).where(
-            MemoryEntry.workspace_id == workspace_id, MemoryEntry.status == "active", visible
-        )
-        if not include_external:
-            query = query.where(MemoryEntry.trust != "external")
+        query = select(MemoryEntry).where(_recallable(workspace_id, member_id, include_workspace, include_external))
         result = await self.db.execute(query.order_by(MemoryEntry.created_at, MemoryEntry.id))
+        return result.scalars().all()
+
+    async def recallable_refs(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        member_id: uuid.UUID,
+        include_workspace: bool,
+        include_external: bool,
+        embedding_model: str,
+    ) -> list[RecallableRef]:
+        """The entries :meth:`recallable` returns that ``embedding_model`` embedded, by id and confidence alone."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryEntry.id, MemoryEntry.confidence)
+            .where(
+                _recallable(workspace_id, member_id, include_workspace, include_external),
+                MemoryEntry.embedding_model == embedding_model,
+                MemoryEntry.embedding_sealed.is_not(None),
+            )
+            .order_by(MemoryEntry.created_at, MemoryEntry.id)
+        )
+        return [RecallableRef(entry_id, confidence) for entry_id, confidence in result.all()]
+
+    async def sealed_embeddings(
+        self, workspace_id: uuid.UUID, entry_ids: Collection[uuid.UUID]
+    ) -> list[SealedEmbedding]:
+        """The sealed embeddings of these entries of the workspace; an id it does not hold is left out."""
+        await self._fence(workspace_id)
+        if not entry_ids:
+            return []
+        result = await self.db.execute(
+            select(
+                MemoryEntry.id,
+                MemoryEntry.scope,
+                MemoryEntry.owner_user_id,
+                MemoryEntry.key_id,
+                MemoryEntry.embedding_sealed,
+            ).where(
+                MemoryEntry.workspace_id == workspace_id,
+                MemoryEntry.id.in_(entry_ids),
+                MemoryEntry.embedding_sealed.is_not(None),
+            )
+        )
+        return [
+            SealedEmbedding(entry_id, scope, owner_user_id, key_id, sealed)
+            for entry_id, scope, owner_user_id, key_id, sealed in result.all()
+            if sealed is not None
+        ]
+
+    async def many_in_workspace(
+        self, workspace_id: uuid.UUID, entry_ids: Collection[uuid.UUID]
+    ) -> Sequence[MemoryEntry]:
+        """These entry versions, only those in ``workspace_id``."""
+        await self._fence(workspace_id)
+        if not entry_ids:
+            return []
+        result = await self.db.execute(
+            select(MemoryEntry).where(MemoryEntry.workspace_id == workspace_id, MemoryEntry.id.in_(entry_ids))
+        )
         return result.scalars().all()
 
     async def in_workspace(self, workspace_id: uuid.UUID, entry_id: uuid.UUID) -> MemoryEntry | None:
@@ -222,3 +294,17 @@ class EntryRepository(FencedRepository[MemoryEntry]):
             .group_by(MemoryEntry.status)
         )
         return {status: count for status, count in result.all()}
+
+
+def _recallable(
+    workspace_id: uuid.UUID, member_id: uuid.UUID, include_workspace: bool, include_external: bool
+) -> ColumnElement[bool]:
+    """The workspace's active entries ``member_id`` may recall: their own, and the workspace's where it shares.
+
+    Another member's entries are never among them, whoever asks.
+    """
+    visible = MemoryEntry.owner_user_id == member_id
+    if include_workspace:
+        visible = or_(visible, MemoryEntry.scope == "workspace")
+    condition = and_(MemoryEntry.workspace_id == workspace_id, MemoryEntry.status == "active", visible)
+    return and_(condition, MemoryEntry.trust != "external") if not include_external else condition

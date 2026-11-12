@@ -53,6 +53,7 @@ from gateway.services.memory._models import (
     MemoryModels,
     ModelUse,
 )
+from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._scoring import INITIAL_CONFIDENCE, QUARANTINE_FLAGS, confidence, cosine, relevance
 from gateway.services.memory._screening import screen
 from gateway.services.memory._store import (
@@ -289,6 +290,7 @@ class MemoryService:
         managers: WorkspaceManagers | None,
         *,
         ledger: UsageLedger | None = None,
+        recall_vectors: RecallVectors | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._uow = uow
@@ -299,6 +301,8 @@ class MemoryService:
         self._config = config
         self._managers = managers
         self._ledger = ledger
+        # The embeddings automatic recall opened, shared by every request of the process; None opens them each turn.
+        self._recall_vectors = recall_vectors
         self._keys = keys
         self._now = now
 
@@ -479,40 +483,56 @@ class MemoryService:
         texts = [query] if not context else [query, f"{context}\n\n{query}"]
         vectors = await self._embed(texts, caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
         model = self._models.embedding_model
+        if model is None:
+            return []
         async with self._uow:
-            entries = await self._store.recallable(
+            candidates = await self._store.recallable_vectors(
                 caller.workspace_id,
                 member_id=caller.member_id,
                 include_workspace=switches.workspace_scope,
                 include_external=not switches.hide_external,
+                embedding_model=model,
+                held=self._recall_vectors,
             )
         alike = sorted(
-            (
-                (max(cosine(vector, entry.embedding) for vector in vectors), entry)
-                for entry in entries
-                if entry.embedding is not None and entry.embedding_model == model
-            ),
+            ((max(cosine(vector, candidate.embedding) for vector in vectors), candidate) for candidate in candidates),
             key=lambda scored: scored[0],
             reverse=True,
         )
-        kept: list[tuple[float, OpenedEntry]] | None = None
+        # Each kept entry's score, id and confidence; texts are opened only for what the reranker reads and what
+        # is handed over.
+        kept: list[tuple[float, uuid.UUID, float]] | None = None
+        opened: dict[uuid.UUID, OpenedEntry] = {}
         if min_relevance is not None and self._models.can_rerank:
             asked = query if not context else f"{query}\n(Said earlier in the conversation: {context})"
-            relevant = await self._relevant(caller, asked, [entry for _, entry in alike[:RERANK_CANDIDATES]])
+            checked = [candidate.id for _, candidate in alike[:RERANK_CANDIDATES]]
+            async with self._uow:
+                opened = await self._store.opened(caller.workspace_id, checked)
+            relevant = await self._relevant(
+                caller, asked, [opened[entry_id] for entry_id in checked if entry_id in opened]
+            )
             if relevant is not None:
-                kept = [(score, entry) for score, entry in relevant if score >= min_relevance]
+                kept = [(score, entry.id, entry.confidence) for score, entry in relevant if score >= min_relevance]
         if kept is None:
             best = alike[0][0] if alike else floor
             kept = [
-                (similarity, entry) for similarity, entry in alike if similarity >= max(floor, best - RECALL_MARGIN)
+                (similarity, candidate.id, candidate.confidence)
+                for similarity, candidate in alike
+                if similarity >= max(floor, best - RECALL_MARGIN)
             ]
-        ranked = sorted(
-            (Recalled(entry, relevance(score, entry.confidence)) for score, entry in kept),
-            key=lambda recalled: recalled.relevance,
-            reverse=True,
-        )[:most]
-        if ranked:
-            async with self._uow:
+        chosen = sorted(kept, key=lambda scored: relevance(scored[0], scored[2]), reverse=True)[:most]
+        if not chosen:
+            return []
+        async with self._uow:
+            unopened = [entry_id for _, entry_id, _ in chosen if entry_id not in opened]
+            if unopened:
+                opened.update(await self._store.opened(caller.workspace_id, unopened))
+            ranked = [
+                Recalled(opened[entry_id], relevance(score, confidence))
+                for score, entry_id, confidence in chosen
+                if entry_id in opened
+            ]
+            if ranked:
                 await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
         return ranked
 
@@ -664,6 +684,8 @@ class MemoryService:
             reads = await self._repos.reads.delete_all(workspace_id)
             keys = await self._repos.keys.delete_all(workspace_id)
         self._keys.forget(keys)
+        if self._recall_vectors is not None:
+            self._recall_vectors.forget(workspace_id)
         logger.info("Memory of workspace %s was erased by a manager", workspace_id)
         return Swept(entries, proposals, reads, len(keys))
 

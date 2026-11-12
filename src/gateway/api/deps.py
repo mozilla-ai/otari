@@ -174,6 +174,7 @@ from gateway.services.memory import (
     MemoryService,
     MemoryToolBackend,
     ModelUse,
+    RecallVectors,
     SessionUsage,
     ToolOutcome,
     WorkspaceKeys,
@@ -2383,11 +2384,14 @@ def build_memory_service(
     keys: WorkspaceKeys,
     container: Container,
     db: AsyncSession | None = None,
+    *,
+    recall_vectors: RecallVectors | None = None,
 ) -> MemoryService:
     """Build the memory service on a request's Unit of Work, or the consolidator's own.
 
     ``container`` serves the hosted providers memory's models may run on, read on the same Unit of Work.
     ``db`` is the request's session, for the management checks; the consolidator has no caller to check.
+    ``recall_vectors`` is the process's opened embeddings, for automatic recall and erasing what it holds.
     """
     managers = None
     if db is not None:
@@ -2402,6 +2406,7 @@ def build_memory_service(
         config,
         managers,
         ledger=_MemoryLedger(uow, UsageLogRepository(uow)),
+        recall_vectors=recall_vectors,
     )
 
 
@@ -2415,15 +2420,28 @@ def get_memory_keys(request: Request) -> WorkspaceKeys:
     return keys
 
 
+def get_recall_vectors(request: Request) -> RecallVectors | None:
+    """This app's opened recall embeddings, held for every request; None where the deployment holds none."""
+    config: GatewayConfig = request.app.state.config
+    if not config.memory_recall_cache:
+        return None
+    held: RecallVectors | None = getattr(request.app.state, "memory_recall_vectors", None)
+    if held is None:
+        held = RecallVectors()
+        request.app.state.memory_recall_vectors = held
+    return held
+
+
 def get_memory_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
     container: ContainerDep,
+    recall_vectors: Annotated[RecallVectors | None, Depends(get_recall_vectors)],
 ) -> MemoryService:
     """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
-    return build_memory_service(uow, config, keys, container, db)
+    return build_memory_service(uow, config, keys, container, db, recall_vectors=recall_vectors)
 
 
 NOT_A_MEMBER = "Memory is for workspace members, and this key names none of its workspace."
@@ -2506,10 +2524,17 @@ class MemoryToolAdmission:
     Asking where memory cannot be had is refused; not asking never is.
     """
 
-    def __init__(self, config: GatewayConfig, keys: WorkspaceKeys, container: Container) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        keys: WorkspaceKeys,
+        container: Container,
+        recall_vectors: RecallVectors | None = None,
+    ) -> None:
         self._config = config
         self._keys = keys
         self._container = container
+        self._recall_vectors = recall_vectors
 
     async def admit(
         self,
@@ -2561,7 +2586,9 @@ class MemoryToolAdmission:
         # Best effort: a request is served without what memory holds rather than failed or held up for it.
         try:
             async with asyncio.timeout(MEMORY_RECALL_BUDGET_S), create_unit_of_work() as uow:
-                service = build_memory_service(uow, self._config, self._keys, self._container)
+                service = build_memory_service(
+                    uow, self._config, self._keys, self._container, recall_vectors=self._recall_vectors
+                )
                 return await recall_for_turn(service, caller, query, context)
         except TimeoutError:
             logger.warning("Automatic recall took longer than %ss; the request goes without it", MEMORY_RECALL_BUDGET_S)
@@ -2577,7 +2604,7 @@ def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:
     config: GatewayConfig = request.app.state.config
     if not config.memory_enabled:
         return None
-    return MemoryToolAdmission(config, get_memory_keys(request), get_container(request))
+    return MemoryToolAdmission(config, get_memory_keys(request), get_container(request), get_recall_vectors(request))
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]

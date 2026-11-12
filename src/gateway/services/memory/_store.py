@@ -14,6 +14,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
 from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal
 from gateway.services.memory._keys import WorkspaceKeys
+from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._sealing import (
     SealedField,
     SealedValueError,
@@ -30,6 +31,15 @@ UNOPENED_ROWS = Counter(
     ["table"],
     registry=REGISTRY,
 )
+
+
+@dataclass(frozen=True)
+class RankedVector:
+    """An entry recall may hand over, as it ranks it: its id, confidence and opened embedding, no text."""
+
+    id: uuid.UUID
+    confidence: float
+    embedding: Sequence[float]
 
 
 @dataclass(frozen=True)
@@ -206,6 +216,45 @@ class EntryStore:
         )
         return await self._open_entries(workspace_id, rows)
 
+    async def recallable_vectors(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        member_id: uuid.UUID,
+        include_workspace: bool,
+        include_external: bool,
+        embedding_model: str,
+        held: RecallVectors | None,
+    ) -> list[RankedVector]:
+        """Each active entry ``member_id`` may recall that ``embedding_model`` embedded, with its embedding opened.
+
+        The entries are listed from the database every time; only their embeddings come from ``held`` where it
+        holds them, and those opened here are kept in it. Texts are left sealed: :meth:`opened` opens the few
+        handed over. An embedding that does not open is left out.
+        """
+        refs = await self._repos.entries.recallable_refs(
+            workspace_id,
+            member_id=member_id,
+            include_workspace=include_workspace,
+            include_external=include_external,
+            embedding_model=embedding_model,
+        )
+        vectors: dict[uuid.UUID, Sequence[float]] = {}
+        if held is not None:
+            vectors.update(held.take(workspace_id, (ref.id for ref in refs)))
+        missing = [ref.id for ref in refs if ref.id not in vectors]
+        if missing:
+            opened = await self._open_embeddings(workspace_id, missing)
+            if held is not None:
+                held.keep(workspace_id, opened)
+            vectors.update(opened)
+        return [RankedVector(ref.id, ref.confidence, vectors[ref.id]) for ref in refs if ref.id in vectors]
+
+    async def opened(self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, OpenedEntry]:
+        """These entries of the workspace, opened, by id; any that does not open is left out."""
+        rows = await self._repos.entries.many_in_workspace(workspace_id, entry_ids)
+        return {entry.id: entry for entry in await self._open_entries(workspace_id, rows)}
+
     async def comparable(
         self, workspace_id: uuid.UUID, *, scope: MemoryScope, owner_user_id: uuid.UUID | None, embedding_model: str
     ) -> list[OpenedEntry]:
@@ -259,6 +308,30 @@ class EntryStore:
                 UNOPENED_ROWS.labels(table="memory_entries").inc()
                 continue
             opened.append(entry)
+        return opened
+
+    async def _open_embeddings(
+        self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[float, ...]]:
+        rows = await self._repos.entries.sealed_embeddings(workspace_id, entry_ids)
+        keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
+        opened: dict[uuid.UUID, tuple[float, ...]] = {}
+        for row in rows:
+            key = keys.get(row.key_id)
+            aad = associated_data(
+                workspace_id=workspace_id,
+                scope=row.scope,
+                owner_user_id=row.owner_user_id,
+                record="entry",
+                record_id=row.id,
+                field="embedding",
+            )
+            try:
+                if key is None:
+                    raise SealedValueError("its key is gone")
+                opened[row.id] = unpack_embedding(open_sealed(key, row.embedding_sealed, aad))
+            except SealedValueError:
+                UNOPENED_ROWS.labels(table="memory_entries").inc()
         return opened
 
 

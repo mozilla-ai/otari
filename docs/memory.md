@@ -259,6 +259,16 @@ entry three members flag leaves recall until an admin looks at it.
   deleted too, so what was deleted opens from no backup.
 - **Deletion.** Deleting a member deletes their own entries and clears them as
   author of the shared ones. Deleting a workspace deletes its memory.
+- **Opened in a process.** Each gateway process holds the workspace data keys it
+  opened, and, with `memory_recall_cache` on (the default), the entry embeddings
+  automatic recall opened, so a turn opens only those it has not yet. An
+  embedding is held for ten minutes from when it was opened, however often it is
+  used, and never an entry's text. Which entries a member may recall is read from
+  the database on every turn, so an entry retired, flagged or deleted is never
+  handed over from what is held. Erasing a workspace drops what the process that
+  erased it holds; other processes hold its embeddings until they expire, and
+  hand over none of them. Off, every entry is opened on every turn: plaintext
+  lives no longer than a request.
 - **Usage, no content.** Each embedding and consolidation call is recorded as
   usage of its workspace, outside any budget. Logs, traces and metrics carry ids
   and counts, never what an agent wrote.
@@ -271,6 +281,7 @@ entry three members flag leaves recall until an admin looks at it.
 | `memory_embedding_model` | unset | The one model every entry and search is embedded with. |
 | `memory_consolidation_model` | unset | The model that decides what a proposal does to memory. |
 | `memory_rerank_model` | unset | The rerank model automatic recall checks relevance with, where a workspace turns the check on. |
+| `memory_recall_cache` | `true` | Hold the embeddings automatic recall opens, ten minutes each, in each process. See [Data protection](#data-protection). |
 | `memory_max_entries_per_workspace` | `5000` | Active entries one workspace holds; past it, the least used is retired. |
 | `memory_entry_max_length` | `2000` | Longest proposal, in characters. |
 | `memory_retention_days` | `180` | Days an unused entry or version is kept. |

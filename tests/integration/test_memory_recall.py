@@ -1,17 +1,20 @@
 """Automatic recall through the gateway, and the experiment that measures what memory saves."""
 
-from collections.abc import Callable, Generator, Sequence
-from typing import Any
+import uuid
+from collections.abc import Callable, Collection, Generator, Sequence
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, CONVERSATION_HEADER, GatewayConfig
 from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
-from gateway.services.memory import MemoryModels, ModelUse
+from gateway.repositories.memory import EntryRepository
+from gateway.services.memory import MemoryModels, ModelUse, RecallVectors
 from gateway.services.memory._models import RERANK_ENDPOINT, MemoryModelError
 from gateway.services.memory._tools import RECALL_OPEN
 from gateway.services.secret_box import generate_secret_key
@@ -352,3 +355,114 @@ def test_the_experiment_report_is_for_the_workspaces_managers(
     refused = memory_client.get(f"{API_ROOT}/workspaces/{workspace_id}/memory/experiment", headers=member)
 
     assert refused.status_code in (401, 403)
+
+
+# -- What recall holds of the entries it opened ------------------------------
+
+
+@pytest.fixture
+def opened_embeddings(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """How many sealed embeddings each recall read from the database to open."""
+    reads: list[int] = []
+    original = EntryRepository.sealed_embeddings
+
+    async def counted(self: EntryRepository, workspace_id: uuid.UUID, entry_ids: Collection[uuid.UUID]) -> Any:
+        reads.append(len(entry_ids))
+        return await original(self, workspace_id, entry_ids)
+
+    monkeypatch.setattr(EntryRepository, "sealed_embeddings", counted)
+    return reads
+
+
+def _held(client: TestClient) -> int:
+    held = getattr(cast(FastAPI, client.app).state, "memory_recall_vectors", None)
+    return len(held) if held is not None else 0
+
+
+def _hold_nothing_yet(client: TestClient) -> None:
+    """The app outlives a test, and what it holds with it."""
+    cast(FastAPI, client.app).state.memory_recall_vectors = RecallVectors()
+
+
+def _retire_every_entry(db_session_factory: Callable[[], Session], workspace_id: str) -> None:
+    """As another process would, past this one's service: what this process holds of them is not told."""
+    with db_session_factory() as session:
+        session.execute(text("SELECT set_config('otari.memory_workspace', :w, true)"), {"w": workspace_id})
+        session.execute(
+            text("UPDATE memory_entries SET status = 'retired' WHERE workspace_id = :w"), {"w": workspace_id}
+        )
+        session.commit()
+
+
+def test_recall_opens_an_entry_once_and_hands_over_only_what_the_database_still_lists(
+    memory_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    opened_embeddings: list[int],
+) -> None:
+    _hold_nothing_yet(memory_client)
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _remembered(memory_client, headers)
+    _switches(memory_client, db_session_factory, master_key_header, auto_recall=True)
+
+    with _provider(_completion(None), _completion(None), _completion(None)):
+        first = _chat(memory_client, headers, messages=[{"role": "user", "content": ASK}])
+        second = _chat(memory_client, headers, messages=[{"role": "user", "content": ASK}])
+        _retire_every_entry(db_session_factory, _workspace_id(db_session_factory))
+        after = _chat(memory_client, headers, messages=[{"role": "user", "content": ASK}])
+
+    assert first.headers["Otari-Memory-Recalled"] == second.headers["Otari-Memory-Recalled"] == "1"
+    assert opened_embeddings == [1], "the second turn opens nothing"
+    assert after.headers["Otari-Memory-Recalled"] == "0", "held, yet no longer listed"
+    assert _held(memory_client) == 1
+
+
+def test_erasing_a_workspace_drops_what_recall_holds_of_it(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    _hold_nothing_yet(memory_client)
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _remembered(memory_client, headers)
+    _switches(memory_client, db_session_factory, master_key_header, auto_recall=True)
+    with _provider(_completion(None)):
+        _chat(memory_client, headers, messages=[{"role": "user", "content": ASK}])
+    assert _held(memory_client) == 1
+
+    erased = memory_client.delete(
+        f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory", headers=master_key_header
+    )
+
+    assert erased.status_code == 200, erased.text
+    assert _held(memory_client) == 0
+
+
+@pytest.fixture
+def uncached_client(
+    test_config: GatewayConfig, clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient]:
+    """A deployment that holds no opened embeddings."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    monkeypatch.setattr(MemoryModels, "embed", _embed)
+    config = test_config.model_copy(
+        update={"memory_enabled": True, "memory_embedding_model": "openai:embed", "memory_recall_cache": False}
+    )
+    yield from build_test_client(config)
+
+
+def test_a_deployment_that_holds_nothing_opens_every_entry_each_turn(
+    uncached_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    opened_embeddings: list[int],
+) -> None:
+    headers = _key(uncached_client, master_key_header, db_session_factory)
+    _remembered(uncached_client, headers)
+    _switches(uncached_client, db_session_factory, master_key_header, auto_recall=True)
+
+    with _provider(_completion(None), _completion(None)):
+        for _ in range(2):
+            response = _chat(uncached_client, headers, messages=[{"role": "user", "content": ASK}])
+            assert response.headers["Otari-Memory-Recalled"] == "1"
+
+    assert opened_embeddings == [1, 1]
+    assert _held(uncached_client) == 0

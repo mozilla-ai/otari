@@ -112,6 +112,7 @@ _SETTING_NAMES = frozenset(
         "memory_max_entries_per_workspace",
         "memory_proposal_max_age_hours",
         "memory_read_retention_days",
+        "memory_recall_cache",
         "memory_rerank_model",
         "memory_retention_days",
         "model_cache_ttl_seconds",
