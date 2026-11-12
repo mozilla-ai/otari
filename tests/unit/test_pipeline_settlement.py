@@ -664,14 +664,28 @@ def test_streamed_text_chars_reads_chat_deltas_and_responses_text_events() -> No
     assert [pipeline._streamed_text_chars(c) for c in (_text_chunk("abcd"), _chunk(), event, other)] == [4, 0, 3, 0]
 
 
-def test_streamed_text_chars_reads_a_messages_text_delta() -> None:
+def test_streamed_text_chars_reads_a_messages_text_and_tool_input_delta() -> None:
     text = SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text="abcd"))
     tool = SimpleNamespace(
         type="content_block_delta", delta=SimpleNamespace(type="input_json_delta", partial_json="{}")
     )
     start = SimpleNamespace(type="message_start")
     no_delta = SimpleNamespace(type="content_block_delta")
-    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start, no_delta)] == [4, 0, 0, 0]
+    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start, no_delta)] == [4, 2, 0, 0]
+
+
+def test_streamed_text_chars_counts_tool_call_arguments_and_reasoning() -> None:
+    """Both are output the provider bills, so an interrupted stream that carried them owes for them."""
+    call = SimpleNamespace(function=SimpleNamespace(arguments="abcd"))
+    chat_call = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[call]))])
+    chat_reasoning = SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(reasoning=SimpleNamespace(content="abc")))]
+    )
+    thinking = SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="thinking_delta", thinking="ab"))
+    arguments = SimpleNamespace(type="response.function_call_arguments.delta", delta="abcde")
+    reasoning = SimpleNamespace(type="response.reasoning_text.delta", delta="a")
+    events = (chat_call, chat_reasoning, thinking, arguments, reasoning)
+    assert [pipeline._streamed_text_chars(c) for c in events] == [4, 3, 2, 5, 1]
 
 
 def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
@@ -775,6 +789,20 @@ async def test_a_provider_cut_before_usage_writes_an_estimated_error_row(
     assert logged["error"]
     assert settlement.refunded == 0
     assert settlement.settled_tokens == [14]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_bills_the_tool_call_arguments_already_streamed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent writing a file through a tool call is cut after 4,000 characters of its arguments."""
+    from any_llm.types.completion import ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
+
+    call = ChoiceDeltaToolCall(index=0, function=ChoiceDeltaToolCallFunction(arguments="x" * 1000))
+    chunk = _text_chunk("").model_copy(update={"choices": [ChunkChoice(delta=ChoiceDelta(tool_calls=[call]), index=0)]})
+
+    settlement = await _cut_stream(monkeypatch, [chunk] * 4, streaming.IncompleteStreamError(4))
+
+    (logged,) = settlement.logged
+    assert logged["usage_override"].completion_tokens == 1000
 
 
 @pytest.mark.asyncio

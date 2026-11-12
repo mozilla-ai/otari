@@ -160,7 +160,9 @@ carries neither.
   - Chat Completions: the last chunk that reports usage and either has no
     choices (OpenAI's `stream_options.include_usage` chunk) or finishes a
     choice (providers such as Cohere and Gemini report usage on the chunk
-    carrying `finish_reason`);
+    carrying `finish_reason`). Otari asks the provider for that chunk even when
+    a request sets `include_usage` to `false`, since it is what the request is
+    billed on, so such a stream ends with it too;
   - Messages: `message_delta`;
   - Responses: `response.completed`.
 
@@ -371,12 +373,12 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   that ran no gateway tools, writes no usage row under the `fail` and
   `allow_free` policies. Under `estimate` (the default of
   `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
-  estimate from the request and the text streamed so far: tokens only, with
-  no per-request charge.
+  estimate from the request and the output streamed so far (text, tool-call
+  arguments and reasoning): tokens only, with no per-request charge.
 - A stream the provider cut after it started answering, with no usage
   reported or only the input tokens (an Anthropic stream), is billed the same
   way under `estimate`: the reported input tokens, or an estimate of the
-  request, plus an estimate of the text already streamed, never a projected
+  request, plus an estimate of the output already streamed, never a projected
   full answer. The row stays an `error` with its error message, so it counts
   in the error totals, and its estimated cost counts in spend. A stream the
   client abandoned after the provider reported only its input tokens is
