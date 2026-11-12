@@ -67,8 +67,9 @@ describes, built for your Codex version.
 
 ## Import Codex usage without routing
 
-Codex can export the usage of sessions that go straight to OpenAI. This needs a
-budget-exempt key, which only a deployment's operator can create, so it works on
+Codex can export the usage of sessions that go straight to OpenAI. This needs an
+[import key](external-usage.md#create-an-import-key), budget-exempt and holding
+`telemetry:write`, which only a deployment's operator can create, so it works on
 a gateway you run, not on otari.ai today. See
 [Enforcement boundary](external-usage-reference.md#enforcement-boundary).
 

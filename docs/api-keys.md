@@ -201,13 +201,15 @@ A key created without naming any scopes gets `inference` alone. Name them in
 {"key_name": "pipeline", "scopes": ["inference", "files:write", "batches:write", "batches:read"]}
 ```
 
-`PATCH` on the same routes replaces a key's scopes. The change applies from the
+`PATCH /api/v1/keys/{key_id}` or `PATCH /api/v1/organizations/me/keys/{key_id}`
+replaces a key's scopes. The change applies from the
 key's next request, so narrowing a key you suspect has leaked takes effect
 without rotating its secret. A key needs at least one scope, and only a service
 key may hold the `end_users` scopes.
 
 A request whose key lacks the scope an endpoint needs is refused with `403`,
-and the message names the scope. A model call that asks Otari to run a web,
+and the message names the scope, except on the MCP routes, which answer every
+refusal with the same fixed `forbidden` error. A model call that asks Otari to run a web,
 code execution or MCP tool needs that tool's scope too. The master key holds
 every scope. Each operation in the [OpenAPI specification](public/openapi.json)
 lists the scopes it needs in `x-otari-key-scopes`, empty where every key may

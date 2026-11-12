@@ -1284,7 +1284,7 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days.
+         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;

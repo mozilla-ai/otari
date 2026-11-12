@@ -202,13 +202,15 @@ export function KeyScopeFields({
               onChange={(isSelected) => toggle(info.scope, isSelected)}
               hasTouchTarget
             >
-              <span className="text-foreground">{info.label}</span>{" "}
-              <code className="text-caption">{info.scope}</code>
-              {info.risk ? (
-                <span className="block text-caption text-warning">
-                  {info.risk}
+              <span className="flex flex-col">
+                <span>
+                  <span className="text-foreground">{info.label}</span>{" "}
+                  <code className="text-caption">{info.scope}</code>
                 </span>
-              ) : null}
+                {info.risk ? (
+                  <span className="text-caption text-warning">{info.risk}</span>
+                ) : null}
+              </span>
             </Checkbox>
           ))}
         </fieldset>

@@ -518,7 +518,7 @@ The callback a harness invokes, with its hook payload on stdin. Run at a termina
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
 | `--max-judges` | `OTARI_HOOK_MAX_JUDGES` | `5` | Judge gates evaluated per event, from 1 to 20. Any other value runs the default, with a notice. |
-| | `OTARI_URL`, `OTARI_API_KEY` | unset | The Otari server to report checks to, and the API key to send them with. See [What `otari hook` reports](#what-otari-hook-reports). |
+| | `OTARI_URL`, `OTARI_API_KEY` | unset | The Otari server to report checks to, and the API key to send them with, which needs the `telemetry:write` and `agents` scopes. See [What `otari hook` reports](#what-otari-hook-reports). |
 | | `OTARI_HOOK_REPORT_CONTENT` | off | `1` also reports the command or paths a check read, and each gate's own detail. |
 | | `OTARI_HOOK_REPORT` | on | `off` turns reporting off. |
 
