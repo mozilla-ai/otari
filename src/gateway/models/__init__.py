@@ -28,6 +28,7 @@ from gateway.models import (  # noqa: F401
     tenancy,
     tools,
     traces,
+    update_check,
     usage,
     users,
 )

@@ -61,6 +61,21 @@ async def test_ipv6_link_local_rejected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shared_address_space_rejected() -> None:
+    for ip in ("100.64.0.1", "100.100.100.200", "100.127.255.254"):
+        with pytest.raises(UnsafeURLError, match="public address space"):
+            await validate_mcp_url(f"https://{ip}/mcp", has_authorization_token=False)
+        with pytest.raises(UnsafeURLError, match="public address space"):
+            await validate_outbound_fetch_url(f"https://{ip}/")
+
+
+@pytest.mark.asyncio
+async def test_shared_address_space_allowed_with_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    await validate_mcp_url("https://100.64.0.1/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
 async def test_non_http_scheme_rejected() -> None:
     with pytest.raises(UnsafeURLError, match="http or https"):
         await validate_mcp_url("ftp://example.com/mcp", has_authorization_token=False)

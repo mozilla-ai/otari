@@ -5,7 +5,7 @@ replica's worker polls; the conditional update that sets ``running`` is what
 lets exactly one replica sync.
 
 Revision ID: d7a1c3e5f9b2
-Revises: d8a491bc02fa
+Revises: d7f1b3c5e9a2
 Create Date: 2026-11-10
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d7a1c3e5f9b2"
-down_revision: str | Sequence[str] | None = "d8a491bc02fa"
+down_revision: str | Sequence[str] | None = "d7f1b3c5e9a2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

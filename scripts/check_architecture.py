@@ -2194,6 +2194,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/mcp_catalog/mcp_catalog_sync_state_repository.py",
         "baseline": (),
     },
+    "gateway.models.update_check.UpdateCheckState": {
+        "repository": "gateway/repositories/update_check/update_check_state_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.ProviderEndpoint": {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
         "baseline": (),
