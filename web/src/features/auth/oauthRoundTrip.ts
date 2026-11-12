@@ -8,7 +8,7 @@ import { resolveSignInReturnHash } from "./publicAuthPaths"
  * `sessionStorage` and not `localStorage`: the value is scoped to the tab that
  * started the flow and dies with it, so a stale state cannot outlive the tab or
  * be read by a second one. The gateway checks the state again against its own
- * record and the HttpOnly flow cookie (`src/gateway/services/oauth_service.py`);
+ * record and the HttpOnly flow cookie (`src/gateway/api/routes/_flow_cookies.py`);
  * this copy is what binds a callback to the tab that started it.
  */
 const STATE_KEY = "otari.oauth.state"
