@@ -2178,3 +2178,33 @@ async def test_a_zero_user_budget_reads_as_exhausted_to_routing(async_db: AsyncS
 
     assert state.used_pct == 100.0
     assert state.remaining_usd == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_round_hold_the_user_cannot_fit_gives_the_ceiling_its_tokens_back(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A tool-loop round holds tokens as well as dollars, and a refusal on the user leaves no ceiling holding them."""
+    org_cap = await _scoped(
+        async_db,
+        scope_type="organization",
+        scope_id=str(tenancy.organization_id),
+        max_budget=100.0,
+        token_limit=1_000_000,
+    )
+    async_db.add(org_cap)
+    async_db.add(Budget(budget_id="round-tokens", max_budget=100.0, token_limit=1_000))
+    await async_db.commit()
+    cap_id = org_cap.id
+    user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
+    user.budget_id = "round-tokens"
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, estimated_tokens=400, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.1"), tokens=900, strategy="for_update") is None
+
+    assert await _token_counters(async_db, cap_id) == (0, 400)
+    assert await _counters(async_db, cap_id) == (0.0, 1.0)
+    assert (handle.token_estimate, handle.scoped_token_estimate) == (400, 400)
+    await reconcile_reservation(async_db, handle, 0.5)
+    assert await _token_counters(async_db, cap_id) == (0, 0)
