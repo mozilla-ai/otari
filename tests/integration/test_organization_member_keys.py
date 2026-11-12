@@ -32,7 +32,7 @@ from sqlmodel import col
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey
+from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey, DisabledReason
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
 from gateway.services.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS
@@ -871,7 +871,7 @@ def test_a_member_made_a_workspace_viewer_loses_only_the_keys_they_minted(
     assert code == status.HTTP_200_OK, body
 
     assert _key_row(db_session_factory, minted["id"]).is_active is False
-    assert _key_row(db_session_factory, minted["id"]).operator_disabled is False
+    assert _key_row(db_session_factory, minted["id"]).disabled_reason is None
     assert _key_row(db_session_factory, issued).is_active is True
     assert _key_row(db_session_factory, legacy).is_active is True
 
@@ -929,7 +929,7 @@ def test_removing_someone_from_the_organization_switches_off_every_key_billed_to
     for key_id in (minted["id"], issued, off["id"]):
         row = _key_row(db_session_factory, key_id)
         assert row.is_active is False
-        assert row.operator_disabled is True
+        assert row.disabled_reason is DisabledReason.OPERATOR
     assert _key_row(db_session_factory, theirs["id"]).is_active is True
 
 
@@ -941,7 +941,7 @@ def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClie
         client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{minted['id']}", json={"is_active": False}
     )
     assert code == status.HTTP_200_OK, body
-    assert body["operator_disabled"] is True
+    assert body["disabled_reason"] == DisabledReason.OPERATOR
 
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
     assert code == status.HTTP_403_FORBIDDEN, body
@@ -960,13 +960,97 @@ def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClie
         client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{minted['id']}", json={"is_active": True}
     )
     assert code == status.HTTP_200_OK, body
-    assert body["operator_disabled"] is False
+    assert body["disabled_reason"] is None
     code, body = _request(
         client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": False}
     )
     assert code == status.HTTP_200_OK, body
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
     assert code == status.HTTP_200_OK, body
+
+
+def _revoke(db_session_factory: Callable[[], Session], key_id: str) -> None:
+    """Revoke the key directly, as no request revokes one yet."""
+    session = db_session_factory()
+    try:
+        row = session.get(APIKey, key_id)
+        assert row is not None
+        row.is_active = False
+        row.disabled_reason = DisabledReason.REVOKED
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_a_revoked_key_refuses_an_operator_too(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """No caller enables a revoked key, and a disable is refused too, which would weaken the reason."""
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+    _revoke(db_session_factory, minted["id"])
+    path = f"{API_ROOT}/keys/{minted['id']}"
+
+    code, body = _request(client, world, "alpha_operator", "PATCH", path, json={"is_active": True})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    assert "operator" not in body["detail"]
+    assert "cannot be enabled again" in body["detail"]
+
+    code, body = _request(client, world, "alpha_operator", "PATCH", path, json={"is_active": False})
+    assert code == status.HTTP_403_FORBIDDEN, body
+
+    # A refusal changes nothing else sent with it, and leaves the reason as it was.
+    code, body = _request(client, world, "alpha_operator", "PATCH", path, json={"is_active": True, "key_name": "y"})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    row = _key_row(db_session_factory, minted["id"])
+    assert (row.is_active, row.disabled_reason, row.key_name) == (False, DisabledReason.REVOKED, "mine")
+
+
+def test_a_revoked_key_refuses_its_owner_without_naming_an_operator(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The owner is refused either way, and the detail says who can clear the reason rather than who set it."""
+    code, mine = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, mine
+    code, held = _create(client, world, "alpha_member", {"key_name": "held"})
+    assert code == status.HTTP_200_OK, held
+    _revoke(db_session_factory, mine["id"])
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{held['id']}", json={"is_active": False}
+    )
+    assert code == status.HTTP_200_OK, body
+
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{mine['id']}", json={"is_active": True})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    assert "operator" not in body["detail"]
+    assert "cannot be enabled again" in body["detail"]
+
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{held['id']}", json={"is_active": True})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    assert "operator" in body["detail"]
+    assert "cannot be enabled again" not in body["detail"]
+
+    assert _key_row(db_session_factory, mine["id"]).disabled_reason is DisabledReason.REVOKED
+
+
+def test_losing_the_organization_does_not_weaken_a_revocation(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The bulk disable records its reason on a key with none, and keeps a reason it cannot clear."""
+    code, revoked = _create(client, world, "alpha_member", {"key_name": "revoked"})
+    assert code == status.HTTP_200_OK, revoked
+    code, plain = _create(client, world, "alpha_member", {"key_name": "plain"})
+    assert code == status.HTTP_200_OK, plain
+    _revoke(db_session_factory, revoked["id"])
+
+    member_id = _organization_member_id(db_session_factory, world, "alpha_member")
+    code, body = _request(client, world, "alpha_owner", "DELETE", f"{API_ROOT}/organizations/me/members/{member_id}")
+    assert code in {status.HTTP_200_OK, status.HTTP_204_NO_CONTENT}, body
+
+    kept = _key_row(db_session_factory, revoked["id"])
+    assert (kept.is_active, kept.disabled_reason) == (False, DisabledReason.REVOKED)
+    switched_off = _key_row(db_session_factory, plain["id"])
+    assert (switched_off.is_active, switched_off.disabled_reason) == (False, DisabledReason.OPERATOR)
 
 
 def _operator_edit_after_the_load(
@@ -1008,7 +1092,7 @@ def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
 
     def switch_off(row: APIKey) -> None:
         row.is_active = False
-        row.operator_disabled = True
+        row.disabled_reason = DisabledReason.OPERATOR
 
     calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], switch_off)
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
@@ -1016,7 +1100,7 @@ def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
     assert calls == [1]
     assert code == status.HTTP_403_FORBIDDEN, body
     row = _key_row(db_session_factory, minted["id"])
-    assert (row.is_active, row.operator_disabled) == (False, True)
+    assert (row.is_active, row.disabled_reason) == (False, DisabledReason.OPERATOR)
 
 
 def test_an_operator_narrowing_landing_mid_update_survives_an_unrelated_edit(

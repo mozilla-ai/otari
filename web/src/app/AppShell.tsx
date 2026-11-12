@@ -52,7 +52,6 @@ import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
-import { Chip } from "@/design-system/indicators/Chip"
 import { useAdoptBrowserAvatar } from "@/features/account/avatar/avatarChoice"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
@@ -215,7 +214,6 @@ function useRecordNavigation(): (to: NavPath, isActive: boolean) => void {
 function NavRowLink({
   to,
   label,
-  badge,
   icon: Icon,
   isActive,
   isCollapsed,
@@ -224,7 +222,6 @@ function NavRowLink({
 }: {
   to: NavPath
   label: string
-  badge?: string
   icon?: IconType
   isActive: boolean
   isCollapsed?: boolean
@@ -244,11 +241,7 @@ function NavRowLink({
         onNavigate()
       }}
       className={`${navRowClass({ isActive, isCollapsed, isNested })} w-full`}
-      // Spelled out with a badge, which would otherwise run into the label
-      // ("Code executionBeta") in the accessible name.
-      aria-label={
-        isCollapsed ? label : badge ? `${label}, ${badge}` : undefined
-      }
+      aria-label={isCollapsed ? label : undefined}
       title={isCollapsed ? label : undefined}
     >
       {/* A nested row draws no glyph: the indent is what marks it as one, and
@@ -261,7 +254,6 @@ function NavRowLink({
       {isCollapsed ? null : (
         <span className="min-w-0 flex-1 truncate">{label}</span>
       )}
-      {badge && !isCollapsed ? <Chip tone="accent">{badge}</Chip> : null}
     </Link>
   )
 }
@@ -360,7 +352,6 @@ function NavGroup({
                 key={child.to}
                 to={child.to}
                 label={child.label}
-                badge={child.badge}
                 icon={child.icon}
                 isActive={currentPath === child.to}
                 onNavigate={() => {
@@ -439,7 +430,6 @@ function NavGroup({
             key={child.to}
             to={child.to}
             label={child.label}
-            badge={child.badge}
             icon={child.icon}
             isActive={currentPath === child.to}
             isNested

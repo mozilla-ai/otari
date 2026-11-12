@@ -89,9 +89,13 @@ from gateway.models.playground import (
     PlaygroundFavoriteModelsUpdate,
     PlaygroundMessagesPublic,
 )
-from gateway.schemas.files import OpenAIFileDeleted, OpenAIFileList, OpenAIFileObject
+from gateway.schemas.files import (
+    OpenAIFileDeleted,
+    OpenAIFileList,
+    OpenAIFileObject,
+)
 from gateway.services import playground_service
-from gateway.services.files import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, FileDialect, FileListing, FileScope, NewFile
+from gateway.services.files import FileDialect, FileListing, FileScope, NewFile
 from gateway.services.log_writer import LogWriter
 
 router = APIRouter(
@@ -360,7 +364,7 @@ async def list_playground_files(
     db: Annotated[AsyncSession, Depends(get_db)],
     files: FileServiceDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
+    limit: Annotated[int, Query(ge=1, le=FileListing.MAX_LIMIT)] = FileListing.DEFAULT_LIMIT,
     after: str | None = None,
 ) -> OpenAIFileList:
     """The caller's own files in one workspace, newest first, in OpenAI's list shape.

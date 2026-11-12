@@ -678,3 +678,17 @@ test.describe("the domain dialog", () => {
     await captureScreenshot(page, "organization-domains-claim-dialog")
   })
 })
+
+test("OAuth app consent", async ({ page }) => {
+  await login(page)
+  // An external app's authorization redirect starts a fresh dashboard document.
+  await page.goto("about:blank")
+  await page.goto(
+    "/#/oauth/authorize?client_id=thunderbolt&redirect_uri=http%3A%2F%2Flocalhost%3A5199%2Foauth%2Fotari",
+  )
+  await expect(
+    page.getByRole("heading", { name: "Connect to Thunderbolt" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Allow access" })).toBeVisible()
+  await captureScreenshot(page, "oauth-app-consent")
+})

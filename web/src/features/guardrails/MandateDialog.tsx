@@ -15,6 +15,10 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { GuardrailParametersSection } from "@/features/guardrails/GuardrailParametersSection"
 import { GuardrailProfileField } from "@/features/guardrails/GuardrailProfileField"
 import {
+  type GuardrailDirection,
+  GuardrailReadsField,
+} from "@/features/guardrails/GuardrailReadsField"
+import {
   findProfile,
   parameterSpecs,
   profileIdentity,
@@ -118,6 +122,9 @@ export function MandateDialog({
   const [profile, setProfile] = useState(mandate?.profile ?? "")
   const [isProfileTouched, setProfileTouched] = useState(isEdit)
   const [mode, setMode] = useState<Mode>((mandate?.mode as Mode) ?? "monitor")
+  const [reads, setReads] = useState<GuardrailDirection[]>(
+    (mandate?.on as GuardrailDirection[] | undefined) ?? ["input"],
+  )
   const [onUnavailable, setOnUnavailable] = useState<Mode>(
     (mandate?.on_unavailable as Mode) ?? "block",
   )
@@ -156,6 +163,7 @@ export function MandateDialog({
     definitionId,
     profile,
     mode,
+    reads,
     onUnavailable,
     url,
     credential,
@@ -194,6 +202,7 @@ export function MandateDialog({
         {
           profile: named,
           mode,
+          on: reads,
           on_unavailable: onUnavailable,
           validate_kwargs: parameters.build(),
           ...scopeBody,
@@ -213,6 +222,7 @@ export function MandateDialog({
         guardrailId: mandate.id,
         body: {
           mode,
+          on: reads,
           on_unavailable: onUnavailable,
           applies_to_all_workspaces: everywhere,
           // The server refuses a list beside "every workspace".
@@ -360,6 +370,7 @@ export function MandateDialog({
         </>
       ) : null}
 
+      <GuardrailReadsField value={reads} onChange={setReads} />
       <Select
         label="Mode"
         value={mode}

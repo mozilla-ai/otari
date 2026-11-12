@@ -33,6 +33,9 @@ test("configure and mandate a guardrail", async ({ page }) => {
   await mandate
     .getByLabel("Endpoint", { exact: true })
     .fill("https://guardrails.example.com")
+  await expect(
+    mandate.getByRole("group", { name: "What it checks" }),
+  ).toBeVisible()
   await expect(mandate.getByRole("button", { name: /Mode$/ })).toBeVisible()
   await expect(
     mandate.getByRole("button", { name: /If unreachable$/ }),

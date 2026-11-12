@@ -11,7 +11,7 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerRepository,
 )
-from gateway.services.tools._mcp_connections import collect_revocations, revoke_in_background
+from gateway.services.tools._mcp_connections import McpRevocation
 
 
 class McpGrantMembershipListener:
@@ -42,11 +42,11 @@ class McpGrantMembershipListener:
         """
         if not server_ids:
             return
-        revocations, unread = await collect_revocations(
+        revocations, unread = await McpRevocation.collect(
             self._connections, self._servers, server_ids=server_ids, user_id=user_id
         )
         if revocations or unread:
-            self._connections.after_commit(lambda: revoke_in_background(revocations, unread=unread))
+            self._connections.after_commit(lambda: McpRevocation.send_in_background(revocations, unread=unread))
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         """Nothing: a grant that ended stays ended."""

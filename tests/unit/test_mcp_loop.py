@@ -2127,3 +2127,63 @@ def test_a_code_execution_with_no_code_is_reported_failed() -> None:
 
     assert entry["status"] == "failed"
     assert "exit_code" not in entry
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_loop_sends_every_round_under_the_first_rounds_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each round is its own provider call with its own id, but the client reads one completion."""
+
+    def _round_chunk(chunk_id: str, **kwargs: Any) -> ChatCompletionChunk:
+        return _chunk(**kwargs).model_copy(update={"id": chunk_id})
+
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [
+                _round_chunk("round-1", tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]),
+                _round_chunk("round-1", finish="tool_calls"),
+            ],
+            [_round_chunk("round-2", content="done"), _round_chunk("round-2", finish="stop")],
+        ),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _FakeSearchPool()),
+            max_iterations=5,
+        )
+    ]
+
+    assert any(chunk.choices and chunk.choices[0].delta.content == "done" for chunk in chunks)
+    assert {chunk.id for chunk in chunks} == {"round-1"}
+
+
+@pytest.mark.asyncio
+async def test_activity_chunks_carry_the_id_of_the_first_chunk_with_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider's preamble chunk with no choices names no response, so activity does not copy its id."""
+    preamble = ChatCompletionChunk(id="", choices=[], created=0, model="", object="chat.completion.chunk")
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [preamble, _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": 1}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="all done", finish="stop")],
+        ),
+    )
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    activity = [c for c in chunks if getattr(c, mcp_loop_module.TOOL_ACTIVITY_FIELD, None) is not None]
+    assert len(activity) == 2
+    assert {(c.id, c.model) for c in activity} == {("cmpl-1", "fake")}

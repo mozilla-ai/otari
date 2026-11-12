@@ -36,7 +36,7 @@ from gateway.repositories.users_repository import (
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
-from gateway.services.tools import revoke_in_background
+from gateway.services.tools import McpRevocation
 
 router = APIRouter(
     prefix="/users",
@@ -447,7 +447,11 @@ async def delete_user(
 
     # After the erasure, which commits, so the lock is held by the transaction that removes the user's grants and
     # marks them deleted: a grant to this user committing meanwhile waits for it and is then refused.
-    await lock_live_users(db, [user_id])
+    if user_id not in await lock_live_users(db, [user_id]):
+        # Another delete of this user held the lock first and has already revoked their
+        # grants and recorded when they were deleted. Erasure is idempotent and the
+        # answer is the same, so the first deletion's time is left as the one that stands.
+        return
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)
@@ -463,7 +467,7 @@ async def delete_user(
         await db.rollback()
         raise database_error("delete user", exc) from None
     # Only once the deletion has committed: a rolled-back one keeps the connections it would have ended.
-    revoke_in_background(revocations, unread=unread)
+    McpRevocation.send_in_background(revocations, unread=unread)
 
 
 @router.get("/{user_id}/usage")

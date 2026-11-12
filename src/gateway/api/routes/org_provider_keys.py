@@ -206,6 +206,14 @@ async def list_org_provider_key_models(
         OfferedModelType | None,
         Query(alias="type", description="Only models of this kind; `unknown` for those no source names a kind for"),
     ] = None,
+    search: Annotated[
+        str | None,
+        Query(max_length=200, description="Only models whose name contains this text, case-insensitively"),
+    ] = None,
+    enabled: Annotated[
+        bool | None,
+        Query(description="Only models served (`true`) or only models withheld (`false`)"),
+    ] = None,
 ) -> OrgProviderKeyModelsPublic:
     """List the models offered on one key, each with the rate it currently serves at.
 
@@ -213,7 +221,13 @@ async def list_org_provider_key_models(
     page length, so a client knows whether another page is owed.
     """
     return await service.list_models(
-        user=current_identity, key_id=key_id, skip=skip, limit=limit, model_type=model_type
+        user=current_identity,
+        key_id=key_id,
+        skip=skip,
+        limit=limit,
+        model_type=model_type,
+        search=search,
+        enabled=enabled,
     )
 
 

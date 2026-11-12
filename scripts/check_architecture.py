@@ -465,7 +465,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/_helpers.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
-    "gateway/api/routes/admin.py",
     "gateway/api/routes/agent_telemetry.py",
     "gateway/api/routes/aliases.py",
     "gateway/api/routes/audio.py",
@@ -615,7 +614,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
-    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
@@ -1310,6 +1308,613 @@ def check_service_package_imports(src_root: Path, domains: set[str]) -> list[str
     ]
 
 
+# The free functions and constants each service package root still exports. A root
+# exports the one service and the types its public methods use (DOMAINS.md), so an
+# entry here records debt rather than granting permission. The baseline only
+# shrinks: a name that stops being exported fails the check until its entry goes.
+SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
+    "gateway/services/api_keys/": (
+        "API_KEY_NO_USER_DETAIL",
+        "API_KEY_VALIDATION_FAILED_DETAIL",
+        "DEFAULT_ORGANIZATION_MAX_END_USERS",
+        "END_USER_SETTINGS",
+        "JWT_BEARER_GRANT",
+        "MASTER_KEY_USER_REQUIRED_DETAIL",
+        "USER_MISMATCH_DETAIL",
+        "access_token_expiry",
+        "admit_organization_key",
+        "declared_secret_problem",
+        "grant_names_organization",
+        "is_access_token",
+        "key_refusal",
+        "match_federation_rules",
+        "mint_access_token",
+        "names_end_user",
+        "operator_enable_refusal",
+        "operator_max_end_users",
+        "operator_set_active",
+        "organization_key_changes",
+        "read_access_token",
+        "refuse_service_key_flag_change",
+        "refuse_unusable_declared_secrets",
+        "resolve_user_id",
+        "rule_matches",
+        "unverified_issuer",
+    ),
+    "gateway/services/budgets/": (
+        "ZERO",
+        "budget_window",
+        "cadence_of",
+        "check_path_external_id",
+        "count_estimate",
+        "end_user_fields",
+        "estimate_abandoned_stream_usage",
+        "estimate_cost",
+        "estimate_output_tokens",
+        "estimate_tokens",
+        "get_budget_state",
+        "hold_tool_call",
+        "increase_reservation",
+        "lock_workspace_for_scope",
+        "period_window",
+        "reconcile_reservation",
+        "record_external_spend",
+        "refund_reservation",
+        "report_estimate",
+        "rerank_estimate",
+        "reserve_budget",
+        "retime_ceilings_for_budget",
+        "run_reservation_sweeper",
+        "settle_abandoned_stream",
+        "settle_cut_stream",
+        "user_subject",
+    ),
+    "gateway/services/catalog/": (
+        "apply_model_metadata",
+        "build_organization_selectors",
+        "build_selector_index",
+        "catalog_model_type",
+        "catalog_models",
+        "common_price_unit",
+        "current_selector_index",
+        "dated_builds",
+        "hide_alias_target",
+        "load_catalog_metadata",
+        "load_served_models_at_startup",
+        "metadata_entry",
+        "model_selector_for_slug",
+        "model_type",
+        "not_chat_detail",
+        "not_embedding_detail",
+        "offered_model_types",
+        "offering_input_rate",
+        "offering_model_type",
+        "organization_offerings",
+        "query_catalog",
+        "read_engine_settings",
+        "record_served_models",
+        "reset_selector_index",
+        "reset_served_models",
+        "resolve_catalog_offerings",
+        "resolve_catalog_selector",
+        "resolve_undated_selector",
+        "run_served_model_refresher",
+        "served_context_window",
+        "set_selector_index",
+        "short_selector_for",
+    ),
+    "gateway/services/code_execution/": (
+        "CONTAINER_AUTO",
+        "CONTAINER_CLAIM_TTL_S",
+        "CONTAINER_ID_PREFIX",
+        "gateway_container_value",
+        "names_provider_container",
+        "new_container_id",
+        "requested_container",
+    ),
+    "gateway/services/feedback/": ("new_feedback_rate_limiter",),
+    "gateway/services/files/": ("run_file_sweeper",),
+    "gateway/services/health_checks/": (
+        "list_hosted_offerings",
+        "refusal_switches_off",
+        "run_health_check_worker",
+    ),
+    "gateway/services/identity/": ("exchange_sso_code",),
+    "gateway/services/inference/": (
+        "CONVERSATION_CACHE_KEY_FIELD",
+        "EMBEDDINGS_BILLING",
+        "EMPTY_COMPLETION_DETAIL",
+        "ESTIMATED_VIDEO_SECONDS",
+        "IMAGES_BILLING",
+        "MODERATION_BILLING",
+        "REASONING_ITEM_ID_PREFIX",
+        "REASONING_SIGNATURE_PREFIX",
+        "RERANK_BILLING",
+        "UPSTREAM_USER_FIELD",
+        "VIDEO_BILLING",
+        "actor_user_id_for",
+        "admit_deployment_paid",
+        "aresponses_via_chat_completions",
+        "audio_seconds",
+        "billed_model",
+        "bind_upstream_user",
+        "call_messages",
+        "call_responses",
+        "chat_user_fields",
+        "client_country",
+        "close_decision_client",
+        "configure_closed_models",
+        "conversation_cache_key",
+        "decision_body",
+        "decision_provider_for",
+        "deferred_charge",
+        "describe_port_error",
+        "embedding_usage",
+        "end_user_identifier",
+        "image_billing",
+        "image_megapixels",
+        "image_quantities",
+        "image_usage",
+        "is_chat_stream_cost_carrier",
+        "is_empty_completion",
+        "is_model_unavailable_error",
+        "is_provider_billing_error",
+        "is_provider_credential_rejection",
+        "is_provider_cut",
+        "is_retry_futile",
+        "is_upstream_connect_failure",
+        "is_upstream_request_fault",
+        "is_upstream_stream_interrupted",
+        "keep_claim_alive",
+        "load_stored_country_database_at_startup",
+        "messages_user_fields",
+        "moderation_usage",
+        "open_country_database",
+        "organization_slot_key",
+        "provider_failure",
+        "reasoning_signature",
+        "reported_charge",
+        "request_country_gate",
+        "request_decision",
+        "require_choices",
+        "rerank_usage",
+        "reset_stored_country_database",
+        "resolve_decision_provider",
+        "responses_user_fields",
+        "run_idempotency_sweeper",
+        "run_stored_country_database_refresher",
+        "serves_responses",
+        "speech_billing",
+        "speech_cost_headers",
+        "speech_usage",
+        "strip_gateway_minted_items",
+        "transcription_billing",
+        "transcription_usage",
+        "upstream_body_messages",
+        "upstream_error_message",
+        "upstream_error_tag",
+        "upstream_exception_chain",
+        "upstream_exception_shape",
+        "upstream_retry_after",
+        "upstream_user_identifier",
+        "usage_unreported",
+        "uses_chat_completions_bridge",
+        "video_usage",
+        "with_responses_instance",
+        "with_upstream_user",
+    ),
+    "gateway/services/mail/": (
+        "normalized_address",
+        "render_email",
+        "sanitize_header_value",
+        "select_transport",
+    ),
+    "gateway/services/pricing/": (
+        "BUNDLED_SNAPSHOT_NAME",
+        "MAX_RATE_PER_MILLION",
+        "MAX_RESIDENT_GENERATIONS",
+        "MEASURED_UNITS",
+        "NO_FACTS",
+        "PROVIDER_TOOL_LIST_PRICES",
+        "UNIT_METER",
+        "VIDEO_SECONDS",
+        "active_generations",
+        "active_timeline",
+        "add_accepted_generation",
+        "apply_rules",
+        "billed_provider_searches",
+        "billed_search_units",
+        "bundled_catalog",
+        "bundled_generation",
+        "can_price",
+        "charge_tool_calls",
+        "charged_as_reported",
+        "current_index",
+        "estimate_settles",
+        "estimate_slot_cost",
+        "estimate_video_cost",
+        "has_completion_meter",
+        "invalid_rate_count",
+        "load_bundled_index",
+        "model_search_rate",
+        "paid_by_the_deployment",
+        "parse_rate",
+        "price_completion",
+        "price_slot",
+        "price_usage",
+        "price_video",
+        "reported_video_cost",
+        "request_rate",
+        "reset_generations",
+        "resolve_as_of",
+        "resolve_rates",
+        "search_rate",
+        "select_generation",
+        "set_accepted_generations",
+        "slot_rate",
+        "tool_rate_lookup",
+        "validated_units",
+        "video_rate",
+    ),
+    "gateway/services/providers/": (
+        "PLATFORM_PROVIDER_NAME",
+        "acompletion",
+        "amessages",
+        "aresponses",
+        "cached_owned_endpoint",
+        "dispatch_on_hosted_credential",
+        "ensure_hosted_country",
+        "ensure_provider_country",
+        "hosted_credential_for",
+        "hosted_implementation",
+        "hosted_models_for",
+        "last4",
+        "load_hosted_names_at_startup",
+        "load_provider_endpoints_at_startup",
+        "load_workspace_hosted_access_at_startup",
+        "missing_provider_credential",
+        "narrow_hosted_models",
+        "new_platform_connect_rate_limiter",
+        "normalize_api_base",
+        "organization_to_serve",
+        "owned_endpoint_http_client",
+        "owned_endpoint_sdk_client",
+        "provider_for",
+        "public_api_base",
+        "refresh_provider_endpoint_cache",
+        "refresh_workspace_hosted_access_cache",
+        "refuse_unsafe_configured_endpoints",
+        "reset_hosted_name_index",
+        "reset_provider_endpoint_cache",
+        "reset_workspace_hosted_access_cache",
+        "run_catalog_updater",
+        "run_hosted_name_refresher",
+        "run_provider_endpoint_refresher",
+        "run_workspace_hosted_access_refresher",
+        "serve_on_hosted_provider",
+        "unpriced_model_refusal",
+        "workspace_may_use_hosted",
+        "workspace_requires_zero_data_retention",
+    ),
+    "gateway/services/rate_limits/": (
+        "load_rate_limit_rules_at_startup",
+        "run_rate_limit_refresher",
+    ),
+    "gateway/services/routing/": (
+        "FALLBACK_WINDOW",
+        "HOLD_INPUT_TOKENS",
+        "HOLD_OUTPUT_TOKENS",
+        "PRIORITY_BACKEND",
+        "ROUTER_LABEL",
+        "ROUTER_LABEL_MODEL",
+        "ROUTER_LABEL_PROVIDER",
+        "WEIGHTED_BACKEND",
+        "active_agent_recommender",
+        "apply_agent_recommenders",
+        "backend_is_priority",
+        "backend_is_weighted",
+        "build_decision_request",
+        "candidates_for",
+        "check_recommender",
+        "clear_router_backend_cache",
+        "compile_catalog_plan",
+        "compile_policy",
+        "decide_ordering",
+        "explain_router_ordering",
+        "get_router_backend",
+        "known_backends",
+        "load_agent_recommenders_at_startup",
+        "needs_budget_state",
+        "preferred_region",
+        "recommendation_from_decision",
+        "refresh_agent_recommenders",
+        "reset_agent_recommenders",
+        "run_agent_recommender_refresher",
+        "selection_consults_router",
+    ),
+    "gateway/services/tenancy/": (
+        "describe_caller",
+        "ensure_bootstrap_identity",
+        "forget_unproven_access",
+        "generate_shared_token",
+        "generate_token",
+        "hash_token",
+        "render_password_reset_email",
+        "report_new_account",
+        "report_sign_in",
+        "sso_blocks_membership",
+        "sso_would_block_membership",
+        "unverified_identity_is_claimable",
+        "update_avatar_face",
+        "update_full_name",
+    ),
+    "gateway/services/tools/": (
+        "BUILTIN_TOOLS",
+        "CHARS_PER_TOKEN",
+        "CODE_EXECUTION_HEADER",
+        "CODE_EXECUTION_TOOL",
+        "CODE_INTERPRETER_CALL_ID_PREFIX",
+        "CONTAINER_GONE_DETAIL_TEMPLATE",
+        "DEFAULT_MAX_RESULTS",
+        "DEFAULT_MAX_TOKENS_PER_PAGE",
+        "DIRECT_DEFAULT_MAX_RESULTS",
+        "MAX_TOOL_ITERATIONS_CAP",
+        "MAX_USES_EXCEEDED_ERROR",
+        "NO_WEB_TOOLS",
+        "OTARI_TOOL_CALLS_FIELD",
+        "SANDBOX_KEY_ENV",
+        "SERVER_TOOL_USE_ID_PREFIX",
+        "WEB_FETCH_HEADER",
+        "WEB_FETCH_TOOL_NAME",
+        "WEB_RETRIEVAL_RESULT_MAX_BYTES",
+        "WEB_SEARCH_CALL_ID_PREFIX",
+        "WEB_SEARCH_HEADER",
+        "WEB_SEARCH_NATIVE_TYPE_PREFIX",
+        "WEB_SEARCH_PURPOSE_HINT",
+        "WEB_SEARCH_TOOL_NAME",
+        "admit_mcp_servers",
+        "admit_web_access",
+        "admitted_tools",
+        "apply_web_access_policy",
+        "build_web_fetch_backend",
+        "build_web_provider_client",
+        "build_web_search_backends",
+        "builtin_fetch_resolved",
+        "check_test_input",
+        "clear_sandbox_api_key",
+        "code_execution_declaration_forms",
+        "configured_tools_to_price",
+        "decide_candidate_tools",
+        "decide_code_executor",
+        "declare_code_execution",
+        "declares_code_execution",
+        "declares_provider_mcp",
+        "deployment_tool_rate_keys",
+        "enriching_fetch_tool",
+        "enrichment_for",
+        "extract_code_execution_tool",
+        "extract_web_tools",
+        "fetch_resolves",
+        "filter_hits_by_domain",
+        "first_provider_code_execution_tool",
+        "is_capped_call",
+        "load_sandbox_credentials_at_startup",
+        "mcp_entry",
+        "native_code_execution_dialect",
+        "native_rendering",
+        "owning_backend",
+        "page_budget_chars",
+        "parse_code_execution_header",
+        "pick_direct_fetch_instance",
+        "pick_direct_search_instance",
+        "provider_attempt_kwargs",
+        "provider_runs_code_natively",
+        "provider_tools",
+        "provider_web_searches",
+        "read_web_declarations",
+        "read_web_fetch_max_uses",
+        "read_web_search_max_uses",
+        "refuse_shadowed_builtin_tools",
+        "register_builtin_fetcher",
+        "reset_sandbox_credential_cache",
+        "reset_search_tool_cache",
+        "resolve_code_executor_preference",
+        "resolve_direct_fetch",
+        "resolve_direct_search",
+        "resolve_fetch",
+        "resolve_in_loop_search",
+        "resolve_search",
+        "retargeted_tool_choice",
+        "run_connection_test",
+        "run_direct_fetch",
+        "run_direct_search",
+        "run_sandbox_credential_refresher",
+        "run_search_tool_refresher",
+        "sandbox_api_key",
+        "sandbox_credential_status",
+        "screened_backend",
+        "search_provider_catalog",
+        "search_resolves",
+        "store_sandbox_api_key",
+        "tools_to_price",
+        "unfunded_tool_detail",
+        "unfunded_tools",
+        "unpriced_direct_fetch_detail",
+        "unpriced_direct_search_detail",
+        "unpriced_tool_detail",
+        "validate_web_declarations",
+        "warn_about_legacy_search_settings",
+        "warn_about_tool_instances",
+        "web_access_disabled_refusal",
+        "web_fetch_tool_definition",
+        "web_search_configured",
+        "web_search_declaration_forms",
+        "web_search_intercept_enabled",
+        "web_search_max_results_baseline",
+        "web_search_tool_definition",
+        "with_native_code_execution_tool",
+        "with_provider_web_searches",
+        "with_typed_code_execution_tool",
+        "without_otari_tool_calls",
+    ),
+    "gateway/services/traces/": (
+        "CACHE_WRITE_ATTRIBUTES",
+        "CLAUDE_CODE_USAGE_SOURCE",
+        "HOOK_SCOPE",
+        "HOOK_USAGE_SOURCE",
+        "MAX_SPANS_PER_EXPORT",
+        "cache_in_input",
+        "context_of",
+        "gate_usage_event_id",
+        "harness_of",
+        "identifier_or_none",
+        "is_subagent",
+        "otlp_sessions",
+        "priced_requests",
+        "project_otlp_spans",
+        "read_context",
+        "read_turn",
+        "read_turn_content",
+        "record_otlp_export",
+        "record_priced_requests",
+        "resolve_session",
+        "run_trace_retention",
+    ),
+    "gateway/services/usage_and_telemetry/": (
+        "MAX_SERIES_POINTS",
+        "SERIES_TOP_N",
+        "dense_series",
+        "error_class_for",
+        "parse_tag_filters",
+        "resolve_window",
+    ),
+}
+
+
+def _declared_all(tree: ast.Module) -> list[str] | None:
+    """Return the names a module's ``__all__`` lists, or None where it declares none."""
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+        ):
+            continue
+        if isinstance(node.value, ast.List | ast.Tuple):
+            return [
+                element.value
+                for element in node.value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            ]
+    return None
+
+
+def _bound_names(tree: ast.Module) -> set[str]:
+    """Return the public names a module binds at its top level, by import or by definition."""
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.Assign):
+            names.update(target.id for target in node.targets if isinstance(target, ast.Name))
+    return {name for name in names if not name.startswith("_")}
+
+
+def _offered_names(tree: ast.Module) -> set[str]:
+    """Return the names a package root offers a caller.
+
+    NOTE: ``__all__`` governs a star import alone, so a name the root binds and
+    leaves out of it is still importable and is offered just the same.
+    """
+    return _bound_names(tree) | set(_declared_all(tree) or ())
+
+
+def _import_sources(tree: ast.Module, file_path: Path, src_root: Path) -> dict[str, tuple[str, str]]:
+    """Return each name a module binds by import, mapped to the module and the name it is defined under there."""
+    sources: dict[str, tuple[str, str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)
+        if module is None:
+            continue
+        for alias in node.names:
+            sources[alias.asname or alias.name] = (module, alias.name)
+    return sources
+
+
+def _module_file(module: str, src_root: Path) -> Path | None:
+    """Return the file a dotted module path names, whether it is a module or a package."""
+    relative = Path(module.replace(".", "/"))
+    candidates = (src_root / relative.with_suffix(".py"), src_root / relative / "__init__.py")
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def _assigns_constant(node: ast.stmt, name: str) -> bool:
+    """Return whether a statement assigns ``name`` as an upper-case module constant, annotated or not."""
+    if not name.isupper():
+        return False
+    if isinstance(node, ast.AnnAssign):
+        return isinstance(node.target, ast.Name) and node.target.id == name
+    return isinstance(node, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == name for target in node.targets
+    )
+
+
+def _definition_kind(
+    module: str, name: str, src_root: Path, seen: frozenset[tuple[str, str]] = frozenset()
+) -> str | None:
+    """Return whether ``name`` is a function or an upper-case constant, following re-exports to its definition.
+
+    NOTE: A name this cannot resolve to a definition under ``src_root`` returns
+    None, so an export it cannot classify is left alone rather than guessed at.
+    """
+    if (module, name) in seen:
+        return None
+    file_path = _module_file(module, src_root)
+    if file_path is None:
+        return None
+    tree = ast.parse(file_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
+            return "function"
+        if _assigns_constant(node, name):
+            return "constant"
+    source = _import_sources(tree, file_path, src_root).get(name)
+    if source is None:
+        return None
+    return _definition_kind(*source, src_root, seen | {(module, name)})
+
+
+def check_service_root_exports(src_root: Path) -> list[str]:
+    """Check that no service package root offers a free function or a constant beyond its baseline."""
+    scope_root = src_root / SERVICE_SCOPE
+    exported: dict[str, set[str]] = {}
+    violations: list[str] = []
+    packages = (
+        sorted(path for path in scope_root.iterdir() if (path / "__init__.py").is_file()) if scope_root.is_dir() else []
+    )
+    for package in packages:
+        key = f"{package.relative_to(src_root).as_posix()}/"
+        init = package / "__init__.py"
+        tree = ast.parse(init.read_text())
+        module = package.relative_to(src_root).as_posix().replace("/", ".")
+        exported[key] = {name for name in _offered_names(tree) if _definition_kind(module, name, src_root) is not None}
+        violations.extend(
+            f"{key}__init__.py exports {name}, which is neither the service nor a type its public methods use; "
+            f"make it a method on what owns it, move it below the domain, or stop exporting it"
+            for name in sorted(exported[key] - set(SERVICE_ROOT_EXPORT_BASELINE.get(key, ())))
+        )
+    violations.extend(
+        f"{key} is on the service root export baseline but no longer exports {name}; remove it from the baseline"
+        for key, names in SERVICE_ROOT_EXPORT_BASELINE.items()
+        for name in sorted(set(names) - exported.get(key, set()))
+    )
+    return violations
+
+
 MODELS_SCOPE = "gateway/models"
 TABLE_ATTRIBUTES = ("__table__", "__tablename__")
 TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
@@ -1425,6 +2030,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.identity.BlockedEmail": {
         "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.identity.OAuthAppGrant": {
+        "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),
     },
     "gateway.models.identity.OAuthIdentityLink": {
@@ -2145,6 +2754,7 @@ def main() -> int:
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
     repository_import_violations = check_repository_imports(SRC_ROOT, domains)
     service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
+    service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
 
     if import_violations:
@@ -2214,6 +2824,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal service package import violations: {len(service_package_import_violations)}")
 
+    if service_root_export_violations:
+        print("\n❌ Service root export violations:\n")
+        for violation in service_root_export_violations:
+            print(f"  {violation}")
+        print(f"\nTotal service root export violations: {len(service_root_export_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -2232,6 +2848,7 @@ def main() -> int:
         or domain_name_violations
         or repository_import_violations
         or service_package_import_violations
+        or service_root_export_violations
         or model_access_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")

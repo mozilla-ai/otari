@@ -4,6 +4,7 @@
 
 * [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
+* [Integrations](integrations.md)
 
 ## What you can do
 
@@ -17,21 +18,23 @@
 ## Build
 
 * [Playground](playground.md)
-* [Configure web search](configure-web-search.md)
-* [Configure code execution](configure-code-execution.md)
-* [Configure an MCP server](configure-an-mcp-server.md)
+* [Web search](web-search.md)
+* [Code execution](code-execution.md)
+* [MCP servers](mcp-servers.md)
 * [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
-* [Framework integrations](framework-integrations.md)
-* [Use with Claude Code](use-with-claude-code.md)
-* [Use with Codex](use-with-codex.md)
-* [Use with Junie](use-with-junie.md)
-* [Use with opencode](use-with-opencode.md)
-* [Use with pi](use-with-pi.md)
-* [Use with oh-my-pi](use-with-oh-my-pi.md)
-* [Use with Hermes Agent](use-with-hermes.md)
-* [Use with Pydantic AI](use-with-pydantic-ai.md)
-* [Use with LangChain](use-with-langchain.md)
-* [Use with LangGraph](use-with-langgraph.md)
+
+## Integrations
+
+* [Claude Code](claude-code.md)
+* [Codex](codex.md)
+* [Junie](junie.md)
+* [opencode](opencode.md)
+* [pi](pi.md)
+* [oh-my-pi](oh-my-pi.md)
+* [Hermes Agent](hermes.md)
+* [Pydantic AI](pydantic-ai.md)
+* [LangChain](langchain.md)
+* [LangGraph](langgraph.md)
 
 ## Observe
 
@@ -63,6 +66,7 @@
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
 * [Sign-in and accounts](sign-in.md)
+* [OAuth apps](oauth-apps.md)
 * [Single sign-on](sso.md)
 * [Run the dashboard](run-the-dashboard.md)
 

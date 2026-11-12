@@ -195,6 +195,36 @@ describe("MandateDialog, creating one on your own service", () => {
     })
   })
 
+  it("sends what the guardrail checks", async () => {
+    const calls = mockApi()
+    const onSaved = renderDialog()
+    const user = userEvent.setup()
+
+    await user.click(
+      dialog().getByRole("button", { name: "Name a profile by hand" }),
+    )
+    await user.type(dialog().getByLabelText("Guardrail profile"), "pii")
+    await user.click(dialog().getByRole("checkbox", { name: "Tool results" }))
+    await user.click(dialog().getByRole("checkbox", { name: "Answers" }))
+    await pickOption(user, "Mode", "Block")
+    await submit()
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(sent(calls, "POST")).toMatchObject({
+      profile: "pii",
+      mode: "block",
+      on: ["input", "tool_results", "output"],
+    })
+  })
+
+  it("keeps a guardrail checking at least one thing", () => {
+    renderDialog()
+
+    expect(
+      dialog().getByRole("checkbox", { name: "User input" }),
+    ).toBeDisabled()
+  })
+
   it("offers no profile to pick until the guardrails service has answered", () => {
     renderDialog({ isCatalogPending: true })
 

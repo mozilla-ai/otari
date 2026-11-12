@@ -32,7 +32,9 @@ from gateway.schemas.tools import (
     McpConnectionStarted,
     McpServerConnectionsPublic,
 )
-from gateway.services.tools import DASHBOARD_CALLBACK_ROUTE
+
+# The dashboard route that finishes a sign-in a dashboard session started.
+DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
 
 # Auth is declared on the router, as `routes/workspace_mcp_servers.py` does.
 router = APIRouter(

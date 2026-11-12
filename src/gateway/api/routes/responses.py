@@ -25,7 +25,8 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal, text_from_content, with_retry_hint
+from gateway.api.routes._guardrail_targets import responses_targets
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -135,20 +136,6 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: RequestMetadata = None
-
-
-def _responses_input_text(value: Any) -> str:
-    """Flatten the Responses ``input`` field to plain text for guardrail checks.
-
-    ``input`` may be a bare string or a list of input items sharing the
-    ``role``/``content`` shape used by chat/messages (text parts look like
-    ``{"type": "input_text", "text": "..."}``).
-    """
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return latest_user_text(value)
-    return text_from_content(value)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -562,7 +549,7 @@ async def create_response(
         response=response,
         declared=DeclaredTools(
             guardrails=request_body.guardrails,
-            guardrail_text=_responses_input_text(request_body.input),
+            guardrail_targets=lambda: responses_targets(request_body),
             tools=request_body.tools,
             mcp_servers=request_body.mcp_servers,
             mcp_server_ids=request_body.mcp_server_ids,
@@ -666,7 +653,25 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    # By alias, as each streamed event is (see ``format_chunk``).
-    body = result.model_dump(exclude_none=True, by_alias=True)
+    body = response_body(result)
     await idempotency.complete(body, response)
+    return body
+
+
+_INLINE_COST_FIELDS = ("cost_usd", "pricing_source")
+
+
+def response_body(result: Any) -> dict[str, Any]:
+    """A whole response as the JSON it is answered with, by alias as each streamed event is (see ``format_chunk``).
+
+    A native Responses provider's usage type drops the fields it does not declare,
+    so the cost ``attach_cost`` put on it is copied across here.
+    """
+    body: dict[str, Any] = result.model_dump(exclude_none=True, by_alias=True)
+    usage = getattr(result, "usage", None)
+    if isinstance(body.get("usage"), dict) and isinstance(usage, OpenResponsesUsage):
+        for name in _INLINE_COST_FIELDS:
+            value = getattr(usage, name, None)
+            if value is not None:
+                body["usage"].setdefault(name, value)
     return body

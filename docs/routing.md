@@ -200,9 +200,12 @@ routing:
           on_unavailable: block
 ```
 
-`mode` is required. `on_unavailable: block` fails closed when the guardrail
-service cannot run or gives no verdict; `monitor` lets the request continue and
-records the skipped check. Only input checks can be mandated by a policy.
+`mode` is required: `monitor` or `block`. `on` says what the guardrail
+reads, and defaults to `[input]`; see
+[What a guardrail reads](guardrails-reference.md#what-a-guardrail-reads).
+`on_unavailable: block` fails closed when the guardrail service cannot run or
+gives no verdict; `monitor` lets the request continue and records the skipped
+check.
 
 Organization-mandated and request-provided guardrails compose with policy
 guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
@@ -255,8 +258,8 @@ harness runs the subagent with its own provider credentials.
 
 The fields and errors are in the
 [API reference](api-reference.md#routing-recommendations), and the Claude Code
-plugin that asks is in
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+plugin that asks is in the
+[Claude Code guide](claude-code.md#let-otari-choose-a-subagents-model).
 
 ### Subagent routers
 
@@ -400,6 +403,7 @@ candidate answers as naming that model directly would.
 | rejected the request as invalid (400) | `400 all_candidates_rejected` |
 | found the prompt too long | `context_length_exceeded` |
 | refused image content the request carries, in wording Otari recognizes | `unsupported_content` |
+| failed to produce output matching the requested JSON schema (Groq's `json_validate_failed`) | `structured_output_failed`. Sending the request again may succeed. |
 | refused the request as too large (413) | `413 request_too_large`. Shrink the request; sending it again unchanged does not help. |
 | refused a parameter the request carries (such as `response_format` on a model with no JSON mode), as named by Otari's provider library | `unsupported_parameter`, with `detail` naming the parameters. A parameter a provider refuses with its own 400 counts as an ordinary rejection. |
 | did not know the model (404) | `502` |

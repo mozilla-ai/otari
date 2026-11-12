@@ -5,6 +5,11 @@ database_url: "sqlite:///./web/e2e/e2e.db"
 host: "127.0.0.1"
 port: 8000
 master_key: "e2e-master-key"
+# Exercise consent against real app metadata and workspace endpoints.
+oauth_apps:
+  thunderbolt:
+    name: "Thunderbolt"
+    redirect_uris: ["http://localhost:5199/oauth/otari"]
 # Keep the smoke focused on the flows under test rather than the pricing gate.
 require_pricing: false
 # Lets a member give their own key a federation rule, which the workload

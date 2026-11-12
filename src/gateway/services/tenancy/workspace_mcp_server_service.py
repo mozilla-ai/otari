@@ -117,11 +117,6 @@ from gateway.services.tools import (
     McpServerRef,
     McpUserTokens,
     StoredMcpOAuthClient,
-    require_per_user_support,
-    revocations_for,
-    revoke_in_background,
-    sign_in_problem,
-    stored_oauth_client,
 )
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
 
@@ -377,7 +372,7 @@ class WorkspaceMcpServerPublic(BaseModel):
         those components masked. A manager sees the URL as stored, because the
         edit form restates it and would otherwise save the mask back.
         """
-        client = stored_oauth_client(server)
+        client = StoredMcpOAuthClient.of(server)
         own_client = client if client is not None and not client.dynamic else None
         return cls(
             id=server.id,
@@ -1057,7 +1052,7 @@ class WorkspaceMcpServerService:
         """Refuse per-user mode where this deployment could not run a sign-in or keep its tokens."""
         if self.config is None:
             raise RuntimeError("WorkspaceMcpServerService was built without the config per-user mode reads")
-        require_per_user_support(self.config)
+        McpConnectionService.require_support(self.config)
 
     async def _revocations(self, server: WorkspaceMcpServer) -> tuple[list[McpRevocation], int]:
         """What to ask the authorization server to end once this server's connections are deleted.
@@ -1066,7 +1061,7 @@ class WorkspaceMcpServerService:
         leaves unread past the page one removal reads.
         """
         rows, total = await McpUserConnectionRepository(self.db).revocable(server_ids=[server.id])
-        return revocations_for(server, rows), total - len(rows)
+        return McpRevocation.for_server(server, rows), total - len(rows)
 
     async def _end_connections(self, server: WorkspaceMcpServer) -> None:
         """Stage the end of every user's connection to a server, and of the client Otari registered for it.
@@ -1076,7 +1071,7 @@ class WorkspaceMcpServerService:
         """
         await McpUserConnectionRepository(self.db).remove_for_server(server.id)
         await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
-        client = stored_oauth_client(server)
+        client = StoredMcpOAuthClient.of(server)
         if client is not None and client.dynamic:
             server.oauth_client = None
 
@@ -1104,7 +1099,7 @@ class WorkspaceMcpServerService:
             await self.db.commit()
             if required:
                 raise
-            problem = await sign_in_problem(server.url)
+            problem = await McpConnectionService.sign_in_problem(server.url)
             if problem is None:
                 await self.db.refresh(server)
                 return True
@@ -1312,7 +1307,7 @@ class WorkspaceMcpServerService:
         moves_host = url_changed and _origin(fields["url"]) != _origin(server.url)
         if per_user:
             client, store_client, another_client = _edited_client(
-                stored_oauth_client(server), new_client_id, new_client_secret, moves_host=moves_host
+                StoredMcpOAuthClient.of(server), new_client_id, new_client_secret, moves_host=moves_host
             )
         ends_connections = was_per_user and (mode_changed or url_changed or another_client)
         revocations, unread = await self._revocations(server) if ends_connections else ([], 0)
@@ -1344,7 +1339,7 @@ class WorkspaceMcpServerService:
             await self._end_connections(server)
 
         await self.db.commit()
-        revoke_in_background(revocations, unread=unread)
+        McpRevocation.send_in_background(revocations, unread=unread)
         if connection_changed:
             await self._record_check(server, user)
         else:
@@ -1665,7 +1660,7 @@ class WorkspaceMcpServerService:
         await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
         await self.db.delete(server)
         await self.db.commit()
-        revoke_in_background(revocations, unread=unread)
+        McpRevocation.send_in_background(revocations, unread=unread)
 
     async def _visible_workspace_id(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         workspace = await authorization.resolve_visible_workspace(

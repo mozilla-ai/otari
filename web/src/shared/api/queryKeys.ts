@@ -12,6 +12,8 @@
  * are deliberately kept apart; read them before adding one.
  */
 
+// Registered third-party apps, separate from dashboard sign-in providers.
+export const OAUTH_APPS = "oauth-apps"
 export const MODELS = "models"
 // The same selectors as MODELS, folded by model and priced for the viewer. Its
 // own key so the two reads can be cached apart, and every pricing mutation

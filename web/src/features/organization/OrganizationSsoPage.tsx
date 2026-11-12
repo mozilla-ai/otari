@@ -17,6 +17,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
+import { Toggle } from "@/design-system/forms/Toggle"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -27,6 +28,7 @@ import {
   useOrganizationSso,
   useOrganizationSsoPreflight,
   useSaveOrganizationSso,
+  useSetOrganizationSsoEnabled,
   useSetOrganizationSsoEnforcement,
   useTestOrganizationSso,
 } from "@/shared/api/organizations"
@@ -56,13 +58,14 @@ const DEFAULT_ROLE_OPTIONS = [
   { value: "viewer", label: "Viewer" },
 ]
 
+const ALLOW_SIGN_IN_LABEL = "Allow sign-in through this connection"
+
 interface Draft {
   displayName: string
   issuer: string
   clientId: string
   clientSecret: string
   defaultRole: string
-  enabled: boolean
 }
 
 function initialDraft(connection: OidcConnection | null): Draft {
@@ -73,7 +76,6 @@ function initialDraft(connection: OidcConnection | null): Draft {
     // Never prefilled: the server does not serve the secret back.
     clientSecret: "",
     defaultRole: connection?.default_role ?? "member",
-    enabled: connection?.enabled ?? true,
   }
 }
 
@@ -113,7 +115,6 @@ function ConnectionDialog({
       client_id: draft.clientId.trim(),
       client_secret: draft.clientSecret === "" ? null : draft.clientSecret,
       default_role: draft.defaultRole === "viewer" ? "viewer" : "member",
-      enabled: draft.enabled,
     }
     save.mutate(body, { onSuccess: onClose })
   }
@@ -174,12 +175,6 @@ function ConnectionDialog({
         options={DEFAULT_ROLE_OPTIONS}
         shouldReserveMessage={false}
       />
-      <Checkbox
-        isSelected={draft.enabled}
-        onChange={(enabled) => set({ enabled })}
-      >
-        Allow sign-in through this connection
-      </Checkbox>
     </FormDialog>
   )
 }
@@ -252,16 +247,38 @@ function ConnectionSummary({
   onRemove: () => void
 }) {
   const test = useTestOrganizationSso()
+  const pause = useSetOrganizationSsoEnabled()
+
   return (
     <Section
       className="border-y border-border py-5"
       contentClassName="flex flex-col gap-4"
     >
-      <div className="flex items-center gap-2">
-        <h2 className="text-title">{connection.display_name}</h2>
-        <Chip tone={connection.enabled ? "success" : "neutral"}>
-          {connection.enabled ? "Enabled" : "Disabled"}
-        </Chip>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 className="text-title">{connection.display_name}</h2>
+          <Chip tone={connection.enabled ? "success" : "neutral"}>
+            {connection.enabled ? "Enabled" : "Disabled"}
+          </Chip>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            {/* The switch already carries this as its accessible name, so the words beside it
+                are for the eye alone and would otherwise be announced twice. */}
+            <span className="text-caption" aria-hidden="true">
+              {ALLOW_SIGN_IN_LABEL}
+            </span>
+            <Toggle
+              isSelected={connection.enabled}
+              onChange={(enabled) => pause.mutate({ enabled })}
+              label={ALLOW_SIGN_IN_LABEL}
+              isDisabled={pause.isPending}
+            />
+          </div>
+        </div>
+        <p className="text-caption">
+          Pausing refuses new sign-ins through your provider. Anyone already
+          signed in stays signed in, and everyone keeps their membership.
+        </p>
+        <ErrorBanner error={pause.error} />
       </div>
       <dl className="grid items-baseline gap-x-6 gap-y-3 sm:grid-cols-[10rem_1fr]">
         <dt className="text-muted">Issuer</dt>
