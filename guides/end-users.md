@@ -50,7 +50,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/2cd77e46300f0c5ae7d4b8aad6d616a21e03f7ac/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/0d2020a71a184eb87f15389a7103f8bb1699aab8/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
@@ -74,8 +74,9 @@ Otari-End-User-Budget: <memories budget id>
   id counts as naming no one.
 - The header only matters when the request creates the end user. An existing end
   user keeps its budget; to change it, [move the end user](#4-manage-end-users).
-- A budget not on the key's list is refused with `403`
-  (`end_user_budget_not_allowed`), even for an existing end user.
+- The header takes a budget's id, not its name: `GET /api/v1/end-user-budgets`
+  lists the key's budgets with both. A budget not on the key's list is refused
+  with `403` (`end_user_budget_not_allowed`), even for an existing end user.
 - The response's `Otari-End-User-Budget` header names the budget the end user is
   actually on, including on a `403` (`budget_exceeded`) from that budget.
 
@@ -188,8 +189,8 @@ or deleted.
 | `GET /api/v1/end-user-budgets` | Lists the key's budgets, with each one's limits, period and end-user count |
 
 - An id the key does not own answers 404, as one that does not exist does.
-- A budget set through these routes must be on the key's list, or the request is
-  refused with `403` (`end_user_budget_not_allowed`).
+- `budget_id` takes a budget's id, not its name. The budget must be on the key's
+  list, or the request is refused with `403` (`end_user_budget_not_allowed`).
 - `GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), filters on
   `budget_id`, `blocked` and `external_id`, and with `include_total=true` puts
   the match count in the `Otari-Total-Count` header. Lists and counts leave out
