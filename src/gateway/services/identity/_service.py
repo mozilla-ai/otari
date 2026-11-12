@@ -467,7 +467,7 @@ class IdentityService:
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
 
         if is_organization_connection_provider(external.provider):
-            return await self._account_for_sso(external, label)
+            return await self._account_for_sso(external)
 
         resolution = await self._identity_provider.resolve(external)
         account = await self._active_account(resolution.identity.id, label)
@@ -484,7 +484,7 @@ class IdentityService:
             raise OAuthAccountLinkedElsewhereError(label)
         return replace(resolution, identity=account)
 
-    async def _account_for_sso(self, external: ProviderIdentity, label: str) -> IdentityResolution:
+    async def _account_for_sso(self, external: ProviderIdentity) -> IdentityResolution:
         """Resolve a first sign-in from one organization's own OIDC connection, bypassing the identity provider port.
 
         What makes the claimed address usable here is the organization's DNS proof of its domain, not the
