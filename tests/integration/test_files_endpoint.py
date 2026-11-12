@@ -316,6 +316,48 @@ def test_file_id_extracted_reaches_provider(
     assert "file_id" not in sent
 
 
+def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model given a file can repeat it, so attaching one reads it: an inference-only key resolves none."""
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("report.txt", b"quarterly numbers", "text/plain")},
+    )
+    assert up.status_code == 200, up.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+    assert client.get(f"{API_ROOT}/files/{up.json()['id']}/content", headers=api_key_header).status_code == 403
+    captured: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": up.json()["id"]}}]}],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 200, resp.text
+    assert "quarterly numbers" not in json.dumps(captured["messages"])
+
+
 def test_budget_rejection_skips_normalization(
     client: TestClient,
     api_key_header: dict[str, str],

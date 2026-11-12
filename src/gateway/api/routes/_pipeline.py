@@ -2941,7 +2941,7 @@ async def resolve_request_context(
             # workspace", matching the /api/v1/files routes.
             post_chars, vision_usage = await normalize_messages(
                 NormalizationTarget(
-                    user_id=user_id,
+                    file_user_id=user_id if _may_read_files(api_key) else None,
                     provider=gate_impl,
                     model=gate_model,
                     instance=gate_instance,
@@ -3795,11 +3795,14 @@ class _ToolRefusal:
     """Why the candidates that share one answer cannot be served.
 
     ``unpriced_tool`` is the tool ``require_pricing`` refused, logged as a rejection
-    only where the refusal answers the request.
+    only where the refusal answers the request. ``admitted`` is the code execution
+    admitted before the refusal, whose container claim the request gives back
+    unless another candidate runs in that container.
     """
 
     error: HTTPException
     unpriced_tool: PricedTool | None = None
+    admitted: AdmittedCodeExecution | None = None
 
 
 def _decide_for_candidates(
@@ -3843,6 +3846,7 @@ async def _admit_candidates(
             claims[candidate.claimed] = await _declare_claims(
                 adapter, ctx, code, candidate.claimed, beside_sandbox=beside_sandbox
             )
+    await _release_unused_claims(claims.values())
     requested = [
         tool
         for tool in (WebTool.SEARCH, WebTool.FETCH)
@@ -3874,34 +3878,49 @@ async def _declare_claims(
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         return _ToolRefusal(domain_error(adapter, exc))
     if admitted.use_sandbox and (missing := _missing_scope(ctx, KeyScope.CODE_EXECUTE, "running code")):
-        return await _refuse_after_admission(adapter, admitted, missing)
+        return _refuse_after_admission(adapter, admitted, missing)
     web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
-        return await _refuse_after_admission(adapter, admitted, exc)
+        return _refuse_after_admission(adapter, admitted, exc)
     if web.declared_any and (missing := _missing_scope(ctx, KeyScope.WEB, "searching or fetching the web")):
-        return await _refuse_after_admission(adapter, admitted, missing)
+        return _refuse_after_admission(adapter, admitted, missing)
     return _DeclaredClaims(code=admitted, web=web)
 
 
-async def _refuse_after_admission(
+def _refuse_after_admission(
     adapter: FormatAdapter[Any, Any], admitted: AdmittedCodeExecution, error: TenancyError
 ) -> _ToolRefusal:
-    """Refuse a candidate admission already took a container claim for, giving the claim back first.
+    """Refuse a candidate admission already ran for, keeping the admission so its claim can be given back."""
+    return _ToolRefusal(domain_error(adapter, error), admitted=admitted)
 
-    Left held, the claim would keep the caller's own next resume of that container busy until it expires.
+
+async def _release_unused_claims(claims: Iterable[_DeclaredClaims | _ToolRefusal]) -> None:
+    """Give back each container claim that only refused candidates took.
+
+    Candidates resuming one container share one claim, so a claim is released only
+    where no admitted candidate runs in that container. Left held, it would keep the
+    caller's own next resume of the container busy until it expires.
     """
-    if admitted.container_lease is not None and admitted.containers is not None:
+    held: dict[str, AdmittedCodeExecution] = {}
+    in_use: set[str] = set()
+    for claim in claims:
+        admitted = claim.code if isinstance(claim, _DeclaredClaims) else claim.admitted
+        if admitted is None or admitted.container_lease is None or admitted.containers is None:
+            continue
+        container_id = admitted.container_lease.container_id
+        if isinstance(claim, _DeclaredClaims):
+            in_use.add(container_id)
+        else:
+            held.setdefault(container_id, admitted)
+    for container_id, admitted in held.items():
+        if container_id in in_use or admitted.containers is None:
+            continue
         try:
-            await admitted.containers.release(admitted.container_lease.container_id)
+            await admitted.containers.release(container_id)
         except DATABASE_ERRORS as exc:
-            logger.warning(
-                "could not release container claim %s: %s",
-                admitted.container_lease.container_id,
-                describe_database_error(exc),
-            )
-    return _ToolRefusal(domain_error(adapter, error))
+            logger.warning("could not release container claim %s: %s", container_id, describe_database_error(exc))
 
 
 def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
@@ -4265,6 +4284,15 @@ async def _admit_web_access(
     ) as exc:
         raise domain_error(adapter, exc) from exc
     return replace(admitted, search_url=search_url)
+
+
+def _may_read_files(api_key: APIKey | None) -> bool:
+    """Whether a ``file_id`` in the request may resolve to a stored file's contents.
+
+    The same scope as reading it from ``/api/v1/files``, since a model given the file
+    can repeat it. A request no key made (the master key, a Playground session) may.
+    """
+    return api_key is None or api_key.holds_scope(KeyScope.FILES_READ)
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:

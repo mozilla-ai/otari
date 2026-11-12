@@ -223,6 +223,38 @@ def test_uploads_are_put_in_the_sandbox_and_written_files_come_back(
     assert content.content == b"png-bytes"
 
 
+def test_staging_an_upload_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A run can print what it is given, so a key that may not read a file may not stage it."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resp = client.post(
+        _ENDPOINT,
+        json={"code": "print(open('data.csv').read())", "file_ids": [upload.json()["id"]]},
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "'files:read'" in resp.json()["detail"]
+    assert port.opened == []
+
+
 def test_an_upload_the_caller_cannot_reach_is_a_400(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:

@@ -1,4 +1,4 @@
-"""A tool refusal after admission gives back the container claim admission took."""
+"""A container claim taken at admission is given back only where no admitted candidate runs in it."""
 
 import logging
 from datetime import UTC, datetime
@@ -10,14 +10,19 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes import messages
-from gateway.api.routes._pipeline import _refuse_after_admission, _ToolRefusal
+from gateway.api.routes._pipeline import (
+    _DeclaredClaims,
+    _refuse_after_admission,
+    _release_unused_claims,
+    _ToolRefusal,
+)
 from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.services.code_execution.containers import ContainerLease
 
-_REFUSAL = KeyScopeMissingError("code:execute", "running code")
+_MISSING_WEB = KeyScopeMissingError("web", "searching or fetching the web")
 
 
-def _admitted(*, held: bool, release: AsyncMock) -> Any:
+def _admitted(release: AsyncMock, *, held: bool = True) -> Any:
     lease = (
         ContainerLease(
             container_id="cntr_held",
@@ -32,33 +37,59 @@ def _admitted(*, held: bool, release: AsyncMock) -> Any:
     return SimpleNamespace(container_lease=lease, containers=SimpleNamespace(release=release))
 
 
-@pytest.mark.asyncio
-async def test_a_refusal_gives_back_the_claim_it_holds() -> None:
-    release = AsyncMock()
+def _refused(admitted: Any) -> _ToolRefusal:
+    return _refuse_after_admission(messages._ADAPTER, admitted, _MISSING_WEB)
 
-    refusal = await _refuse_after_admission(messages._ADAPTER, _admitted(held=True, release=release), _REFUSAL)
+
+def test_a_refusal_keeps_its_claim_for_the_caller_to_settle() -> None:
+    release = AsyncMock()
+    admitted = _admitted(release)
+
+    refusal = _refused(admitted)
+
+    assert refusal.error.status_code == 403
+    assert refusal.admitted is admitted
+    release.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_claim_only_refused_candidates_took_is_given_back_once() -> None:
+    release = AsyncMock()
+    admitted = _admitted(release)
+
+    await _release_unused_claims([_refused(admitted), _refused(admitted)])
 
     release.assert_awaited_once_with("cntr_held")
-    assert isinstance(refusal, _ToolRefusal)
-    assert refusal.error.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_claim_an_admitted_candidate_runs_in_stays_held() -> None:
+    """The head runs in the sandbox while a fallback is refused: the shared claim must stay."""
+    release = AsyncMock()
+    admitted = _admitted(release)
+    head = _DeclaredClaims(code=admitted, web=SimpleNamespace())  # type: ignore[arg-type]
+
+    await _release_unused_claims([head, _refused(admitted)])
+    await _release_unused_claims([_refused(admitted), head])
+
+    release.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_a_refusal_with_no_claim_releases_nothing() -> None:
     release = AsyncMock()
 
-    await _refuse_after_admission(messages._ADAPTER, _admitted(held=False, release=release), _REFUSAL)
+    await _release_unused_claims([_refused(_admitted(release, held=False))])
 
-    release.assert_not_awaited()
+    release.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_a_release_that_fails_still_refuses(caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_release_that_fails_is_logged_without_its_statement(caplog: pytest.LogCaptureFixture) -> None:
     release = AsyncMock(side_effect=OperationalError("UPDATE secret", {"token": "s3cr3t"}, Exception("down")))
 
     with caplog.at_level(logging.WARNING):
-        refusal = await _refuse_after_admission(messages._ADAPTER, _admitted(held=True, release=release), _REFUSAL)
+        await _release_unused_claims([_refused(_admitted(release))])
 
-    assert refusal.error.status_code == 403
     assert "could not release container claim cntr_held" in caplog.text
     assert "s3cr3t" not in caplog.text

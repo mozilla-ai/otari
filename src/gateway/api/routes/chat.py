@@ -595,7 +595,7 @@ async def run_chat_completion(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,

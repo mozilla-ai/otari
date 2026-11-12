@@ -62,6 +62,7 @@ from gateway.core.database import release_session
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.budget_exceptions import EndUserBudgetWithoutEndUserError
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -223,6 +224,10 @@ async def execute_code(
         inputs=[],
     )
     if request.file_ids:
+        if api_key is not None and not api_key.holds_scope(KeyScope.FILES_READ):
+            # The run can print a staged file, so staging one reads it.
+            missing = KeyScopeMissingError(KeyScope.FILES_READ.value, "staging stored files")
+            raise await refuse(missing.message, status.HTTP_403_FORBIDDEN)
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)
         # The master key acts deployment-wide, so it reaches an upload in any workspace.
