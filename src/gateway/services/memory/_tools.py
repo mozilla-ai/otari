@@ -246,11 +246,15 @@ async def call_memory_tool(
     return ToolOutcome(data=result.model_dump(mode="json"))
 
 
-async def recall_for_turn(service: MemoryService, caller: MemoryCaller, query: str) -> tuple[str | None, int]:
+async def recall_for_turn(
+    service: MemoryService, caller: MemoryCaller, query: str, context: str | None = None
+) -> tuple[str | None, int]:
     """What automatic recall adds to a request's newest turn, and how many entries it holds.
+
+    ``context`` is the user's turns before it, which the turn may only refer to.
 
     Raises:
         TenancyError: memory is off for the caller, or the query could not be embedded.
     """
-    found = await service.recall(caller, query)
+    found = await service.recall(caller, query, context=context)
     return render_recall([_recalled(recalled.entry, round(recalled.relevance, 4)) for recalled in found]), len(found)

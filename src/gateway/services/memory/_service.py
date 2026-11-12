@@ -76,6 +76,9 @@ MAX_ATTEMPTS = 5
 # Automatic recall: how alike an entry must be to a request's newest turn, and how many are handed over.
 DEFAULT_RECALL_MIN_SIMILARITY = 0.75
 DEFAULT_RECALL_MAX_ENTRIES = 3
+# How far below the most alike entry another may be and still be handed over: one alike only in a name the
+# question mentions falls well below what the question is about.
+RECALL_MARGIN = 0.1
 # The read records automatic recall and the search tool leave, which the experiment counts.
 RECALL_TOOL = "auto_recall"
 SEARCH_TOOL = "memory_search"
@@ -437,8 +440,12 @@ class MemoryService:
                 arm=arm,
             )
 
-    async def recall(self, caller: MemoryCaller, query: str) -> list[Recalled]:
+    async def recall(self, caller: MemoryCaller, query: str, *, context: str | None = None) -> list[Recalled]:
         """What the caller may recall that is alike enough to ``query``, best first, for a request's newest turn.
+
+        ``context`` is the user's turns before it. An entry is as alike as the more alike of the turn alone and the
+        turn read after ``context``: a follow-up finds what its conversation is about, and a question that changes
+        the subject is not held to the old one. Entries well below the most alike are left out.
 
         Empty where the workspace does not recall automatically. Only what is handed over is recorded as read.
 
@@ -452,7 +459,8 @@ class MemoryService:
             if settings is None or not settings.auto_recall:
                 return []
             floor, most = settings.recall_min_similarity, settings.recall_max_entries
-        [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
+        texts = [query] if not context else [query, f"{context}\n\n{query}"]
+        vectors = await self._embed(texts, caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
         model = self._models.embedding_model
         async with self._uow:
             entries = await self._store.recallable(
@@ -466,10 +474,15 @@ class MemoryService:
                 for entry in entries
                 if entry.embedding is not None
                 and entry.embedding_model == model
-                and (similarity := cosine(vector, entry.embedding)) >= floor
+                and (similarity := max(cosine(vector, entry.embedding) for vector in vectors)) >= floor
             ]
+            best = max((similarity for similarity, _ in alike), default=floor)
             ranked = sorted(
-                (Recalled(entry, relevance(similarity, entry.confidence)) for similarity, entry in alike),
+                (
+                    Recalled(entry, relevance(similarity, entry.confidence))
+                    for similarity, entry in alike
+                    if similarity >= best - RECALL_MARGIN
+                ),
                 key=lambda recalled: recalled.relevance,
                 reverse=True,
             )[:most]

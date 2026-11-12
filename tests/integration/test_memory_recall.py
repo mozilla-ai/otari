@@ -81,6 +81,48 @@ def test_recall_leaves_alone_what_is_not_alike_a_tool_turn_and_a_request_that_de
     assert all(RECALL_OPEN not in str(call["messages"]) for call in sent)
 
 
+def test_a_follow_up_finds_what_its_conversation_is_about(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _remembered(memory_client, headers)
+    _switches(memory_client, db_session_factory, master_key_header, auto_recall=True)
+    follow_up = {"role": "user", "content": "and on which branch?"}
+    conversation = [{"role": "user", "content": ASK}, {"role": "assistant", "content": "With make."}, follow_up]
+
+    with _provider(_completion(None), _completion(None)) as sent:
+        alone = _chat(memory_client, headers, messages=[follow_up])
+        in_conversation = _chat(memory_client, headers, messages=conversation)
+
+    assert alone.headers["Otari-Memory-Recalled"] == "0", "the follow-up alone names too little"
+    assert in_conversation.headers["Otari-Memory-Recalled"] == "1"
+    assert DEPLOY in _last_user_text(sent[1])
+    assert sent[1]["messages"][0] == {"role": "user", "content": ASK}, "the earlier turns are searched, not changed"
+
+
+def test_recall_leaves_out_what_is_far_less_alike_than_the_best(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _remembered(memory_client, headers)
+    nearby = "Run the api test suite on main before a deploy"
+    assert _call(memory_client, headers, "memory_propose", text=nearby, kind="procedure")["isError"] is False
+    assert _consolidate(memory_client) == 1
+    _switches(memory_client, db_session_factory, master_key_header, auto_recall=True, recall_min_similarity=0.7)
+
+    with _provider(_completion(None)) as sent:
+        response = _chat(
+            memory_client,
+            headers,
+            messages=[{"role": "user", "content": "how do I deploy the api from the main branch?"}],
+        )
+
+    # Both clear the floor, but the second only shares some words with what is asked.
+    assert response.headers["Otari-Memory-Recalled"] == "1"
+    text = _last_user_text(sent[0])
+    assert DEPLOY in text and nearby not in text
+
+
 def test_the_experiment_serves_its_control_sessions_without_memory_and_reports_both_arms(
     memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:

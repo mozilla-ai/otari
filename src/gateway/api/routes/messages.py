@@ -64,7 +64,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     scope_prompt_cache_key,
 )
-from gateway.api.routes._recall import recall_query, with_recall
+from gateway.api.routes._recall import recall_context, recall_query, with_recall
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
@@ -1077,6 +1077,7 @@ async def create_message(
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
             memory_header=raw_request.headers.get(MEMORY_HEADER),
             recall_query=recall_query(request.messages),
+            recall_context=recall_context(request.messages),
             # Anthropic's own field, which is where an Anthropic SDK puts the id it
             # read off the last response. Resolved at admission against this caller's
             # leases; the provider never sees it when the sandbox runs the code.

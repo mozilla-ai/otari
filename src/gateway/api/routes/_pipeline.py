@@ -4253,6 +4253,8 @@ class DeclaredTools:
     # The text of the request's newest turn when the user wrote it, which automatic recall searches memory for;
     # None for a turn that hands back tool results, which is no new question.
     recall_query: str | None = None
+    # The user's turns before it, which recall searches with it: they often say what a follow-up is about.
+    recall_context: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -4331,7 +4333,7 @@ async def prepare_gateway_tools(
 
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
-    memory_recall = await _recall_memory(response, admitted_memory, declared.recall_query)
+    memory_recall = await _recall_memory(response, admitted_memory, declared.recall_query, declared.recall_context)
 
     caps: dict[str, int] = {}
     for answer in admitted.values():
@@ -4409,7 +4411,9 @@ def _without_memory_declarations(tools: list[dict[str, Any]] | None) -> list[dic
     return [tool for tool in tools if not _declares_memory(tool)]
 
 
-async def _recall_memory(response: Response, admitted: AdmittedMemory | None, query: str | None) -> str | None:
+async def _recall_memory(
+    response: Response, admitted: AdmittedMemory | None, query: str | None, context: str | None
+) -> str | None:
     """What automatic recall adds to the request's newest turn, saying on ``response`` what memory the request got.
 
     ``Otari-Memory-Arm`` names the experiment arm of its session, and ``Otari-Memory-Recalled`` how many
@@ -4421,14 +4425,17 @@ async def _recall_memory(response: Response, admitted: AdmittedMemory | None, qu
         response.headers[MEMORY_ARM_HEADER] = admitted.arm
     if admitted.recall is None or not query or not query.strip():
         return None
-    text, count = await admitted.recall(query[:MEMORY_RECALL_QUERY_MAX])
+    text, count = await admitted.recall(
+        query[:MEMORY_RECALL_QUERY_MAX], context[-MEMORY_RECALL_QUERY_MAX:] if context else None
+    )
     response.headers[MEMORY_RECALLED_HEADER] = str(count)
     return text
 
 
 MEMORY_ARM_HEADER = "Otari-Memory-Arm"
 MEMORY_RECALLED_HEADER = "Otari-Memory-Recalled"
-# Characters of a turn automatic recall embeds: its start says what it asks.
+# Characters of a turn automatic recall embeds: its start says what it asks. Of the turns before it, their end,
+# which is nearest the question.
 MEMORY_RECALL_QUERY_MAX = 2_000
 
 

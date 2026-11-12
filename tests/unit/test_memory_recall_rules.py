@@ -6,7 +6,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.api.routes._recall import recall_query, responses_recall_query, responses_with_recall, with_recall
+from gateway.api.routes._recall import (
+    recall_context,
+    recall_query,
+    responses_recall_context,
+    responses_recall_query,
+    responses_with_recall,
+    with_recall,
+)
 from gateway.schemas.memory import RecalledEntry
 from gateway.services.memory._experiment import MIN_SESSIONS, SessionUsage, assign_arm, compare, summarize
 from gateway.services.memory._tools import RECALL_CLOSE, RECALL_OPEN, UNTRUSTED_NOTICE, render_recall
@@ -28,6 +35,26 @@ def test_a_user_turn_is_searched_for_and_a_tool_turn_is_not() -> None:
     assert recall_query(anthropic_tool_turn) is None
     assert recall_query([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "x"}}]}]) is None
     assert recall_query([]) is None
+
+
+def test_the_latest_user_turns_before_the_newest_go_with_it() -> None:
+    conversation = [
+        {"role": "user", "content": "oldest"},
+        {"role": "assistant", "content": "an answer recall leaves out"},
+        {"role": "user", "content": "we talked about shared memory"},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "x"}]},
+        {"role": "user", "content": [{"type": "text", "text": "with Alejandro"}]},
+        {"role": "user", "content": "what did we decide?"},
+    ]
+    assert recall_context(conversation) == "we talked about shared memory\n\nwith Alejandro"
+    assert recall_context([{"role": "user", "content": "what did we decide?"}]) is None
+    assert recall_context([*conversation, {"role": "tool", "content": "out"}]) is None, "no question, no context"
+
+    message = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "shared memory"}]}
+    output = {"type": "function_call_output", "call_id": "c", "output": "x"}
+    assert responses_recall_context([message, output, {"role": "user", "content": "decided?"}]) == "shared memory"
+    assert responses_recall_context("decided?") is None
+    assert responses_recall_context([message, output]) is None
 
 
 def test_what_recall_found_is_added_to_the_newest_turn_only() -> None:

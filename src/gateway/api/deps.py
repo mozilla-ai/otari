@@ -2488,12 +2488,13 @@ MEMORY_RECALL_BUDGET_S = 3.0
 class AdmittedMemory:
     """What memory one request through the gateway gets.
 
-    ``tools`` are memory's tools for its loop, ``recall`` what memory holds on its newest turn (the text to add,
-    and how many entries), and ``arm`` the experiment arm of its session.
+    ``tools`` are memory's tools for its loop, ``recall`` what memory holds on its newest turn, given that turn
+    and the user's turns before it (the text to add, and how many entries), and ``arm`` the experiment arm of
+    its session.
     """
 
     tools: MemoryToolBackend | None
-    recall: Callable[[str], Awaitable[tuple[str | None, int]]] | None
+    recall: Callable[[str, str | None], Awaitable[tuple[str | None, int]]] | None
     arm: ExperimentArm | None
 
 
@@ -2556,12 +2557,12 @@ class MemoryToolAdmission:
             service = build_memory_service(uow, self._config, self._keys, self._container)
             return await call_memory_tool(service, caller, name, arguments)
 
-    async def _recall(self, caller: MemoryCaller, query: str) -> tuple[str | None, int]:
+    async def _recall(self, caller: MemoryCaller, query: str, context: str | None) -> tuple[str | None, int]:
         # Best effort: a request is served without what memory holds rather than failed or held up for it.
         try:
             async with asyncio.timeout(MEMORY_RECALL_BUDGET_S), create_unit_of_work() as uow:
                 service = build_memory_service(uow, self._config, self._keys, self._container)
-                return await recall_for_turn(service, caller, query)
+                return await recall_for_turn(service, caller, query, context)
         except TimeoutError:
             logger.warning("Automatic recall took longer than %ss; the request goes without it", MEMORY_RECALL_BUDGET_S)
         except TenancyError as exc:
