@@ -315,6 +315,49 @@ async def test_a_search_that_would_pass_the_budget_is_refused_instead_of_run(
 
 
 @pytest.mark.asyncio
+async def test_a_free_model_keeps_serving_past_the_budget_but_its_searches_stop_at_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    fake_search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    serve_search_on_fake: Callable[..., None],
+) -> None:
+    serve_search_on_fake({"hits": [_HIT_WITH_TEXT]})
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 0.0, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    key = _key_on_budget(client, master_key_header, "free-model-user", 0.025)
+
+    def ask(searches: int) -> int:
+        responses = [_completion(tool_call=True)] * searches + [_completion(tool_call=False)]
+        with (
+            patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
+            admitted_search_spy() as search,
+        ):
+            response = client.post(
+                f"{API_ROOT}/chat/completions",
+                json={
+                    "model": MODEL_NAME,
+                    "messages": [{"role": "user", "content": "what is otari"}],
+                    "tools": [{"type": "otari_web_search"}],
+                    "max_tool_iterations": searches + 1,
+                },
+                headers={API_KEY_HEADER: f"Bearer {key}"},
+            )
+        assert response.status_code == 200, response.text
+        return search.await_count
+
+    assert ask(3) == 2
+    assert ask(1) == 0
+    assert _spend(db_session_factory, "free-model-user") == pytest.approx(2 * _SEARCH_UNIT_COST)
+    user = client.get(f"{API_ROOT}/users/free-model-user", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
 async def test_failed_search_is_counted_but_never_billed(
     client: TestClient,
     api_key_header: dict[str, str],

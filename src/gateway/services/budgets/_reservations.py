@@ -404,7 +404,7 @@ class ReservationHandle:
     scoped_token_estimate: int = 0
     request_estimate: int = 0
     scoped_request_estimate: int = 0
-    # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
+    # This is None when the request holds nothing: a free model under no cap, a budget-exempt key, or nothing capped.
     reservation_id: str | None = None
     # The time to live of a ledger row written for this reservation after admission.
     reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC
@@ -962,18 +962,21 @@ async def reserve_budget(
     # spend. Priced at the caller's organization's rate, so "free" means free at
     # what this request will settle at rather than at the deployment's list price.
     #
-    # It still spends tokens and is still a request, so a budget capping either of
-    # those holds and gates them here as it would for any other request. Only when
-    # nothing caps a count does the whole reservation drop away, which keeps the
-    # hot path for a free model on a dollars-only budget exactly what it was.
+    # It still takes a hold wherever anything is capped, dollars included. A budget
+    # capping tokens or requests gates them here as for any other request, and a
+    # dollar cap needs the hold for the gateway-run tools: each priced call grows it
+    # through the dollar gate, and settlement records their spend on the ceilings
+    # the hold names. The model call itself is never refused on dollars.
     usd: Decimal | None = held
     if model_is_free is None and model:
         model_is_free = await _is_model_free(
             db, model, pricing_provider=pricing_provider, organization_id=organization_id
         )
     if model_is_free:
-        budget_caps_counts = budget is not None and (budget.token_limit is not None or budget.request_limit is not None)
-        if not budget_caps_counts and not any(ceiling.caps_counts for ceiling in scoped):
+        budget_caps_anything = budget is not None and (
+            budget.max_budget is not None or budget.token_limit is not None or budget.request_limit is not None
+        )
+        if not budget_caps_anything and not scoped:
             return no_reservation
         usd = None
 
@@ -984,7 +987,7 @@ async def reserve_budget(
     #
     # Deliberately here rather than earlier, so it costs a query only on a request
     # that is actually about to take a hold. Everything above this line returns a
-    # handle holding nothing (no budget and no ceiling, a free model, a disabled
+    # handle holding nothing (no budget and no ceiling, an uncapped free model, a disabled
     # strategy, an exempt key), and none of those can be refused by a leak, so
     # sweeping for one would be a read per request bought for nothing. Skipped on
     # a top-up too, which runs inside a request whose own hold is live.

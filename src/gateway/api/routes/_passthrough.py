@@ -534,6 +534,8 @@ async def run_passthrough(
                 counts_toward_budget=not budget_exempt,
                 scope=BudgetScopeRequest(api_key=api_key, provider_instance=row_provider),
                 organization_id=organization_id,
+                # A rate free for text that prices this request on another slot is held to the dollar budget.
+                model_is_free=False if estimated_cost > ZERO else None,
             )
         except HTTPException as exc:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
