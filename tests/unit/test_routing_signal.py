@@ -7,13 +7,11 @@ for every endpoint at once. Also the prompt flattening guardrails read.
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from gateway.api.routes._helpers import latest_user_text, routing_opted_out, routing_signal
+from gateway.api.routes._helpers import routing_opted_out, routing_signal
 
 
 def _request(headers: dict[str, str]) -> Request:
@@ -65,26 +63,3 @@ def test_the_conversation_id_is_extracted_and_trimmed() -> None:
 def test_an_absent_or_blank_conversation_id_is_none(headers: dict[str, str]) -> None:
     # Blank is treated as absent rather than keying on an empty identity.
     assert routing_signal(_request(headers)).conversation_id is None
-
-
-# -- the prompt text guardrails read ----------------------------------------
-
-
-def test_the_latest_user_turn_is_read() -> None:
-    convo: list[dict[str, Any]] = [
-        {"role": "system", "content": "you are terse"},
-        {"role": "user", "content": "OPENER"},
-        {"role": "assistant", "content": "sure"},
-        {"role": "user", "content": "LATEST"},
-    ]
-    assert latest_user_text(convo) == "LATEST"
-
-
-def test_content_part_lists_are_flattened() -> None:
-    messages = [{"role": "user", "content": [{"type": "text", "text": "part one"}, {"type": "image_url"}]}]
-    assert latest_user_text(messages) == "part one"
-
-
-def test_a_conversation_with_no_user_turn_falls_back_to_the_last_message() -> None:
-    messages = [{"role": "system", "content": "only a system turn"}]
-    assert latest_user_text(messages) == "only a system turn"

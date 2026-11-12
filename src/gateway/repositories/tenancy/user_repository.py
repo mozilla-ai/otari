@@ -248,7 +248,9 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         both racers read the live hash before either writes and both writes
         land. A deployment that needs this guarantee runs PostgreSQL.
         """
-        await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
+        # Identity IDs never change. NO KEY UPDATE still serializes status and
+        # token writes while allowing foreign keys to reference this identity.
+        await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update(key_share=True))
 
     async def record_sign_in(self, user_id: uuid.UUID, *, at: datetime) -> None:
         """Stage ``at`` as the identity's last sign-in, unless a later one is already recorded."""
@@ -265,7 +267,10 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
         """
         result = await self.db.execute(
-            select(User).where(col(User.id) == user_id).with_for_update().execution_options(populate_existing=True)
+            select(User)
+            .where(col(User.id) == user_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 

@@ -106,6 +106,9 @@ the corresponding startup value after the database is available.
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
 | `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. When set, a country file stored from the Settings page is not read. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
+| `closed_model_providers` | Providers whose models are closed, so a plan for open-weight models does not cover them, except a model in `closed_model_open_families`. A model on any other provider is open-weight unless its name is in `closed_model_families`. Defaults to Anthropic, Gemini, Vertex AI, xAI and OpenAI, with their Azure and Vertex variants. |
+| `closed_model_families` | Model name prefixes that are closed on any provider, matched after the last `/` and any vendor prefix (OpenRouter's `anthropic/claude-sonnet-4` and Bedrock's `us.anthropic.claude-sonnet-4` are both `claude`). A prefix matches a whole word unless it ends in `-`: `o3` matches `o3-mini` but not `o3x`, and `gpt-` matches any name it starts. Defaults to `claude`, `gemini`, `grok`, `gpt-`, `chatgpt` and `o1` to `o9`. |
+| `closed_model_open_families` | Model name prefixes that are open-weight even on a closed provider or in a closed family, matched the same way. Defaults to `gpt-oss` and `gemma`. |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -224,6 +227,13 @@ holds no budget.
 - They count in `rate_limit_store`, so with Redis they hold across replicas.
 - `per: key` does not limit a request without an API key (the master key or a
   dashboard session), and `per: user` does not limit one billed to no user.
+
+A build that bills organizations can also limit how many of an organization's
+calls on the deployment's own provider credentials are in flight at once, which
+no rule here sets. A chat completion, message or response over that limit waits
+up to 10 seconds for a slot, then is refused with a 429 naming the rule
+`organization_concurrency`. Each server process lets at most that many requests
+wait at once; one more is refused straight away with the same 429. It counts in the same store.
 
 `per: model` limits each model in `models`, written as `instance:model`. One
 count is kept per model and shared by every policy, alias and direct call that

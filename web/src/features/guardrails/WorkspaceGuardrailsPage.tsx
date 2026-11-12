@@ -9,6 +9,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { mandateConsequence } from "@/features/guardrails/buildState"
 import { MandateConsequenceMark } from "@/features/guardrails/GuardrailStatus"
 import {
+  checksLabel,
   ifItCantRunLabel,
   mandatesFor,
   runsOnLabel,
@@ -66,6 +67,11 @@ export function WorkspaceGuardrailsPage() {
       ),
     },
     {
+      id: "checks",
+      header: "Checks",
+      cell: (row) => <span className="text-muted">{checksLabel(row)}</span>,
+    },
+    {
       id: "mode",
       header: "Mode",
       cell: (row) => (
@@ -86,9 +92,9 @@ export function WorkspaceGuardrailsPage() {
   return (
     <div className="flex flex-col">
       <PageIntro title="Guardrails">
-        The guardrails your organization runs on what users in{" "}
-        {selected?.name ?? "this workspace"} send to a model. An owner or admin
-        changes them on the organization&rsquo;s{" "}
+        The guardrails your organization runs on what models read and answer in{" "}
+        {selected?.name ?? "this workspace"}. An owner or admin changes them on
+        the organization&rsquo;s{" "}
         <Link
           to="/organization/guardrails"
           className="font-medium text-link hover:text-link-hover"

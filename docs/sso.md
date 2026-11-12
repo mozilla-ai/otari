@@ -24,6 +24,22 @@ Two organizations may configure a connection to the same issuer. A person is
 admitted to an organization only on a domain that organization itself has
 proven, never on the issuer alone.
 
+## Pausing a connection
+
+A connection can be paused from the Single sign-on settings page, beside its
+status. Pausing refuses every new sign-in through the provider and changes
+nothing else: sessions already signed in stay signed in, every membership the
+connection granted remains, and the stored client secret is kept, so resuming
+needs no credential.
+
+Pausing writes that one field. It neither re-reads the provider's
+configuration nor needs the issuer resubmitted, so a connection can be paused
+while its provider is unreachable.
+
+A connection the organization requires sign-in through cannot be paused,
+because that would leave the organization admitting nobody. Stop requiring
+sign-in first.
+
 ## Accounts
 
 A person's identity at a connection is keyed on the connection's issuer and
@@ -33,9 +49,13 @@ existing account by address, name, or anything else. That account holds no
 email address, so API keys, budgets, and usage stay on whichever account
 already held them: an identity change never moves them to a new account.
 
+Because the account holds no address, the organization's **Members & roles** page shows no email under that person's name. It marks the row SSO in that place instead, so the row reads as an account the connection provisioned rather than one whose address is missing. A row showing neither is an account that has no address yet, such as an operator identity nobody has claimed.
+
 Where the organization already holds another account for the address a
 connection's first sign-in claims, the two accounts are never merged
 automatically and neither one is told about the other.
+
+A first sign-in also joins the organization's workspace named **Default workspace**, at the role the connection grants, so the new account has somewhere to work. An organization that has no workspace of that name grants none, and an owner or admin assigns one from the organization's **Members & roles** page.
 
 **API keys are rotated, not moved.** A key stranded on an older account stays
 usable from that account; there is no operation that transfers a key to

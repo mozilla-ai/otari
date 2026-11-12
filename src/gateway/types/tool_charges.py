@@ -51,6 +51,11 @@ def is_provider_web_search_key(rate_key: "RateKey") -> bool:
     )
 
 
+def is_provider_web_search(label: str | None, rate_keys: "tuple[RateKey, ...] | None") -> bool:
+    """Whether calls under ``label`` and ``rate_keys`` are searches a model's provider ran, not the gateway."""
+    return label is not None and rate_keys == (label,) and is_provider_web_search_key(label)
+
+
 def gateway_tool_pricing_key(tool: str) -> str:
     """The ``ModelPricing.model_key`` an operator prices a gateway-run tool under.
 

@@ -253,6 +253,19 @@ def _reset_default_workspace() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_guardrail_verdicts() -> None:
+    """Drop the guardrail verdicts a worker keeps before each test.
+
+    A verdict is kept by the check and the text it answered, and tests ask the
+    same check about the same text with a different fake verdict each, so one
+    test's answer would otherwise be the next one's.
+    """
+    from gateway.services.guardrails import clear_verdict_cache
+
+    clear_verdict_cache()
+
+
+@pytest.fixture(autouse=True)
 def _reset_default_pricing() -> Generator[None, None, None]:
     """Restore process-wide pricing state to its default before each test.
 

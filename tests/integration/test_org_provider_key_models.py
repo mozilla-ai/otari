@@ -515,6 +515,16 @@ async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
     unknown = await _service(async_db).list_models(user=owner, key_id=key_id, model_type="unknown")
     assert [model.model for model in unknown.data] == ["mystery"]
 
+    searched = await _service(async_db).list_models(user=owner, key_id=key_id, search="GPT")
+    assert ([model.model for model in searched.data], searched.count) == (["gpt-4o"], 1)
+    assert searched.type_counts == {"chat": 1}
+
+    served = await _service(async_db).list_models(user=owner, key_id=key_id, enabled=True)
+    withheld = await _service(async_db).list_models(user=owner, key_id=key_id, enabled=False)
+    assert [model.model for model in served.data] == [model.model for model in listed.data if model.enabled]
+    assert [model.model for model in withheld.data] == [model.model for model in listed.data if not model.enabled]
+    assert withheld.count == len(withheld.data) > 0
+
 
 async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_it(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch

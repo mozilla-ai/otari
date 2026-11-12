@@ -157,7 +157,7 @@ same trace in another backend.
 
 Claude Code can export its own spans, so a session is traced without routing
 its model traffic through Otari. Set it up with
-[Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
+[Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 
 - Each prompt becomes a turn, with its model requests and tool calls.
 - A tool call a Claude Code hook refused shows as `blocked`. Blocked calls and

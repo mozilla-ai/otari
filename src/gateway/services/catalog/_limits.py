@@ -86,6 +86,15 @@ def _entry(
     return None
 
 
+def _sends_response_format(provider_type: str, model_id: str) -> bool:
+    """Whether any-llm passes ``response_format`` to this provider's model rather than refusing it.
+
+    Its Bedrock provider sends it only to Anthropic models, as a forced tool
+    call, whatever models.dev says the model can do.
+    """
+    return provider_type != "bedrock" or "anthropic." in model_id
+
+
 def model_limits(
     config: GatewayConfig,
     models_dev: ModelsDevCatalog | None,
@@ -145,7 +154,8 @@ def model_capabilities(
     ``supported_parameters`` names only the request parameters models.dev records
     a flag for, so it is not the full set a model accepts: ``tools`` and
     ``tool_choice`` for ``tool_call``, ``response_format`` for ``structured_output``,
-    ``reasoning`` for ``reasoning``.
+    ``reasoning`` for ``reasoning``. ``response_format`` is left out where any-llm
+    refuses it for the provider, since a request carrying it would fail.
 
     An engine that names its parsers overrides two of those flags: it calls
     tools only with a tool-call parser, whatever the model can do, and a
@@ -160,6 +170,10 @@ def model_capabilities(
         return None
     tool_call = metadata.tool_call if metadata else None
     reasoning = metadata.reasoning if metadata else None
+    instance, _, model_id = model_key.partition(":")
+    structured_output = metadata.structured_output if metadata else None
+    if not _sends_response_format(config.provider_instance_type(instance), model_id):
+        structured_output = False
     input_modalities = (
         list(served_modalities) if served_modalities else (metadata.input_modalities if metadata else ["text"])
     )
@@ -168,7 +182,7 @@ def model_capabilities(
         reasoning = reasoning or settings.reasoning_parser is not None
     flags = (
         (tool_call, ("tools", "tool_choice")),
-        (metadata.structured_output if metadata else None, ("response_format",)),
+        (structured_output, ("response_format",)),
         (reasoning, ("reasoning",)),
     )
     return ModelCapabilities(

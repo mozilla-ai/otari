@@ -42,7 +42,12 @@ from gateway.models.tenancy import (
 from gateway.models.users import User as BillingUser
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository, OIDCConnectionRepository
-from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
+from gateway.repositories.tenancy import (
+    OrganizationDomainRepository,
+    OrganizationMemberRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
+)
 from gateway.services.identity import IdentityService
 from gateway.services.mail import Mailer
 from gateway.services.tenancy import (
@@ -51,8 +56,15 @@ from gateway.services.tenancy import (
     VerifiedDomainLookup,
     forget_unproven_access,
 )
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
-from .tenancy_helpers import create_member, create_organization, membership_writes
+from .tenancy_helpers import (
+    create_member,
+    create_organization,
+    create_workspace,
+    membership_listener_on,
+    membership_writes,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,13 +76,16 @@ def _service_with(
     db: AsyncSession, uow: UnitOfWork, policy: IdentityProviderPort, *, terms_url: str | None = None
 ) -> IdentityService:
     """Build the service as its request builder does, on ``policy``."""
+    organizations = OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow)
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
-        organizations=OrganizationService(db, membership_listener=None, uow=uow),
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        organizations=organizations,
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=1,
         terms_url=terms_url,
         mailer=Mailer(GatewayConfig(mail_transport="none")),
@@ -310,6 +325,59 @@ async def test_an_sso_account_gets_no_personal_organization(async_db: AsyncSessi
     )
     assert membership is not None
     assert membership.role == "member"
+
+
+async def test_a_first_sso_sign_in_joins_the_organizations_default_workspace(async_db: AsyncSession) -> None:
+    """Nothing else would give this account a workspace, and it cannot create one itself."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=owner)
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(
+        workspace.id, signed_in.account.id
+    )
+    assert member is not None
+    assert member.role == "member"
+
+
+async def test_a_connections_viewer_default_is_a_viewer_of_the_default_workspace(async_db: AsyncSession) -> None:
+    """A viewer of the organization is a viewer of its workspaces, as the invitation form has it."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=owner)
+    await _add_connection(async_db, organization.id, default_role="viewer")
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(
+        workspace.id, signed_in.account.id
+    )
+    assert member is not None
+    assert member.role == "viewer"
+
+
+async def test_a_first_sso_sign_in_grants_nothing_where_no_workspace_carries_the_default_name(
+    async_db: AsyncSession,
+) -> None:
+    """The cost of keying on the name: the sign-in still succeeds, with no workspace granted."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    await create_workspace(async_db, organization, name="Renamed", owner=owner)
+    await _add_connection(async_db, organization.id)
+    await _add_claim(async_db, organization.id, domain="acme.example")
+
+    signed_in = await _sso_service(async_db).sign_in_with_oauth(_sso_identity(email="ada@acme.example"))
+
+    assert signed_in.new_account is True
+    granted = await WorkspaceMemberRepository(async_db).get_workspace_ids_for_user(
+        user_id=signed_in.account.id, organization_id=organization.id
+    )
+    assert granted == []
 
 
 async def test_an_sso_sign_in_succeeds_with_open_signup_off(async_db: AsyncSession) -> None:

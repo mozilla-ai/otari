@@ -1,7 +1,3 @@
----
-icon: people
----
-
 # Members and invitations
 
 Organization **Admins and Owners** can invite other members to collaborate and control which workspaces they can access. This makes it easy to give each person access only to the areas relevant to their work.
@@ -145,7 +141,9 @@ so it is deliberately limited.
 - **Only verified addresses** join. An unverified address, or one only vouched
   for through an invitation link, is skipped.
 - **Existing memberships are left alone.** A suspended membership is not revived,
-  and an existing role is not overwritten.
+  an existing role is not overwritten, and no workspace is granted, so somebody
+  taken off a workspace on purpose is not put back by signing in.
+- **The workspace named Default workspace is granted** to a new member, at the same role, so they have somewhere to work. An organization that has no workspace of that name grants none, and an owner or admin assigns one from **Members & roles**.
 - **Joining does not change** the person's active organization.
 - **Public email providers** cannot be claimed.
 

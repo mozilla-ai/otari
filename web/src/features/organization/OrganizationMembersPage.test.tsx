@@ -1076,6 +1076,88 @@ describe("OrganizationMembersPage", () => {
     expect(within(row).getByText("$2.25 in flight")).toBeInTheDocument()
   })
 
+  it("marks a member admitted through the organization's own connection", async () => {
+    mockApi({
+      members: [
+        OWNER,
+        organizationMember({
+          organization_member_id: "sso-membership",
+          user_id: "dddddddd-0000-0000-0000-000000000000",
+          attribution_user_id: "dddddddd-0000-0000-0000-000000000000",
+          full_name: "Ada Lovelace",
+          email: null,
+          is_sso_account: true,
+          role: "member",
+        }),
+      ],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Ada Lovelace")
+
+    expect(within(rowFor("Ada Lovelace")).getByText("SSO")).toBeInTheDocument()
+  })
+
+  it("leaves an address-less member unmarked when they are not an SSO account", async () => {
+    // The unclaimed operator identity holds no address either, so the mark
+    // follows the account shape rather than the empty address.
+    mockApi({ members: [OWNER] })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Operator")
+
+    expect(
+      within(rowFor("Operator")).queryByText("SSO"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("leaves an SSO member who has since set an address unmarked", async () => {
+    // Their address heads the row because they have no name, so the mark would
+    // stand in for something already on screen.
+    mockApi({
+      members: [
+        OWNER,
+        organizationMember({
+          organization_member_id: "named-later-membership",
+          user_id: "ffffffff-0000-0000-0000-000000000000",
+          attribution_user_id: "ffffffff-0000-0000-0000-000000000000",
+          full_name: null,
+          email: "ada@acme.test",
+          is_sso_account: true,
+        }),
+      ],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("ada@acme.test")
+    const row = rowFor("ada@acme.test")
+
+    expect(within(row).queryByText("SSO")).not.toBeInTheDocument()
+  })
+
+  it("shows a member's address rather than the mark when they hold one", async () => {
+    mockApi({
+      members: [
+        OWNER,
+        organizationMember({
+          organization_member_id: "addressed-membership",
+          user_id: "eeeeeeee-0000-0000-0000-000000000000",
+          attribution_user_id: "eeeeeeee-0000-0000-0000-000000000000",
+          full_name: "Grace Hopper",
+          email: "grace@example.com",
+          role: "member",
+        }),
+      ],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Grace Hopper")
+    const row = rowFor("Grace Hopper")
+
+    expect(within(row).getByText("grace@example.com")).toBeInTheDocument()
+    expect(within(row).queryByText("SSO")).not.toBeInTheDocument()
+  })
+
   it("leaves the spend cells empty for a member with no spend row", async () => {
     // A member added by address before any key was issued has no `users` row, so
     // there is nothing to report. Empty rather than zero: zero would claim they

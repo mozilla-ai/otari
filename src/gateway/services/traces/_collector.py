@@ -276,14 +276,35 @@ class RequestTrace:
 
     @_never_raises
     def record_guardrail(
-        self, *, profile: str, mode: str, valid: bool | None, started: datetime, ended: datetime
+        self,
+        *,
+        profile: str,
+        mode: str,
+        valid: bool | None,
+        started: datetime,
+        ended: datetime,
+        event: str | None = None,
+        tool: str | None = None,
+        withheld: bool = False,
     ) -> None:
-        """One input guardrail check. ``valid`` is None when the check could not be evaluated."""
+        """One guardrail check. ``valid`` is None when the check could not be evaluated.
+
+        ``event`` is where it ran: ``before_model`` for input, ``after_tool`` for
+        a tool result, ``before_tool`` for a tool call and ``after_model`` for the
+        answer, with ``tool`` naming the tool where it is known. ``withheld`` marks
+        a tool result or call the model read a replacement for.
+        """
         attributes: dict[str, str | int | float | bool] = {}
         if (safe_profile := identifier_or_none(profile)) is not None:
             attributes["otari.guardrail.profile"] = safe_profile
         if (safe_mode := identifier_or_none(mode)) is not None:
             attributes["otari.guardrail.mode"] = safe_mode
+        if (safe_event := identifier_or_none(event)) is not None:
+            attributes["otari.guardrail.event"] = safe_event
+        if (safe_tool := identifier_or_none(tool)) is not None:
+            attributes["otari.guardrail.tool"] = safe_tool
+        if withheld:
+            attributes["otari.guardrail.action"] = "withheld"
         self._add(
             SpanRecord(
                 span_id=_span_id(),

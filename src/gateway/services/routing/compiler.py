@@ -360,6 +360,7 @@ def compile_policy(
                 profile=guardrail.profile,
                 url=guardrail.url,
                 mode=guardrail.mode,
+                on=guardrail.on,
                 on_unavailable=guardrail.on_unavailable,
                 validate_kwargs=guardrail.validate_kwargs,
             )

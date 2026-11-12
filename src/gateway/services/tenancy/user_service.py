@@ -380,6 +380,7 @@ async def create_user_for_signup(
     blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
+    address_proven: bool = False,
 ) -> User | None:
     """Claim an identity ``organization_service`` already put on the roster, register a new
     one where the deployment allows it, or do nothing.
@@ -414,6 +415,10 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
+    ``address_proven`` says the caller already proved the mailbox (an invitation
+    sent to it, through ``SignupInvitePort``): the identity is then verified as it
+    is claimed, and no verification email is sent, so the caller can sign in at once.
+
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
     The mail send is scheduled on ``background_tasks`` after the commit rather
@@ -422,7 +427,8 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
-    mailer.require_ready()
+    if not address_proven:
+        mailer.require_ready()
     validate_new_password(password)
     if config.terms_url is not None and not terms_accepted:
         raise TermsNotAcceptedError
@@ -475,12 +481,14 @@ async def create_user_for_signup(
                     return None
 
             token = generate_token()
-            values: dict[str, str | datetime | None] = {
-                "full_name": identity.full_name or full_name,
-                "email_verification_token_hash": hash_token(token),
-                "email_verification_token_expires_at": datetime.now(UTC)
-                + timedelta(hours=config.email_verification_expiry_hours),
-            }
+            values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
+            if address_proven:
+                values["email_verified_at"] = datetime.now(UTC)
+            else:
+                values["email_verification_token_hash"] = hash_token(token)
+                values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
+                    hours=config.email_verification_expiry_hours
+                )
             if terms_accepted:
                 values["terms_accepted_at"] = datetime.now(UTC)
             # NOTE: A provider sign-in or another first password can commit after the check above.
@@ -496,6 +504,8 @@ async def create_user_for_signup(
     except _SignupRaceLostError:
         return None
     await db.refresh(identity)
+    if address_proven:
+        return identity
 
     background_tasks.add_task(
         mailer.send,

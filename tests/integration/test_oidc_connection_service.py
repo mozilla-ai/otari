@@ -32,7 +32,7 @@ from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, DashboardSession, Organization, User
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
-from gateway.schemas.identity import OIDCConnectionRequest
+from gateway.schemas.identity import OIDCConnectionPublic, OIDCConnectionRequest, OrganizationSsoPublic
 from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity import OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
@@ -136,6 +136,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         # The providers a configured deployment offers, because a link at one nobody configured is
         # not a way in and an empty set here would hide that rule rather than exercise it.
         offered_providers=frozenset(OAUTH_PROVIDERS),
+        sso_redirect_uri="https://otari.test/auth/sso/callback",
     )
 
 
@@ -227,6 +228,12 @@ async def _live_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
     return len(result.scalars().all())
 
 
+def _connection_of(settings: OrganizationSsoPublic) -> OIDCConnectionPublic:
+    """The connection a settings answer carries, asserted present as a successful write leaves it."""
+    assert settings.connection is not None
+    return settings.connection
+
+
 def _request(**overrides: Any) -> OIDCConnectionRequest:
     fields: dict[str, Any] = {
         "issuer": _ISSUER,
@@ -234,7 +241,6 @@ def _request(**overrides: Any) -> OIDCConnectionRequest:
         "client_secret": "s3cr3t-client-value",
         "display_name": "Example IdP",
         "default_role": "member",
-        "enabled": True,
     }
     fields.update(overrides)
     return OIDCConnectionRequest(**fields)
@@ -258,7 +264,7 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     document = _document(resolved_issuer)
     _stub_discovery(monkeypatch, resolved_issuer=resolved_issuer, document=document)
 
-    public = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    public = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
 
     assert public.resolved_issuer == resolved_issuer
 
@@ -268,28 +274,23 @@ async def test_save_stores_the_discovered_issuer_and_endpoints(
     assert stored.discovery_document == document
 
 
-async def test_save_refuses_disabling_a_connection_the_organization_requires(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The other half of the invariant: it must not be reachable by editing the connection instead."""
+async def test_a_save_cannot_pause_a_connection(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The submission carries no such field, so the stored setting survives every edit."""
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request())
-    organization_id = organization.id
-    await async_db.execute(
-        update(Organization)
-        .where(col(Organization.id) == organization_id)
-        .values(sso_required=True, sso_break_glass_waived=True)
+    await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    saved = _connection_of(
+        await _connection_service(async_db).save_for_user(user=admin, request=_request(display_name="Renamed IdP"))
     )
-    await async_db.commit()
 
-    with pytest.raises(OIDCConnectionDisabledError):
-        await _connection_service(async_db).save_for_user(user=admin, request=_request(enabled=False))
-
-    stored = await _stored(async_db, organization_id)
+    assert saved.enabled is False
+    assert saved.display_name == "Renamed IdP"
+    stored = await _stored(async_db, organization.id)
     assert stored is not None
-    assert stored.enabled is True
+    assert stored.enabled is False
 
 
 async def test_save_encrypts_the_client_secret_and_returns_only_last4(
@@ -299,8 +300,10 @@ async def test_save_encrypts_the_client_secret_and_returns_only_last4(
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(client_secret="s3cr3t-client-value")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(client_secret="s3cr3t-client-value")
+        )
     )
 
     assert public.client_secret_last4 == "alue"
@@ -376,7 +379,7 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
-    first = await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    first = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
 
     replacement_issuer = "https://idp.acme.example"
     replacement_document = _document(replacement_issuer)
@@ -388,16 +391,17 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
         discovered_at=replacement_discovered_at,
     )
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin,
-        request=_request(
-            issuer=replacement_issuer,
-            client_id="a-replacement-client-id",
-            client_secret="replacement-secret-9999",
-            display_name="Renamed IdP",
-            default_role="viewer",
-            enabled=False,
-        ),
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin,
+            request=_request(
+                issuer=replacement_issuer,
+                client_id="a-replacement-client-id",
+                client_secret="replacement-secret-9999",
+                display_name="Renamed IdP",
+                default_role="viewer",
+            ),
+        )
     )
 
     assert public.id == first.id
@@ -411,7 +415,8 @@ async def test_save_over_an_existing_connection_moves_every_submitted_field(
     assert stored.discovery_document == replacement_document
     assert stored.discovered_at == replacement_discovered_at
     assert stored.default_role == "viewer"
-    assert stored.enabled is False
+    # Not among the fields a save replaces, so it keeps the value the first store gave it.
+    assert stored.enabled is True
     assert decrypt_secret(stored.encrypted_client_secret) == "replacement-secret-9999"
 
 
@@ -423,8 +428,10 @@ async def test_an_edit_that_leaves_the_secret_out_keeps_the_stored_one(
     _stub_discovery(monkeypatch)
     await _connection_service(async_db).save_for_user(user=admin, request=_request(client_secret="first-secret-value"))
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(client_secret=None, display_name="Renamed IdP")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(client_secret=None, display_name="Renamed IdP")
+        )
     )
 
     assert public.display_name == "Renamed IdP"
@@ -549,8 +556,10 @@ async def test_a_first_save_that_loses_the_race_takes_over_the_row_that_won(
 
     monkeypatch.setattr(OIDCConnectionRepository, "add", _add_after_a_concurrent_save)
 
-    public = await _connection_service(async_db).save_for_user(
-        user=admin, request=_request(display_name="The IdP that asked second")
+    public = _connection_of(
+        await _connection_service(async_db).save_for_user(
+            user=admin, request=_request(display_name="The IdP that asked second")
+        )
     )
 
     assert public.display_name == "The IdP that asked second"
@@ -561,6 +570,94 @@ async def test_a_first_save_that_loses_the_race_takes_over_the_row_that_won(
 
 
 # =============================================================================
+# Pausing and resuming
+# =============================================================================
+
+
+async def test_pausing_writes_the_one_field_and_reads_no_provider(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Why pausing is a write of its own: an unreachable provider is when it is most wanted."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    calls: list[str] = []
+    _stub_refused_discovery(monkeypatch, calls=calls)
+
+    paused = _connection_of(await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False))
+
+    assert paused.enabled is False
+    assert calls == []
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is False
+    assert stored.issuer == _ISSUER
+    assert stored.client_id == "a-client-id"
+    assert decrypt_secret(stored.encrypted_client_secret) == "s3cr3t-client-value"
+
+
+async def test_resuming_admits_sign_in_again(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    resumed = _connection_of(await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=True))
+
+    assert resumed.enabled is True
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_pausing_is_refused_while_the_organization_requires_the_connection(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+    await _connection_service(async_db).save_for_user(user=admin, request=_request())
+    organization_id = organization.id
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization_id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+    )
+    await async_db.commit()
+
+    with pytest.raises(OIDCConnectionDisabledError):
+        await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+    stored = await _stored(async_db, organization_id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_a_first_connection_admits_sign_in(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A connection is added to be signed in through, and nothing submitted says otherwise."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+    _stub_discovery(monkeypatch)
+
+    saved = _connection_of(await _connection_service(async_db).save_for_user(user=admin, request=_request()))
+
+    assert saved.enabled is True
+    stored = await _stored(async_db, organization.id)
+    assert stored is not None
+    assert stored.enabled is True
+
+
+async def test_pausing_refuses_when_no_connection_is_configured(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+
+    with pytest.raises(OIDCConnectionNotFoundError):
+        await _connection_service(async_db).set_enabled_for_user(user=admin, enabled=False)
+
+
+# =============================================================================
 # The authority gate
 # =============================================================================
 
@@ -568,9 +665,26 @@ async def test_a_first_save_that_loses_the_race_takes_over_the_row_that_won(
 _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object]]] = {
     "delete_for_user": lambda service, user: service.delete_for_user(user=user),
     "get_for_user": lambda service, user: service.get_for_user(user=user),
+    "preflight_sso_enforcement_for_user": lambda service, user: service.preflight_sso_enforcement_for_user(user=user),
     "save_for_user": lambda service, user: service.save_for_user(user=user, request=_request()),
+    "set_enabled_for_user": lambda service, user: service.set_enabled_for_user(user=user, enabled=False),
+    "set_sso_enforcement_for_user": lambda service, user: service.set_sso_enforcement_for_user(
+        user=user, required=False, break_glass_user_id=None, break_glass_waived=False
+    ),
+    "settings_for_user": lambda service, user: service.settings_for_user(user=user),
     "test_for_user": lambda service, user: service.test_for_user(user=user),
 }
+
+
+def test_the_authority_gate_covers_every_for_user_method() -> None:
+    """``_GATED_CALLS`` is the only proof that every ``*_for_user`` method runs the gate.
+
+    An equality rather than a subset, so a removed or renamed method fails here rather than
+    leaving an entry nothing runs.
+    """
+    declared = {name for name in vars(OIDCConnectionService) if name.endswith("_for_user") and not name.startswith("_")}
+
+    assert declared == set(_GATED_CALLS)
 
 
 @pytest.mark.parametrize("role", ["member", "viewer"])
@@ -578,7 +692,7 @@ _GATED_CALLS: dict[str, Callable[[OIDCConnectionService, User], Awaitable[object
 async def test_a_member_who_cannot_manage_the_organization_is_refused(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, role: str, method: str
 ) -> None:
-    """The organization's connection is neither served, re-discovered nor removed for such a caller."""
+    """No method on this unit acts for such a caller, and nothing stored changes."""
     organization = await create_organization(async_db, slug="acme")
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
@@ -674,7 +788,7 @@ async def test_test_for_user_rediscovers_and_stores(async_db: AsyncSession, monk
     refreshed_document["token_url"] = f"{_ISSUER}/token-v2"
     _stub_discovery(monkeypatch, document=refreshed_document)
 
-    public = await _connection_service(async_db).test_for_user(user=admin)
+    public = _connection_of(await _connection_service(async_db).test_for_user(user=admin))
 
     assert public.resolved_issuer == _ISSUER
     stored = await _stored(async_db, organization.id)
@@ -807,7 +921,7 @@ async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
     admin = await _admin(async_db, organization)
     _stub_discovery(monkeypatch)
     service = _connection_service(async_db)
-    public = await service.save_for_user(user=admin, request=_request())
+    public = _connection_of(await service.save_for_user(user=admin, request=_request()))
     stored = await _stored(async_db, organization.id)
     assert stored is not None
     metadata = DiscoveredProvider(
@@ -817,9 +931,7 @@ async def test_the_sign_in_client_still_claims_its_state_after_the_block_closes(
         discovered_at=datetime.now(UTC),
     )
 
-    client = await service.client_for_sign_in(
-        stored, metadata, redirect_uri="https://otari.example.com/auth/sso/callback", allow_private_hosts=False
-    )
+    client = await service.client_for_sign_in(stored, metadata)
 
     # Reached the way apron-auth reaches it during the exchange, outside every block this service
     # opened. None is the answer for a state nothing minted; the point is that it answers.
