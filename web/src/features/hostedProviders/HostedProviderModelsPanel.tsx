@@ -16,7 +16,10 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
+  filteredEmptyContent,
   OfferedModelFilters,
+  type ServingFilter,
+  servedParam,
   useModelSearchTerm,
 } from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
@@ -69,9 +72,17 @@ export function HostedProviderModelsPanel({
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
   const [kind, setKind] = useState<KindFilter>("")
+  const [serving, setServing] = useState<ServingFilter>("")
   const [search, setSearch] = useState("")
   const term = useModelSearchTerm(search)
-  const models = useHostedModels(provider.name, page, pageSize, kind, term)
+  const models = useHostedModels(
+    provider.name,
+    page,
+    pageSize,
+    kind,
+    term,
+    servedParam(serving),
+  )
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
 
@@ -206,13 +217,14 @@ export function HostedProviderModelsPanel({
         </p>
       ) : null}
 
-      {/* A failed list is not an empty one, and a kind or a search with no
+      {/* A failed list is not an empty one, and a filter with no
           models left is an empty table rather than "no models offered". So is
           a search's answer still shown while the list it was cleared to loads. */}
       {!models.error &&
       !models.isPlaceholderData &&
       rows.length === 0 &&
       kind === "" &&
+      serving === "" &&
       term === "" ? (
         <EmptyState
           title="No models offered yet"
@@ -232,6 +244,11 @@ export function HostedProviderModelsPanel({
               setKind(next)
               setPage(0)
             }}
+            serving={serving}
+            onServingChange={(next) => {
+              setServing(next)
+              setPage(0)
+            }}
             search={search}
             onSearchChange={(next) => {
               setSearch(next)
@@ -246,7 +263,7 @@ export function HostedProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
-              emptyContent={term ? "No models match this search." : undefined}
+              emptyContent={filteredEmptyContent(term, serving)}
             />
           </TableScrollFrame>
           <TablePagination

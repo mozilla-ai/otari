@@ -21,7 +21,10 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
+  filteredEmptyContent,
   OfferedModelFilters,
+  type ServingFilter,
+  servedParam,
   useModelSearchTerm,
 } from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
@@ -80,6 +83,8 @@ export function ProviderModelsPanel({
   onPageSizeChange,
   kind,
   onKindChange,
+  serving,
+  onServingChange,
   search,
   onSearchChange,
 }: {
@@ -98,6 +103,9 @@ export function ProviderModelsPanel({
   /** Which kind of model is shown, empty for every kind. Owned above, in the URL, as the page is. */
   kind: KindFilter
   onKindChange: (kind: KindFilter) => void
+  /** Served models, withheld ones, or both. Owned above, in the URL, as the kind is. */
+  serving: ServingFilter
+  onServingChange: (serving: ServingFilter) => void
   /** What is typed into the model search. Owned above, in the URL, as the kind is. */
   search: string
   onSearchChange: (search: string) => void
@@ -109,6 +117,7 @@ export function ProviderModelsPanel({
     pageSize,
     kind,
     term,
+    servedParam(serving),
   )
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
@@ -302,13 +311,14 @@ export function ProviderModelsPanel({
       ) : null}
 
       {/* A failed list is not an empty one: with a settled error, rendering
-          "no models yet" would tell an admin their catalog is gone. A kind or
-          a search with no models left is an empty table, not this, and so is
+          "no models yet" would tell an admin their catalog is gone. A filter
+          with no models left is an empty table, not this, and so is
           a search's answer still shown while the list it was cleared to loads. */}
       {!models.error &&
       !models.isPlaceholderData &&
       rows.length === 0 &&
       kind === "" &&
+      serving === "" &&
       term === "" ? (
         <EmptyState
           title="No models offered yet"
@@ -325,6 +335,8 @@ export function ProviderModelsPanel({
             showTabs={models.data !== undefined}
             kind={kind}
             onKindChange={onKindChange}
+            serving={serving}
+            onServingChange={onServingChange}
             search={search}
             onSearchChange={onSearchChange}
           />
@@ -336,7 +348,7 @@ export function ProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
-              emptyContent={term ? "No models match this search." : undefined}
+              emptyContent={filteredEmptyContent(term, serving)}
             />
           </TableScrollFrame>
           <TablePagination

@@ -227,6 +227,8 @@ export function useHostedModels(
   type = "",
   /** Only models whose name contains this text; empty for every model. */
   search = "",
+  /** Only served models, or only withheld ones; undefined for both. */
+  served?: boolean,
 ) {
   return useQuery({
     queryKey: [
@@ -237,10 +239,11 @@ export function useHostedModels(
       pageSize,
       type,
       search,
+      served,
     ],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>
