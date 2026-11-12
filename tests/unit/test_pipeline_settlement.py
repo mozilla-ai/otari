@@ -3392,27 +3392,27 @@ def _round_gate_ctx(monkeypatch: pytest.MonkeyPatch, rate: float, hold: Callable
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("rate", "held"), [(10.0, True), (0.0, False)], ids=["priced", "free"])
-async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_holds_nothing(
-    monkeypatch: pytest.MonkeyPatch, rate: float, held: bool
+@pytest.mark.parametrize(("rate", "dollars"), [(10.0, 0.1), (0.0, 0.0)], ids=["priced", "free"])
+async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_its_tokens_alone(
+    monkeypatch: pytest.MonkeyPatch, rate: float, dollars: float
 ) -> None:
     """A round grows the hold by its own prompt only: the request's one output limit is already held."""
-    holds: list[tuple[Decimal, int]] = []
+    holds: list[tuple[Decimal, int, bool]] = []
 
-    async def fake_hold(db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0) -> Decimal:
-        holds.append((amount, tokens))
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens, model_is_free))
         return amount
 
     ctx = _round_gate_ctx(monkeypatch, rate, fake_hold)
 
     assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
 
-    if held:
-        [(amount, tokens)] = holds
-        assert float(amount) == pytest.approx(0.1)
-        assert tokens == 10_000
-    else:
-        assert holds == []
+    [(amount, tokens, model_is_free)] = holds
+    assert float(amount) == pytest.approx(dollars)
+    assert tokens == 10_000
+    assert model_is_free is (dollars == 0)
 
 
 @pytest.mark.asyncio
@@ -3431,7 +3431,9 @@ async def test_a_tool_loop_round_on_a_request_that_holds_nothing_takes_no_hold(m
 async def test_a_tool_loop_round_that_cannot_be_held_is_refused(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     """A round the budgets have no room for, or cannot be asked about, is not held and is sent as the last."""
 
-    async def fake_hold(db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0) -> Decimal | None:
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal | None:
         if failure == "database":
             raise SQLAlchemyError("budgets unavailable")
         return None

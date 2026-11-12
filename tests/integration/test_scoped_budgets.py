@@ -2208,3 +2208,25 @@ async def test_a_round_hold_the_user_cannot_fit_gives_the_ceiling_its_tokens_bac
     assert (handle.token_estimate, handle.scoped_token_estimate) == (400, 400)
     await reconcile_reservation(async_db, handle, 0.5)
     assert await _token_counters(async_db, cap_id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_free_models_round_holds_its_tokens_past_an_overspent_dollar_ceiling(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A free model is admitted past a dollar ceiling it settled over, and so is its loop's next round."""
+    org_cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
+    org_cap.current_spend = Decimal("1.05")
+    async_db.add(org_cap)
+    await async_db.commit()
+    handle = await reserve_budget(
+        async_db, tenancy.user_id, 0.0, estimated_tokens=100, model_is_free=True, scope=tenancy.scope()
+    )
+    assert handle.reservation_id is not None
+
+    held = await hold_tool_call(async_db, handle, Decimal(0), tokens=500, model_is_free=True, strategy="for_update")
+
+    assert held is not None
+    assert await _token_counters(async_db, org_cap.id) == (0, 600)
+    await reconcile_reservation(async_db, handle, 0.0)
+    assert await _token_counters(async_db, org_cap.id) == (0, 0)

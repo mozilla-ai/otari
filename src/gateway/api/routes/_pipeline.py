@@ -2634,7 +2634,7 @@ class ReservationRoundGate:
     visible output is part of that prompt; a round's reasoning is not held. A round
     that does not fit is sent as the loop's last, without the gateway's tools
     (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
-    holds nothing, as a free tool call does (``ReservationToolGate``).
+    holds its tokens alone.
     """
 
     def __init__(self, ctx: RequestContext) -> None:
@@ -2663,8 +2663,6 @@ class ReservationRoundGate:
                 cache_write_ttl=inputs.cache_write_ttl,
                 facts=inputs.facts,
             )
-            if cost <= ZERO:
-                return True
             # Ends whatever the request left pending, so a failed hold rolls back only the hold.
             await release_session(ctx.db)
             held = await hold_tool_call(
@@ -2672,6 +2670,8 @@ class ReservationRoundGate:
                 handle,
                 cost,
                 tokens=estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0),
+                # A round that costs nothing holds its tokens alone, as a free model's request does at admission.
+                model_is_free=cost <= ZERO,
                 strategy=ctx.config.budget_strategy,
             )
         except DATABASE_ERRORS as exc:
