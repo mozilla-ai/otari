@@ -5,6 +5,7 @@ A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
+from gateway.core.config import API_ROOT
 from gateway.core.error_codes import (
     END_USER_BUDGET_NOT_ALLOWED,
     END_USER_BUDGET_WITHOUT_END_USER,
@@ -251,7 +252,10 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
     error_code = END_USER_BUDGET_NOT_ALLOWED
 
     def __init__(self, budget_id: str):
-        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+        super().__init__(
+            f"This key may not assign budget '{budget_id}' to its end users: no budget on its list has that id. "
+            f"Pass a budget_id from GET {API_ROOT}/end-user-budgets"
+        )
 
 
 class EndUserBudgetWithoutEndUserError(TenancyValidationError):
