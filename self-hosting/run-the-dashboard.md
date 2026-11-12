@@ -214,4 +214,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/ccd552b925b91dbfef8432cb1488f481c307974b/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/e0be8cfc81e43ae3b01534d8396e5ff19361af62/web/README.md).
