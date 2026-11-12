@@ -1949,3 +1949,61 @@ def test_a_circular_re_export_does_not_recurse_forever(tmp_path: Path, monkeypat
         'from gateway.services.things._a import looping\n\n__all__ = ["looping"]\n',
     )
     assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_root_star_importing_a_free_function_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A star import binds every public name of its source, so it hides none of them."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", f"class ThingService:\n    pass\n\n\n{_FREE_FUNCTION}")
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._thing import *\n")
+    assert check.check_service_root_exports(tmp_path) == [
+        "gateway/services/things/__init__.py exports names_a_thing, which is neither the service nor a type its "
+        "public methods use; make it a method on what owns it, move it below the domain, or stop exporting it"
+    ]
+
+
+def test_a_star_import_binds_only_what_the_source_lists_in_dunder_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the source declares __all__, a star import binds those names and no others."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/services/things/_thing.py",
+        f'class ThingService:\n    pass\n\n\n{_FREE_FUNCTION}\n__all__ = ["ThingService"]\n',
+    )
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._thing import *\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_star_import_at_an_intermediate_hop_is_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The root names the function, and the module it names it from only star-imports it."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_inner/_leaf.py", _FREE_FUNCTION)
+    _write(tmp_path, "gateway/services/things/_inner/__init__.py", "from ._leaf import *\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._inner import names_a_thing\n\n__all__ = ["names_a_thing"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_circular_star_import_does_not_recurse_forever(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_a.py", "from gateway.services.things._b import *\n")
+    _write(tmp_path, "gateway/services/things/_b.py", "from gateway.services.things._a import *\n")
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._a import *\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_relative_import_in_the_root_is_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", _FREE_FUNCTION)
+    _write(tmp_path, "gateway/services/things/__init__.py", "from ._thing import names_a_thing\n")
+    assert len(check.check_service_root_exports(tmp_path)) == 1

@@ -1812,7 +1812,7 @@ def _bound_names(tree: ast.Module) -> set[str]:
     names: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
-            names.update(alias.asname or alias.name for alias in node.names)
+            names.update(alias.asname or alias.name for alias in node.names if alias.name != "*")
         elif isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             names.add(node.name)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -1822,13 +1822,14 @@ def _bound_names(tree: ast.Module) -> set[str]:
     return {name for name in names if not name.startswith("_")}
 
 
-def _offered_names(tree: ast.Module) -> set[str]:
-    """Return the names a package root offers a caller.
+def _offered_names(tree: ast.Module, file_path: Path, src_root: Path) -> set[str]:
+    """Return the names a package root offers a caller, including those a star import binds.
 
     NOTE: ``__all__`` governs a star import alone, so a name the root binds and
     leaves out of it is still importable and is offered just the same.
     """
-    return _bound_names(tree) | set(_declared_all(tree) or ())
+    starred = {name for module in _star_modules(tree, file_path, src_root) for name in _star_names(module, src_root)}
+    return _bound_names(tree) | set(_declared_all(tree) or ()) | starred
 
 
 def _import_sources(tree: ast.Module, file_path: Path, src_root: Path) -> dict[str, tuple[str, str]]:
@@ -1841,8 +1842,36 @@ def _import_sources(tree: ast.Module, file_path: Path, src_root: Path) -> dict[s
         if module is None:
             continue
         for alias in node.names:
-            sources[alias.asname or alias.name] = (module, alias.name)
+            if alias.name != "*":
+                sources[alias.asname or alias.name] = (module, alias.name)
     return sources
+
+
+def _star_modules(tree: ast.Module, file_path: Path, src_root: Path) -> list[str]:
+    """Return the modules a module star-imports from."""
+    modules: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or not any(alias.name == "*" for alias in node.names):
+            continue
+        module = node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)
+        if module is not None:
+            modules.append(module)
+    return modules
+
+
+def _star_names(module: str, src_root: Path, seen: frozenset[str] = frozenset()) -> set[str]:
+    """Return the names ``from module import *`` binds: its ``__all__``, or else every public name it binds."""
+    file_path = _module_file(module, src_root)
+    if module in seen or file_path is None:
+        return set()
+    tree = ast.parse(file_path.read_text())
+    declared = _declared_all(tree)
+    if declared is not None:
+        return set(declared)
+    names = _bound_names(tree)
+    for inner in _star_modules(tree, file_path, src_root):
+        names |= _star_names(inner, src_root, seen | {module})
+    return names
 
 
 def _module_file(module: str, src_root: Path) -> Path | None:
@@ -1883,9 +1912,14 @@ def _definition_kind(
         if _assigns_constant(node, name):
             return "constant"
     source = _import_sources(tree, file_path, src_root).get(name)
-    if source is None:
-        return None
-    return _definition_kind(*source, src_root, seen | {(module, name)})
+    if source is not None:
+        return _definition_kind(*source, src_root, seen | {(module, name)})
+    for starred in _star_modules(tree, file_path, src_root):
+        if name in _star_names(starred, src_root):
+            kind = _definition_kind(starred, name, src_root, seen | {(module, name)})
+            if kind is not None:
+                return kind
+    return None
 
 
 def check_service_root_exports(src_root: Path) -> list[str]:
@@ -1901,7 +1935,8 @@ def check_service_root_exports(src_root: Path) -> list[str]:
         init = package / "__init__.py"
         tree = ast.parse(init.read_text())
         module = package.relative_to(src_root).as_posix().replace("/", ".")
-        exported[key] = {name for name in _offered_names(tree) if _definition_kind(module, name, src_root) is not None}
+        offered = _offered_names(tree, init, src_root)
+        exported[key] = {name for name in offered if _definition_kind(module, name, src_root) is not None}
         violations.extend(
             f"{key}__init__.py exports {name}, which is neither the service nor a type its public methods use; "
             f"make it a method on what owns it, move it below the domain, or stop exporting it"
