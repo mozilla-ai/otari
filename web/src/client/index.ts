@@ -218,6 +218,7 @@ export type UsageFilterKeysArePinned = Assert<
 export type User = Schemas["UserResponse"]
 export type UpdateUserRequest = Schemas["UpdateUserRequest"]
 export type ApiKey = Schemas["KeyInfo"]
+export type ApiKeyDisabledReason = Schemas["DisabledReason"]
 export type CreateKeyRequest = Schemas["CreateKeyRequest"]
 export type CreateKeyResponse = Schemas["CreateKeyResponse"]
 export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
@@ -377,6 +378,8 @@ export type OrganizationSso = Schemas["OrganizationSsoPublic"]
 export type OidcConnection = Schemas["OIDCConnectionPublic"]
 export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
 export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+export type OidcConnectionEnabledRequest =
+  Schemas["OIDCConnectionEnabledRequest"]
 export type OrganizationSsoEnforcement =
   Schemas["OrganizationSsoEnforcementPublic"]
 export type OrganizationSsoEnforcementRequest =
@@ -597,6 +600,7 @@ export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
 export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
+export type Workspaces = Schemas["WorkspacesPublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
 export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
@@ -810,3 +814,7 @@ export type * from "./local"
 
 export type FeedbackSubmission =
   operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]
+
+export type AppDetails = components["schemas"]["AppDetails"]
+export type AppAuthorizationResponse =
+  components["schemas"]["AppAuthorizationResponse"]

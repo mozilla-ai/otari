@@ -15,9 +15,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.budget_exceptions import WorkspaceBudgetDefaultBudgetNotFoundError
 from gateway.exceptions.organizations_exceptions import (
     NotAuthorizedError,
     OrganizationDomainAlreadyClaimedError,
@@ -36,15 +39,27 @@ from gateway.models.tenancy import (
     OrganizationDomain,
     OrganizationDomainCreateRequest,
     OrganizationDomainUpdateRequest,
+    OrganizationMember,
     User,
+    Workspace,
+    WorkspaceMember,
 )
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
 )
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
+from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+
+from .tenancy_helpers import create_workspace, membership_writes
 
 _SERVICE_MODULE = "gateway.services.tenancy.organization_domain_service"
 
@@ -110,6 +125,34 @@ async def _claim(
         db.add(row)
         await db.flush()
     return row
+
+
+async def _auto_join(
+    db: AsyncSession, user: User, *, membership_listener: MembershipListener | None = None
+) -> OrganizationMember | None:
+    """Run the sign-in auto-join over ``db``, inside the block the sign-in that triggers it holds.
+
+    ``membership_listener`` replaces the one the request path builds, for a test about what the
+    grant does when announcing the workspace membership fails.
+    """
+    writes = membership_writes(db)
+    uow = writes["uow"]
+    if membership_listener is not None:
+        writes["membership_listener"] = membership_listener
+    listener = DomainAutoJoinListener(
+        OrganizationDomainRepository(uow),
+        OrganizationMemberRepository(uow),
+        OrganizationService(db, **writes),
+    )
+    async with uow:
+        return await listener.join(user)
+
+
+class _RefusingMembershipListener(BudgetMembershipListener):
+    """A listener whose reaction to a new workspace membership fails, as a stale default would."""
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        raise WorkspaceBudgetDefaultBudgetNotFoundError(uuid.uuid4())
 
 
 # =============================================================================
@@ -344,12 +387,125 @@ async def test_a_verified_address_joins_the_organization_that_proved_its_domain(
     await _claim(async_db, organization, domain="acme.example", default_role="viewer")
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(newcomer)
+    membership = await _auto_join(async_db, newcomer)
 
     assert membership is not None
     assert membership.organization_id == organization.id
     assert membership.role == "viewer"
     assert membership.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_a_newcomer_joins_the_organizations_default_workspace(async_db: AsyncSession) -> None:
+    """Nothing else would give them one, and only a manager can create one."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    await _auto_join(async_db, newcomer)
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id)
+    assert member is not None
+    assert member.role == "member"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_grant_leaves_the_membership_and_does_not_fail_the_admission(
+    async_db: AsyncSession,
+) -> None:
+    """The grant is the convenience; the admission it completes is the thing the caller asked for."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+    refusing = _RefusingMembershipListener(BudgetRepositories.on(UnitOfWork(async_db)))
+
+    membership = await _auto_join(async_db, newcomer, membership_listener=refusing)
+
+    assert membership is not None
+    assert membership.status == "active"
+    members = WorkspaceMemberRepository(async_db)
+    assert await members.get_by_workspace_and_user(workspace.id, newcomer.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_workspace_lookup_does_not_fail_the_admission(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lookup is the grant's first statement, so it is covered by the same savepoint."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    async def _refuse(self: WorkspaceRepository, organization_id: uuid.UUID, name: str) -> Workspace | None:
+        raise OperationalError("statement timed out", None, TimeoutError())
+
+    monkeypatch.setattr(WorkspaceRepository, "get_by_organization_and_name", _refuse)
+
+    membership = await _auto_join(async_db, newcomer)
+
+    assert membership is not None
+    assert membership.status == "active"
+    monkeypatch.undo()
+    assert await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, newcomer.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_viewer_claim_makes_a_viewer_of_the_default_workspace(async_db: AsyncSession) -> None:
+    """A viewer of the organization is a viewer of its workspaces, as the invitation form has it."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example", default_role="viewer")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    await _auto_join(async_db, newcomer)
+
+    member = await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id)
+    assert member is not None
+    assert member.role == "viewer"
+
+
+@pytest.mark.asyncio
+async def test_no_workspace_is_granted_where_none_carries_the_default_name(async_db: AsyncSession) -> None:
+    """The cost of keying on the name: the membership still lands, with no workspace granted."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name="Renamed", owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    membership = await _auto_join(async_db, newcomer)
+
+    assert membership is not None
+    assert await WorkspaceMemberRepository(async_db).get_active_by_workspace_and_user(workspace.id, newcomer.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_later_sign_in_does_not_restore_a_workspace_membership_an_admin_deleted(
+    async_db: AsyncSession,
+) -> None:
+    """Being dropped from the default workspace is a decision; the next sign-in must not undo it."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    workspace = await create_workspace(async_db, organization, name=DEFAULT_WORKSPACE_NAME, owner=admin)
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+    await _auto_join(async_db, newcomer)
+    members = WorkspaceMemberRepository(async_db)
+    granted = await members.get_by_workspace_and_user(workspace.id, newcomer.id)
+    assert granted is not None
+    await members.delete(granted)
+
+    await _auto_join(async_db, newcomer)
+
+    assert await members.get_by_workspace_and_user(workspace.id, newcomer.id) is None
 
 
 @pytest.mark.asyncio
@@ -359,7 +515,7 @@ async def test_an_unverified_address_does_not_join(async_db: AsyncSession) -> No
     await _claim(async_db, organization, domain="acme.example")
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example", email_verified=False)
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -369,7 +525,7 @@ async def test_an_unproven_claim_sweeps_in_nobody(async_db: AsyncSession) -> Non
     await _claim(async_db, organization, domain="acme.example", verified=False)
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -378,7 +534,7 @@ async def test_a_disabled_claim_sweeps_in_nobody(async_db: AsyncSession) -> None
     await _claim(async_db, organization, domain="acme.example", enabled=False)
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -386,7 +542,7 @@ async def test_an_unclaimed_domain_is_the_ordinary_no_match(async_db: AsyncSessi
     organization = await _organization(async_db, slug="acme")
     newcomer = await _identity(async_db, organization, role=None, email="new@elsewhere.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -396,7 +552,7 @@ async def test_an_identity_with_no_address_is_skipped(async_db: AsyncSession) ->
     await _claim(async_db, organization, domain="acme.example")
     operator = await _identity(async_db, organization, role=None, email=None)
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(operator) is None
+    assert await _auto_join(async_db, operator) is None
 
 
 @pytest.mark.asyncio
@@ -413,7 +569,7 @@ async def test_a_suspended_member_is_not_re_added_by_signing_in(async_db: AsyncS
         status="suspended",
     )
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(removed)
+    membership = await _auto_join(async_db, removed)
 
     assert membership is not None
     assert membership.status == "suspended"
@@ -427,7 +583,7 @@ async def test_an_established_role_is_never_overwritten_by_the_claims_default(
     await _claim(async_db, organization, domain="acme.example", default_role="viewer")
     owner = await _identity(async_db, organization, role="owner", email="owner@acme.example")
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(owner)
+    membership = await _auto_join(async_db, owner)
 
     assert membership is not None
     assert membership.role == "owner"
@@ -442,7 +598,7 @@ async def test_auto_join_never_moves_where_the_caller_is_pointed(async_db: Async
     person = await _identity(async_db, home, role="member", email="person@acme.example")
     pointed_at = person.active_organization_id
 
-    membership = await OrganizationDomainService(async_db).auto_join_for_user(person)
+    membership = await _auto_join(async_db, person)
 
     assert membership is not None
     assert membership.organization_id == claiming.id
@@ -462,7 +618,7 @@ async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_exis
     claim = await _claim(async_db, organization, domain="acme.example", verified=False)
     service = OrganizationDomainService(async_db)
 
-    assert await service.auto_join_for_user(existing) is None
+    assert await _auto_join(async_db, existing) is None
 
     monkeypatch.setattr(
         f"{_SERVICE_MODULE}.resolve_txt_records",
@@ -470,7 +626,7 @@ async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_exis
     )
     await service.verify_domain_for_user(user=admin, organization_domain_id=claim.id)
 
-    assert await service.auto_join_for_user(existing) is not None
+    assert await _auto_join(async_db, existing) is not None
 
 
 @pytest.mark.asyncio
@@ -480,7 +636,7 @@ async def test_dropping_a_claim_leaves_the_members_it_already_admitted(async_db:
     admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
     joined = await _identity(async_db, organization, role=None, email="joined@acme.example")
     service = OrganizationDomainService(async_db)
-    assert await service.auto_join_for_user(joined) is not None
+    assert await _auto_join(async_db, joined) is not None
 
     await service.delete_domain_for_user(user=admin, organization_domain_id=claim.id)
 
@@ -492,7 +648,7 @@ async def test_dropping_a_claim_leaves_the_members_it_already_admitted(async_db:
     assert still_there.status == "active"
     # And the claim no longer admits anyone new.
     latecomer = await _identity(async_db, organization, role=None, email="late@acme.example")
-    assert await service.auto_join_for_user(latecomer) is None
+    assert await _auto_join(async_db, latecomer) is None
 
 
 # =============================================================================
@@ -796,7 +952,7 @@ async def test_a_proof_that_has_aged_out_admits_nobody(async_db: AsyncSession) -
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+    assert await _auto_join(async_db, newcomer) is None
 
 
 @pytest.mark.asyncio
@@ -809,7 +965,7 @@ async def test_a_proof_inside_its_window_still_admits(async_db: AsyncSession) ->
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None
 
 
 @pytest.mark.asyncio
@@ -838,7 +994,7 @@ async def test_re_verifying_an_aged_out_proof_runs_the_lookup_again(
     assert renewed.verified_at is not None
     assert renewed.verified_at > stale
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None
 
 
 @pytest.mark.asyncio
@@ -858,4 +1014,4 @@ async def test_a_record_pulled_after_verification_stops_mattering_only_at_the_tt
     await async_db.flush()
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
 
-    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+    assert await _auto_join(async_db, newcomer) is not None

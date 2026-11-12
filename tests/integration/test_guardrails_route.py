@@ -2,7 +2,7 @@
 
 Guardrails are a pre-provider interceptor wired identically into all three
 endpoints (chat / messages / responses) via
-:func:`gateway.api.routes._helpers.apply_input_guardrails`. These tests patch
+:class:`gateway.api.routes._guardrails.RequestGuardrails`. These tests patch
 the shared ``run_input_guardrails`` so they exercise the route wiring — block
 short-circuits the provider, monitor annotates and falls through, and the
 ``guardrails`` field never leaks upstream — without standing up the guardrails
@@ -96,7 +96,7 @@ def test_block_mode_returns_403_and_skips_provider(
     provider = AsyncMock()
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=AsyncMock(return_value=verdict)),
         patch(provider_symbol, new=provider),
     ):
         resp = client.post(path, json={**body, "guardrails": [{"profile": "prompt-injection"}]}, headers=api_key_header)
@@ -123,7 +123,7 @@ def test_monitor_mode_forwards_and_annotates(
     provider = AsyncMock(return_value=_text_message_response("answered"))
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=AsyncMock(return_value=verdict)),
         patch("gateway.api.routes.messages.amessages", new=provider),
     ):
         resp = client.post(
@@ -223,7 +223,7 @@ def test_a_streamed_answer_carries_the_guardrail_verdict(
     )
     path, target, body = _ROUTES[route]
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=AsyncMock(return_value=verdict)),
         patch(target, side_effect=_streamed(route)),
     ):
         resp = client.post(
@@ -309,7 +309,7 @@ def test_valid_input_passes_through_and_field_is_stripped(
         return _text_message_response("hi")
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=AsyncMock(return_value=verdict)),
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
     ):
         resp = client.post(
@@ -338,7 +338,7 @@ def test_no_guardrails_field_is_a_noop(
         return _text_message_response("hi")
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=runner),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=runner),
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
     ):
         resp = client.post(
@@ -370,7 +370,9 @@ def test_a_callers_credential_reaches_the_runner_for_their_own_endpoint(
     guardrail = {"profile": "probe", "mode": "block", "url": "https://caller.example/guard", "credential": "tok"}
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=runner),
+        # The URL is a placeholder no resolver knows; its safety check has tests of its own.
+        patch("gateway.api.routes._guardrails.check_guardrail_urls", new=AsyncMock(return_value={})),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=runner),
         patch(provider_symbol, new=AsyncMock()),
     ):
         resp = client.post(path, json={**body, "guardrails": [guardrail]}, headers=api_key_header)
@@ -388,7 +390,7 @@ def test_a_credential_without_a_url_is_refused_without_echoing_it(
     path, _, body = _ROUTES["chat"]
     runner = AsyncMock()
 
-    with patch("gateway.api.routes._helpers.run_input_guardrails", new=runner):
+    with patch("gateway.api.routes._guardrails.run_input_guardrails", new=runner):
         resp = client.post(
             path,
             json={**body, "guardrails": [{"profile": "probe", "credential": "tok-secret"}]},
@@ -411,7 +413,7 @@ def test_a_credentialed_profile_named_twice_is_refused_without_echoing_it(
         {"profile": "probe", "url": "https://b.example/guard", "credential": "tok-secret"},
     ]
 
-    with patch("gateway.api.routes._helpers.run_input_guardrails", new=runner):
+    with patch("gateway.api.routes._guardrails.run_input_guardrails", new=runner):
         resp = client.post(path, json={**body, "guardrails": guardrails}, headers=api_key_header)
 
     assert resp.status_code == 422, resp.text

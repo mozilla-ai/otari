@@ -59,7 +59,7 @@ from gateway.api.deps import (
     ApiKeyServiceDep,
     BudgetServiceDep,
     CurrentIdentity,
-    DeploymentUserServiceDep,
+    DeploymentAdministrationAccessDep,
     OrganizationServiceDep,
     PersonGrowthSignalPortDep,
     get_config,
@@ -101,7 +101,7 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.tenancy import DeploymentUserService, OrganizationService
+from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -615,7 +615,7 @@ async def list_own_key_end_users(
 async def _federation_rule_key(
     db: AsyncSession,
     organizations: OrganizationService,
-    deployment_users: DeploymentUserService,
+    deployment_users: DeploymentAdministrationAccess,
     identity: TenancyUser,
     key_id: str,
     *,
@@ -646,7 +646,7 @@ async def create_own_federation_rule(
     config: Annotated[GatewayConfig, Depends(get_config)],
     api_keys: ApiKeyServiceDep,
     organizations: OrganizationServiceDep,
-    deployment_users: DeploymentUserServiceDep,
+    deployment_users: DeploymentAdministrationAccessDep,
 ) -> FederationRulePublic:
     """Let an OpenID Connect identity token stand in for a key, through the token exchange.
 
@@ -672,7 +672,7 @@ async def list_own_federation_rules(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_keys: ApiKeyServiceDep,
     organizations: OrganizationServiceDep,
-    deployment_users: DeploymentUserServiceDep,
+    deployment_users: DeploymentAdministrationAccessDep,
 ) -> list[FederationRulePublic]:
     """List the identities that may authenticate as a key, oldest first.
 
@@ -691,7 +691,7 @@ async def delete_own_federation_rule(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_keys: ApiKeyServiceDep,
     organizations: OrganizationServiceDep,
-    deployment_users: DeploymentUserServiceDep,
+    deployment_users: DeploymentAdministrationAccessDep,
 ) -> Response:
     """Remove a federation rule from a key. Tokens it matched stop with the next request.
 

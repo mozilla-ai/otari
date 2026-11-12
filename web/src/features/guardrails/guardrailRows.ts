@@ -6,6 +6,7 @@ import type {
   OrganizationGuardrailDefinition,
 } from "@/client"
 import { checkLabel } from "@/features/guardrails/builtInCatalog"
+import { DIRECTION_OPTIONS } from "@/features/guardrails/GuardrailReadsField"
 import { parameterLabel } from "@/features/guardrails/guardrailParameters"
 
 // The catalog lists it beside real checks, and it names none a reader picks.
@@ -86,6 +87,14 @@ export function ifItCantRunLabel(mandate: OrganizationGuardrail): string {
   return mandate.mode === "block" && mandate.on_unavailable === "block"
     ? "Refuse the request"
     : "Serve it unchecked"
+}
+
+/** What a guardrail reads, in the dialog's words and its order. */
+export function checksLabel(guardrail: { on?: readonly string[] }): string {
+  const on = guardrail.on ?? ["input"]
+  return DIRECTION_OPTIONS.filter((option) => on.includes(option.value))
+    .map((option) => option.label)
+    .join(", ")
 }
 
 /** The mandates that cover one workspace, whether by name or by covering all. */

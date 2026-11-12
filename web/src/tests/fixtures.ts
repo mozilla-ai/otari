@@ -336,6 +336,8 @@ export function organizationMember(
     // up does. Both shapes have to render, so the builder ships neither and a
     // test names the one it is about.
     email: null,
+    // False by default; a test about an SSO member says so.
+    is_sso_account: false,
     full_name: "Operator",
     role: "owner",
     status: "active",
@@ -504,7 +506,8 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     last_used_at: null,
     expires_at: null,
     is_active: true,
-    operator_disabled: false,
+    disabled_reason: null,
+    operator_can_enable: true,
     allowed_models: null,
     allowed_tools: null,
     exclude_from_budget: false,
@@ -648,6 +651,7 @@ export function organizationGuardrail(
     has_credential: false,
     definition_id: null,
     mode: "monitor",
+    on: ["input"],
     on_unavailable: "block",
     validate_kwargs: null,
     enabled: true,

@@ -44,7 +44,7 @@ from gateway.services.content_normalizer import (
     name_container_copies,
     normalize_messages,
 )
-from gateway.services.files import FileService, StagedFile, provider_holds_copies
+from gateway.services.files import FileService, StagedFile
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.services.tools import (
@@ -294,7 +294,7 @@ def container_copies_step(
         if not has_container_blocks(kwargs["messages"], "anthropic"):
             return kwargs
         provider, _ = AnyLLM.split_model_provider(kwargs["model"])
-        if not isinstance(provider, LLMProvider) or not provider_holds_copies(provider):
+        if not isinstance(provider, LLMProvider) or not files.provider_holds_copies(provider):
             raise CandidateCannotServe(render(NoCandidateHoldsCopiesError()))
         try:
             credential = effective_credential(provider, kwargs)

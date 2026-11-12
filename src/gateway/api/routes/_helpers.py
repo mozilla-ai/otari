@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -16,23 +14,14 @@ from starlette.types import Message
 from gateway.api.request_id import set_request_id
 from gateway.core.config import CONVERSATION_HEADER, END_USER_BUDGET_HEADER, ROUTER_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
-from gateway.core.env import otari_env
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.guardrails import (
-    GuardrailResult,
-    GuardrailsNotReachableError,
-    InProcessGuardrail,
-    run_input_guardrails,
-)
 from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
 from gateway.services.tools import DirectCaller
-from gateway.services.traces import RequestTrace, TraceService, TraceWriter
-from gateway.services.url_safety import UnsafeURLError
+from gateway.services.traces import TraceService, TraceWriter
 from gateway.services.workspace_scope import default_workspace_id
 
 if TYPE_CHECKING:
@@ -80,8 +69,7 @@ def text_from_content(content: Any) -> str:
     Handles the two wire shapes shared across the chat and Anthropic-messages
     formats: a bare string, or a list of content parts where text parts look
     like ``{"type": "text", "text": "..."}``. Non-text parts (images, tool
-    results, etc.) are ignored — guardrails like prompt-injection detection
-    operate on the textual prompt.
+    results, etc.) are ignored; a tool result is read as content of its own.
 
     Returns:
         The flattened text, or an empty string for unrecognized shapes.
@@ -96,25 +84,6 @@ def text_from_content(content: Any) -> str:
             elif isinstance(part, dict) and isinstance(part.get("text"), str):
                 parts.append(part["text"])
         return "\n".join(parts)
-    return ""
-
-
-def latest_user_text(messages: Sequence[Any]) -> str:
-    """Return the text of the most recent ``role == "user"`` message.
-
-    Falls back to the last message of any role if no user message is present.
-    Used to feed input-direction guardrails the prompt the model is about to
-    see.
-
-    Returns:
-        The latest user message's text, or an empty string if ``messages`` is
-        empty.
-    """
-    for message in reversed(messages):
-        if isinstance(message, dict) and message.get("role") == "user":
-            return text_from_content(message.get("content"))
-    if messages and isinstance(messages[-1], dict):
-        return text_from_content(messages[-1].get("content"))
     return ""
 
 
@@ -163,147 +132,6 @@ def routing_opted_out(raw_request: Request) -> bool:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
     )
-
-
-async def apply_input_guardrails(
-    guardrails: list[GuardrailConfig] | None,
-    input_text: str,
-    *,
-    response: Response,
-    config: GatewayConfig | None = None,
-    credentials: Mapping[str, str] | None = None,
-    mandated: Collection[str] | None = None,
-    in_process: Mapping[str, InProcessGuardrail | None] | None = None,
-    trace: RequestTrace | None = None,
-) -> None:
-    """Enforce the input guardrails for a request before the provider call.
-
-    ``guardrails`` is the effective list: the caller's own, merged with any the
-    caller's organization mandates and any a routing policy mandates (see
-    :func:`gateway.api.routes._pipeline.merge_guardrail_layers`, which is where
-    the merge happens so every completion endpoint enforces a mandate alike).
-    ``credentials`` carries the bearer credential for the endpoint an entry
-    names, keyed by profile: an organization's stored one, or the caller's own
-    for a profile no layer mandates. ``mandated`` names the profiles a layer above the caller supplied,
-    which is what decides whether a URL that fails its safety check is the
-    caller's malformed request (a 400 naming their own URL) or a stored entry
-    being unevaluable (governed by its ``mode`` / ``on_unavailable``, with the
-    endpoint kept out of the response). ``in_process`` carries the guardrails
-    this worker holds for the organization's own definitions, keyed by profile;
-    one of those is answered here rather than sent to any service, and a profile
-    whose guardrail this worker does not hold arrives as ``None`` and is
-    unevaluable.
-
-    No-op when ``guardrails`` is empty/None (zero overhead for the common
-    case). On a ``block``-mode flag, raises ``403`` and the provider is never
-    called. On a non-blocking flag (``monitor`` mode), attaches a compact
-    summary to the :data:`GUARDRAILS_RESULT_HEADER` response header and lets
-    the request proceed.
-
-    Service-failure handling depends on ``mode`` and ``on_unavailable`` (see
-    :func:`gateway.services.guardrails.run_input_guardrails`): a ``block``
-    guardrail that can't be evaluated or answers no verdict fails closed
-    (``502``) unless it sets ``on_unavailable="monitor"``; a ``monitor``
-    guardrail fails open (logged, request proceeds).
-
-    Note:
-        The header is set on the injected ``response``, so it reaches
-        non-streaming responses. For streamed responses (where the route
-        returns its own ``StreamingResponse``) the ``monitor`` annotation is
-        not currently propagated; ``block`` still applies (it raises before any
-        bytes are streamed).
-
-    Raises:
-        HTTPException: ``400`` when a *caller-supplied* guardrail's ``url``
-            fails the SSRF/scheme safety check (a mandated entry's failure is a
-            502 or a recorded inconclusive instead, per its own settings);
-            ``403`` when a ``block`` guardrail flags the input; ``502`` when a
-            ``block`` guardrail that fails closed can't be evaluated. The 502
-            body names the profile and not the endpoint, which goes to the log
-            instead.
-    """
-    if not guardrails:
-        return
-
-    # Effective guardrails URL: dashboard override / config / env, falling back to
-    # the env var when no config is threaded in (e.g. unit tests). A dashboard
-    # override mutates config, so it hot-applies on the next request.
-    default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
-    started = datetime.now(UTC)
-    try:
-        verdict = await run_input_guardrails(
-            guardrails,
-            input_text,
-            default_url=default_url,
-            credentials=credentials,
-            mandated=mandated,
-            in_process=in_process,
-        )
-    except UnsafeURLError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except GuardrailsNotReachableError as exc:
-        if trace is not None:
-            ended = datetime.now(UTC)
-            for guardrail in guardrails:
-                trace.record_guardrail(
-                    profile=guardrail.profile, mode=guardrail.mode, valid=None, started=started, ended=ended
-                )
-        # The full reason, endpoint included, goes to the log; the caller gets
-        # the error's `public_detail`, which names the profile and nothing else.
-        # An organization's guardrail endpoint is not the caller's to see
-        # (otari#654), and it is not theirs to fix either.
-        logger.warning("guardrail check could not be evaluated: %s", exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
-
-    if trace is not None:
-        # The checks run concurrently, so each span covers the whole evaluation.
-        ended = datetime.now(UTC)
-        for result in verdict.results:
-            trace.record_guardrail(
-                profile=result.profile, mode=result.mode, valid=result.valid, started=started, ended=ended
-            )
-
-    if verdict.blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": "Request blocked by guardrail policy.",
-                "code": "guardrail_violation",
-                "guardrails": [
-                    {
-                        "profile": r.profile,
-                        "explanation": r.explanation,
-                        "score": r.score,
-                    }
-                    for r in verdict.flagged
-                    if r.mode == "block"
-                ],
-            },
-        )
-
-    if verdict.results:
-        # Non-blocking: surface the verdict for observability (monitor mode, or
-        # a passing block-mode check). Header value is kept compact and free of
-        # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        # `status` and `reason` are fixed words, so a `valid: null` still says
-        # whether the check ran.
-        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(
-            [_guardrail_summary(r) for r in verdict.results], separators=(",", ":")
-        )
-
-
-def _guardrail_summary(result: GuardrailResult) -> dict[str, object]:
-    """One guardrail's entry in the :data:`GUARDRAILS_RESULT_HEADER` value."""
-    summary: dict[str, object] = {
-        "profile": result.profile,
-        "mode": result.mode,
-        "valid": result.valid,
-        "score": result.score,
-        "status": result.status,
-    }
-    if result.unavailable is not None:
-        summary["reason"] = result.unavailable
-    return summary
 
 
 async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID | None) -> uuid.UUID:

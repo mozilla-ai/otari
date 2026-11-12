@@ -195,22 +195,22 @@ A gate that never matches looks the same as a clean result, so check it first.
 2. Dry-run it against the paths and commands you expect a session to touch:
 
    ```
-   $ otari guardrails validate --path docs/public/openapi.json --command "make postman"
-   .otari/guardrails: composed from 8 files, 24 gate(s), schema 1.0.
-   0 error(s), 0 warning(s).
+   $ otari guardrails validate --path docs/public/openapi.json --command "uv run python scripts/generate_openapi.py"
+   .otari/guardrails: composed from 21 files, 39 gate(s), schema 1.0.
+   0 error(s), 0 warning(s), 2 accepted.
 
-   PreToolUse, Bash: make postman
+   PreToolUse, Bash: uv run python scripts/generate_openapi.py
      quiet      use-pnpm-not-npm (required)
      quiet      no-force-push (advisory)
-     20 gate(s) do not apply here.
+     ...
 
    PreToolUse, Edit/Write: docs/public/openapi.json
      quiet      no-hand-edited-changelog (required)
      ...
 
    Stop, the finished turn: 1 changed path(s), 1 command(s)
-     quiet      openapi-changed-needs-postman (required)
-     fires      openapi-changed-needs-generator (required)
+     quiet      openapi-changed-needs-generator (advisory)
+     fires      routes-changed-needs-sdk-manifest (advisory) in .otari/guardrails/generated-artifacts.yml
      would run  no-leftover-conflict-markers (verifier, required)
      skipped    no-narrative-comments (judge, when_changed does not match)
    ```
@@ -285,7 +285,7 @@ export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
   reporting works on a gateway you run, not on otari.ai today.
 - **Claude Code** does not pass these variables to its hooks; set them in the
   `env` block of `~/.claude/settings.json`, beside the exporter variables of
-  [Send Claude Code sessions to Otari](../../docs/use-with-claude-code.md#send-claude-code-sessions-to-otari).
+  [Send Claude Code sessions to Otari](../../docs/claude-code.md#send-claude-code-sessions-to-otari).
   Keep the key out of project settings files you commit.
 - **The server sees your gates**, including their messages and your own gates in
   `~/.otari/`. Point `OTARI_URL` only at a server you trust with them. It keeps

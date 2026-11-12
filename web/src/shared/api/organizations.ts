@@ -21,6 +21,7 @@ import type {
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   OfferOrgProviderModelRequest,
+  OidcConnectionEnabledRequest,
   OidcConnectionRequest,
   Organization,
   OrganizationContext,
@@ -944,6 +945,20 @@ export function useSaveOrganizationSso() {
   })
 }
 
+// Pausing a connection leaves who enforcement would affect alone: that report counts members by
+// the links they hold, which no change here moves.
+export function useSetOrganizationSsoEnabled() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OidcConnectionEnabledRequest) =>
+      apiFetch<OrganizationSso>("/organizations/me/sso", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
+  })
+}
+
 export function useTestOrganizationSso() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -1012,13 +1027,25 @@ export function useOrgProviderModels(
   pageSize: number,
   /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
   type = "",
+  /** Only models whose name contains this text; empty for every model. */
+  search = "",
+  /** Only served models, or only withheld ones; undefined for both. */
+  served: boolean | undefined = undefined,
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize, type],
+    queryKey: [
+      ORGANIZATION_PROVIDER_MODELS,
+      keyId,
+      page,
+      pageSize,
+      type,
+      search,
+      served,
+    ],
     queryFn: () =>
       apiFetch<OrgProviderModels>(
-        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
       ),
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>

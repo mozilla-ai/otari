@@ -1,7 +1,3 @@
----
-icon: desk
----
-
 # Organizations and workspaces
 
 A workspace is the boundary for one app, environment, team, or customer. It keeps provider access, API keys, budgets, usage history, and members separate from other workspaces.

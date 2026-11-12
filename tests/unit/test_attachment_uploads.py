@@ -22,8 +22,8 @@ from gateway.services.content_normalizer import (
     _within_inline_limit,
     inline_limit_for,
 )
-from gateway.services.files import FileService, _attachment_uploads, uploads_attachments
-from gateway.services.files._attachment_uploads import upload_attachment
+from gateway.services.files import FileService, _attachment_uploads
+from gateway.services.files._attachment_uploads import upload_attachment, uploads_attachments
 from gateway.services.providers import CountryGate, CountryNotServedError
 from gateway.types.provider_account import ResolvedCredential
 
@@ -207,7 +207,7 @@ def _limit(*candidates: LLMProvider | None, fmt: str = "openai", files: bool = T
         GatewayConfig(files_gemini_inline_max_bytes=100),
         LLMProvider.GEMINI if candidates[0] is None else candidates[0],
         cast(Any, fmt),
-        files=cast(FileService, object()) if files else None,
+        files=cast(FileService, _Files()) if files else None,
         candidates=candidates,
         instance=None,
         workspace_id=None,
@@ -249,6 +249,9 @@ def test_responses_gets_no_limit() -> None:
 class _Files:
     def __init__(self) -> None:
         self.credentials: list[ResolvedCredential] = []
+
+    def uploads_attachments(self, provider: LLMProvider | str | None) -> bool:
+        return uploads_attachments(provider)
 
     async def attachment_uri(self, data: bytes, *, credential: ResolvedCredential, **_: Any) -> str:
         self.credentials.append(credential)

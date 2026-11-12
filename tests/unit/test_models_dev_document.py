@@ -16,10 +16,12 @@ from gateway.types.models_dev import (
     ModelsDevIssues,
     ModelsDevRates,
     ModelsDevTier,
+    catalog_document,
     models_dev_provider_id,
     models_dev_provider_ids,
     normalize_models_dev_base_url,
     parse_catalog,
+    read_catalog_document,
     snapshot_document,
 )
 
@@ -272,6 +274,22 @@ def test_model_for_maps_the_any_llm_name_and_the_listing_prefix(catalog: ModelsD
     assert catalog.model_for("gemini", "models/gemini-9") is None
     assert catalog.model_for("mystery", "gemini-2.5-pro") is None
     assert catalog.provider_for("gemini") is catalog.providers["google"]
+
+
+def test_model_for_matches_an_id_that_differs_only_in_case() -> None:
+    """models.dev lowercases OVHcloud's ids; the provider lists them in mixed case."""
+    catalog = parse_catalog({"ovhcloud": {"models": {"qwen3-32b": {}, "Qwen3-32B": {"name": "exact"}, "gpt-x": {}}}})
+    models = catalog.providers["ovhcloud"].models
+    assert catalog.model_for("ovhcloud", "Qwen3-32B") is models["Qwen3-32B"]
+    assert catalog.model_for("ovhcloud", "QWEN3-32b") is models["qwen3-32b"]
+    assert catalog.model_for("ovhcloud", "GPT-X") is models["gpt-x"]
+
+
+def test_a_stored_catalog_still_finds_an_id_that_differs_only_in_case() -> None:
+    stored = catalog_document(parse_catalog({"ovhcloud": {"models": {"qwen3-32b": {"name": "Qwen"}}}}))
+    model = read_catalog_document(stored).model_for("ovhcloud", "Qwen3-32B")
+    assert model is not None
+    assert model.name == "Qwen"
 
 
 def test_vertex_claude_is_found_where_v2_lists_it_and_where_v1_does() -> None:

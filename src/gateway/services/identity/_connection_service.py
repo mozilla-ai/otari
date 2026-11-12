@@ -17,6 +17,7 @@ from gateway.exceptions.identity_exceptions import (
     OIDCDiscoveryError,
     SsoBreakGlassRequiredError,
     SsoBreakGlassRouteRequiredError,
+    SsoNotAddressableError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
@@ -35,6 +36,7 @@ from gateway.schemas.identity import (
     OrganizationSsoEnforcementPublic,
     OrganizationSsoPreflightMemberPublic,
     OrganizationSsoPreflightPublic,
+    OrganizationSsoPublic,
 )
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
@@ -103,6 +105,7 @@ class OIDCConnectionService:
         allow_private_hosts: bool,
         passkey_rp_id: str | None,
         offered_providers: frozenset[str],
+        sso_redirect_uri: str | None,
     ) -> None:
         self._uow = uow
         self._repositories = repositories
@@ -121,6 +124,8 @@ class OIDCConnectionService:
         self._allow_private_hosts = allow_private_hosts
         self._passkey_rp_id = passkey_rp_id
         self._offered_providers = offered_providers
+        # This is None where the deployment has no public address of its own.
+        self._sso_redirect_uri = sso_redirect_uri
 
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
@@ -134,8 +139,27 @@ class OIDCConnectionService:
 
     async def get_for_user(self, *, user: User) -> OIDCConnectionPublic | None:
         """Return the caller's organization's connection, or None. Owners and admins only."""
-        organization = await self._managed_organization(user)
+        return await self._connection_for(await self._managed_organization(user))
 
+    async def settings_for_user(self, *, user: User) -> OrganizationSsoPublic:
+        """Return the caller's organization's sign-in connection settings. Owners and admins only."""
+        organization = await self._managed_organization(user)
+        return self._settings(organization, await self._connection_for(organization))
+
+    def _settings(self, organization: Organization, connection: OIDCConnectionPublic | None) -> OrganizationSsoPublic:
+        """Assemble the settings answer.
+
+        NOTE: Enforcement is reported as of the organization the request resolved. Only
+        ``set_sso_enforcement_for_user`` writes it, and every decision taken on it is re-read
+        under ``lock_settings``.
+        """
+        return OrganizationSsoPublic(
+            redirect_uri=self._sso_redirect_uri,
+            connection=connection,
+            enforcement=self._enforcement_of(organization),
+        )
+
+    async def _connection_for(self, organization: Organization) -> OIDCConnectionPublic | None:
         async with self._uow:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
@@ -143,12 +167,16 @@ class OIDCConnectionService:
             domains = await self._domains.for_organization(organization.id)
             return self._to_public(connection, domains)
 
-    async def save_for_user(self, *, user: User, request: OIDCConnectionRequest) -> OIDCConnectionPublic:
+    async def save_for_user(self, *, user: User, request: OIDCConnectionRequest) -> OrganizationSsoPublic:
         """Discover the submitted issuer and store the caller's organization's connection. Owners and admins only.
+
+        Answers with the organization's whole settings, as every method that changes the connection
+        does, so a caller needs no second read to show the result.
 
         Discovery runs before any write, and only a successful discovery opens the transaction that
         stores it, so a refused issuer leaves an existing connection, its document, and its secret
-        exactly as they were.
+        exactly as they were. Whether the connection admits sign-in is not submitted here, so this
+        can neither pause nor resume one. A new connection is stored admitting sign-in.
 
         NOTE: Where the organization requires sign-in through this connection, storing it also
         revokes the live session of every active member the stored issuer leaves with no link.
@@ -174,13 +202,11 @@ class OIDCConnectionService:
             raise OIDCDiscoveryError
 
         async with self._uow:
-            # Serialized against the enforcement switch on the organization row. The two rules are
-            # read-then-write over each other's column: without this, one transaction can turn
-            # enforcement on while another disables the connection it would enforce, and both
-            # commit, leaving an organization that admits nobody.
+            # Serialized against the enforcement switch on the organization row. This write reads
+            # that switch and the issuer it is storing together, to sign out whoever enforcement
+            # now refuses. An enforcement change interleaved with it would answer that from a
+            # different pair.
             await self._organizations.organizations.lock_settings(organization.id)
-            if not request.enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
-                raise OIDCConnectionDisabledError
             connection = await self._connections.get_for_organization(organization.id)
             secret = _secret_to_store(request, connection)
             if connection is None:
@@ -194,9 +220,41 @@ class OIDCConnectionService:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.for_organization(organization.id)
             await self._revoke_blocked_sessions(organization, connection)
-            return self._to_public(connection, domains)
+            stored = self._to_public(connection, domains)
 
-    async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
+        return self._settings(organization, stored)
+
+    async def set_enabled_for_user(self, *, user: User, enabled: bool) -> OrganizationSsoPublic:
+        """Pause or resume sign-in through the caller's organization's connection. Owners and admins only.
+
+        Needs no credential and reaches no provider, so a connection can be paused while its
+        provider is unreachable, which is when an administrator is most likely to want to. The
+        only way to change the setting, which is what keeps storing a connection from moving it.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionDisabledError: The organization requires sign-in through this connection,
+                which pausing it would leave admitting nobody.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            # Serialized with the enforcement switch, which must not be turned on while this is
+            # turning sign-in off.
+            await self._organizations.organizations.lock_settings(organization.id)
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                raise OIDCConnectionNotFoundError
+            if not enabled and await self._organizations.organizations.is_sso_enforced(organization.id):
+                raise OIDCConnectionDisabledError
+            connection.enabled = enabled
+            self._connections.stage(connection)
+            domains = await self._domains.for_organization(organization.id)
+            stored = self._to_public(connection, domains)
+
+        return self._settings(organization, stored)
+
+    async def test_for_user(self, *, user: User) -> OrganizationSsoPublic:
         """Re-discover the caller's organization's own issuer and store the result. Owners and admins only.
 
         Raises:
@@ -230,7 +288,9 @@ class OIDCConnectionService:
             current.discovered_at = discovered.discovered_at
             self._connections.stage(current)
             domains = await self._domains.for_organization(organization.id)
-            return self._to_public(current, domains)
+            stored = self._to_public(current, domains)
+
+        return self._settings(organization, stored)
 
     async def delete_for_user(self, *, user: User) -> None:
         """Remove the caller's organization's connection. Owners and admins only.
@@ -243,10 +303,10 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
 
         async with self._uow:
-            # The third path deciding on the enforcement switch and the connection together, so it
-            # serializes on the same row as the other two. Without it, a delete that read the switch
-            # off and an enable that still saw the connection both commit, and the organization then
-            # requires a connection that does not exist.
+            # Every path deciding on the enforcement switch and the connection together serializes
+            # on this row. Without it, a delete that read the switch off and an enable that still
+            # saw the connection both commit, and the organization then requires a connection that
+            # does not exist.
             await self._organizations.organizations.lock_settings(organization.id)
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
@@ -344,7 +404,7 @@ class OIDCConnectionService:
         return connection if connection is not None and connection.enabled else None
 
     async def start_sign_in(
-        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
+        self, connection: OIDCConnection, metadata: DiscoveredProvider
     ) -> BrowserBoundAuthorization:
         """Mint an authorization URL for ``connection``'s own provider, and stage the pending state.
 
@@ -352,19 +412,18 @@ class OIDCConnectionService:
             SsoNotAddressableError: This deployment has no address a provider may send a browser
                 back to.
         """
+        redirect_uri = self._registered_redirect_uri()
         async with self._uow:
             client = client_for(
                 connection,
                 metadata,
                 pending=self._sign_in_states,
                 redirect_uri=redirect_uri,
-                allow_private_hosts=allow_private_hosts,
+                allow_private_hosts=self._allow_private_hosts,
             )
             return await client.get_authorization_url(redirect_uri=redirect_uri)
 
-    async def client_for_sign_in(
-        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
-    ) -> StoredStateClient:
+    async def client_for_sign_in(self, connection: OIDCConnection, metadata: DiscoveredProvider) -> StoredStateClient:
         """Build the client ``connection``'s own provider signs in through.
 
         Raises:
@@ -376,9 +435,14 @@ class OIDCConnectionService:
                 connection,
                 metadata,
                 pending=self._sign_in_states,
-                redirect_uri=redirect_uri,
-                allow_private_hosts=allow_private_hosts,
+                redirect_uri=self._registered_redirect_uri(),
+                allow_private_hosts=self._allow_private_hosts,
             )
+
+    def _registered_redirect_uri(self) -> str:
+        if self._sso_redirect_uri is None:
+            raise SsoNotAddressableError
+        return self._sso_redirect_uri
 
     async def record_first_sign_in(self, connection: OIDCConnection) -> None:
         """Record that a sign-in through ``connection`` succeeded.
@@ -394,9 +458,8 @@ class OIDCConnectionService:
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
 
-    async def get_enforcement_for_user(self, *, user: User) -> OrganizationSsoEnforcementPublic:
-        """Return the caller's organization's current sign-in enforcement. Owners and admins only."""
-        organization = await self._managed_organization(user)
+    @staticmethod
+    def _enforcement_of(organization: Organization) -> OrganizationSsoEnforcementPublic:
         return OrganizationSsoEnforcementPublic(
             required=organization.sso_required,
             break_glass_user_id=organization.sso_break_glass_user_id,
@@ -706,7 +769,6 @@ class OIDCConnectionService:
                 discovery_document=discovered.document,
                 discovered_at=discovered.discovered_at,
                 default_role=request.default_role,
-                enabled=request.enabled,
             )
         except OIDCConnectionConflictError:
             winner = await self._connections.get_for_organization(organization_id)
@@ -733,7 +795,6 @@ class OIDCConnectionService:
         connection.discovery_document = discovered.document
         connection.discovered_at = discovered.discovered_at
         connection.default_role = request.default_role
-        connection.enabled = request.enabled
         self._connections.stage(connection)
 
     @staticmethod

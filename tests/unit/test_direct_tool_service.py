@@ -6,6 +6,7 @@ and the workspace's policy are fakes that record what the service asked of them.
 
 import asyncio
 import uuid
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -21,7 +22,7 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchPolicyResolutionFailure,
 )
 from gateway.models.tools import ResolvedWebSearchConfig
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, ToolUse
 from gateway.schemas.tools import FetchRequest, SearchRequest
 from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolService, DirectToolUsage
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
@@ -81,8 +82,10 @@ class _Ledger:
         self.steps.append(("admit_funding",))
         return "funding"
 
-    async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
-        self.steps.append(("settle_funding", funding, cost, description))
+    async def settle_funding(
+        self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
+    ) -> None:
+        self.steps.append(("settle_funding", funding, cost, description, dict(tools)))
 
     async def release(self) -> bool:
         self.steps.append(("release",))
@@ -170,7 +173,13 @@ async def test_a_served_call_settles_its_hold_at_the_reported_cost() -> None:
         ("hold", "billed", Decimal("0.01")),
         ("admit_funding",),
         ("release",),
-        ("settle_funding", "funding", Decimal("0.007"), "fake:fake-search"),
+        (
+            "settle_funding",
+            "funding",
+            Decimal("0.007"),
+            "fake:fake-search",
+            {"otari:web_search": ToolUse(calls=1, amount=Decimal("0.007"))},
+        ),
         ("settle", "hold", Decimal("0.007")),
     ]
     assert gates.tracked == ["fake-search"]

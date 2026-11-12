@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 from sqlalchemy.exc import OperationalError
 
+from gateway.api.routes import mcp_catalog as _worker
+from gateway.api.routes.mcp_catalog import run_mcp_catalog_sync_worker
 from gateway.core.config import GatewayConfig
-from gateway.services.mcp_catalog import _worker
 
 
 class _Stop(BaseException):
@@ -33,7 +34,7 @@ async def _run(monkeypatch: pytest.MonkeyPatch, config: GatewayConfig, failures:
 
     monkeypatch.setattr(_worker, "create_unit_of_work", _no_database)
     with pytest.raises(_Stop):
-        await _worker.run_mcp_catalog_sync_worker(build, config, interval=0)
+        await run_mcp_catalog_sync_worker(build, config, interval=0)
     return built
 
 
@@ -85,6 +86,6 @@ async def test_the_poll_touches_nothing_while_the_sync_is_off(monkeypatch: pytes
     monkeypatch.setattr(asyncio, "sleep", count_then_stop)
     monkeypatch.setattr(_worker, "create_unit_of_work", never)
     with pytest.raises(_Stop):
-        await _worker.run_mcp_catalog_sync_worker(never, config, interval=0)
+        await run_mcp_catalog_sync_worker(never, config, interval=0)
 
     assert polls == 3

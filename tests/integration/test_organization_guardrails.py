@@ -390,6 +390,32 @@ async def test_a_mandate_names_one_backend_or_the_other(async_db: AsyncSession) 
         await service.create_guardrail(user=owner, request=_create(url=PUBLIC_URL, definition_id=definition.id))
 
 
+async def test_what_a_mandate_reads_round_trips_and_reaches_the_request_path(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = OrganizationGuardrailService(async_db)
+
+    created = await service.create_guardrail(user=owner, request=_create(workspace_ids=[workspace.id]))
+    assert created.on == ["input"], "a mandate reads the input alone unless it says otherwise"
+    updated = await service.update_guardrail(
+        user=owner,
+        guardrail_id=created.id,
+        request=OrganizationGuardrailUpdate(mode="block", on=["input", "tool_results", "input"]),
+    )
+    assert (updated.mode, updated.on) == ("block", ["input", "tool_results"])
+
+    [resolved] = await resolve_organization_guardrails(
+        async_db, organization_id=organization.id, workspace_id=workspace.id
+    )
+    assert (resolved.config.mode, resolved.config.on) == ("block", ["input", "tool_results"])
+
+
+async def test_a_mandate_that_reads_nothing_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        _create(on=[])
+
+
 async def test_a_credential_beside_a_definition_is_refused_as_the_contradiction(
     async_db: AsyncSession,
 ) -> None:

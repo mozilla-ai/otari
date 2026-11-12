@@ -1,14 +1,16 @@
 """The MCP server catalog: remote servers a workspace can add without hunting for a URL.
 
-Listing a server grants nothing. A workspace's stored servers stay its allow
-list, and a catalog server becomes one through the same create a pasted URL does.
+Listing a server grants nothing. A catalog server becomes a workspace's own
+only through the same create a pasted URL goes through.
 
 The sync is the deployment's and an organization's shelf is its own, so each
 has a router with its own gate rather than a route overriding one in place.
 Listed in ``CORE_FEATURES`` as ``FEATURE`` below.
 """
 
+import asyncio
 import uuid
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -21,8 +23,11 @@ from gateway.api.deps import (
     verify_master_key,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.log_config import logger
 from gateway.schemas.mcp_catalog import (
     McpCatalogFeaturedListPublic,
     McpCatalogFeaturedPublic,
@@ -30,7 +35,7 @@ from gateway.schemas.mcp_catalog import (
     McpCatalogServersPublic,
     McpCatalogSyncStatus,
 )
-from gateway.services.mcp_catalog import run_mcp_catalog_sync_worker
+from gateway.services.mcp_catalog import McpCatalogService, RegistryClient
 
 router = APIRouter(prefix="/mcp-catalog", tags=["mcp-catalog"], dependencies=[Depends(verify_master_key)])
 
@@ -131,6 +136,43 @@ async def request_mcp_catalog_sync(service: McpCatalogServiceDep) -> McpCatalogS
     A sync that is already running is left to finish, and this one follows it.
     """
     return await service.request_sync()
+
+
+POLL_SECONDS = 60.0
+
+
+async def run_mcp_catalog_sync_worker(
+    build_service: Callable[[UnitOfWork], McpCatalogService],
+    config: GatewayConfig,
+    interval: float = POLL_SECONDS,
+) -> None:
+    """Poll for a due sync forever; only the replica that claims one carries it out.
+
+    Every error is logged and retried on the next poll. Cancelled at shutdown. While
+    ``mcp_catalog_sync`` is ``off`` a poll neither reads the database nor opens a connection anywhere.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        if config.mcp_catalog_sync == "off":
+            continue
+        try:
+            async with create_unit_of_work() as uow, RegistryClient() as registry:
+                status = await build_service(uow).sync_if_due(registry.fetch_page)
+            if status is not None:
+                logger.info(
+                    "MCP catalog sync %s: %s pages, %s kept, %s removed",
+                    status.outcome,
+                    status.pages,
+                    status.kept,
+                    status.removed,
+                )
+        except asyncio.CancelledError:
+            raise
+        except DATABASE_ERRORS as exc:
+            logger.warning("MCP catalog sync could not reach the database (%s); retrying", describe_database_error(exc))
+        except Exception as exc:
+            # The type alone: a traceback through a database call would carry the statement's parameters.
+            logger.warning("MCP catalog sync failed (%s); retrying in %ss", type(exc).__name__, interval)
 
 
 async def _poll(config: GatewayConfig) -> None:

@@ -102,7 +102,7 @@ and overlays. If no row fits, open an issue and ask.
 
 ## Dev setup
 
-**Prerequisites:** Python 3.13+, `uv`, Docker (for integration tests).
+**Prerequisites:** Python 3.13+, `uv` within the `required-version` range in `pyproject.toml` (uv refuses every command outside it; `uv self update <version>` moves an installer-managed uv), Docker (for integration tests).
 
 ```bash
 git clone https://github.com/mozilla-ai/otari
@@ -155,7 +155,7 @@ Most dependencies are floored (`>=`) rather than pinned, and `uv.lock` is commit
 because CI and the Docker image both install from it with `--frozen`. Two mechanisms
 keep it current, and they cover different things:
 
-- **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
+- **Dependabot** (`.github/dependabot.yml`) opens monthly version-update PRs for the
   `uv`, `github-actions`, `docker` and dashboard (`npm`, which covers pnpm)
   ecosystems. Security updates are separate, need no config, and cover every
   ecosystem here but the dashboard: they follow alerts, and the dependency graph

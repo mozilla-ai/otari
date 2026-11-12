@@ -220,6 +220,21 @@ def test_authorize_refuses_rather_than_fails_when_this_deployment_has_no_https_a
     assert response.status_code == 503, response.text
 
 
+def test_authorize_refuses_rather_than_fails_when_this_deployment_has_no_address_of_its_own(
+    client: TestClient, db_session: Session, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no public address configured there is no callback a provider may send a browser to.
+
+    The same refusal as a non-https address.
+    """
+    organization = _acme(db_session)
+    monkeypatch.setattr(test_config, "public_base_url", None)
+
+    response = client.get(f"{API_ROOT}/auth/sso/{organization.slug}/authorize")
+
+    assert response.status_code == 503, response.text
+
+
 def test_authorize_hands_back_a_consent_url_and_sets_the_flow_cookie(client: TestClient, db_session: Session) -> None:
     organization = _acme(db_session)
 
