@@ -81,6 +81,7 @@ def test_the_providers_listing_wins_over_models_dev() -> None:
         ("realtime", "realtime"),
         # Not one of the nine values models.dev filters by, but in its data.
         ("audio", "speech"),
+        ("moderation", "moderation"),
         ("extraction", "other"),
         ("something-new", "other"),
     ],
@@ -180,6 +181,16 @@ def test_a_transcription_model_is_refused_chat_and_sent_to_transcriptions() -> N
     )
     # A moderation model such as Llama Guard is called through chat completions.
     assert not_chat_detail(config, None, ["together:meta-llama/Llama-Guard-4-12B"], "guard") is None
+
+
+def test_a_moderation_model_models_dev_names_is_not_refused_chat() -> None:
+    # gpt-oss-safeguard and Llama Guard are called through chat completions, so
+    # models.dev's ``moderation`` type must not read as ``other``, which is refused.
+    model = {"type": "moderation", "modalities": {"input": ["text"], "output": ["text"]}}
+    models_dev = parse_catalog_v2({"groq": {"models": {"openai/gpt-oss-safeguard-20b": model}}})
+    config = GatewayConfig()
+
+    assert not_chat_detail(config, models_dev, ["groq:openai/gpt-oss-safeguard-20b"], "safeguard") is None
 
 
 @pytest.mark.parametrize(
