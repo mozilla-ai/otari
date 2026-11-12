@@ -3874,15 +3874,34 @@ async def _declare_claims(
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         return _ToolRefusal(domain_error(adapter, exc))
     if admitted.use_sandbox and (missing := _missing_scope(ctx, KeyScope.CODE_EXECUTE, "running code")):
-        return _ToolRefusal(domain_error(adapter, missing))
+        return await _refuse_after_admission(adapter, admitted, missing)
     web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
-        return _ToolRefusal(domain_error(adapter, exc))
+        return await _refuse_after_admission(adapter, admitted, exc)
     if web.declared_any and (missing := _missing_scope(ctx, KeyScope.WEB, "searching or fetching the web")):
-        return _ToolRefusal(domain_error(adapter, missing))
+        return await _refuse_after_admission(adapter, admitted, missing)
     return _DeclaredClaims(code=admitted, web=web)
+
+
+async def _refuse_after_admission(
+    adapter: FormatAdapter[Any, Any], admitted: AdmittedCodeExecution, error: TenancyError
+) -> _ToolRefusal:
+    """Refuse a candidate admission already took a container claim for, giving the claim back first.
+
+    Left held, the claim would keep the caller's own next resume of that container busy until it expires.
+    """
+    if admitted.container_lease is not None and admitted.containers is not None:
+        try:
+            await admitted.containers.release(admitted.container_lease.container_id)
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "could not release container claim %s: %s",
+                admitted.container_lease.container_id,
+                describe_database_error(exc),
+            )
+    return _ToolRefusal(domain_error(adapter, error))
 
 
 def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
