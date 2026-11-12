@@ -5,7 +5,7 @@ efforts it accepts and the default one), which says the model reasons when
 models.dev does not know the model.
 
 Revision ID: a4c8e2f6b1d9
-Revises: d8a491bc02fa
+Revises: d7f1b3c5e9a2
 Create Date: 2026-11-12
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a4c8e2f6b1d9"
-down_revision: str | Sequence[str] | None = "d8a491bc02fa"
+down_revision: str | Sequence[str] | None = "d7f1b3c5e9a2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

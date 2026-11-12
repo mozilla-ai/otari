@@ -646,6 +646,7 @@ SAVEPOINT_BASELINE = (
     "gateway/repositories/tenancy/organization_member_repository.py",
     "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
     "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
+    "gateway/repositories/update_check/update_check_state_repository.py",
     "gateway/repositories/users_repository.py",
 )
 
