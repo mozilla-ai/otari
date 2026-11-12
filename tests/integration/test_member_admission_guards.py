@@ -1,10 +1,12 @@
 """Who an organization may put on its roster without the address's owner agreeing.
 
-Two rules, at the service layer, where the caller can be an ordinary owner rather
-than the deployment operator the API tests act as:
+At the service layer, where the caller can be an ordinary owner rather than the
+deployment operator the API tests act as. Three rules:
 
 - under ``open_signup``, adding a member straight to ``active`` is the operator's
   alone, and everyone else invites;
+- under ``open_signup``, an accept link that was not emailed goes back to the
+  operator alone;
 - an address at a domain another organization has proven is refused, whether
   added, invited or reinvited.
 
@@ -30,6 +32,7 @@ from gateway.models.tenancy import (
     BulkInviteOrganizationMembersRequest,
     InviteOrganizationMemberRequest,
     Organization,
+    User,
 )
 from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
 from gateway.services.tenancy import OrganizationService
@@ -318,22 +321,185 @@ async def test_an_owner_can_reactivate_a_member_who_accepted_an_invitation_under
     assert updated.status == "active"
 
 
-@pytest.mark.parametrize(("config", "shared"), [(_OPEN_SIGNUP_CONFIG, False), (_TEST_CONFIG, True)])
-async def test_an_unsent_accept_link_goes_back_to_an_owner_only_where_signup_is_closed(
-    async_db: AsyncSession, config: GatewayConfig, shared: bool
-) -> None:
+async def _operator(db: AsyncSession, organization: Organization) -> User:
+    operator = await create_member(db, organization, role="owner", full_name="Operator")
+    operator.is_superuser = True
+    await db.flush()
+    return operator
+
+
+async def test_a_deployment_operator_can_add_a_member_directly_under_open_signup(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
-    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    operator = await _operator(async_db, organization)
+
+    added = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).create_active_organization_member_for_user(
+        user=operator,
+        request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+        open_signup=True,
+    )
+
+    assert added.status == "active"
+
+
+async def test_a_deployment_operator_can_invite_an_address_at_a_domain_another_organization_proved(
+    async_db: AsyncSession,
+) -> None:
+    await _prove(async_db, await create_organization(async_db, slug="acme"))
+    operator = await _operator(async_db, await create_organization(async_db, slug="globex"))
 
     invited = await OrganizationService(
         async_db, **membership_writes(async_db)
     ).invite_active_organization_member_for_user(
-        user=owner,
+        user=operator,
+        request=InviteOrganizationMemberRequest(email=ADDRESS),
+        config=_OPEN_SIGNUP_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    assert invited.status == "invited"
+
+
+async def test_a_deployment_operator_can_add_an_address_at_a_domain_another_organization_proved(
+    async_db: AsyncSession,
+) -> None:
+    await _prove(async_db, await create_organization(async_db, slug="acme"))
+    operator = await _operator(async_db, await create_organization(async_db, slug="globex"))
+
+    added = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).create_active_organization_member_for_user(
+        user=operator,
+        request=ActiveOrganizationMemberCreateRequest(email=ADDRESS),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+        open_signup=True,
+    )
+
+    assert added.status == "active"
+
+
+async def test_a_deployment_operator_can_reissue_once_another_organization_proves_the_domain(
+    async_db: AsyncSession,
+) -> None:
+    operator = await _operator(async_db, await create_organization(async_db, slug="globex"))
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    invited = await service.invite_active_organization_member_for_user(
+        user=operator,
+        request=InviteOrganizationMemberRequest(email=ADDRESS),
+        config=_OPEN_SIGNUP_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+    await _prove(async_db, await create_organization(async_db, slug="acme"))
+
+    reissued = await service.reissue_organization_member_invitation_for_user(
+        user=operator,
+        invitation_id=invited.invitation_id,
+        config=_OPEN_SIGNUP_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    assert reissued.status == "invited"
+
+
+async def test_a_deployment_operator_can_activate_an_invited_member_under_open_signup(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    operator = await _operator(async_db, organization)
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    invited = await service.invite_active_organization_member_for_user(
+        user=operator,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=_OPEN_SIGNUP_CONFIG,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    updated = await service.update_active_organization_member_for_user(
+        user=operator,
+        organization_member_id=invited.organization_member_id,
+        request=ActiveOrganizationMemberUpdateRequest(status="active"),
+        sso_enforcement=NO_SSO_ENFORCEMENT,
+        open_signup=True,
+    )
+
+    assert updated.status == "active"
+
+
+async def _caller(db: AsyncSession, organization: Organization, *, operator: bool) -> User:
+    if operator:
+        return await _operator(db, organization)
+    return await create_member(db, organization, role="owner", full_name="Owner")
+
+
+_LINK_CASES = [(_OPEN_SIGNUP_CONFIG, False, False), (_OPEN_SIGNUP_CONFIG, True, True), (_TEST_CONFIG, False, True)]
+
+
+@pytest.mark.parametrize(("config", "operator", "shared"), _LINK_CASES)
+async def test_an_invite_returns_an_unsent_accept_link_only_to_a_caller_who_may_admit_without_acceptance(
+    async_db: AsyncSession, config: GatewayConfig, operator: bool, shared: bool
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    caller = await _caller(async_db, organization, operator=operator)
+
+    invited = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_member_for_user(
+        user=caller,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=config,
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
-    assert invited.mail_sent is False
     assert (invited.accept_link is not None) is shared
+
+
+@pytest.mark.parametrize(("config", "operator", "shared"), _LINK_CASES)
+async def test_a_bulk_invite_returns_unsent_accept_links_only_to_a_caller_who_may_admit_without_acceptance(
+    async_db: AsyncSession, config: GatewayConfig, operator: bool, shared: bool
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    caller = await _caller(async_db, organization, operator=operator)
+
+    result = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_members_for_user(
+        user=caller,
+        request=BulkInviteOrganizationMembersRequest(emails=["ada@example.com", "grace@example.com"]),
+        config=config,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    assert len(result.invited) == 2
+    assert all((invited.accept_link is not None) is shared for invited in result.invited)
+
+
+@pytest.mark.parametrize(("config", "operator", "shared"), _LINK_CASES)
+async def test_a_reissue_returns_an_unsent_accept_link_only_to_a_caller_who_may_admit_without_acceptance(
+    async_db: AsyncSession, config: GatewayConfig, operator: bool, shared: bool
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    caller = await _caller(async_db, organization, operator=operator)
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    invited = await service.invite_active_organization_member_for_user(
+        user=caller,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=config,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    reissued = await service.reissue_organization_member_invitation_for_user(
+        user=caller,
+        invitation_id=invited.invitation_id,
+        config=config,
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+
+    assert (reissued.accept_link is not None) is shared
