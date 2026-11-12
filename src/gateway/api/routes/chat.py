@@ -353,8 +353,8 @@ class _ChatAdapter:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if kwargs.get("stream_options") is None:
-            kwargs["stream_options"] = {"include_usage": True}
+        # The usage chunk is what the stream is billed on, so it is asked for whatever the caller sent.
+        kwargs["stream_options"] = {**(kwargs.get("stream_options") or {}), "include_usage": True}
         return kwargs
 
     async def run_tool_loop(

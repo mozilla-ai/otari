@@ -80,25 +80,26 @@ def test_no_injection_for_non_streaming() -> None:
     assert "stream_options" not in kwargs
 
 
-def test_stream_preserves_disabled_usage() -> None:
+def test_stream_asks_for_usage_when_the_caller_turned_it_off() -> None:
+    """The usage chunk is what a stream is billed on, so the provider is asked for it either way."""
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"include_usage": False}},
     )
-    assert kwargs["stream_options"]["include_usage"] is False
+    assert kwargs["stream_options"]["include_usage"] is True
 
 
-def test_stream_preserves_empty_options() -> None:
+def test_stream_asks_for_usage_on_empty_options() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {}},
     )
-    assert kwargs["stream_options"] == {}
+    assert kwargs["stream_options"] == {"include_usage": True}
 
 
-def test_stream_preserves_custom_options_without_usage() -> None:
+def test_stream_keeps_custom_options_and_asks_for_usage() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"custom_field": "value"}},
     )
-    assert kwargs["stream_options"] == {"custom_field": "value"}
+    assert kwargs["stream_options"] == {"custom_field": "value", "include_usage": True}
 
 
 def test_preserves_client_stream_options() -> None:

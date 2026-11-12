@@ -6146,17 +6146,38 @@ async def _open_unguarded_stream(
 # ---------------------------------------------------------------------------
 
 
+_RESPONSES_OUTPUT_DELTAS = (
+    "output_text.delta",
+    "function_call_arguments.delta",
+    "custom_tool_call_input.delta",
+    "reasoning_text.delta",
+    "reasoning_summary_text.delta",
+)
+# The field of a Messages content_block_delta that carries each kind of output.
+_MESSAGES_DELTA_FIELDS = {"text_delta": "text", "input_json_delta": "partial_json", "thinking_delta": "thinking"}
+
+
 def _streamed_text_chars(chunk: Any) -> int:
-    """Characters of output text a Chat chunk, a Responses event or a Messages event carries."""
+    """Characters of output a Chat chunk, a Responses event or a Messages event carries.
+
+    Text, tool-call arguments and reasoning all count, since the provider bills each as output.
+    """
     if choices := getattr(chunk, "choices", None):
-        text = getattr(getattr(choices[0], "delta", None), "content", None)
-    elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
-        text = getattr(chunk, "delta", None)
+        delta = getattr(choices[0], "delta", None)
+        calls = getattr(delta, "tool_calls", None) or []
+        parts = [
+            getattr(delta, "content", None),
+            getattr(getattr(delta, "reasoning", None), "content", None),
+            *(getattr(getattr(call, "function", None), "arguments", None) for call in calls),
+        ]
+    elif str(getattr(chunk, "type", "")).endswith(_RESPONSES_OUTPUT_DELTAS):
+        parts = [getattr(chunk, "delta", None)]
     elif getattr(chunk, "type", None) == "content_block_delta" and (delta := getattr(chunk, "delta", None)) is not None:
-        text = getattr(delta, "text", None) if getattr(delta, "type", None) == "text_delta" else None
+        field = _MESSAGES_DELTA_FIELDS.get(getattr(delta, "type", None) or "")
+        parts = [getattr(delta, field, None)] if field else []
     else:
         return 0
-    return len(text) if isinstance(text, str) else 0
+    return sum(len(part) for part in parts if isinstance(part, str))
 
 
 def _is_final_usage(chunk: Any) -> bool:
