@@ -205,6 +205,15 @@ def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
     return ", or ".join(ways)
 
 
+def _admits_without_acceptance(*, operator: bool, open_signup: bool) -> bool:
+    """Whether a caller may give an address an active membership that its holder has not accepted.
+
+    Where ``open_signup`` is on, anyone can create an organization, so only a deployment operator may.
+    Holding an unsent accept link counts, because opening the link accepts for the invitee.
+    """
+    return operator or not open_signup
+
+
 def _hash_invitation_token(token: str) -> str:
     """SHA-256 hex of an invitation token; only the hash is ever stored.
 
@@ -1423,7 +1432,7 @@ class OrganizationService:
             organization=organization,
         )
         operator = await self.is_deployment_operator(user)
-        if open_signup and not operator:
+        if not _admits_without_acceptance(operator=operator, open_signup=open_signup):
             raise DirectMemberAddUnavailableError
 
         email = _validated_email(request.email)
@@ -1673,7 +1682,9 @@ class OrganizationService:
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
         # Before the commit, so a failed read cannot leave a committed invitation unmailed.
-        share_link = await self._may_share_accept_links(user, config)
+        share_link = _admits_without_acceptance(
+            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
+        )
 
         try:
             async with self._require_unit_of_work():
@@ -1749,7 +1760,9 @@ class OrganizationService:
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
         # Before the commit, and once, since the emails go out concurrently on one session.
-        share_link = await self._may_share_accept_links(user, config)
+        share_link = _admits_without_acceptance(
+            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
+        )
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
@@ -1908,15 +1921,6 @@ class OrganizationService:
         )
         return invitation, membership, token
 
-    async def _may_share_accept_links(self, inviter: User, config: GatewayConfig) -> bool:
-        """Whether an accept link that was not emailed may be returned to its inviter.
-
-        Opening the link accepts for the invitee, so under ``open_signup``, where anyone
-        can create an organization, handing it to an inviter who is not a deployment
-        operator would let them add an address without its owner, as a direct add would.
-        """
-        return not config.open_signup or await self.is_deployment_operator(inviter)
-
     async def _mail_invitation(
         self,
         *,
@@ -1938,8 +1942,7 @@ class OrganizationService:
         ``mail_limit`` is held back the same way: the link costs the deployment
         nothing, and its sender's standing is what the limit protects.
 
-        Without ``share_link`` (see ``_may_share_accept_links``) the link is never
-        returned, and the invitee accepts from their pending invitations once signed in.
+        Without ``share_link`` the link is never returned, and the invitee accepts from their pending invitations.
         """
         email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
@@ -2538,7 +2541,7 @@ class OrganizationService:
         ``invitation_expiry_hours``. The invitation keeps its id, role and
         workspace assignments; whoever reissues it becomes its inviter. This is
         how a lost link is recovered, including on a deployment with no mail,
-        where the new link is returned to share where ``_may_share_accept_links`` allows.
+        where the new link is returned to share, under ``open_signup`` to a deployment operator only.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -2588,7 +2591,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
-            share_link=operator or not config.open_signup,
+            share_link=_admits_without_acceptance(operator=operator, open_signup=config.open_signup),
         )
 
     async def _update_membership(
@@ -2735,11 +2738,12 @@ class OrganizationService:
             organization_id=organization.id,
         )
         if (
-            open_signup
-            and update_data.get("status") == "active"
+            update_data.get("status") == "active"
             and target.status != "active"
             and not await self._membership_was_accepted(target)
-            and not await self.is_deployment_operator(user)
+            and not _admits_without_acceptance(
+                operator=await self.is_deployment_operator(user), open_signup=open_signup
+            )
         ):
             raise MembershipActivationNeedsAcceptanceError
 
