@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -27,6 +27,7 @@ class ServedModel(Base):
 
     ``settings_reported`` says whether the engine told how it was started.
     Without it a ``None`` parser means unknown rather than switched off.
+    ``reasoning`` says the listing described the model's reasoning options.
     """
 
     __tablename__ = "served_models"
@@ -70,4 +71,5 @@ class ServedModel(Base):
     reasoning_parser: Mapped[str | None] = mapped_column(String(64), default=None)
     tool_call_parser: Mapped[str | None] = mapped_column(String(64), default=None)
     input_modalities: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    reasoning: Mapped[bool] = mapped_column(default=False, server_default=false())
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

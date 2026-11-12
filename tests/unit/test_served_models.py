@@ -1,4 +1,4 @@
-"""Unit tests for what a vLLM or SGLang server says about the models it serves, and how a listing uses it."""
+"""Unit tests for what a vLLM-format or SGLang server says about the models it serves, and how a listing uses it."""
 
 import uuid
 from collections.abc import Callable
@@ -75,14 +75,42 @@ def test_a_vllm_listing_gives_the_served_context_and_the_loaded_model() -> None:
 
 
 def test_a_listing_from_anything_else_says_nothing() -> None:
+    # OpenRouter's and Together's own listings carry ``context_length``, which is not vLLM's field.
     openai = Model.model_validate(
-        {"id": "gpt-4o", "object": "model", "created": 0, "owned_by": "openai", "max_model_len": 128000}
+        {"id": "gpt-4o", "object": "model", "created": 0, "owned_by": "openai", "context_length": 128000}
     )
     # The declared ``models:`` fallback stamps the instance name, which may be ``vllm``, and adds no fields.
     declared = _vllm()
 
     assert facts_from_listing(openai, None) is None
     assert facts_from_listing(declared, None) is None
+
+
+def test_a_server_built_on_vllm_is_read_under_its_own_name() -> None:
+    """TensorFold's listing, as its operator shared it."""
+    tensorfold = Model.model_validate(
+        {
+            "id": "GLM-5.3-Flash",
+            "object": "model",
+            "created": 1794399885,
+            "owned_by": "tensorfold",
+            "context_length": 1048576,
+            "max_model_len": 1048576,
+            "reasoning": {
+                "default_enabled": False,
+                "default_effort": "high",
+                "supported_efforts": ["max", "high", "low"],
+            },
+        }
+    )
+
+    assert facts_from_listing(tensorfold, None) == ServedFacts(engine="vllm", context_window=1048576, reasoning=True)
+
+
+def test_only_a_reasoning_object_says_the_model_reasons() -> None:
+    for value in (None, True, "high", ["high"]):
+        facts = facts_from_listing(_vllm(max_model_len=1, reasoning=value), None)
+        assert facts is not None and not facts.reasoning
 
 
 def test_a_context_length_that_is_not_a_positive_integer_is_left_unknown() -> None:
@@ -251,6 +279,16 @@ def test_sglang_settings_describe_a_model_models_dev_does_not_know() -> None:
     assert capabilities.name is None
     assert capabilities.supported_parameters == ["tools", "tool_choice", "reasoning"]
     assert capabilities.input_modalities == ["text"]
+
+
+def test_a_listing_s_reasoning_describes_a_model_models_dev_does_not_know() -> None:
+    _serve("cairn", "custom", ServedFacts(engine="vllm", context_window=1048576, reasoning=True))
+
+    capabilities = model_capabilities(_config(), MODELS_DEV, "cairn:custom")
+
+    assert capabilities is not None
+    assert capabilities.supported_parameters == ["reasoning"]
+    assert model_limits(_config(), MODELS_DEV, "cairn:custom") == ModelLimits(1048576, None)
 
 
 ACME = uuid.UUID(int=1)

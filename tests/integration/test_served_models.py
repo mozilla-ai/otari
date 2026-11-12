@@ -52,7 +52,7 @@ def _config(postgres_url: str) -> GatewayConfig:
     )
 
 
-def _listed_context(config: GatewayConfig, alist: Any) -> int | None:
+def _listed_model(config: GatewayConfig, alist: Any) -> dict[str, Any]:
     """Start the gateway, list its models with ``alist`` standing in for the server, and stop it."""
     get_model_cache().clear()
     client_gen = build_test_client(config)
@@ -67,8 +67,8 @@ def _listed_context(config: GatewayConfig, alist: Any) -> int | None:
         client_gen.close()
     assert response.status_code == 200
     (model,) = [model for model in response.json()["data"] if "cairn-qwen" in model["id"]]
-    context: int | None = model.get("context_window")
-    return context
+    listed: dict[str, Any] = model
+    return listed
 
 
 def test_the_context_a_vllm_server_reports_is_listed_and_outlives_a_restart(postgres_url: str) -> None:
@@ -84,11 +84,32 @@ def test_the_context_a_vllm_server_reports_is_listed_and_outlives_a_restart(post
         }
     )
 
-    assert _listed_context(config, AsyncMock(return_value=[served])) == 262144
+    assert _listed_model(config, AsyncMock(return_value=[served]))["context_window"] == 262144
 
     # A new start whose live listing fails falls back to the declared model, and
     # still lists the context the server reported, from the database.
-    assert _listed_context(config, AsyncMock(side_effect=ConnectionError("down"))) == 262144
+    assert _listed_model(config, AsyncMock(side_effect=ConnectionError("down")))["context_window"] == 262144
+
+
+def test_a_server_built_on_vllm_reports_its_context_and_reasoning_under_its_own_name(postgres_url: str) -> None:
+    """TensorFold's listing, which models.dev knows nothing about."""
+    config = _config(postgres_url)
+    served = Model.model_validate(
+        {
+            "id": "cairn-qwen",
+            "object": "model",
+            "created": 0,
+            "owned_by": "tensorfold",
+            "context_length": 1048576,
+            "max_model_len": 1048576,
+            "reasoning": {"default_enabled": False, "default_effort": "high", "supported_efforts": ["max", "high"]},
+        }
+    )
+
+    for alist in (AsyncMock(return_value=[served]), AsyncMock(side_effect=ConnectionError("down"))):
+        model = _listed_model(config, alist)
+        assert model["context_window"] == 1048576
+        assert model["supported_parameters"] == ["reasoning"]
 
 
 # --------------------------------------------------------------------------- #
