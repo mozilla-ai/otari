@@ -20,6 +20,7 @@ land and is not reproducible on demand.
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from pydantic import ValidationError
 from gateway import main as gateway_main
 from gateway.container import build_container
 from gateway.core.config import GatewayConfig
+from gateway.core.database import dispose_db
 from gateway.main import (
     _LIFESPAN_WORKERS,
     _REFRESHER_STOP_TIMEOUT_SECONDS,
@@ -171,6 +173,47 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     # indistinguishable from the fix under test.
     async with lifespan(app):
         pass
+
+
+@pytest.mark.asyncio
+async def test_a_cache_reset_that_raises_does_not_stop_the_rest_of_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every other reset still runs, and the engine is still disposed."""
+    reset: list[str] = []
+    disposed: list[bool] = []
+
+    def explodes() -> None:
+        raise RuntimeError("reset blew up")
+
+    first, second, *rest = _LIFESPAN_WORKERS
+    workers = (
+        replace(first, reset=explodes),
+        replace(second, reset=lambda: reset.append(second.name)),
+        *rest,
+    )
+    monkeypatch.setattr(gateway_main, "_LIFESPAN_WORKERS", workers)
+
+    async def recording_dispose_db() -> None:
+        disposed.append(True)
+        await dispose_db()
+
+    monkeypatch.setattr(gateway_main, "dispose_db", recording_dispose_db)
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'lifespan.db'}",
+        master_key="sk-test-master",
+    )
+    app = FastAPI()
+    app.state.config = config
+    app.state.enabled_features = ()
+    app.state.container = build_container(config=config)
+
+    async with _create_lifespan()(app):
+        pass
+
+    assert reset == [second.name]
+    assert disposed == [True]
 
 
 def _recording_refresher(name: str, started: list[str]) -> Callable[..., Coroutine[Any, Any, None]]:

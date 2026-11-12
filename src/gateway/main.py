@@ -1018,6 +1018,16 @@ def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
         logger.warning("%s stopped with an unexpected error", name, exc_info=error)
 
 
+def _reset_worker_cache(worker: _LifespanWorker) -> None:
+    """Clear ``worker``'s cache, logging a failure so it cannot stop the rest of shutdown."""
+    if worker.reset is None:
+        return
+    try:
+        worker.reset()
+    except Exception:  # noqa: BLE001 - the writer, clients and engine still need closing
+        logger.warning("%s cache reset failed at shutdown", worker.name, exc_info=True)
+
+
 async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
     """Cancel all refreshers, then give the group one shared shutdown bound.
 
@@ -1294,8 +1304,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         finally:
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
-                if worker.reset is not None:
-                    worker.reset()
+                _reset_worker_cache(worker)
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
