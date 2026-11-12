@@ -638,7 +638,6 @@ SAVEPOINT_BASELINE = (
     "gateway/repositories/budgets/scoped_budget_repository.py",
     "gateway/repositories/budgets/workspace_budget_default_repository.py",
     "gateway/repositories/catalog/served_model_repository.py",
-    "gateway/repositories/health_checks/health_check_settings_repository.py",
     "gateway/repositories/identity/blocked_email_repository.py",
     "gateway/repositories/identity/oidc_connection_repository.py",
     "gateway/repositories/providers/workspace_hosted_access_repository.py",
@@ -646,7 +645,6 @@ SAVEPOINT_BASELINE = (
     "gateway/repositories/tenancy/organization_member_repository.py",
     "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
     "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
-    "gateway/repositories/update_check/update_check_state_repository.py",
     "gateway/repositories/users_repository.py",
 )
 

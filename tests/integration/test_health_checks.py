@@ -13,7 +13,7 @@ from any_llm.exceptions import ModelNotFoundError
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
@@ -33,7 +33,7 @@ from gateway.services.model_discovery_service import get_model_cache
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.types.models_dev import parse_catalog_v2
 
-from .conftest import build_test_client
+from .conftest import _to_async_url, build_test_client
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECKS = f"{API_ROOT}/health-checks"
@@ -806,3 +806,26 @@ async def test_the_settings_row_survives_a_lost_insert_race(async_db: AsyncSessi
 
     assert row.id == 1
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_of_the_settings_waits_for_a_concurrent_one_and_returns_its_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def first_read(session: AsyncSession) -> datetime:
+        return (await HealthCheckSettingsRepository(session).get_or_create()).updated_at
+
+    try:
+        async with sessions() as first, sessions() as second:
+            first_updated_at = await first_read(first)
+            waiting = asyncio.create_task(first_read(second))
+            # The first read has not committed, so the second cannot finish.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
+            await first.commit()
+            second_updated_at = await waiting
+    finally:
+        await engine.dispose()
+
+    assert second_updated_at == first_updated_at
