@@ -5,6 +5,11 @@ database_url: "sqlite:///./web/e2e/e2e.db"
 host: "127.0.0.1"
 port: 8000
 master_key: "e2e-master-key"
+# Exercise consent against real app metadata and workspace endpoints.
+oauth_apps:
+  thunderbolt:
+    name: "Thunderbolt"
+    redirect_uris: ["http://localhost:5199/oauth/otari"]
 # Keep the smoke focused on the flows under test rather than the pricing gate.
 require_pricing: false
 # Lets a member give their own key a federation rule, which the workload
@@ -19,3 +24,8 @@ sandbox_url: "http://sandbox.invalid"
 # On, so the Contact spec can reach the dialog; every send it makes is
 # intercepted in the browser and never leaves the machine.
 feedback_enabled: true
+# An identity token must name an audience this deployment answers to, so a
+# deployment that admits members' rules refuses to start without one. Nothing
+# here verifies a token, so the value only has to exist.
+federation_audiences:
+  - "http://127.0.0.1:8000"

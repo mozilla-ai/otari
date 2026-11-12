@@ -51,10 +51,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast, get_args
 
 from fastapi import BackgroundTasks
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -77,14 +77,18 @@ from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.guardrails import (
+    DEFAULT_DIRECTIONS,
     GuardrailConfig,
+    GuardrailDirection,
+    GuardrailMode,
     OrganizationGuardrail,
     OrganizationGuardrailDefinition,
     OrganizationGuardrailWorkspace,
+    distinct_directions,
 )
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
-from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.secret_box import (
@@ -150,11 +154,6 @@ class OrganizationGuardrailCreate(BaseModel):
     ``http://`` sidecar) and this row cannot see what it is set to, so an entry
     that fell back to it could not promise the bearer was sent over https. See
     `_require_url_for_credential`.
-
-    ``on`` is not offered. This plane mandates input-direction checks, which is
-    the only direction the request path enforces
-    (`services.guardrails.run_input_guardrails`); an organization that could
-    store an output-direction mandate would be storing one nothing runs.
     """
 
     # A body that would actually be accepted, which the derived one is not: the
@@ -199,9 +198,20 @@ class OrganizationGuardrailCreate(BaseModel):
             "and credential, which name a service"
         ),
     )
-    mode: Literal["block", "monitor"] = Field(
+    mode: GuardrailMode = Field(
         default="monitor",
-        description="block rejects a flagged request with 403; monitor annotates the response and forwards it",
+        description=(
+            "monitor records the verdict and forwards the request; block refuses flagged input or a flagged "
+            "answer with 403 and withholds a flagged tool result or tool call"
+        ),
+    )
+    on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
+        default_factory=lambda: list(DEFAULT_DIRECTIONS),
+        min_length=1,
+        description=(
+            "What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call "
+            "before it runs or reaches the client), output (the model's answer)"
+        ),
     )
     on_unavailable: Literal["block", "monitor"] = Field(
         default="block",
@@ -290,7 +300,10 @@ class OrganizationGuardrailUpdate(BaseModel):
             "an explicit null clears the link; omit the field to leave it as it is"
         ),
     )
-    mode: Literal["block", "monitor"] | SkipJsonSchema[None] = None
+    mode: GuardrailMode | SkipJsonSchema[None] = None
+    on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] | SkipJsonSchema[None] = Field(
+        default=None, min_length=1
+    )
     on_unavailable: Literal["block", "monitor"] | SkipJsonSchema[None] = None
     validate_kwargs: dict[str, Any] | None = Field(
         default=None,
@@ -315,7 +328,7 @@ class OrganizationGuardrailUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("profile", "mode", "on_unavailable", "enabled", "applies_to_all_workspaces")
+            for field in ("profile", "mode", "on", "on_unavailable", "enabled", "applies_to_all_workspaces")
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
@@ -344,6 +357,7 @@ class OrganizationGuardrailPublic(BaseModel):
     # schema a clear rather than the "leave it alone" the fields above it mean.
     definition_id: uuid.UUID | None
     mode: str
+    on: list[GuardrailDirection]
     on_unavailable: str
     validate_kwargs: dict[str, Any] | None = Field(
         description=(
@@ -374,6 +388,7 @@ class OrganizationGuardrailPublic(BaseModel):
             has_credential=guardrail.encrypted_credential is not None,
             definition_id=guardrail.definition_id,
             mode=guardrail.mode,
+            on=_stored_directions(guardrail.on),
             on_unavailable=guardrail.on_unavailable,
             validate_kwargs=redact_secret_like_values(guardrail.validate_kwargs),
             enabled=guardrail.enabled,
@@ -493,6 +508,7 @@ async def resolve_organization_guardrails(
                 profile=row.profile,
                 url=row.url,
                 mode=_stored_mode(row.mode),
+                on=_stored_directions(row.on),
                 on_unavailable=_stored_mode(row.on_unavailable),
                 validate_kwargs=row.validate_kwargs or {},
             ),
@@ -501,6 +517,17 @@ async def resolve_organization_guardrails(
         )
         for row in rows
     ]
+
+
+def _stored_directions(value: object) -> list[GuardrailDirection]:
+    """Narrow a stored ``on``, keeping the directions it names and falling back to the default.
+
+    Its writers are the request schemas, so anything else is a row written
+    around them, and the input is what every mandate read before ``on`` existed.
+    """
+    known = get_args(GuardrailDirection)
+    directions = [d for d in value if d in known] if isinstance(value, list) else []
+    return cast("list[GuardrailDirection]", directions) or list(DEFAULT_DIRECTIONS)
 
 
 def _stored_mode(value: str) -> Literal["block", "monitor"]:
@@ -736,9 +763,10 @@ class OrganizationGuardrailService:
     ) -> OrganizationGuardrailPublic:
         """Mandate a guardrail, encrypting its credential before it is stored.
 
-        With ``growth``, the organization's first guardrail is reported as
-        ``FIRST_GUARDRAIL_CONFIGURED`` for ``user``, derived as the first key is:
-        a read of current state, so deleting every guardrail re-arms it.
+        With ``growth``, the guardrail is reported as ``GUARDRAIL_CREATED``, and
+        the organization's first as ``FIRST_GUARDRAIL_CONFIGURED`` for ``user``
+        too, derived as the first key is: a read of current state, so deleting
+        every guardrail re-arms it.
         """
         organization_id = await self._manageable_organization_id(user)
 
@@ -771,6 +799,7 @@ class OrganizationGuardrailService:
             encrypted_credential=_encrypted(credential) if credential else None,
             definition_id=request.definition_id,
             mode=request.mode,
+            on=list(request.on),
             on_unavailable=request.on_unavailable,
             # Nothing stored to restore from, so this keeps whatever was sent:
             # a ``***`` on a create is a literal the caller typed. Written as
@@ -790,6 +819,14 @@ class OrganizationGuardrailService:
         await self._replace_scope(guardrail.id, workspace_ids)
         await self._commit()
         await self.db.refresh(guardrail)
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.GUARDRAIL_CREATED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=organization_id,
+            )
         if existing == 0 and growth is not None and background_tasks is not None and user.email is not None:
             await growth.record_activation(
                 background_tasks=background_tasks,
@@ -865,6 +902,8 @@ class OrganizationGuardrailService:
             guardrail.profile = request.profile
         if request.mode is not None:
             guardrail.mode = request.mode
+        if request.on is not None:
+            guardrail.on = list(request.on)
         if request.on_unavailable is not None:
             guardrail.on_unavailable = request.on_unavailable
         if "validate_kwargs" in fields:

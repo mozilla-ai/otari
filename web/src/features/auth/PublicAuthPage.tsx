@@ -8,12 +8,15 @@ import type { PublicAuthPath } from "./publicAuthPaths"
 import {
   isPublicAuthPageAvailable,
   oauthCallbackProvider,
+  ssoAuthorizeSlug,
 } from "./publicAuthPaths"
 import { RecoverPasswordPage } from "./RecoverPasswordPage"
 import { ResendVerificationPage } from "./ResendVerificationPage"
 import { ResetPasswordPage } from "./ResetPasswordPage"
 import { SetupPage } from "./SetupPage"
 import { SignupPage } from "./SignupPage"
+import { SsoAuthorizePage } from "./SsoAuthorizePage"
+import { SsoCallbackPage } from "./SsoCallbackPage"
 import { VerifyEmailPage } from "./VerifyEmailPage"
 
 /**
@@ -36,10 +39,17 @@ export function PublicAuthPage({
   path,
   hash,
 }: {
-  path: PublicAuthPath
+  /** Null for a direct link naming an organization's slug rather than one of the fixed pages. */
+  path: PublicAuthPath | null
   hash: string
 }) {
   const { mail_ready, oauth_providers } = useDeployment()
+
+  if (path === null) {
+    const slug = ssoAuthorizeSlug(hash)
+    return slug === null ? null : <SsoAuthorizePage slug={slug} />
+  }
+
   const provider = oauthCallbackProvider(path)
 
   if (
@@ -77,6 +87,8 @@ export function PublicAuthPage({
       // than an assertion, because a `!` here would be a claim the type system
       // cannot check and the fallback renders the same panel either way.
       return <OAuthCallbackPage provider={provider ?? ""} hash={hash} />
+    case "/auth/sso/callback":
+      return <SsoCallbackPage hash={hash} />
   }
 }
 

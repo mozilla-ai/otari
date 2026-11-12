@@ -16,6 +16,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
+from any_llm import LLMProvider
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.api.deps import build_file_service
@@ -372,3 +373,20 @@ async def test_an_upload_cancelled_before_its_commit_takes_its_blob_with_it() ->
         await service.store(_upload(b"a,b\n", workspace_id=None))
 
     assert store.blobs == {}
+
+
+def test_the_service_answers_which_providers_hold_a_copy_of_an_attachment() -> None:
+    """The copy table reached through the service, so a caller learns it before asking for copies."""
+    service = _service(_MemoryStore(), _StubFiles())
+
+    assert service.provider_holds_copies(LLMProvider.ANTHROPIC)
+    assert not service.provider_holds_copies(LLMProvider.OPENAI)
+
+
+def test_the_service_answers_which_providers_take_an_attachment_upload() -> None:
+    """The upload table reached through the service, so a caller learns it before asking for a URI."""
+    service = _service(_MemoryStore(), _StubFiles())
+
+    assert service.uploads_attachments(LLMProvider.GEMINI)
+    assert not service.uploads_attachments(LLMProvider.VERTEXAI)
+    assert not service.uploads_attachments(None)

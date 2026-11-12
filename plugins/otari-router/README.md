@@ -56,7 +56,7 @@ Each spawn leaves a dim transcript line such as
   [subagent router](../../docs/routing.md#subagent-routers) switched on in its
   dashboard, and the recommendation is one decision-model call billed to the
   key above; on otari.ai a managed recommender answers, with nothing to
-  configure. See [Use with Claude Code](../../docs/use-with-claude-code.md#let-otari-choose-a-subagents-model)
+  configure. See the [Claude Code guide](../../docs/claude-code.md#let-otari-choose-a-subagents-model)
   for what the gateway does with the request.
 - A Claude Code build with the mods API, which hooks modules run on.
 

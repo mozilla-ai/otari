@@ -10,6 +10,7 @@ import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import {
   isAcceptInvitationPath,
+  isSsoAuthorizePath,
   type PublicAuthPath,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
@@ -100,6 +101,12 @@ export default function App({
  * one decision no route gets to make, and accepting an invitation is one no
  * *session* gets to require.
  */
+const AppAuthorizationPage = lazy(() =>
+  import("@/features/auth/AppAuthorizationPage").then((module) => ({
+    default: module.AppAuthorizationPage,
+  })),
+)
+
 function DeploymentRoot({ hash }: { hash: string }) {
   const { public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
@@ -135,13 +142,17 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // in an open tab has to tear both down rather than re-render on top of the
   // previous link's result.
   const publicAuth = publicAuthPath(hash)
-  if (publicAuth) {
+  if (publicAuth || isSsoAuthorizePath(hash)) {
     // Signup's heading is "Claim your account" where signup is closed, so its
-    // tab says the same.
+    // tab says the same. A direct link naming an organization's slug carries
+    // no entry of its own in that fixed table, so it falls back to the one
+    // title every sign-in surface here shares.
     const title =
       publicAuth === "/signup" && !open_signup
         ? "Claim account"
-        : PUBLIC_AUTH_TITLES[publicAuth]
+        : publicAuth
+          ? PUBLIC_AUTH_TITLES[publicAuth]
+          : "Sign in"
     return (
       <PublicPageTitle page={title}>
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
@@ -176,6 +187,13 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // Auth gates the router rather than living inside it: signing in is the one
   // decision no route gets to make. The route table and the shell it renders
   // into are in src/routes, wired up in src/app/router.tsx.
+  if (hash.split("?")[0] === "#/oauth/authorize") {
+    return (
+      <Suspense fallback={<PageLoading label="Loading authorization…" />}>
+        <AppAuthorizationPage key={hash} />
+      </Suspense>
+    )
+  }
   return <SignedInRoot />
 }
 
@@ -214,4 +232,5 @@ const PUBLIC_AUTH_TITLES: Record<PublicAuthPath, string> = {
   "/setup": "Set up",
   "/auth/google/callback": "Sign in",
   "/auth/github/callback": "Sign in",
+  "/auth/sso/callback": "Sign in",
 }

@@ -484,10 +484,8 @@ async def test_an_uploaded_image_no_provider_reads_stays_a_document(monkeypatch:
         (".env", {".env"}, ".env-2"),
     ],
 )
-def test_sandbox_path_for(filename: str, taken: set[str], expected: str) -> None:
-    from gateway.services.files import sandbox_path_for
-
-    assert sandbox_path_for(filename, taken) == expected
+def test_named_for_sandbox(filename: str, taken: set[str], expected: str) -> None:
+    assert _stored(filename=filename).named_for_sandbox(taken).filename == expected
 
 
 @pytest.mark.asyncio

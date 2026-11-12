@@ -24,6 +24,7 @@ from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
+from gateway.core.settings.identity import IdentitySettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
@@ -35,6 +36,7 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.tools import CodeExecutor, SandboxProvider
+from gateway.types.models_dev import MODELS_DEV_BASE_URL, normalize_models_dev_base_url
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the
@@ -579,6 +581,7 @@ class GatewayConfig(
     ProviderSettings,
     FeedbackSettings,
     HealthCheckFeatureSettings,
+    IdentitySettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
@@ -1100,6 +1103,14 @@ class GatewayConfig(
             "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
             "cutoff). Set false to disable the outbound call; the gateway then shows the "
             "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
+        ),
+    )
+    models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
+        default=MODELS_DEV_BASE_URL,
+        description=(
+            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "publishes models.dev's catalog plus the models it does not list yet. Set "
+            "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
@@ -1795,13 +1806,22 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse federation without ``OTARI_SECRET_KEY``."""
-        if self.federation_enabled and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
-            setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        """Refuse federation without ``OTARI_SECRET_KEY`` or without an audience of this deployment's own."""
+        if not self.federation_enabled:
+            return
+        setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        if not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
             msg = (
                 f"{setting} is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
                 "POST /api/v1/oauth/token issues. Set OTARI_SECRET_KEY (generate one with "
                 f"`otari gen-secret-key`) or clear {setting}"
+            )
+            raise ValueError(msg)
+        if not self.federation_audiences:
+            msg = (
+                f"{setting} is set, but federation_audiences names no audience; an identity token must name "
+                "an audience this deployment answers to, or a token minted for another service at the same "
+                f"issuer would authenticate here. Set federation_audiences or clear {setting}"
             )
             raise ValueError(msg)
 
@@ -2212,6 +2232,16 @@ class GatewayConfig(
             msg = f"{info.field_name} must carry no username or password"
             raise ValueError(msg)
         return normalized
+
+    @field_validator("models_dev_base_url")
+    @classmethod
+    def _validate_models_dev_base_url(cls, value: str) -> str:
+        """An absolute http(s) origin, with or without a path, that the document paths append to."""
+        try:
+            return normalize_models_dev_base_url(value)
+        except ValueError as exc:
+            msg = f"models_dev_base_url {exc}"
+            raise ValueError(msg) from None
 
     @field_validator("ui_base_url")
     @classmethod

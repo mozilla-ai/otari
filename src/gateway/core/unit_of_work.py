@@ -13,8 +13,18 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session, describe_database_error
+from gateway.core.database import (
+    DATABASE_ERRORS,
+    create_log_session,
+    create_session,
+    describe_database_error,
+    release_session,
+)
 from gateway.log_config import logger
+
+
+class InsideUnitOfWorkError(RuntimeError):
+    """The connection was asked to go back to the pool while a block of its Unit of Work was open."""
 
 
 class OutsideUnitOfWorkError(RuntimeError):
@@ -108,6 +118,24 @@ class UnitOfWork:
         except DATABASE_ERRORS as exc:
             logger.warning("Could not roll back a unit of work: %s", describe_database_error(exc))
 
+    async def release(self) -> bool:
+        """Commit and return the connection to the pool, for a slow outbound call about to run.
+
+        Returns whether the staged work was committed.
+        The world is free to move while the call that follows is out,
+        so a step must re-read afterward anything it read before calling this.
+
+        NOTE: A release that fails rolls the staged work back, so a caller that needs what it
+        staged to be durable must check the answer.
+
+        Raises:
+            InsideUnitOfWorkError: a block is currently open.
+        """
+        if self._depth > 0:
+            msg = "The unit of work's connection cannot be released while a block is open"
+            raise InsideUnitOfWorkError(msg)
+        return await release_session(self._session)
+
 
 def session_for(uow: UnitOfWork) -> AsyncSession:
     """Give a repository the session of the Unit of Work's open block.
@@ -152,6 +180,7 @@ async def create_unit_of_work_with_session() -> AsyncIterator[tuple[AsyncSession
 
 
 __all__ = [
+    "InsideUnitOfWorkError",
     "OutsideUnitOfWorkError",
     "UnitOfWork",
     "UnitOfWorkRolledBackError",

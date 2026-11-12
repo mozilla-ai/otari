@@ -19,15 +19,17 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 
 import math
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import MISSING, dataclass, fields, is_dataclass
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 __all__ = [
     "CATALOG_FORMAT",
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
+    "MODELS_DEV_BASE_URL",
     "MODELS_DEV_SOURCES",
     "MODELS_DEV_UNITS",
     "RATE_FIELDS",
@@ -50,6 +52,7 @@ __all__ = [
     "catalog_document",
     "models_dev_provider_id",
     "models_dev_provider_ids",
+    "normalize_models_dev_base_url",
     "parse_catalog",
     "parse_catalog_v2",
     "read_catalog_document",
@@ -331,6 +334,17 @@ class ModelsDevProvider:
     name: str | None
     doc: str | None
     models: Mapping[str, ModelsDevModel]
+    _folded: Mapping[str, ModelsDevModel] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        folded: dict[str, ModelsDevModel] = {}
+        for key, model in self.models.items():
+            folded.setdefault(key.casefold(), model)
+        object.__setattr__(self, "_folded", folded)
+
+    def model_in_any_case(self, name: str) -> ModelsDevModel | None:
+        """The first model, in document order, whose key differs from ``name`` only in case."""
+        return self._folded.get(name.casefold())
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,11 +417,20 @@ class ModelsDevCatalog:
         return next((self.providers[key] for key in ids if key in self.providers), None)
 
     def model_for(self, provider_type: str, model_id: str) -> ModelsDevModel | None:
-        """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one."""
+        """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one.
+
+        An exact id wins; failing one, an id that differs only in case matches,
+        because models.dev lowercases some providers' ids (OVHcloud's) that the
+        provider itself lists in mixed case.
+        """
         names = (model_id, model_id.removeprefix(LISTING_PREFIX))
-        for key in models_dev_provider_ids(provider_type):
-            models = self.providers[key].models if key in self.providers else {}
+        providers = [self.providers[key] for key in models_dev_provider_ids(provider_type) if key in self.providers]
+        for provider in providers:
+            models = provider.models
             if (model := next((models[name] for name in names if name in models), None)) is not None:
+                return model
+        for provider in providers:
+            if (model := next(filter(None, map(provider.model_in_any_case, names)), None)) is not None:
                 return model
         return None
 
@@ -542,7 +565,19 @@ class _Reader:
             last_updated=self.text(raw, "last_updated", path),
             cost=self.cost(raw, path),
             type=None,
+            pricing=self.stored_pricing(raw, path),
         )
+
+    def stored_pricing(self, raw: dict[str, Any], path: str) -> ModelsDevPricing | None:
+        """The v2 price block a stored snapshot keeps beside its v1 fields, in :func:`catalog_document`'s encoding."""
+        value = raw.get("pricing")
+        if value is None:
+            return None
+        try:
+            return _stored_pricing(value)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            self.note(f"{path}.pricing", "a stored price block")
+            return None
 
     def model_v2(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:
         modalities = self.mapping(raw, "modalities", path) or {}
@@ -1089,21 +1124,52 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
 
+# Where the documents are fetched from unless ``GatewayConfig.models_dev_base_url``
+# says otherwise: Mozilla.ai's fork of models.dev, which publishes models.dev's
+# catalog plus the models it does not list yet (github.com/mozilla-ai/models.dev).
+MODELS_DEV_BASE_URL = "https://mozilla-ai.github.io/models.dev"
+
+
+def normalize_models_dev_base_url(value: str) -> str:
+    """``value`` as a base the document paths append to, or ``ValueError`` saying what is wrong with it.
+
+    The message never repeats the value: the part that is wrong may be a
+    credential, and the config error and the snapshot script both print it.
+    A query or fragment is refused by its delimiter, as an empty one would
+    still put the document path after it.
+    """
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or "?" in normalized or "#" in normalized:
+        raise ValueError("must be an absolute http(s) URL without a query or fragment")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("must carry no username or password")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class ModelsDevSource:
-    """One document models.dev publishes, where it lives and the reader for it."""
+    """One document models.dev publishes, its path under the base URL and the reader for it."""
 
     name: str
-    url: str
+    path: str
     parse: Callable[[object], ModelsDevCatalog]
+
+    def url_for(self, base_url: str) -> str:
+        return base_url.rstrip("/") + self.path
+
+    @property
+    def url(self) -> str:
+        """The document's URL under the default base."""
+        return self.url_for(MODELS_DEV_BASE_URL)
 
 
 # The documents in the order the gateway tries them: v2, then v1 when v2 fails.
-# v2 still lives under ``/experimental/``; when it moves, its URL here is the one
+# v2 still lives under ``/experimental/``; when it moves, its path here is the one
 # change. Without ``?type=all``, models.dev leaves out the decision models.
 MODELS_DEV_SOURCES = (
-    ModelsDevSource("v2", "https://models.dev/experimental/v2.0/api.json?type=all", parse_catalog_v2),
-    ModelsDevSource("v1", "https://models.dev/api.json", parse_catalog),
+    ModelsDevSource("v2", "/experimental/v2.0/api.json?type=all", parse_catalog_v2),
+    ModelsDevSource("v1", "/api.json", parse_catalog),
 )
 
 
@@ -1135,14 +1201,19 @@ def _model_document(key: str, model: ModelsDevModel) -> dict[str, Any]:
         document["cost"] = cost
     if model.context_window is not None:
         document["limit"] = {"context": model.context_window}
+    if model.pricing is not None:
+        document["pricing"] = _encoded(model.pricing)
     return document
 
 
 def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
     """The catalog as a stored price snapshot: each provider's id, name and doc, and each model's price fields.
 
-    The snapshot keeps the document's own shape, so :func:`parse_catalog` reads
-    it back, and a stored or bundled snapshot is read like a live download.
+    The snapshot keeps the v1 document's shape, so :func:`parse_catalog` reads
+    it back, and a stored or bundled snapshot is read like a live download. The
+    v1 shape prices tokens only, so a model's v2 price block travels beside it
+    under ``pricing``: that is where a per-second, per-image or per-character
+    rate lives, and a snapshot without it would price no media model.
     """
     document: dict[str, Any] = {}
     for key, provider in catalog.providers.items():
@@ -1156,10 +1227,12 @@ def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
 
 
 def _encoded(value: object) -> object:
-    """A catalog value as JSON: a dataclass without the fields left at their default, a tuple as a list."""
+    """A catalog value as JSON: a dataclass without its derived or default fields, a tuple as a list."""
     if is_dataclass(value) and not isinstance(value, type):
         document: dict[str, object] = {}
         for field in fields(value):
+            if not field.init:
+                continue
             item = getattr(value, field.name)
             if field.default is MISSING or item != field.default:
                 document[field.name] = _encoded(item)

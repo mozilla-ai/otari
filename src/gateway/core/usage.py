@@ -115,6 +115,7 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             reasoning_tokens=reasoning_tokens,
+            provider_web_searches=provider_web_searches_of(usage),
             service_tier=service_tier if service_tier is not None else service_tier_of(usage),
             inference_geo=usage.inference_geo,
         )
@@ -178,8 +179,16 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
 
 
 def provider_web_searches_of(usage: CompletionUsage) -> int:
-    """Return the searches the provider ran itself, which only a :class:`GatewayUsage` carries."""
-    return usage.provider_web_searches if isinstance(usage, GatewayUsage) else 0
+    """Return the searches the provider ran itself.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to ``server_tool_use.web_search_requests``,
+    which any-llm fills for Gemini's Google Search grounding).
+    """
+    if isinstance(usage, GatewayUsage):
+        return usage.provider_web_searches
+    server_tool_use = usage.server_tool_use
+    return (server_tool_use.web_search_requests or 0) if server_tool_use is not None else 0
 
 
 def service_tier_of(usage: CompletionUsage) -> str | None:

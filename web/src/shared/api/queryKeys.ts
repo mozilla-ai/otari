@@ -12,6 +12,8 @@
  * are deliberately kept apart; read them before adding one.
  */
 
+// Registered third-party apps, separate from dashboard sign-in providers.
+export const OAUTH_APPS = "oauth-apps"
 export const MODELS = "models"
 // The same selectors as MODELS, folded by model and priced for the viewer. Its
 // own key so the two reads can be cached apart, and every pricing mutation
@@ -145,6 +147,13 @@ export const ORGANIZATION_PROVIDER_AVAILABLE_MODELS =
 // The organization's email-domain claims. Its own key for the same reason:
 // one page reads it, and claiming a domain has no bearing on anything else.
 export const ORGANIZATION_DOMAINS = "organization-domains"
+// The organization's own bring-your-own OIDC connection. Its own key: one page
+// reads it, and saving, testing or removing it has no bearing on anything else.
+export const ORGANIZATION_SSO = "organization-sso"
+// Who enabling that connection's enforcement would affect. A member linking
+// changes this count, so it invalidates independently of the connection
+// itself.
+export const ORGANIZATION_SSO_PREFLIGHT = "organization-sso-preflight"
 export const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make

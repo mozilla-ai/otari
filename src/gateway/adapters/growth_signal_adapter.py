@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
+from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 
 
 class NullGrowthSignalAdapter(GrowthSignalPort):
@@ -56,6 +56,18 @@ class NullGrowthSignalAdapter(GrowthSignalPort):
         event: GrowthActivationEvent,
         user_id: uuid.UUID,
         email: str,
+    ) -> None:
+        return None
+
+    async def record_action(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        action: GrowthAction,
+        user_id: uuid.UUID,
+        email: str | None,
+        organization_id: uuid.UUID,
+        details: Mapping[str, str] | None = None,
     ) -> None:
         return None
 

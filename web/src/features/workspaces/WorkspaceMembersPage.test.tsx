@@ -226,6 +226,30 @@ describe("WorkspaceMembersPage", () => {
     expect(dialog.queryByRole("link")).toBeNull()
   })
 
+  it("marks an SSO-admitted colleague for a reader who cannot reach the organization page", async () => {
+    // This card is the only members list that reader gets, so the mark has to
+    // reach it too or the blank address is unexplained for them.
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "22222222-0000-0000-0000-000000000009",
+          user_id: "99999999-0000-0000-0000-000000000009",
+          full_name: "Ada Lovelace",
+          email: null,
+          is_sso_account: true,
+        }),
+      ],
+    })
+    await renderPage()
+
+    const row = (await screen.findAllByRole("row")).find(
+      (candidate) => within(candidate).queryByText("Ada Lovelace") !== null,
+    ) as HTMLElement
+    expect(within(row).getByText("SSO")).toBeInTheDocument()
+  })
+
   it("reports a roster that failed instead of calling the workspace full", async () => {
     // An empty candidate list is only "everyone is already here" once the
     // roster has answered; a failed one has to say so instead.

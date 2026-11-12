@@ -119,10 +119,11 @@ describe("the base build's dependencies", () => {
 })
 
 describe("the event catalog", () => {
-  it("carries the fourteen names the platform already records under", () => {
+  it("carries the names a superset build reports under", () => {
     // Pinned as strings, not just as keys: a superset build reports into the
     // analytics workspace otari-ai already reports into, so renaming one here
-    // splits its funnel in two rather than failing anything.
+    // splits its funnel in two rather than failing anything. The first fourteen
+    // are the platform's own; the two after them are new names.
     expect(TELEMETRY_EVENTS).toEqual({
       SIGNUP_STARTED: "Signup Started",
       SIGNUP_SUCCESS: "Signup Success",
@@ -137,6 +138,8 @@ describe("the event catalog", () => {
       TAB_CHANGED: "Tab Changed",
       ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
       ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
+      USE_MODEL_CLICKED: "Use This Model Clicked",
+      SESSION_OPENED: "Session Opened",
       CHECKOUT_CANCELLED: "Checkout Cancelled",
     })
   })
@@ -181,11 +184,7 @@ describe("the wiring behind the catalog", () => {
    * a contract rather than removing a leftover. `events.ts` says why each of
    * these is here.
    */
-  const NOT_FIRED_HERE = [
-    "ACTIVATION_GUIDE_SHOWN",
-    "ACTIVATION_GUIDE_DISMISSED",
-    "CHECKOUT_CANCELLED",
-  ]
+  const NOT_FIRED_HERE = ["CHECKOUT_CANCELLED"]
 
   it.each(
     Object.keys(TELEMETRY_EVENTS).filter(

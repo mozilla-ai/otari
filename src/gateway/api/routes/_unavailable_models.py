@@ -1,9 +1,10 @@
 """Switch off a hosted model the moment its provider refuses to serve it, beside the request that met the refusal.
 
-A provider can stop serving a model it still lists (Together moved models to
-dedicated endpoints only, and its listing does not say so), and every request
-for it then fails. The health checks service switches the model off and tells
-the operators; this starts it without holding up the answer.
+A provider can stop serving a model it still lists (Together moves models to
+dedicated endpoints only, which discovery sees only where Together's
+serverless listing answers), and every request for it then fails. The health
+checks service switches the model off and tells the operators; this starts it
+without holding up the answer.
 """
 
 import asyncio

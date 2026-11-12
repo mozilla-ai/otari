@@ -1,10 +1,6 @@
----
-icon: list-tree
----
-
 # Sessions
 
-A session is one run of an agent: its turns, the model calls and the tools it
+A session is one run of an agent: its turns, the model requests and the tools it
 ran, with how long each took and what it cost. Otari records one for the requests
 it serves, so you can see what an agent did, not only what one call did.
 
@@ -32,7 +28,7 @@ off or change how long sessions are kept.
 
 - **Claude Code and Codex** are recognized automatically when they route through
   Otari. Claude Code can also send its sessions without routing its model
-  traffic; see [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
+  traffic; see [Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 - **Your own agent** sends the same `Otari-Conversation-Id` header on every
   request of one run, tool-result follow-ups included. Give each run, and each
   subagent, its own id. A request without the header is a session of its own.

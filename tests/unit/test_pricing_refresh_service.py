@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
+from gateway.core.config import GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 from gateway.services.model_catalog_service import ModelsDevRefusedError
 from gateway.services.pricing import (
@@ -132,6 +133,90 @@ async def test_the_preview_reports_changed_rates_against_the_active_snapshot(
     assert pending is not None and pending.changed_count == 1
     assert await refresh.reject_price_refresh(session) is True
     assert await refresh.preview_pending_refresh(session) is None
+
+
+def _clip(price: float) -> dict[str, Any]:
+    """A video model priced per second of output, which only the v2 price block can state."""
+    return {"id": "clip", "pricing": {"modalities": {"video": {"output": {"price": price, "unit": "second"}}}}}
+
+
+def _painter(image_price: float) -> dict[str, Any]:
+    """A chat model with full text rates that also prices an image, per image, in its block."""
+    image = {"output": {"price": image_price, "unit": "image"}}
+    return {"id": "painter", "cost": {"input": 1, "output": 2}, "pricing": {"modalities": {"image": image}}}
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_image_rate_beside_unchanged_text_rates(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The rate columns are the same, so only the block tells the two prices apart."""
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.04)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "painter")
+    assert entry is not None and entry.priced and entry.slot_columns is None
+
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.05)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:painter", "changed")]
+    assert not preview.changes_nothing
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_per_unit_price(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    """A per-second rate has no v1 field; the stored snapshot must still carry it and compare it."""
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.02)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "clip")
+    assert entry is not None and entry.priced and entry.slot_columns is not None
+    assert entry.slot_columns.unit == "second"
+
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.03)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:clip", "changed")]
+
+
+@pytest.mark.asyncio
+async def test_the_preview_stores_the_catalog_of_facts_it_downloaded(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The kinds and details the dashboard shows come from the stored catalog, so a preview refreshes it too."""
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    row = await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE)
+    assert row is not None
+    assert set(json.loads(row.snapshot)["providers"]["test"]["models"]) == {"model"}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_without_metadata_stores_no_catalog(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=False))
+
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_a_database_error_storing_the_catalog_is_logged_without_it_and_the_preview_goes_on(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def fail(_session: AsyncSession, _catalog: ModelsDevCatalog) -> bool:
+        raise TimeoutError("the-catalog-payload")
+
+    monkeypatch.setattr(refresh, "store_models_dev_catalog", fail)
+    preview = await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    assert preview.added_count == 1
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert "Unable to store the models.dev catalog" in caplog.text
+    assert "the-catalog-payload" not in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 @pytest.mark.asyncio

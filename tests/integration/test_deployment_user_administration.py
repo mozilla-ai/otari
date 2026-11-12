@@ -17,11 +17,14 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.api.deps import get_deployment_user_service
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
@@ -39,7 +42,6 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 
@@ -532,7 +534,7 @@ async def _mark_bootstrap(db: AsyncSession, user: User) -> None:
 async def test_a_non_operator_is_told_the_surface_does_not_exist(async_db: AsyncSession) -> None:
     """404 and not 403: the dashboard's `apiFetch` drops the session on a 403."""
     outsider, _ = await _identity(async_db, full_name="Ada Lovelace")
-    service = DeploymentUserService(async_db)
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
 
     assert await service.has_administration_access(outsider) is False
     with pytest.raises(DeploymentAdministrationUnavailableError):
@@ -552,7 +554,7 @@ async def test_the_bootstrap_marker_admits_an_operator_whose_flag_was_cleared(
     """The arm that keeps a deployment from being locked out of its own administration."""
     operator, _ = await _identity(async_db, full_name="Operator")
     await _mark_bootstrap(async_db, operator)
-    service = DeploymentUserService(async_db)
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
 
     assert operator.is_superuser is False
     assert await service.has_administration_access(operator) is True
@@ -563,7 +565,9 @@ async def test_the_bootstrap_marker_admits_an_operator_whose_flag_was_cleared(
 async def test_a_superuser_reaches_the_surface_with_no_marker_at_all(async_db: AsyncSession) -> None:
     superuser, _ = await _identity(async_db, full_name="Root", is_superuser=True)
 
-    assert await DeploymentUserService(async_db).has_administration_access(superuser) is True
+    assert (
+        await get_deployment_user_service(async_db, UnitOfWork(async_db)).has_administration_access(superuser) is True
+    )
 
 
 @pytest.mark.asyncio
@@ -573,7 +577,7 @@ async def test_another_operator_cannot_deactivate_or_demote_the_bootstrap_identi
     anchor, _ = await _identity(async_db, full_name="Operator")
     await _mark_bootstrap(async_db, anchor)
     second, _ = await _identity(async_db, full_name="Root", is_superuser=True)
-    service = DeploymentUserService(async_db)
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
 
     for request in (
         DeploymentUserUpdateRequest(is_active=False),
@@ -597,7 +601,7 @@ async def test_the_service_refuses_the_two_shapes_the_routes_also_refuse(
     async_db: AsyncSession,
 ) -> None:
     operator, _ = await _identity(async_db, full_name="Root", is_superuser=True)
-    service = DeploymentUserService(async_db)
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
 
     with pytest.raises(EmptyDeploymentUserUpdateError):
         await service.update_user(
@@ -615,5 +619,30 @@ async def test_the_service_refuses_the_two_shapes_the_routes_also_refuse(
         await service.update_user(
             actor=operator,
             user_id=uuid.uuid4(),
+            request=DeploymentUserUpdateRequest(is_active=False),
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_identity_cached_in_the_session_is_not_found(
+    async_db: AsyncSession, db_session_factory: Callable[[], Session]
+) -> None:
+    """A concurrently deleted account must return not-found rather than fail while refreshing it."""
+    operator, organization = await _identity(async_db, full_name="Root", is_superuser=True)
+    target = User(full_name="Removed account", active_organization_id=organization.id)
+    async_db.add(target)
+    await async_db.commit()
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
+
+    with db_session_factory() as other:
+        other.execute(delete(User).where(col(User.id) == target.id))
+        other.commit()
+
+    # The repository's ordinary primary-key lookup can still return the stale identity-map entry.
+    assert await service.users.get(target.id) is target
+    with pytest.raises(DeploymentUserNotFoundError):
+        await service.update_user(
+            actor=operator,
+            user_id=target.id,
             request=DeploymentUserUpdateRequest(is_active=False),
         )

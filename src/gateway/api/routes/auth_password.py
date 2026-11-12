@@ -50,7 +50,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_db, verify_master_key
 from gateway.exceptions.identity_exceptions import CurrentPasswordRequiredError, EmailChangeNotSupportedError
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
@@ -86,8 +86,8 @@ class SetPasswordRequest(BaseModel):
     The example is the first-boot claim, because that is the call an operator
     makes first and the one whose required fields are not obvious from the
     schema: ``email`` is optional here in general and *required* when the
-    identity has no address yet. Without it the generated Postman body carries
-    only ``new_password``, which is the one shape that cannot complete the flow
+    identity has no address yet. Without it a request body built from the spec
+    carries only ``new_password``, which is the one shape that cannot complete the flow
     the docs walk through.
     """
 
@@ -157,6 +157,7 @@ async def set_dashboard_password(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     master_key: Annotated[str | None, Depends(verify_master_key)],
+    connections: OIDCConnectionServiceDep,
 ) -> PasswordResponse:
     """Set or change the password the caller signs in to the dashboard with.
 
@@ -225,6 +226,7 @@ async def set_dashboard_password(
             identity,
             current_password=body.current_password,
             new_password=body.new_password,
+            sso_enforcement=connections,
             keep_session_token_hash=keep_session,
         )
     else:
@@ -232,6 +234,7 @@ async def set_dashboard_password(
             db,
             identity,
             new_password=body.new_password,
+            sso_enforcement=connections,
             email=body.email,
             keep_session_token_hash=keep_session,
         )

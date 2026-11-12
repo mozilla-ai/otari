@@ -27,8 +27,10 @@ from gateway.services.model_catalog_service import (
     ModelsDevRefusedError,
     background_catalog_enabled,
     catalog_refresh_interval,
+    catalog_source_changed,
     clear_catalog_cache,
     fetch_models_dev_document,
+    models_dev_base_url,
     serve_catalog,
 )
 from gateway.services.pricing import (
@@ -89,6 +91,7 @@ def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
 class _PendingSnapshot:
     index: ModelsDevPriceIndex
     raw_snapshot: str
+    catalog: ModelsDevCatalog
 
 
 class PricingRefreshError(Exception):
@@ -128,10 +131,16 @@ class PricingRefreshPreview:
 
 
 def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]]:
-    """Each priced model's rates, keyed by its models.dev provider and model ids."""
+    """Each priced model's rates and its price block, keyed by its models.dev provider and model ids.
+
+    The block is compared whole: an image or web search price beside a text
+    price moves no rate column, and is a price change all the same.
+    """
 
     return {
-        f"{entry.provider_id}:{entry.model_id}": entry.price_signature() for entry in index.entries() if entry.priced
+        f"{entry.provider_id}:{entry.model_id}": (entry.price_signature(), entry.pricing)
+        for entry in index.entries()
+        if entry.priced
     }
 
 
@@ -202,7 +211,7 @@ def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
     index = _parse_snapshot(raw_snapshot)
     if not any(entry.priced for entry in index.entries()):
         raise PricingRefreshError("The models.dev data prices no models")
-    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot)
+    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot, catalog=catalog)
 
 
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
@@ -223,7 +232,9 @@ async def prepare_price_refresh(
     """Fetch and persist a new snapshot until an operator confirms it.
 
     Works whether or not ``models_dev_metadata`` is on; ``config`` only decides
-    whether the download also warms the metadata cache.
+    whether the download also becomes the catalog of model facts every worker
+    serves, so the kinds and details the dashboard shows are as new as the
+    prices it previews. Storing it never fails the preview.
     """
 
     try:
@@ -236,6 +247,15 @@ async def prepare_price_refresh(
 
     fetched_at = datetime.now(UTC)
     preview = _build_preview(current_index(), latest.index, fetched_at, latest.raw_snapshot)
+    if config is not None and config.models_dev_metadata:
+        try:
+            await store_models_dev_catalog(session, latest.catalog)
+        except DATABASE_ERRORS as exc:
+            await session.rollback()
+            logger.warning(
+                "Unable to store the models.dev catalog fetched for the price refresh (%s)",
+                describe_database_error(exc),
+            )
     pending_row = await session.get(PricingSnapshot, MODELS_DEV_PENDING_SOURCE)
     if pending_row is None:
         session.add(PricingSnapshot(source=MODELS_DEV_PENDING_SOURCE, snapshot=latest.raw_snapshot))
@@ -677,22 +697,27 @@ def reset_catalog_refresh_state() -> None:
     _catalog_applied_at = None
 
 
-def _catalog_text(catalog: ModelsDevCatalog) -> str:
-    return json.dumps(catalog_document(catalog), separators=(",", ":"), ensure_ascii=False)
+def _catalog_text(catalog: ModelsDevCatalog, source: str) -> str:
+    return json.dumps(catalog_document(catalog, source=source), separators=(",", ":"), ensure_ascii=False)
 
 
-def _read_stored_catalog(raw: str) -> ModelsDevCatalog:
-    return read_catalog_document(json.loads(raw))
+def _read_stored_catalog(raw: str) -> tuple[ModelsDevCatalog, str | None]:
+    """The stored catalog and the base URL it was downloaded from, None for a row stored before that was recorded."""
+    document = json.loads(raw)
+    meta = document.get("_meta") if isinstance(document, dict) else None
+    source = meta.get("source") if isinstance(meta, dict) else None
+    return read_catalog_document(document), source if isinstance(source, str) else None
 
 
 async def store_models_dev_catalog(session: AsyncSession, catalog: ModelsDevCatalog) -> bool:
     """Store a downloaded catalog for every worker to serve; false when the stored one is the same.
 
     An unchanged catalog is not written again, so the other workers read the
-    row only when it has changed.
+    row only when it has changed. The row records the base URL it came from,
+    so a worker started against another one knows to replace it.
     """
     global _catalog_applied_at
-    raw = await asyncio.to_thread(_catalog_text, catalog)
+    raw = await asyncio.to_thread(_catalog_text, catalog, models_dev_base_url())
     row = await session.get(PricingSnapshot, MODELS_DEV_CATALOG_SOURCE)
     if row is not None and row.snapshot == raw:
         return False
@@ -731,11 +756,11 @@ async def load_stored_models_dev_catalog(session: AsyncSession) -> bool:
     ).scalar_one()
     _catalog_applied_at = updated_at
     try:
-        catalog = await asyncio.to_thread(_read_stored_catalog, raw)
+        catalog, source = await asyncio.to_thread(_read_stored_catalog, raw)
     except ValueError as exc:
         logger.warning("Ignoring the stored models.dev catalog: %s", exc)
         return False
-    serve_catalog(catalog, updated_at)
+    serve_catalog(catalog, updated_at, source)
     return True
 
 
@@ -755,9 +780,12 @@ async def download_models_dev_catalog_if_due(config: GatewayConfig) -> bool:
 
     One worker in the deployment downloads per interval. A failed download is
     logged, keeps what is stored, and is tried again ``CATALOG_RETRY_SECONDS``
-    later.
+    later. A stored catalog from another base URL than the configured one is
+    replaced at that retry cadence too: the claim its download made was on the
+    old source, so it does not hold the new one off for the interval.
     """
     interval = catalog_refresh_interval(config)
+    due_within = CATALOG_RETRY_SECONDS if catalog_source_changed() else interval
     async with create_session() as session:
         # Read first, so a tick with no download due writes nothing.
         claimed_at = (
@@ -766,10 +794,10 @@ async def download_models_dev_catalog_if_due(config: GatewayConfig) -> bool:
             )
         ).scalar_one_or_none()
         if claimed_at is not None and datetime.now(UTC) - normalize_effective_at(claimed_at) < timedelta(
-            seconds=interval
+            seconds=due_within
         ):
             return False
-        if not await claim_poll_tick(session, interval, MODELS_DEV_CATALOG_CLAIM_SOURCE):
+        if not await claim_poll_tick(session, due_within, MODELS_DEV_CATALOG_CLAIM_SOURCE):
             return False
     try:
         catalog = await fetch_models_dev_document(reuse_within=interval / 2, fill_cache=True)
@@ -777,7 +805,7 @@ async def download_models_dev_catalog_if_due(config: GatewayConfig) -> bool:
         level = logging.ERROR if isinstance(exc, ModelsDevRefusedError) else logging.WARNING
         logger.log(level, "%s; keeping the stored copy", exc)
         async with create_session() as session:
-            await _retry_catalog_download_soon(session, interval)
+            await _retry_catalog_download_soon(session, due_within)
         return False
     async with create_session() as session:
         await store_models_dev_catalog(session, catalog)

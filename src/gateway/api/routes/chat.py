@@ -26,7 +26,8 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
+from gateway.api.routes._guardrail_targets import chat_targets
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -52,7 +53,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -315,6 +316,7 @@ class _ChatAdapter:
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
             cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
+            provider_web_searches=provider_web_searches_of(chunk.usage),
             service_tier=chunk.service_tier,
             inference_geo=chunk.usage.inference_geo,
         )
@@ -645,7 +647,7 @@ async def run_chat_completion(
         response=response,
         declared=DeclaredTools(
             guardrails=request.guardrails,
-            guardrail_text=latest_user_text(request.messages),
+            guardrail_targets=lambda: chat_targets(request.messages),
             tools=request.tools,
             mcp_servers=request.mcp_servers,
             mcp_server_ids=request.mcp_server_ids,

@@ -738,7 +738,7 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=None,
             mcp_server_ids=[stored.id],
@@ -770,7 +770,7 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=[McpServerConfig(name="inline", url=OTHER_PUBLIC_URL)],
             mcp_server_ids=[stored.id],
@@ -803,7 +803,7 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=[McpServerConfig(name="inline", url=PUBLIC_URL)],
             mcp_server_ids=None,
@@ -860,7 +860,7 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[stored.id],
@@ -890,7 +890,7 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[uuid.uuid4()],
@@ -918,7 +918,7 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[uuid.uuid4()],
@@ -1511,7 +1511,7 @@ async def _admit(
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=inline,
             mcp_server_ids=ids,

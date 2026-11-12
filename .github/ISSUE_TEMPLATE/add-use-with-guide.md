@@ -1,16 +1,16 @@
 ---
-name: "Docs: add a use-with guide"
+name: "Docs: add an integration guide"
 about: "Write an integration guide for a coding tool or client, following the Claude Code and opencode guides"
-title: "docs: add use-with guide for <Tool>"
+title: "docs: add integration guide for <Tool>"
 labels: ["good first issue", "documentation"]
 ---
 
 ## What
 
-Add a guide at `docs/use-with-<tool>.md` showing how to point **&lt;Tool&gt;** at Otari, following the matching exemplar for its API surface:
+Add a guide at `docs/<tool>.md` showing how to point **&lt;Tool&gt;** at Otari, following the matching exemplar for its API surface:
 
-- `docs/use-with-claude-code.md` for tools that speak the Anthropic Messages API
-- `docs/use-with-opencode.md` for tools that speak an OpenAI-compatible API
+- `docs/claude-code.md` for tools that speak the Anthropic Messages API
+- `docs/opencode.md` for tools that speak an OpenAI-compatible API
 
 ## Why
 
@@ -18,7 +18,7 @@ Coding tools are the most common reason people reach for a gateway. Each one set
 
 ## Steps
 
-1. Copy the matching exemplar (`docs/use-with-claude-code.md` for Anthropic/Messages clients, or `docs/use-with-opencode.md` for OpenAI-compatible clients) to `docs/use-with-<tool>.md`.
+1. Copy the matching exemplar (`docs/claude-code.md` for Anthropic/Messages clients, or `docs/opencode.md` for OpenAI-compatible clients) to `docs/<tool>.md`.
 2. Fill in each section for this tool:
    - [ ] **Intro**: which API surface the tool speaks (OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, etc.) and which Otari endpoints it hits
    - [ ] **Quick start**: cover both **Connected to otari.ai** and **Self-hosted**, either as separate subsections or clearly labeled examples, with the exact env vars or config file the tool uses (base URL, auth token, model)
@@ -27,16 +27,16 @@ Coding tools are the most common reason people reach for a gateway. Each one set
    - [ ] **See also**: link back to the Quickstart and the provider setup
 3. Don't re-explain provider setup. Link to it. This guide assumes a provider is already configured.
 4. Test it end to end against a running Otari.
-5. Link the new page from the docs navigation (`docs/index.md`) and any nearby cross-references that should mention it.
+5. List the new page under `## Integrations` in `docs/SUMMARY.md`, link it from `docs/integrations.md`, and add any nearby cross-references that should mention it.
 
 ## Acceptance criteria
 
-- [ ] New file at `docs/use-with-<tool>.md`
+- [ ] New file at `docs/<tool>.md`
 - [ ] Follows the matching exemplar for the tool's API surface
 - [ ] Both "Connected to otari.ai" and "Self-hosted" variants covered, either as separate subsections or clearly labeled examples
 - [ ] The tool's selector format for Otari is explained with concrete examples
 - [ ] At least one tool-specific gotcha called out
-- [ ] Linked from `docs/index.md`
+- [ ] Listed in `docs/SUMMARY.md` and linked from `docs/integrations.md`
 
 ## Good picks to start
 
@@ -44,6 +44,6 @@ Cursor, Continue, Aider, Zed, Cline, Windsurf, Codex CLI, and Gemini CLI all sup
 
 ## Resources
 
-- Exemplars: `docs/use-with-claude-code.md`, `docs/use-with-opencode.md`
+- Exemplars: `docs/claude-code.md`, `docs/opencode.md`
 - Model format and providers: `docs/models.md`
 - Base config: `docs/self-hosted-quickstart.md`

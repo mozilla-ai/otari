@@ -1,5 +1,6 @@
 """The video job records: who started a job here, and billing a completed one once."""
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -13,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
 from gateway.repositories.inference import InferenceRepositories
@@ -325,6 +327,49 @@ async def test_the_length_asked_prices_a_job_before_the_providers_charge(async_d
 
     assert await _settle(service, workspace_id, reported=None, charged=0.39) is True
     assert recorder.record.await_args_list[0].args[0].cost == Decimal("0.5")
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("charged", [0.25, 0.14, 0.0])
+async def test_a_rate_far_from_the_providers_charge_is_warned_of_and_still_bills(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture, charged: float
+) -> None:
+    recorder = _Recorder()
+    service = await _service(async_db, recorder=recorder, rate=AsyncMock(return_value=_per_second(0.033)))
+    workspace_id = await default_workspace_id(async_db)
+    await _record(service, "video_done", seconds=5)
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger=gateway_logger.name)
+    try:
+        assert await _settle(service, workspace_id, reported=5, charged=charged) is True
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert recorder.record.await_args_list[0].args[0].cost == Decimal("0.165")
+    [warning] = _warnings(caplog)
+    assert "video_done" in warning and "0.165" in warning and f"{Decimal(str(charged)):.6f}" in warning
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("charged", [0.17, 0.15, 0.18, None, float("nan")])
+async def test_a_rate_near_the_providers_charge_or_with_none_to_check_is_not_warned_of(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture, charged: float | None
+) -> None:
+    service = await _service(async_db, rate=AsyncMock(return_value=_per_second(0.033)))
+    workspace_id = await default_workspace_id(async_db)
+    await _record(service, "video_done", seconds=5)
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger=gateway_logger.name)
+    try:
+        assert await _settle(service, workspace_id, reported=5, charged=charged) is True
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert _warnings(caplog) == []
 
 
 @pytest.mark.asyncio

@@ -32,13 +32,14 @@ import math
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
+from gateway.models.guardrails import DEFAULT_DIRECTIONS, GuardrailDirection, GuardrailMode, distinct_directions
 from gateway.models.money import UsdRate
 
 __all__ = [
@@ -308,20 +309,23 @@ class SelectEntry(BaseModel):
 class PolicyGuardrail(BaseModel):
     """A guardrail the operator mandates for every request through the policy.
 
-    There is deliberately no ``on`` field. The request-level model accepts
-    ``on: [output]`` and does not enforce it, so allowing it here would let an
-    operator write a mandate that silently does nothing. Policy guardrails are
-    input-direction only until output-direction enforcement exists.
+    The same entry a request or an organization mandate carries, so a policy's
+    guardrail reads and acts exactly as theirs does.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     profile: str = Field(min_length=1, max_length=128)
-    mode: Literal["block", "monitor"] = Field(
+    mode: GuardrailMode = Field(
         description=(
             "Required, with no default: the request-level field defaults to 'monitor', so an omitted "
             "mode here would read as a mandate and behave as shadow mode."
         )
+    )
+    on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
+        default_factory=lambda: list(DEFAULT_DIRECTIONS),
+        min_length=1,
+        description="What the guardrail reads: input, tool_results, tool_calls, output. Defaults to input.",
     )
     on_unavailable: Literal["block", "monitor"] = Field(
         default="block",

@@ -1676,11 +1676,14 @@ def test_a_policy_guardrail_is_handed_to_the_guardrail_runner(guarded_client: Te
     _create_user(guarded_client)
     seen: list[Any] = []
 
-    async def capture(guardrails: Any, text: str, **kwargs: Any) -> None:
+    async def capture(guardrails: Any, text: str, **kwargs: Any) -> Any:
+        from gateway.services.guardrails import GuardrailVerdict
+
         seen.append(guardrails)
+        return GuardrailVerdict()
 
     with (
-        patch("gateway.api.routes._pipeline.apply_input_guardrails", new=capture),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=capture),
         patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
     ):
         resp = guarded_client.post(
@@ -1700,11 +1703,14 @@ def test_a_caller_cannot_weaken_a_policy_guardrail_over_the_wire(guarded_client:
     _create_user(guarded_client)
     seen: list[Any] = []
 
-    async def capture(guardrails: Any, text: str, **kwargs: Any) -> None:
+    async def capture(guardrails: Any, text: str, **kwargs: Any) -> Any:
+        from gateway.services.guardrails import GuardrailVerdict
+
         seen.append(guardrails)
+        return GuardrailVerdict()
 
     with (
-        patch("gateway.api.routes._pipeline.apply_input_guardrails", new=capture),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=capture),
         patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
     ):
         resp = guarded_client.post(
@@ -1737,6 +1743,7 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
         credentials: Any = None,
         mandated: Any = None,
         in_process: Any = None,
+        unsafe: Any = None,
     ) -> Any:
         from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 
@@ -1745,7 +1752,7 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
         )
 
     with (
-        patch("gateway.api.routes._helpers.run_input_guardrails", new=flagged),
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=flagged),
         patch("gateway.api.routes.chat.acompletion", new=provider),
     ):
         resp = guarded_client.post(

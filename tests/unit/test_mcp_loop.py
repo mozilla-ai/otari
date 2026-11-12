@@ -22,13 +22,14 @@ from any_llm.types.completion import (
     CompletionUsage,
     Function,
     PromptTokensDetails,
+    ServerToolUsage,
 )
 from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
-from gateway.core.usage import cache_write_1h_tokens_of, reasoning_tokens_of
+from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.inference import EmptyCompletionError
@@ -501,6 +502,28 @@ async def test_loop_accumulates_cached_tokens_across_iterations(monkeypatch: pyt
     assert out.usage is not None
     assert out.usage.prompt_tokens_details is not None
     assert out.usage.prompt_tokens_details.cached_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A grounded round the loop hid still bills its searches, though the final round ran none."""
+    searched = _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=10, completion_tokens=2)
+    assert searched.usage is not None
+    searched.usage.server_tool_use = ServerToolUsage(web_search_requests=2)
+    responses = iter([searched, _completion(finish="stop", content="done", prompt=12, completion_tokens=3)])
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert provider_web_searches_of(out.usage) == 2
 
 
 @pytest.mark.asyncio
@@ -1061,8 +1084,14 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
             cache_creation_token_details=CacheCreationTokenDetails(ephemeral_1h_input_tokens=40),
         ),
         completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12),
+        server_tool_use=ServerToolUsage(web_search_requests=2),
     )
-    round_two = CompletionUsage(prompt_tokens=140, completion_tokens=5, total_tokens=145)
+    round_two = CompletionUsage(
+        prompt_tokens=140,
+        completion_tokens=5,
+        total_tokens=145,
+        server_tool_use=ServerToolUsage(web_search_requests=1),
+    )
     iter_streams = iter(
         [
             _async_iter(
@@ -1103,6 +1132,7 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
     assert usages[0].prompt_tokens_details.cache_write_tokens == 40
     assert cache_write_1h_tokens_of(usages[0]) == 40
     assert reasoning_tokens_of(usages[0]) == 12
+    assert provider_web_searches_of(usages[0]) == 3
 
 
 @pytest.mark.asyncio
@@ -2097,3 +2127,63 @@ def test_a_code_execution_with_no_code_is_reported_failed() -> None:
 
     assert entry["status"] == "failed"
     assert "exit_code" not in entry
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_loop_sends_every_round_under_the_first_rounds_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each round is its own provider call with its own id, but the client reads one completion."""
+
+    def _round_chunk(chunk_id: str, **kwargs: Any) -> ChatCompletionChunk:
+        return _chunk(**kwargs).model_copy(update={"id": chunk_id})
+
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [
+                _round_chunk("round-1", tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]),
+                _round_chunk("round-1", finish="tool_calls"),
+            ],
+            [_round_chunk("round-2", content="done"), _round_chunk("round-2", finish="stop")],
+        ),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=cast(Any, _FakeSearchPool()),
+            max_iterations=5,
+        )
+    ]
+
+    assert any(chunk.choices and chunk.choices[0].delta.content == "done" for chunk in chunks)
+    assert {chunk.id for chunk in chunks} == {"round-1"}
+
+
+@pytest.mark.asyncio
+async def test_activity_chunks_carry_the_id_of_the_first_chunk_with_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider's preamble chunk with no choices names no response, so activity does not copy its id."""
+    preamble = ChatCompletionChunk(id="", choices=[], created=0, model="", object="chat.completion.chunk")
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [preamble, _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": 1}')]), _chunk(finish="tool_calls")],
+            [_chunk(content="all done", finish="stop")],
+        ),
+    )
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),
+            max_iterations=5,
+            emit_activity=True,
+        )
+    ]
+
+    activity = [c for c in chunks if getattr(c, mcp_loop_module.TOOL_ACTIVITY_FIELD, None) is not None]
+    assert len(activity) == 2
+    assert {(c.id, c.model) for c in activity} == {("cmpl-1", "fake")}

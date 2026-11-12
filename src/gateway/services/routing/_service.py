@@ -7,10 +7,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.repositories.routing import RoutingPolicyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import catalog_models, offering_input_rate
 from gateway.services.model_access import workspace_serves_target
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tools import provider_tools
 from gateway.services.usage_and_telemetry import ServedTraffic, UsageService
 
@@ -79,10 +82,26 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 class RoutingService:
     """What routing gives an organization's callers."""
 
-    def __init__(self, config: GatewayConfig, usage: UsageService, keys: ApiKeyService) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        usage: UsageService,
+        keys: ApiKeyService,
+        *,
+        uow: UnitOfWork,
+        organizations: OrganizationService,
+    ) -> None:
         self._config = config
         self._usage = usage
         self._keys = keys
+        self._uow = uow
+        self._organizations = organizations
+
+    async def is_first_policy_in_organization(self, organization_id: uuid.UUID) -> bool:
+        """Whether the policy just stored is the only one in any of the organization's workspaces."""
+        workspace_ids = await self._organizations.get_workspace_ids_in_organization(organization_id)
+        async with self._uow:
+            return await RoutingPolicyRepository(self._uow).count_in_workspaces(workspace_ids) == 1
 
     async def automatic_fallbacks(
         self,

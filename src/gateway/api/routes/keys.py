@@ -23,13 +23,18 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
-from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
+from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey, DisabledReason
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.api_keys import operator_max_end_users, operator_set_active, refuse_service_key_flag_change
+from gateway.services.api_keys import (
+    operator_enable_refusal,
+    operator_max_end_users,
+    operator_set_active,
+    refuse_service_key_flag_change,
+)
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -215,9 +220,12 @@ class KeyInfo(BaseModel):
     last_used_at: str | None
     expires_at: str | None
     is_active: bool
-    # Off because an operator, or a removal from the workspace or organization,
-    # switched it off; only an operator may switch it back on.
-    operator_disabled: bool = False
+    # The reason the owner cannot enable this key. Null for every other key,
+    # including one the owner disabled.
+    disabled_reason: DisabledReason | None
+    # Whether an operator can enable this key, which some reasons also block.
+    # True wherever there is no reason, since nothing then blocks enabling it.
+    operator_can_enable: bool
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
     exclude_from_budget: bool
@@ -251,7 +259,8 @@ class KeyInfo(BaseModel):
             last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
-            operator_disabled=bool(key.operator_disabled),
+            disabled_reason=key.disabled_reason,
+            operator_can_enable=operator_enable_refusal(key) is None,
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),

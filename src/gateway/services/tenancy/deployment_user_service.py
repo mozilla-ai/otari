@@ -40,11 +40,15 @@ granting yourself back a cleared flag, or reactivating the bootstrap identity,
 something an operator can still do here.
 """
 
-import uuid
+from __future__ import annotations
 
-from sqlalchemy.exc import SQLAlchemyError
+import uuid
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
@@ -66,11 +70,14 @@ from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepos
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
+if TYPE_CHECKING:
+    from gateway.services.identity import SelfServiceKeyDeactivationListener
 
-class DeploymentUserService:
-    """Reads and writes identities across the whole deployment."""
 
-    def __init__(self, db: AsyncSession):
+class DeploymentAdministrationAccess:
+    """Reads identities and administration authority across the whole deployment."""
+
+    def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.users = UserRepository(db)
         self.members = OrganizationMemberRepository(db)
@@ -92,6 +99,21 @@ class DeploymentUserService:
             return True
         bootstrap = await load_bootstrap_identity(self.db)
         return bootstrap is not None and bootstrap.id == actor.id
+
+    async def administration_access_ids(self, actors: Iterable[User]) -> set[uuid.UUID]:
+        """Which of ``actors`` may reach the surface, in one lookup rather than one each.
+
+        The plural form of ``has_administration_access``, for a caller deciding over a set of
+        accounts at once. Both read the same marker, so neither can answer differently.
+        """
+        candidates = list(actors)
+        superusers = {actor.id for actor in candidates if actor.is_superuser}
+        if len(superusers) == len(candidates):
+            return superusers
+        bootstrap = await load_bootstrap_identity(self.db)
+        if bootstrap is None:
+            return superusers
+        return superusers | {actor.id for actor in candidates if actor.id == bootstrap.id}
 
     async def list_users(
         self,
@@ -122,6 +144,19 @@ class DeploymentUserService:
             ],
             count=count,
         )
+
+    async def _require_administration_access(self, actor: User) -> None:
+        """Raise the 404 unless this caller operates the deployment."""
+        if not await self.has_administration_access(actor):
+            raise DeploymentAdministrationUnavailableError
+
+
+class DeploymentUserService(DeploymentAdministrationAccess):
+    """Administer identities, notifying credential owners in the same transaction."""
+
+    def __init__(self, db: AsyncSession, *, uow: UnitOfWork, keys: SelfServiceKeyDeactivationListener) -> None:
+        super().__init__(db)
+        self.uow, self.keys = uow, keys
 
     async def update_user(
         self,
@@ -161,30 +196,24 @@ class DeploymentUserService:
                     "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
                 )
 
-        if request.is_active is not None:
-            target.is_active = request.is_active
-        if request.is_active is False:
-            target.email_verification_token_hash = None
-            target.email_verification_token_expires_at = None
-            target.password_reset_token_hash = None
-            target.password_reset_token_expires_at = None
-        if request.is_superuser is not None:
-            target.is_superuser = request.is_superuser
-        self.db.add(target)
-        try:
+        async with self.uow:
+            # App-key issuance holds this lock until its credential is committed.
+            target = await self.users.get_locked(user_id)
+            if target is None:
+                raise DeploymentUserNotFoundError(user_id)
+            if request.is_active is not None:
+                target.is_active = request.is_active
+            if request.is_active is False:
+                target.email_verification_token_hash = None
+                target.email_verification_token_expires_at = None
+                target.password_reset_token_hash = None
+                target.password_reset_token_expires_at = None
+            if request.is_superuser is not None:
+                target.is_superuser = request.is_superuser
+            self.db.add(target)
             if request.is_active is False:
                 await revoke_user_dashboard_sessions(self.db, target.id)
-            await self.db.commit()
-        except SQLAlchemyError:
-            # The same reason ``OrganizationService`` rolls back rather than
-            # letting the failure travel: SQLAlchemy leaves a session whose
-            # flush failed unusable, so a caller that reuses it gets
-            # ``PendingRollbackError`` from its next statement instead of the
-            # failure that actually happened. The request path is covered either
-            # way, since ``get_db`` closes the session at teardown; a
-            # service-layer caller (every service-level test here is one) is not.
-            await self.db.rollback()
-            raise
+                await self.keys.deactivate_self_service_keys(target.id)
         await self.db.refresh(target)
         # Operator access opens shared session content and, where enabled, break-glass,
         # so who granted or removed it, and who deactivated whom, is on the record.
@@ -204,11 +233,6 @@ class DeploymentUserService:
             bootstrap_id=bootstrap.id if bootstrap is not None else None,
             actor_id=actor.id,
         )
-
-    async def _require_administration_access(self, actor: User) -> None:
-        """Raise the 404 unless this caller operates the deployment."""
-        if not await self.has_administration_access(actor):
-            raise DeploymentAdministrationUnavailableError
 
 
 def _to_public(
@@ -242,4 +266,4 @@ def _to_public(
     )
 
 
-__all__ = ["DeploymentUserService"]
+__all__ = ["DeploymentAdministrationAccess", "DeploymentUserService"]

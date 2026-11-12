@@ -73,6 +73,25 @@ def test_a_resolvable_candidate_compiles(config: GatewayConfig) -> None:
     assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
 
 
+def test_a_policy_guardrail_reads_and_acts_as_a_request_entry_does(config: GatewayConfig) -> None:
+    spec = PolicySpec.model_validate(
+        {
+            "select": [{"default": "openai:gpt-5-mini"}],
+            "guardrails": [
+                {"profile": "pii", "mode": "monitor", "on": ["input", "tool_results"]},
+                {"profile": "prompt-injection", "mode": "block"},
+            ],
+        }
+    )
+
+    plan = compile_policy(config, "safe", spec)
+
+    assert [(g.profile, g.mode, g.on) for g in plan.guardrails] == [
+        ("pii", "monitor", ["input", "tool_results"]),
+        ("prompt-injection", "block", ["input"]),
+    ]
+
+
 def test_every_candidate_unresolvable_is_a_502_about_provider_config(config: GatewayConfig) -> None:
     """The shape of an operator deleting a provider instance out from under a
     running gateway, which the resolver cannot distinguish from a typo.

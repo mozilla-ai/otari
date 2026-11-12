@@ -4,6 +4,69 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.44.0](https://github.com/mozilla-ai/otari/releases/tag/v0.44.0) - 2026-11-11
+
+
+
+### Bug Fixes
+
+- Name the end user's budget on its budget_exceeded refusal in [#3114](https://github.com/mozilla-ai/otari/pull/3114) by [@daavoo](https://github.com/daavoo) ([`5d0212b`](https://github.com/mozilla-ai/otari/commit/5d0212bdfbcf405bcc6ac9ab7db22ccc7d18bd45))
+- **feedback:** Add Cancel and a desktop close button to Contact in [#3112](https://github.com/mozilla-ai/otari/pull/3112) by [@jigjigjig](https://github.com/jigjigjig) ([`db09cca`](https://github.com/mozilla-ai/otari/commit/db09cca5270ed26c85a3fd76bba6989154526c28))
+- **traces:** Make the session panel's figures and wording agree in [#3117](https://github.com/mozilla-ai/otari/pull/3117) by [@jigjigjig](https://github.com/jigjigjig) ([`77b5673`](https://github.com/mozilla-ai/otari/commit/77b5673ef4274c9e77e53a8408bde5f6db938003))
+- **catalog:** Stop listing response_format where Bedrock refuses it in [#3128](https://github.com/mozilla-ai/otari/pull/3128) by [@tbille](https://github.com/tbille) ([`c3d12d1`](https://github.com/mozilla-ai/otari/commit/c3d12d127592322bf66b75525926b8415d18ae00))
+- **models:** List an organization key's models under an id that dispatch resolves by [@tbille](https://github.com/tbille) ([`557ddaf`](https://github.com/mozilla-ai/otari/commit/557ddafbf5b50f7d9a665d27c215a3d29ea41be3))
+- **errors:** Code a structured-output generation failure as retryable by [@tbille](https://github.com/tbille) ([`dc59529`](https://github.com/mozilla-ai/otari/commit/dc59529a4b807425c275a34ba8f53c4028a6f519))
+- **errors:** Keep structured_output_failed when every routed candidate fails it in [#3130](https://github.com/mozilla-ai/otari/pull/3130) by [@tbille](https://github.com/tbille) ([`0ba8031`](https://github.com/mozilla-ai/otari/commit/0ba8031cc29b7af8a912a857771e287021bfabcc))
+- **web:** Put the connection's on/off beside it, not inside its credential form in [#3126](https://github.com/mozilla-ai/otari/pull/3126) by [@peteski22](https://github.com/peteski22) ([`b3b267a`](https://github.com/mozilla-ai/otari/commit/b3b267a01236e5ac5eb23b2bb3ebcb28931f35bc))
+
+
+### Features
+
+- **BREAKING:** **growth:** Report product actions and flow steps through the growth and telemetry seams in [#3050](https://github.com/mozilla-ai/otari/pull/3050) by [@jigjigjig](https://github.com/jigjigjig) ([`7d7c046`](https://github.com/mozilla-ai/otari/commit/7d7c0467d2f42f498838c3b9e66b9e3793e8ecb7))
+- **mail:** Let one message name its sender, and quote the From name in [#3111](https://github.com/mozilla-ai/otari/pull/3111) by [@jigjigjig](https://github.com/jigjigjig) ([`76e5a05`](https://github.com/mozilla-ai/otari/commit/76e5a05068503c4562b433d567f33d2636a6e596))
+- **identity:** Allow a customer's own OIDC issuer in [#2857](https://github.com/mozilla-ai/otari/pull/2857) by [@peteski22](https://github.com/peteski22) ([`9e6ebc9`](https://github.com/mozilla-ai/otari/commit/9e6ebc9e30f52294cfb9e7f5cc04bb43e3af1a5c))
+- **BREAKING:** **billing:** Let the billing port fund subscriptions in [#2824](https://github.com/mozilla-ai/otari/pull/2824) by [@hasangzl](https://github.com/hasangzl) ([`c891691`](https://github.com/mozilla-ai/otari/commit/c89169184f40ea3d71796bb24a3cb340936e04dc))
+- **tenancy:** Give an automatically admitted member a workspace in [#3127](https://github.com/mozilla-ai/otari/pull/3127) by [@peteski22](https://github.com/peteski22) ([`1f3e152`](https://github.com/mozilla-ai/otari/commit/1f3e152fa60f5a71482008c845bd019d212d2533))
+
+
+### Maintenance
+
+- **BREAKING:** **deps:** Raise apron-auth to 0.23 and require a workload audience in [#3106](https://github.com/mozilla-ai/otari/pull/3106) by [@peteski22](https://github.com/peteski22) ([`13f7e30`](https://github.com/mozilla-ai/otari/commit/13f7e3046f7dce88cbc18455cfbc1b79973c5ac9))
+
+
+### Other
+
+- Update data-collection.md file by [@ssaantunes](https://github.com/ssaantunes) ([`6782122`](https://github.com/mozilla-ai/otari/commit/6782122df8f9db1e802afcb1c97fcb9379605fb9))
+- Update agent-session-content.md by [@ssaantunes](https://github.com/ssaantunes) ([`4edd20a`](https://github.com/mozilla-ai/otari/commit/4edd20a1e09a8b68ce5d1b40f3bceea63bdb1cc2))
+
+
+
+### New Contributors
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.43.0...v0.44.0
+## [0.43.0](https://github.com/mozilla-ai/otari/releases/tag/v0.43.0) - 2026-11-10
+
+
+
+### Bug Fixes
+
+- Bill OpenAI Responses web searches by [@daavoo](https://github.com/daavoo) ([`8ee7221`](https://github.com/mozilla-ai/otari/commit/8ee72211fd130bba1391b7b7aff9393daf798b18))
+- **auth:** Link the privacy policy beside the terms at signup in [#3095](https://github.com/mozilla-ai/otari/pull/3095) by [@jigjigjig](https://github.com/jigjigjig) ([`28e27a4`](https://github.com/mozilla-ai/otari/commit/28e27a436ac39208342285ae1c9ce41a9425dcd4))
+- **pricing:** Keep per-unit prices in a stored models.dev snapshot by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`fa30c88`](https://github.com/mozilla-ai/otari/commit/fa30c8847b42fe3abb43f2d8fdfe959dec4f3563))
+- **providers:** Move a seeded rate's unit with its numbers in [#3087](https://github.com/mozilla-ai/otari/pull/3087) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e555a17`](https://github.com/mozilla-ai/otari/commit/e555a1772ce8d7905f265670f4f63e415ef5d135))
+- Bill Gemini Google Search grounding in [#3104](https://github.com/mozilla-ai/otari/pull/3104) by [@daavoo](https://github.com/daavoo) ([`d205180`](https://github.com/mozilla-ai/otari/commit/d20518082f5e7b856cb053cfe4ad50406902d012))
+
+
+### Features
+
+- Share each member's avatar pick with their organization in [#3092](https://github.com/mozilla-ai/otari/pull/3092) by [@jigjigjig](https://github.com/jigjigjig) ([`98a752e`](https://github.com/mozilla-ai/otari/commit/98a752e9873a7496db84cb9801755a3bc5c63004))
+- **models:** Read the models.dev catalog from a configurable base url by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`5ef1be6`](https://github.com/mozilla-ai/otari/commit/5ef1be64222b827204e2fb774104c9e954973cbf))
+- **pricing:** Store the catalog of facts a price update downloads by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4bb6381`](https://github.com/mozilla-ai/otari/commit/4bb6381b8da6b76e42ac4c5035bd2d31ec0ea6ba))
+- **catalog:** Use the context length vLLM and SGLang servers report in [#3101](https://github.com/mozilla-ai/otari/pull/3101) by [@daavoo](https://github.com/daavoo) ([`9c31dce`](https://github.com/mozilla-ai/otari/commit/9c31dce214f3c3084c07e775ebec736b6ee94540))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.42.0...v0.43.0
 ## [0.42.0](https://github.com/mozilla-ai/otari/releases/tag/v0.42.0) - 2026-11-10
 
 

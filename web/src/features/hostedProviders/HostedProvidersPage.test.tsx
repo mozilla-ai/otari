@@ -273,10 +273,16 @@ function mockApi(
         const kind = model.type ?? "unknown"
         typeCounts[kind] = (typeCounts[kind] ?? 0) + 1
       }
-      const kind = new URL(url, "http://x").searchParams.get("type")
-      const shown = kind
-        ? models.filter((model) => (model.type ?? "unknown") === kind)
-        : models
+      const params = new URL(url, "http://x").searchParams
+      const kind = params.get("type")
+      const search = params.get("search")?.toLowerCase()
+      const enabled = params.get("enabled")
+      const shown = models.filter(
+        (model) =>
+          (!kind || (model.type ?? "unknown") === kind) &&
+          (!search || model.model.toLowerCase().includes(search)) &&
+          (enabled === null || String(model.enabled) === enabled),
+      )
       return jsonResponse({
         data: shown,
         count: shown.length,
@@ -992,6 +998,84 @@ describe("HostedProvidersPage", () => {
         (request) =>
           request.url.includes("/hosted-providers/openai/models?") &&
           request.url.includes("type=image"),
+      ),
+    ).toBe(true)
+  })
+
+  it("searches a provider's models by name", async () => {
+    const requests = mockApi({
+      models: [hostedModel(), hostedModel({ id: "m2", model: "gpt-image-1" })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    await within(panel).findByText("gpt-image-1")
+    await user.type(
+      within(panel).getByRole("searchbox", {
+        name: "Search models on openai",
+      }),
+      "IMAGE",
+    )
+
+    await waitFor(() => expect(within(panel).queryByText("gpt-4o")).toBeNull())
+    expect(within(panel).getByText("gpt-image-1")).toBeInTheDocument()
+    expect(
+      requests.some(
+        (request) =>
+          request.url.includes("/hosted-providers/openai/models?") &&
+          request.url.includes("search=IMAGE"),
+      ),
+    ).toBe(true)
+
+    await user.clear(
+      within(panel).getByRole("searchbox", {
+        name: "Search models on openai",
+      }),
+    )
+    await user.type(
+      within(panel).getByRole("searchbox", {
+        name: "Search models on openai",
+      }),
+      "nothing",
+    )
+    expect(
+      await within(panel).findByText("No models match this search."),
+    ).toBeInTheDocument()
+    expect(within(panel).queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("shows only the models a provider does not serve", async () => {
+    const requests = mockApi({
+      models: [
+        hostedModel(),
+        hostedModel({ id: "m2", model: "gpt-image-1", enabled: false }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    await within(panel).findByText("gpt-4o")
+    await user.click(within(panel).getByRole("radio", { name: "Not serving" }))
+
+    await waitFor(() => expect(within(panel).queryByText("gpt-4o")).toBeNull())
+    expect(within(panel).getByText("gpt-image-1")).toBeInTheDocument()
+    expect(
+      requests.some(
+        (request) =>
+          request.url.includes("/hosted-providers/openai/models?") &&
+          request.url.includes("enabled=false"),
       ),
     ).toBe(true)
   })

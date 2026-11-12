@@ -42,10 +42,10 @@ function canShare(email: string): boolean {
  * A message to the Otari team, opened from Contact beside Documentation: in the
  * top bar from `md` up, and in the account menu below it.
  *
- * Not a `FormDialog`: that frame always renders a titled header, a footer rule
- * and Cancel, and this one is a message and a single action. It wears the
- * same geometry classes, so it sits at the same offset and becomes the same
- * full-screen sheet below 640px, and it shares the dirty guard.
+ * Not a `FormDialog`: that frame always renders a titled header and a footer
+ * rule, and this one has neither. It wears the same geometry classes, so it
+ * sits at the same offset and becomes the same full-screen sheet below 640px,
+ * and it shares the dirty guard.
  *
  * Sending swaps the compose for a thank-you in the same frame, which stays
  * until it is dismissed: a timer would take the words away from a slow reader.
@@ -173,13 +173,14 @@ export function FeedbackDialog({
           <Modal.Dialog
             aria-labelledby={headingId}
             aria-describedby={isSent ? thanksId : undefined}
-            className="otari-form-dialog otari-form-dialog--md flex flex-col p-0 outline-none"
+            className="otari-form-dialog otari-form-dialog--md relative flex flex-col p-0 outline-none"
           >
             {returnFocusRef ? <RestoreFocus target={returnFocusRef} /> : null}
-            {/* The sheet's way out on a touch screen, which has no Escape and
-                no backdrop to press. Shown wherever the frame is the sheet,
-                which is by height as well as by width. */}
-            <div className="hidden shrink-0 justify-end pt-1.5 pr-2.5 pl-4 max-sm:flex [@media(height<=639px)]:flex">
+            {/* On the sheet (a narrow or a short screen) Close is a touch
+                screen's only way out, so it gets its own row; on the floating
+                frame it sits in the corner, beside the field. The query is the
+                sheet's negated, so every size gets one of the two. */}
+            <div className="flex shrink-0 justify-end pt-1.5 pr-2.5 pl-4 [@media(width>639px)_and_(height>639px)]:absolute [@media(width>639px)_and_(height>639px)]:top-3 [@media(width>639px)_and_(height>639px)]:right-3 [@media(width>639px)_and_(height>639px)]:z-10 [@media(width>639px)_and_(height>639px)]:p-0">
               <Button
                 aria-label="Close"
                 isIconOnly
@@ -201,7 +202,7 @@ export function FeedbackDialog({
                       } as CSSProperties)
                     : undefined
                 }
-                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>=640px)_and_(height>=640px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]"
+                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 [@media(width>639px)_and_(height>639px)]:min-h-[min(var(--feedback-held-height),calc(var(--visual-viewport-height,100dvh)_-_15rem))]"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}
@@ -222,7 +223,7 @@ export function FeedbackDialog({
                     className="text-muted max-w-100 text-base text-balance max-sm:max-w-80"
                   >
                     {sentTo
-                      ? `Our team will reply to ${sentTo}.`
+                      ? `We’ll email you at ${sentTo}.`
                       : "Our team has your message."}
                   </p>
                 </div>
@@ -250,7 +251,7 @@ export function FeedbackDialog({
                 <Modal.Heading id={headingId} className="sr-only">
                   Contact
                 </Modal.Heading>
-                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1">
+                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1 [@media(width>639px)_and_(height>639px)]:pr-16">
                   <ErrorBanner error={notSent} />
                   {/* Native, as the playground composer's is: the shared
                       `TextArea` brings a visible label, a caption row and a
@@ -286,7 +287,7 @@ export function FeedbackDialog({
                     data-feedback-part="consent"
                     className="text-caption shrink-0 px-6 pb-5 break-words max-sm:px-4 max-sm:pb-3"
                   >
-                    By sending, you agree we can reply to {shareable} about this
+                    By sending, you agree we can email {shareable} about this
                     message only.
                   </p>
                 ) : null}
@@ -330,45 +331,53 @@ export function FeedbackDialog({
                           </p>
                         ) : null}
                       </div>
-                      {/* Not `isPending`, for the reason `FormDialog` gives: a
-                          send in flight is working, not refused, so it keeps
-                          its fill and its width while the spinner stands in. */}
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        aria-keyshortcuts={
-                          IS_APPLE ? "Meta+Enter" : "Control+Enter"
-                        }
-                        data-feedback-send={isPending ? "pending" : "idle"}
-                        className={`relative pr-3 pl-4 max-sm:min-h-11 max-sm:w-full max-sm:px-4 pointer-coarse:px-4 ${
-                          isPending ? "pointer-events-none" : ""
-                        }`}
-                      >
-                        <span
-                          data-feedback-send-label
-                          className="flex items-center gap-3"
+                      <div className="flex items-center gap-2 max-sm:flex-col max-sm:items-stretch max-sm:[&>button]:min-h-11 max-sm:[&>button]:w-full">
+                        <Button
+                          isDisabled={isPending}
+                          onPress={guard.requestClose}
                         >
-                          Send to the Otari team
+                          Cancel
+                        </Button>
+                        {/* Not `isPending`, for the reason `FormDialog` gives: a
+                            send in flight is working, not refused, so it keeps
+                            its fill and its width while the spinner stands in. */}
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          aria-keyshortcuts={
+                            IS_APPLE ? "Meta+Enter" : "Control+Enter"
+                          }
+                          data-feedback-send={isPending ? "pending" : "idle"}
+                          className={`relative pr-3 pl-4 max-sm:px-4 pointer-coarse:px-4 ${
+                            isPending ? "pointer-events-none" : ""
+                          }`}
+                        >
                           <span
-                            aria-hidden="true"
-                            className="text-(length:--text-caption-step) leading-(--text-caption-step--line-height) tracking-[0.06em] opacity-72 pointer-coarse:hidden"
+                            data-feedback-send-label
+                            className="flex items-center gap-3"
                           >
-                            {IS_APPLE ? "⌘↵" : "Ctrl ↵"}
-                          </span>
-                        </span>
-                        {isPending ? (
-                          <span
-                            data-feedback-send-spinner
-                            className="absolute inset-0 flex items-center justify-center"
-                          >
-                            <Spinner
-                              size="sm"
-                              color="current"
+                            Send to the Otari team
+                            <span
                               aria-hidden="true"
-                            />
+                              className="text-(length:--text-caption-step) leading-(--text-caption-step--line-height) tracking-[0.06em] opacity-72 pointer-coarse:hidden"
+                            >
+                              {IS_APPLE ? "⌘↵" : "Ctrl ↵"}
+                            </span>
                           </span>
-                        ) : null}
-                      </Button>
+                          {isPending ? (
+                            <span
+                              data-feedback-send-spinner
+                              className="absolute inset-0 flex items-center justify-center"
+                            >
+                              <Spinner
+                                size="sm"
+                                color="current"
+                                aria-hidden="true"
+                              />
+                            </span>
+                          ) : null}
+                        </Button>
+                      </div>
                     </>
                   )}
                 </footer>

@@ -16,9 +16,12 @@ from gateway.types.models_dev import (
     ModelsDevIssues,
     ModelsDevRates,
     ModelsDevTier,
+    catalog_document,
     models_dev_provider_id,
     models_dev_provider_ids,
+    normalize_models_dev_base_url,
     parse_catalog,
+    read_catalog_document,
     snapshot_document,
 )
 
@@ -273,6 +276,22 @@ def test_model_for_maps_the_any_llm_name_and_the_listing_prefix(catalog: ModelsD
     assert catalog.provider_for("gemini") is catalog.providers["google"]
 
 
+def test_model_for_matches_an_id_that_differs_only_in_case() -> None:
+    """models.dev lowercases OVHcloud's ids; the provider lists them in mixed case."""
+    catalog = parse_catalog({"ovhcloud": {"models": {"qwen3-32b": {}, "Qwen3-32B": {"name": "exact"}, "gpt-x": {}}}})
+    models = catalog.providers["ovhcloud"].models
+    assert catalog.model_for("ovhcloud", "Qwen3-32B") is models["Qwen3-32B"]
+    assert catalog.model_for("ovhcloud", "QWEN3-32b") is models["qwen3-32b"]
+    assert catalog.model_for("ovhcloud", "GPT-X") is models["gpt-x"]
+
+
+def test_a_stored_catalog_still_finds_an_id_that_differs_only_in_case() -> None:
+    stored = catalog_document(parse_catalog({"ovhcloud": {"models": {"qwen3-32b": {"name": "Qwen"}}}}))
+    model = read_catalog_document(stored).model_for("ovhcloud", "Qwen3-32B")
+    assert model is not None
+    assert model.name == "Qwen"
+
+
 def test_vertex_claude_is_found_where_v2_lists_it_and_where_v1_does() -> None:
     """v2 moved Vertex's Claude models under ``google-vertex``; v1 and older snapshots keep them apart."""
     assert models_dev_provider_ids("vertexaianthropic") == ("google-vertex-anthropic", "google-vertex")
@@ -367,3 +386,25 @@ def test_the_module_is_standard_library_only() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.snapshot_document(module.parse_catalog({"p": {"models": {}}})) == {"p": {"id": "p", "models": {}}}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://mirror.example/#",
+        "https://mirror.example/?",
+        "https://mirror.example/catalog?type=all",
+        "ftp://mirror.example",
+        "mirror.example",
+        "https://user:password@mirror.example",
+    ],
+)
+def test_a_base_url_a_document_path_cannot_follow_is_refused_without_being_repeated(value: str) -> None:
+    """An empty ``?`` or ``#`` still puts the path after it, and a credential must not reach a log or a snapshot."""
+    with pytest.raises(ValueError, match="must") as refused:
+        normalize_models_dev_base_url(value)
+    assert "mirror.example" not in str(refused.value)
+
+
+def test_a_base_url_keeps_its_path_and_loses_its_trailing_slash() -> None:
+    assert normalize_models_dev_base_url(" https://mirror.example/catalog/ ") == "https://mirror.example/catalog"

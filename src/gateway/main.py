@@ -86,13 +86,19 @@ from gateway.services.alias_service import load_aliases_at_startup, reset_alias_
 from gateway.services.api_keys import refuse_unusable_declared_secrets
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
-from gateway.services.catalog import reset_selector_index
+from gateway.services.catalog import (
+    load_served_models_at_startup,
+    reset_selector_index,
+    reset_served_models,
+    run_served_model_refresher,
+)
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
 from gateway.services.inference import (
     close_decision_client,
+    configure_closed_models,
     load_stored_country_database_at_startup,
     open_country_database,
     reset_stored_country_database,
@@ -105,6 +111,7 @@ from gateway.services.log_writer import (
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key, load_master_key_hash, startup_notice
+from gateway.services.model_catalog_service import configure_models_dev_base_url
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -249,6 +256,16 @@ _UNAUTHENTICATED_PATHS = frozenset(
         # because that is how the generated document keys them.
         f"{API_ROOT}/auth/oauth/{{provider}}/authorize",
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
+    }
+)
+
+# Consent POST shares the authorization URL but still requires a signed-in identity.
+_UNAUTHENTICATED_OPERATIONS = frozenset(
+    {
+        ("get", f"{API_ROOT}/oauth/apps/authorize"),
+        ("get", f"{API_ROOT}/oauth/apps/clients"),
+        ("post", f"{API_ROOT}/oauth/apps/token"),
+        ("post", f"{API_ROOT}/oauth/apps/revoke"),
     }
 )
 # Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
@@ -598,6 +615,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         lambda config, _container: run_discovery_refresher(config, hosted=build_hosted_discovery(config)),
         reset_discovery_cache,
     ),
+    _LifespanWorker("served model", lambda _config, _container: run_served_model_refresher(), reset_served_models),
     _LifespanWorker(
         "models.dev catalog", lambda config, _container: run_catalog_refresher(config), reset_catalog_refresh_state
     ),
@@ -970,6 +988,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         config: GatewayConfig = app.state.config
         app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
+        configure_closed_models(
+            providers=config.closed_model_providers,
+            closed_families=config.closed_model_families,
+            open_families=config.closed_model_open_families,
+        )
+        configure_models_dev_base_url(config.models_dev_base_url)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
         # implementation it actually dispatches to. Deliberately not
@@ -1094,6 +1118,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_served_models_at_startup()
         await load_workspace_hosted_access_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
@@ -1378,9 +1403,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
             if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
             requirement: list[dict[str, list[str]]] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
-            for operation in path_item.values():
+            for method, operation in path_item.items():
                 if isinstance(operation, dict):
-                    operation["security"] = requirement
+                    operation["security"] = [] if (method, path) in _UNAUTHENTICATED_OPERATIONS else requirement
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

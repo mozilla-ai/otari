@@ -707,6 +707,7 @@ describe("AppShell surface gating", () => {
       "Workspaces",
       "Members & roles",
       "Email domains",
+      "Single sign-on",
       "Spend & budgets",
       "Guardrails",
       "Org settings",
@@ -1233,15 +1234,13 @@ describe("AppShell entitlement gating", () => {
     // Shut to start. The panel stays mounted so it has a height to animate from,
     // but it is `hidden` and `aria-hidden` while shut, so its rows are reachable
     // by neither tab nor a screen reader until the group opens.
-    expect(screen.queryByRole("link", { name: "Web search, Beta" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Web search" })).toBeNull()
     expect(screen.getByText("Web search").closest("[hidden]")).not.toBeNull()
 
     await user.click(screen.getByRole("button", { name: "Tools" }))
+    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "Web search, Beta" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Code execution, Beta" }),
+      screen.getByRole("link", { name: "Code execution" }),
     ).toBeInTheDocument()
   })
 
@@ -1254,9 +1253,7 @@ describe("AppShell entitlement gating", () => {
     expect(
       await screen.findByRole("button", { name: "Tools", expanded: true }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Web search, Beta" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
   })
 
   it("signs out from the account menu rather than the page header", async () => {
@@ -1508,10 +1505,10 @@ describe("AppShell entitlement gating", () => {
     await user.click(screen.getByRole("button", { name: "Tools" }))
 
     expect(
-      await screen.findByRole("link", { name: "Web search, Beta" }),
+      await screen.findByRole("link", { name: "Web search" }),
     ).toHaveAttribute("href", "/tools/web-search")
     expect(
-      screen.getByRole("link", { name: "Code execution, Beta" }),
+      screen.getByRole("link", { name: "Code execution" }),
     ).toBeInTheDocument()
   })
 

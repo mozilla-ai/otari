@@ -110,6 +110,9 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.routing.attempt_position": int,
     "otari.guardrail.profile": str,
     "otari.guardrail.mode": str,
+    "otari.guardrail.event": str,
+    "otari.guardrail.tool": str,
+    "otari.guardrail.action": str,
     "otari.mcp.server": str,
     "otari.mcp.server_id": str,
     "otari.mcp.tool_count": int,
@@ -406,6 +409,10 @@ class SessionOwners(Protocol):
         A pair qualifies where :meth:`is_member` holds for it and the workspace
         still keeps what its sessions were about.
         """
+        ...
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization ``workspace_id`` belongs to, whose own provider keys its sessions may have run on."""
         ...
 
 

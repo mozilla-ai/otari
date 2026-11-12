@@ -15,9 +15,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, TraceServiceDep, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    DeploymentUserServiceDep,
+    IdentityServiceDep,
+    TraceServiceDep,
+    verify_master_key,
+)
 from gateway.core.surface import Surface
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
@@ -33,7 +38,6 @@ from gateway.schemas.identity import (
     BlockedEmailsPublic,
     PasswordLinkPublic,
 )
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 
 # Auth on the router for the reason `routes/organizations.py` declares it there:
 # every handler happens to take an identity today, and one that did not would be
@@ -47,14 +51,6 @@ router = APIRouter(
 )
 
 SURFACE = Surface("admin")
-
-
-def get_deployment_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> DeploymentUserService:
-    """Build the deployment user service on the request's session."""
-    return DeploymentUserService(db)
-
-
-DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
 
 
 async def require_deployment_administration(

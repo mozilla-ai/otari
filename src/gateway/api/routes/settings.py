@@ -319,7 +319,7 @@ async def rotate_master_key(
         await record_session_key_marker(db, hashed)
         if session_identity is not None:
             # NOTE: The identity service's block also commits the rotation staged above.
-            reminted = await identities.start_session(session_identity)
+            reminted = await identities.start_session(session_identity, asserted_email=None)
         await db.commit()
     except MasterKeyRotationConflictError as exc:
         await db.rollback()

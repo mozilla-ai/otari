@@ -70,6 +70,13 @@ describe("SessionAtAGlance", () => {
     expect(screen.queryByText(/draws it shorter/)).not.toBeInTheDocument()
   })
 
+  it("leaves the turns out for an agent that reports none", () => {
+    render(<SessionAtAGlance stats={stats({ turns: 0 })} cost={1.84} />)
+
+    expect(screen.getByText("22 tool calls")).toBeInTheDocument()
+    expect(screen.queryByText(/0 turns/)).not.toBeInTheDocument()
+  })
+
   it("counts the tool calls subagents made", () => {
     render(<SessionAtAGlance stats={stats({ inSubagents: 5 })} cost={1.84} />)
 
@@ -256,7 +263,7 @@ describe("SessionAtAGlance", () => {
 
     expect(
       screen.getByText(
-        "Judge gates made 3 model calls, for $0.01 the split above leaves out, from the 1 call priced.",
+        "Judge gates made 3 model requests, for $0.01 the split above leaves out, from the 1 request priced.",
       ),
     ).toBeInTheDocument()
   })

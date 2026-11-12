@@ -11,6 +11,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiLogIn,
   FiMessageSquare,
   FiRepeat,
   FiServer,
@@ -156,17 +157,11 @@ const BASE_NAV_SECTIONS = [
         // leads with Policies because `/routing` *is* the policies page, not to
         // make a parent reachable.
         children: [
-          {
-            to: "/tools/web-search",
-            label: "Web search",
-            icon: FiGlobe,
-            badge: "Beta",
-          },
+          { to: "/tools/web-search", label: "Web search", icon: FiGlobe },
           {
             to: "/tools/code-execution",
             label: "Code execution",
             icon: FiCode,
-            badge: "Beta",
           },
           { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
         ],
@@ -286,6 +281,14 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Email domains",
         surface: "organizations",
         icon: FiAtSign,
+      },
+      // Below the domains it admits through, since BYO OIDC reuses their
+      // DNS proofs rather than carrying its own.
+      {
+        to: "/organization/sso",
+        label: "Single sign-on",
+        surface: "organizations",
+        icon: FiLogIn,
       },
     ],
   },

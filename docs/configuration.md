@@ -80,6 +80,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -92,8 +93,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
-| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_audiences` | The audiences this deployment answers to, one of which an identity token must name in its `aud` claim. Required once `federation_issuers` or `federation_member_rules` is set. See [How a token is checked](workload-identity.md#how-a-token-is-checked). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY` and `federation_audiences`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
@@ -101,6 +103,9 @@ the corresponding startup value after the database is available.
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
 | `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. When set, a country file stored from the Settings page is not read. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
+| `closed_model_providers` | Providers whose models are closed, so a plan for open-weight models does not cover them, except a model in `closed_model_open_families`. A model on any other provider is open-weight unless its name is in `closed_model_families`. Defaults to Anthropic, Gemini, Vertex AI, xAI and OpenAI, with their Azure and Vertex variants. |
+| `closed_model_families` | Model name prefixes that are closed on any provider, matched after the last `/` and any vendor prefix (OpenRouter's `anthropic/claude-sonnet-4` and Bedrock's `us.anthropic.claude-sonnet-4` are both `claude`). A prefix matches a whole word unless it ends in `-`: `o3` matches `o3-mini` but not `o3x`, and `gpt-` matches any name it starts. Defaults to `claude`, `gemini`, `grok`, `gpt-`, `chatgpt` and `o1` to `o9`. |
+| `closed_model_open_families` | Model name prefixes that are open-weight even on a closed provider or in a closed family, matched the same way. Defaults to `gpt-oss` and `gemma`. |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -219,6 +224,13 @@ holds no budget.
 - They count in `rate_limit_store`, so with Redis they hold across replicas.
 - `per: key` does not limit a request without an API key (the master key or a
   dashboard session), and `per: user` does not limit one billed to no user.
+
+A build that bills organizations can also limit how many of an organization's
+calls on the deployment's own provider credentials are in flight at once, which
+no rule here sets. A chat completion, message or response over that limit waits
+up to 10 seconds for a slot, then is refused with a 429 naming the rule
+`organization_concurrency`. Each server process lets at most that many requests
+wait at once; one more is refused straight away with the same 429. It counts in the same store.
 
 `per: model` limits each model in `models`, written as `instance:model`. One
 count is kept per model and shared by every policy, alias and direct call that
@@ -981,6 +993,12 @@ prices each model at the prices now in force. A model waiting for a price is
 served once it has one, so a model released after the bundled snapshot arrives
 priced and serving in one update.
 
+With `models_dev_metadata` on, an update also stores the catalog of model
+facts it downloaded, which gives each model its kind and details, so the
+dashboard does not show a price for a model it still calls unknown. Storing it
+is best effort: a database error there is logged and the price update goes
+on, and a v1 catalog, read when v2 cannot be, lists every model as chat.
+
 **Update catalog** on the Hosted providers page runs it at once, after a preview
 of the price changes and of each provider's new models
 (`POST /api/v1/hosted-providers/catalog-update/preview`, then
@@ -1004,8 +1022,15 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
-It refuses models.dev data the gateway cannot read: a document that lists
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
+from `models_dev_base_url`. It carries every rate the catalog states, per
+second, image, character and minute as well as per token, so a video, image,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+which publishes the same documents at the same paths, built from models.dev's
+catalog plus the models it does not list yet; each of those is also offered to
+models.dev, and leaves the fork once it lands there. `https://models.dev` reads
+models.dev itself, and a private mirror works when it serves the same paths.
+An update refuses models.dev data the gateway cannot read: a document that lists
 no models, or one with more than a quarter of its models damaged. When neither
 catalog can be read, the prices in force stay, and the update reports an error.
 
@@ -1017,7 +1042,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 The bundled snapshot is the whole models.dev catalog, so it also carries the
 model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+saved v2 `api.json`, adding `--input-version v1` for a v1 one; `--base-url`
+fetches from somewhere other than the default) and commit
 `src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was

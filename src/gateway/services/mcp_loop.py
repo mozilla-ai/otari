@@ -31,6 +31,7 @@ from any_llm.types.completion import (
     ChunkChoice,
     CompletionTokensDetails,
     PromptTokensDetails,
+    ServerToolUsage,
 )
 
 from gateway.core.env import otari_env
@@ -38,6 +39,7 @@ from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.log_config import logger
@@ -349,7 +351,8 @@ class _ChatTotals:
 
     ``tool_calls`` holds the ended ``otari_tool_calls`` entries a response that is not
     streamed carries. A stream sends each entry as its call starts and ends instead,
-    so it stays empty there.
+    so it stays empty there. ``stream_id`` is the id of a stream's first chunk, which
+    every later round's chunks are sent under.
     """
 
     prompt: int = 0
@@ -359,7 +362,9 @@ class _ChatTotals:
     cache_write_5m: int = 0
     cache_write_1h: int = 0
     reasoning: int = 0
+    web_searches: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    stream_id: str | None = None
 
 
 def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
@@ -374,6 +379,7 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
     acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
     acc.cache_write_1h += cache_write_1h_tokens_of(usage)
     acc.reasoning += reasoning_tokens_of(usage)
+    acc.web_searches += provider_web_searches_of(usage)
 
 
 def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatTotals) -> None:
@@ -403,6 +409,8 @@ def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatT
         reasoning = usage.completion_tokens_details = CompletionTokensDetails()
     if reasoning is not None:
         reasoning.reasoning_tokens = totals.reasoning
+    if totals.web_searches:
+        usage.server_tool_use = ServerToolUsage(web_search_requests=totals.web_searches)
 
 
 # The field a tool activity chunk carries. The Chat wire has no vocabulary for a
@@ -466,8 +474,9 @@ class _ChatStreamState:
         # official OpenAI client raise IndexError.
         self.visible_tool_index: dict[int, int] = {}
         self.next_visible_tool_index = 0
-        # The round's first upstream chunk: activity chunks copy its id, model and
-        # timestamp so they read as part of the same stream.
+        # The round's first upstream chunk with choices (its first chunk until one
+        # arrives): activity chunks copy its id, model and timestamp so they read as
+        # part of the same stream, and a choiceless preamble names no response.
         self.template: ChatCompletionChunk | None = None
 
     def deferred_terminal(self) -> list[ChatCompletionChunk]:
@@ -606,7 +615,15 @@ class _ChatToolLoopStrategy:
         pool: ToolBackend,
         acc: _ChatTotals,
     ) -> tuple[StreamAction, ChatCompletionChunk]:
-        if state.template is None:
+        # Each round is its own provider call with its own id, but the client reads
+        # the stream as one completion, so every chunk carries the first id. A
+        # preamble chunk with no choices names no response, so it does not set it.
+        if acc.stream_id is None:
+            if event.choices and event.id:
+                acc.stream_id = event.id
+        elif event.id != acc.stream_id:
+            event = event.model_copy(update={"id": acc.stream_id})
+        if state.template is None or (event.choices and not state.template.choices):
             state.template = event
         if state.first is None and event.choices:
             state.first = event

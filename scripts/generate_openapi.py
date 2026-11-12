@@ -23,6 +23,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
+from gateway.core.settings.identity import OAuthAppConfig
 from gateway.main import create_app
 from gateway.services.secret_box import generate_secret_key
 
@@ -39,12 +40,14 @@ def generate_openapi_spec() -> dict[str, object]:
         config = GatewayConfig(
             database_url=database_url,
             bootstrap_api_key=False,
+            oauth_apps={"example": OAuthAppConfig(name="Example", redirect_uris=["https://example.invalid/callback"])},
             # A placeholder, so the conditionally mounted token exchange (mounted
             # only where a federation issuer is trusted) is in the published
             # contract. The spec has to describe every route this app can serve,
             # not only the ones a bare default config happens to reach. Nothing is
             # called during generation; it never authenticates anything.
             federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
+            federation_audiences=["https://openapi-generation-placeholder.invalid"],
             # Off by default, and on wherever Contact is offered, so it is part of the contract too.
             feedback_enabled=True,
         )

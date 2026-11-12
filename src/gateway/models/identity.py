@@ -4,16 +4,23 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 
 MAX_EMAIL_LENGTH = 255
-MAX_PROVIDER_LENGTH = 50
+MAX_PROVIDER_LENGTH = 255
 MAX_SUBJECT_LENGTH = 255
 MAX_BLOCK_REASON_LENGTH = 500
+
+OIDC_PROVIDER_PREFIX = "oidc:"
+# An issuer is named as a provider by prefixing it, so the room for one is what the provider column
+# holds less the prefix. Stated here rather than at each boundary, because a limit split between
+# two places drifts.
+MAX_OIDC_ISSUER_LENGTH = MAX_PROVIDER_LENGTH - len(OIDC_PROVIDER_PREFIX)
 
 
 class EmailAssertion(StrEnum):
@@ -78,8 +85,10 @@ class OAuthIdentityLink(Base):
     The primary key is the provider's ``(provider, subject)`` pair, which names one person at that provider.
     An account holds at most one link per provider.
 
-    NOTE: ``email_at_link`` and ``email_assertion_at_link`` record what the provider said when the link was made.
-    They must not be used to look an account up.
+    NOTE: ``asserted_email`` and ``email_assertion`` record what the provider last asserted, refreshed
+    on each sign-in. They must not resolve which account an identity signs in as, which is what
+    ``(provider, subject)`` is for: a provider asserting somebody else's address must not reach their account.
+    Finding the accounts an address reaches, so that blocking it ends their sessions, is a read they do serve.
     """
 
     __tablename__ = "oauth_identity_link"
@@ -89,8 +98,8 @@ class OAuthIdentityLink(Base):
     subject: Mapped[str] = mapped_column(String(MAX_SUBJECT_LENGTH), primary_key=True)
     # The unique constraint above leads with this column, so it also serves as the column's index.
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    email_at_link: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
-    email_assertion_at_link: Mapped[EmailAssertion] = mapped_column(
+    asserted_email: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
+    email_assertion: Mapped[EmailAssertion] = mapped_column(
         Enum(
             EmailAssertion,
             native_enum=False,
@@ -129,11 +138,109 @@ class BlockedEmail(Base):
         return "@" not in self.pattern
 
 
+def is_organization_connection_provider(provider: str | None) -> bool:
+    """Whether ``provider`` names an organization's own OIDC connection rather than a built-in one.
+
+    NOTE: ``oidc_flow_provider`` writes a connection id under the same prefix, so this is true of a
+    pending-flow provider as well. Callers holding one must not read it as an identity provider.
+    """
+    return provider is not None and provider.startswith(OIDC_PROVIDER_PREFIX)
+
+
+def oidc_identity_provider(issuer: str) -> str:
+    """Return the identity provider naming everyone this OIDC issuer vouches for.
+
+    The same value for every organization whose connection resolves to this issuer: the
+    issuer is who proved the person's identity, not which organization's connection reached it.
+
+    Raises:
+        ValueError: The provider value is too long to store.
+
+    """
+    provider = f"{OIDC_PROVIDER_PREFIX}{issuer}"
+    if len(provider) > MAX_PROVIDER_LENGTH:
+        msg = (
+            f"An OIDC issuer identifies a provider too long to store: "
+            f"{len(provider)} characters, at most {MAX_PROVIDER_LENGTH} allowed"
+        )
+        raise ValueError(msg)
+    return provider
+
+
+def oidc_flow_provider(connection_id: uuid.UUID) -> str:
+    """Return the pending-flow provider value naming one organization's OIDC connection.
+
+    Distinct per connection even where two organizations share one issuer, because only a
+    connection carries the client credentials a sign-in attempt resolves against.
+    """
+    return f"{OIDC_PROVIDER_PREFIX}{connection_id}"
+
+
+class OIDCConnection(Base):
+    """One organization's connection to its own OIDC identity provider.
+
+    An organization holds at most one connection, by the unique constraint on
+    ``organization_id``. ``issuer`` is the organization's own claim; ``resolved_issuer`` is
+    what discovery confirmed it to be.
+
+    NOTE: ``resolved_issuer`` carries no unique constraint. Two organizations may configure
+    one shared identity provider, and a sign-in attempt narrows among them by other means.
+    """
+
+    __tablename__ = "oidc_connection"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_oidc_connection_organization_id"),
+        Index("ix_oidc_connection_resolved_issuer", "resolved_issuer"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False
+    )
+    issuer: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolved_issuer: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_client_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    client_secret_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    default_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member", server_default="member")
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True, server_default=true())
+    discovery_document: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    discovered_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    first_sign_in_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
 __all__ = [
     "MAX_BLOCK_REASON_LENGTH",
     "BlockedEmail",
     "EmailAssertion",
     "MailedLinkStatus",
     "OAuthIdentityLink",
+    "OIDCConnection",
     "ProviderIdentity",
+    "is_organization_connection_provider",
+    "oidc_flow_provider",
+    "oidc_identity_provider",
 ]
+
+
+class OAuthAppGrant(Base):
+    """A short-lived, single-use approval to mint an app key. No credentials are stored."""
+
+    __tablename__ = "oauth_app_grants"
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(2048))
+    challenge: Mapped[str] = mapped_column(String(43))
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)

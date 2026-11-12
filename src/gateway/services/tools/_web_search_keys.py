@@ -20,6 +20,8 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 
+from fastapi import BackgroundTasks
+
 import any_fetch
 import any_search
 from gateway.core.settings.tools import (
@@ -56,6 +58,7 @@ from gateway.models.tools import (
     WebToolCredential,
     WebToolCredentialSource,
 )
+from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
@@ -241,7 +244,18 @@ class WebSearchKeyService:
             )
         return OrgWebSearchKeysPublic(data=[_public(row) for row in rows], count=count)
 
-    async def create_key(self, *, user: User, request: OrgWebSearchKeyCreateRequest) -> OrgWebSearchKeyPublic:
+    async def create_key(
+        self,
+        *,
+        user: User,
+        request: OrgWebSearchKeyCreateRequest,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> OrgWebSearchKeyPublic:
+        """Add a key to the caller's organization.
+
+        With ``growth``, the key is reported as ``WEB_SEARCH_KEY_ADDED`` once it commits.
+        """
         organization_id = await self._managed_organization(user)
         kind = request.kind
         provider = _validated_provider(kind, request.provider)
@@ -264,6 +278,15 @@ class WebSearchKeyService:
                 )
         except WebSearchKeyConflict:
             raise WebSearchKeyAlreadyExistsError(provider, name, kind=kind) from None
+        if growth is not None and background_tasks is not None:
+            await growth.record_action(
+                background_tasks=background_tasks,
+                action=GrowthAction.WEB_SEARCH_KEY_ADDED,
+                user_id=user.id,
+                email=user.email,
+                organization_id=organization_id,
+                details={"provider": provider, "kind": "web_fetch" if kind == "fetch" else "web_search"},
+            )
         return _public(row)
 
     async def update_key(

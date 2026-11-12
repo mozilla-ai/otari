@@ -128,6 +128,12 @@ aliases, and routing-policy names, and lists each model once however many
 providers serve it (see [Listing available models](#listing-available-models)). A provider's embedding and rerank models are
 offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
+Together lists every model it can deploy, but serves most of them only on a
+dedicated endpoint. Discovery leaves those out: it also asks Together for its
+serverless models (`GET /v1/models?serverless=true`) and keeps only those. If
+that listing fails, or is not shorter than the full listing, discovery keeps
+every model. To serve a model on a dedicated endpoint of your own, add it to the
+roster by hand.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
@@ -162,6 +168,15 @@ sends it.
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 from models.dev's entry for the model under the provider serving it:
 
+- A model a vLLM or SGLang server lists, through a configured instance, a
+  hosted provider or an organization's own key, reports the context length
+  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  above it. Each listing of the server is stored, so the value survives a
+  restart and reaches every worker within a minute. An organization's key is
+  read only for that organization's callers, and is listed when the key is
+  added or its models are refreshed. Where the provider has no models.dev entry for the model,
+  the entry comes from models.dev's Hugging Face listing, under the model's own
+  name or the model the server loaded.
 - Until the gateway has fetched models.dev, and always with
   `models_dev_metadata: false`, the entry comes from the models.dev catalog
   bundled with the gateway.
@@ -181,13 +196,20 @@ uses:
 - `supported_parameters`: `tools` and `tool_choice` for a model that calls
   tools, `response_format` for one with structured output, and `reasoning` for
   a reasoning model. It names only the parameters models.dev records a flag
-  for, not every parameter the model takes.
+  for, not every parameter the model takes. `response_format` is left out where
+  Otari cannot send it to the provider, as on Bedrock for every model but
+  Anthropic's.
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
 
-All three are unset for a model models.dev does not describe, which means
-unknown rather than unsupported. An alias reports its target's capabilities but
+An SGLang server also says how it was started, and that overrides models.dev:
+without a tool-call parser it offers no `tools`, a reasoning parser adds
+`reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
+not say, so its models keep models.dev's flags.
+
+All three are unset for a model neither models.dev nor its server describes,
+which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
@@ -213,10 +235,21 @@ The models.dev catalog is refreshed as follows:
   default) and stores it in the database; every worker serves the stored copy
   within 30 seconds. A model listing never waits on the download, and after a
   restart the stored copy is served at once.
+- The stored catalog records the `models_dev_base_url` it came from. After a
+  restart with another one, it is served until a download from the new source
+  replaces it, which is tried within a minute rather than after the interval.
+- A catalog update, **Update catalog** on the Hosted providers page or
+  `POST /api/v1/hosted-providers/catalog-update/preview`, stores the catalog
+  it downloads for the prices at once when `models_dev_metadata` is on, so a
+  new model's kind and details arrive with its price. A database error there
+  is logged and does not fail the update.
 - A failed download is tried again a minute later. The gateway reads
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
   back. Both give the same limits, capabilities and prices.
+- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+  models.dev, which serves models.dev's catalog plus the models it does not
+  list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
 - When neither can be read, the last good copy stays in use and the gateway
   logs why.
 - A document is refused when it lists no models or when more than a quarter of
@@ -255,10 +288,16 @@ unit is shown under the side it bills, so an image price, or a video model's
 per-second price, is under **Output**, and hovering it names what it prices and
 its unit ("Video output, $0.045/second"). A per-second price on any other kind
 of model is audio, shown on the side it is stored on. On a phone, which cannot
-hover, the unit is shown beside the amount. The list endpoint,
+hover, the unit is shown beside the amount. The search box beside the tabs
+keeps the models whose name contains what is typed, in any case, and the
+**Serving** / **Not serving** choice beside it keeps the models switched on or
+off; the tab counts then count only those. The list endpoint,
 `GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
-kind as `type` (`unknown` included), returns each model's `type`, and counts
-every kind in `type_counts` whichever one it returns.
+kind as `type` (`unknown` included), the search as `search` and the switch as
+`enabled` (`true` or `false`), returns each model's `type`, and counts every
+kind the search and the switch keep in `type_counts` whichever one it returns.
+The hosted providers' `GET /api/v1/hosted-providers/{provider}/models` takes
+the same three.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
