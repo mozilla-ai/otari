@@ -1155,6 +1155,18 @@ refuse such a value when a tool is saved.
   $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
   new account gets 2,500 credits for its first 30 days. A search returns at most
   10 results, and its hits carry a snippet but no page text.
+- **SpecStream** (`specstream`) needs an API key, read from the tool's `api_key`,
+  such as `${SPECSTREAM_API_KEY}`, and reports what each search costs
+  (`price_usd`), which is what the search is billed at. SpecStream's
+  [pricing](https://specstream.ai/pricing), read 2026-11-12, is per search at one
+  of two cost tiers chosen by `speed`: with `default`, $5 per 1,000 searches of up
+  to 10 results, and with `fast`, $1 per 1,000; each started block of 10 results
+  more adds to it, so a workspace's `max_results` ceiling also bounds what one
+  search can cost, and a search with no results costs nothing. Since it reports
+  its cost, a call may set `speed` in `provider_options`. Otari asks for 10
+  results unless the call sets `max_results`, at most 100. Hits carry a snippet,
+  and page text only with the `passages` option; a `time_range` becomes
+  SpecStream's `after:` operator in the query.
 - **Synthetic** (`synthetic`) needs an API key, read from the tool's `api_key`,
   such as `${SYNTHETIC_API_KEY}`. It reports no cost, so a search is billed at the
   tool's own rate (its `price_per_call`, or a `search` price set on the dashboard's

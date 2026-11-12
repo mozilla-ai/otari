@@ -386,3 +386,24 @@ The first provider whose price per call depends on an option.
 - Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
+
+### 2026-11-12, SpecStream (any-search)
+
+The first provider that takes the same parameters as a GET's query string or a POST's body.
+
+- When a provider documents both, send the one that keeps the query out of the URL: SpecStream's
+  `POST /v1/web-search` takes the GET's parameters as a JSON body, at the same price, so
+  `query_in_url` stays false and no real-socket log test is owed.
+- A provider can answer with every result it read unless a count is sent, and charge by the
+  results returned: SpecStream without `num`. Send a count on every call, the provider's first
+  price block (10) when the caller passes none, so a search without `max_results` costs what one
+  search is listed at.
+- A provider can report its cost and still sell tiers: SpecStream's `speed` is `cost_tier`, and
+  `reports_cost` is set, since `price_usd` is in every successful answer, a search with no
+  results included, at 0.
+- A provider with a query operator for dates and none for recency: `after:` as DeepSeek's, here
+  holding on every result, with an undated result kept, since nothing says it falls outside.
+- Two date fields can mean different precisions: `published_at`, a news item's time, wins over
+  `published`, a day; both are checked when sent.
+- Fixture recipes: `error` with a made-up key (`invalid_token`, 401); `normal` and `empty` follow
+  the API reference's `WebSearchPage` until a key records them.
