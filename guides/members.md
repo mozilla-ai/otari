@@ -135,9 +135,11 @@ to create an organization where signup is open.
 A claimed email domain lets people join without anyone deciding about each one,
 so it is deliberately limited.
 
-- **Only a proven claim admits anyone.** Several organizations may claim the same
-  domain; the first to publish the record proves it. A claim on a domain somebody
-  else owns therefore cannot lock out the real owner.
+- **Only a proven claim admits anyone.** Any number of organizations may claim
+  the same domain, including one another organization has proven. A claim is
+  proven when its organization verifies it and the published record matches.
+  Verifying is refused while another organization's proof is current. An
+  unproven claim therefore cannot stop the domain's real owner from proving it.
 - **Only Member and Viewer** can be granted, never organization management.
 - **Only verified addresses** join. An unverified address, or one only vouched
   for through an invitation link, is skipped.
