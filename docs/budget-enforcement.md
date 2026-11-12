@@ -63,10 +63,9 @@ at the input rate. Their reasoning, and the part of their output's price above t
 input rate, are not held, so a long loop can settle somewhat past its hold. A
 round on a free or unpriced model holds its tokens alone. A round the budget
 cannot hold is sent as the loop's last: it offers none of Otari's tools and asks
-the model to answer from what it already has, so the request ends with an answer,
-and that round settles past the budget too. If the model calls one of Otari's
-tools in that round anyway, the request fails as one past `max_tool_iterations`
-does.
+the model to answer from what it already has, and it settles past the budget too.
+The model can answer from those results; if it calls one of Otari's tools in
+that round anyway, the request fails as one past `max_tool_iterations` does.
 
 Holds are priced at the rules of the model's price the request meets before the
 call: estimated context, requested tier, image size, video resolution and start
