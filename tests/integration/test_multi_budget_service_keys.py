@@ -224,6 +224,23 @@ def test_a_budget_off_the_list_is_refused_with_a_code(client: TestClient, master
     assert _end_user(client, master_key_header, key_id, "new-user").status_code == 404
 
 
+def test_a_budget_on_a_request_naming_no_end_user_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A budget that would apply to no one is refused rather than ignored, so a mistake cannot turn it off."""
+    _, service = _mlpa(client, master_key_header)
+    plain = client.post(f"{API_ROOT}/keys", json={"key_name": "plain", "user_id": "plain"}, headers=master_key_header)
+    assert plain.status_code == 200, plain.text
+    plain_headers = {API_KEY_HEADER: f"Bearer {plain.json()['key']}"}
+
+    for headers, user in ((plain_headers, "someone"), (service, "mlpa")):
+        refused = _chat(client, headers, user, budget="eu-ai")
+        assert refused.status_code == 400, refused.text
+        assert refused.headers["Otari-Error-Code"] == "end_user_budget_without_end_user"
+        assert refused.json()["code"] == "end_user_budget_without_end_user"
+    assert _chat(client, plain_headers, "plain").status_code == 200
+
+
 def test_a_replay_repeats_the_budget_and_a_retry_naming_another_is_refused(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

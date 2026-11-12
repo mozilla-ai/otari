@@ -5,7 +5,11 @@ A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED, END_USER_LIMIT_REACHED
+from gateway.core.error_codes import (
+    END_USER_BUDGET_NOT_ALLOWED,
+    END_USER_BUDGET_WITHOUT_END_USER,
+    END_USER_LIMIT_REACHED,
+)
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyForbiddenError,
@@ -248,6 +252,22 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
 
     def __init__(self, budget_id: str):
         super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+
+
+class EndUserBudgetWithoutEndUserError(TenancyValidationError):
+    """A request names an end-user budget but no end user of a service key, so the budget would apply to no one.
+
+    Refused rather than ignored: a budget is a spend control, and one that a typo or the wrong key quietly turns off
+    goes unnoticed until the bill.
+    """
+
+    error_code = END_USER_BUDGET_WITHOUT_END_USER
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Otari-End-User-Budget applies only to a service key's request whose user field names one of its end "
+            "users; this request names none, so the budget would not be applied"
+        )
 
 
 class EndUserLimitReachedError(TenancyForbiddenError):

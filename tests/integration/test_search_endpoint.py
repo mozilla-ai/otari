@@ -1393,6 +1393,18 @@ def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
     assert refused.headers["Otari-Error-Code"] == "end_user_budget_not_allowed"
 
 
+def test_a_budget_on_a_search_naming_no_end_user_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = {**_keyed(client, master_key_header, "plain-search"), "Otari-End-User-Budget": "any-budget"}
+
+    refused = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "end_user_budget_without_end_user"
+    assert refused.headers["Otari-Error-Code"] == "end_user_budget_without_end_user"
+
+
 # --------------------------------------------------------------------------- #
 # The workspace's policy and organization key
 # --------------------------------------------------------------------------- #

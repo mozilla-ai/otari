@@ -56,6 +56,8 @@ PRICING_REQUIRED = "pricing_required"
 # The organization has no funds paid in to cover a request the deployment pays for.
 INSUFFICIENT_FUNDS = "insufficient_funds"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
+# Otari-End-User-Budget on a request that names no end user of a service key, so no budget would apply.
+END_USER_BUDGET_WITHOUT_END_USER = "end_user_budget_without_end_user"
 # A service key already has as many end users as its ``max_end_users`` allows.
 END_USER_LIMIT_REACHED = "end_user_limit_reached"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
