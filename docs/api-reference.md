@@ -524,9 +524,8 @@ was not stored or can no longer be read:
 
 The same retry recovers what a lost response would have said: the replay
 carries the original's `Otari-Request-ID`, and its `usage.cost_usd` where the
-original had one, which an answer
-from a proxy in front of the gateway (see
-[Request ID and inline cost](#request-id-and-inline-cost)) does not.
+original had one. An answer from a proxy in front of the gateway carries
+neither (see [Request ID and inline cost](#request-id-and-inline-cost)).
 
 ## Rerank
 
