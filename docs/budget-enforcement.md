@@ -58,12 +58,11 @@ resending the whole conversation so far. The hold above covers the loop's first
 round and its output limit. Every later round grows the hold by its own prompt
 before it is sent: the whole request it carries (the conversation, a system
 prompt or instructions, and the tools), at the same four characters per token.
-The visible output of earlier rounds is part of that prompt, so it is held there,
-at the input rate. Their reasoning, and the part of their output's price above the
-input rate, are not held, so a long loop can settle somewhat past its hold. A
+Each round's own output is billed as output too, and only the one output limit
+admission holds covers it, so a long loop can settle somewhat past its hold. A
 round on a free or unpriced model holds its tokens alone. A round the budget
 cannot hold is sent as the loop's last: it offers none of Otari's tools and asks
-the model to answer from what it already has, and it settles past the budget too.
+the model to answer from what it already has, and it may settle past the budget.
 The model can answer from those results; if it calls one of Otari's tools in
 that round anyway, the request fails as one past `max_tool_iterations` does.
 

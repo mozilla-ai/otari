@@ -2630,8 +2630,8 @@ class ReservationRoundGate:
     The hold taken at admission covers the request's first round and one output
     limit. Every later round resends the whole conversation and is billed too, so
     each grows the hold by its own prompt, priced at the candidate serving it as
-    admission prices the first: about four characters per token. Earlier rounds'
-    visible output is part of that prompt; a round's reasoning is not held. A round
+    admission prices the first: about four characters per token. A round's own
+    output is covered only by the one output limit admission holds. A round
     that does not fit is sent as the loop's last, without the gateway's tools
     (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
     holds its tokens alone.
