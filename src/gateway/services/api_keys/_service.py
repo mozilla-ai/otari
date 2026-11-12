@@ -2,20 +2,24 @@ import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
 
+from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import (
+    AppKeyOwnerInactiveError,
     FederationIssuerInvalidError,
     FederationIssuerNotAllowedError,
     FederationRuleExistsError,
     FederationRuleLimitError,
     FederationRuleNotFoundError,
-    OperatorDisabledKeyError,
+    KeyEnableRefusedError,
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
+from gateway.models.tenancy import User
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys._declared import apply_declared_key
@@ -60,6 +64,30 @@ class ApiKeyService:
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
+
+    async def issue_app_key(
+        self, *, user: User, workspace_id: uuid.UUID, client_id: str, app_name: str, key_format: ApiKeyFormatPort
+    ) -> str:
+        """Mint a budget-enforced app credential inside the caller's authority transaction."""
+        if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
+            raise AppKeyOwnerInactiveError
+        key = key_format.mint()
+        await self._keys.issue_app_key(
+            key_id=str(uuid.uuid4()),
+            key_hash=hash_key(key),
+            prefix=key_format.fingerprint(key),
+            suffix=key_suffix(key),
+            name=f"{app_name} (OAuth)",
+            user_id=str(user.id),
+            workspace_id=workspace_id,
+            client_id=client_id,
+        )
+        return key
+
+    async def revoke_key_by_token(self, token: str) -> None:
+        """Permanently revoke the presented API key, preserving its usage history."""
+        async with self._uow:
+            await self._keys.revoke_by_hash(hash_key(token))
 
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
@@ -210,13 +238,13 @@ class ApiKeyService:
         than written over. A changed access list must fit the owner's own.
 
         Raises:
-            OperatorDisabledKeyError: the changes switch on a key an operator switched off.
+            KeyEnableRefusedError: the changes enable a key disabled for a reason the owner cannot clear.
             ValueError: a changed access list names something unknown, or grants more than the owner's.
         """
         async with self._uow:
             await self._keys.reload_locked(key)
-            if changes.get("is_active") is True and key.operator_disabled:
-                raise OperatorDisabledKeyError
+            if changes.get("is_active") is True and key.disabled_reason is not None:
+                raise KeyEnableRefusedError(key.disabled_reason)
             stored = AccessLists(key.allowed_models, key.allowed_tools)
             access = await self.check_access_lists(
                 config,

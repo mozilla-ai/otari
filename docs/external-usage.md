@@ -29,11 +29,11 @@ Pick the way that matches where the usage comes from.
 
 ### Claude Code and Codex
 
-They send their usage as they run once pointed at Otari; see
-[Use with Claude Code](use-with-claude-code.md) and
-[Use with Codex](use-with-codex.md). For Claude Code sessions from before that,
+They send their usage as they run once pointed at Otari; see the
+[Claude Code](claude-code.md) and
+[Codex](codex.md) guides. For Claude Code sessions from before that,
 `otari import claude-code` reads the transcripts already on disk; see
-[Backfill history from local transcripts](use-with-claude-code.md#backfill-history-from-local-transcripts).
+[Backfill history from local transcripts](claude-code.md#backfill-history-from-local-transcripts).
 
 ### OpenTelemetry
 

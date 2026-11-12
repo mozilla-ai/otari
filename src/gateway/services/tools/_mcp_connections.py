@@ -78,8 +78,6 @@ EXPIRY_SKEW = timedelta(minutes=5)
 # How long one renewal may hold a connection's row while it waits on the authorization server.
 RENEWAL_DEADLINE_SECONDS = 20.0
 CALLBACK_PATH = "/mcp-connections/callback"
-# The dashboard route that finishes a sign-in a dashboard session started.
-DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
 # An OAuth ``error`` code as RFC 6749 section 4.1.2.1 spells one, and short.
 _SAFE_ERROR = re.compile(r"[a-z0-9_.-]{1,64}")
@@ -108,10 +106,10 @@ class StoredMcpOAuthClient(BaseModel):
         expired = self.secret_expires_at is not None and self.secret_expires_at <= now.timestamp()
         return self.redirect_uri == redirect_uri and not expired
 
-
-def stored_oauth_client(server: WorkspaceMcpServer) -> StoredMcpOAuthClient | None:
-    """A server's stored OAuth client, if it has one."""
-    return StoredMcpOAuthClient.model_validate(server.oauth_client) if server.oauth_client else None
+    @classmethod
+    def of(cls, server: WorkspaceMcpServer) -> StoredMcpOAuthClient | None:
+        """A server's stored OAuth client, if it has one."""
+        return cls.model_validate(server.oauth_client) if server.oauth_client else None
 
 
 def checked_return_to(return_to: str | None) -> str | None:
@@ -152,7 +150,7 @@ def callback_url(config: GatewayConfig) -> str:
     return f"{base}{API_ROOT}{CALLBACK_PATH}"
 
 
-def require_per_user_support(config: GatewayConfig) -> None:
+def _require_per_user_support(config: GatewayConfig) -> None:
     """Refuse per-user mode on a deployment that could not run a sign-in or keep its tokens.
 
     Raises:
@@ -202,7 +200,7 @@ def _client_for(server: WorkspaceMcpServer, *, client_id: str, auth_method: str)
         SecretDecryptionError: the stored client secret will not decrypt.
         SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
     """
-    return _client_from(stored_oauth_client(server), client_id=client_id, auth_method=auth_method)
+    return _client_from(StoredMcpOAuthClient.of(server), client_id=client_id, auth_method=auth_method)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +213,7 @@ class McpServerRef:
 
     @classmethod
     def of(cls, row: WorkspaceMcpServer) -> McpServerRef:
-        return cls(row.id, row.name, stored_oauth_client(row))
+        return cls(row.id, row.name, StoredMcpOAuthClient.of(row))
 
     id: uuid.UUID
     name: str
@@ -322,8 +320,29 @@ class McpRevocation:
     client: McpOAuthClient
     token: str
 
+    @staticmethod
+    def for_server(server: WorkspaceMcpServer, connections: Collection[McpUserConnection]) -> list[McpRevocation]:
+        """What revoking these connections to ``server`` sends: one token each, the refresh token where there is one."""
+        return _revocations_for(server, connections)
 
-def revocations_for(server: WorkspaceMcpServer, connections: Collection[McpUserConnection]) -> list[McpRevocation]:
+    @staticmethod
+    async def collect(
+        connections: McpUserConnectionRepository,
+        servers: WorkspaceMcpServerRepository,
+        *,
+        server_ids: Collection[uuid.UUID] | None = None,
+        user_id: str | None = None,
+    ) -> tuple[list[McpRevocation], int]:
+        """What revoking the connections a removal is about to delete sends, and how many it leaves unread."""
+        return await _collect_revocations(connections, servers, server_ids=server_ids, user_id=user_id)
+
+    @staticmethod
+    def send_in_background(revocations: Collection[McpRevocation], *, unread: int = 0) -> None:
+        """Ask authorization servers to end these tokens after a removal commits, without waiting on them."""
+        _revoke_in_background(revocations, unread=unread)
+
+
+def _revocations_for(server: WorkspaceMcpServer, connections: Collection[McpUserConnection]) -> list[McpRevocation]:
     """What revoking these connections to ``server`` sends: one token each, the refresh token where there is one.
 
     A connection whose server publishes no revocation endpoint, whose client the server no longer
@@ -344,7 +363,7 @@ def revocations_for(server: WorkspaceMcpServer, connections: Collection[McpUserC
     return revocations
 
 
-async def collect_revocations(
+async def _collect_revocations(
     connections: McpUserConnectionRepository,
     servers: WorkspaceMcpServerRepository,
     *,
@@ -360,7 +379,7 @@ async def collect_revocations(
     revocations = [
         revocation
         for server in held
-        for revocation in revocations_for(server, [row for row in rows if row.server_id == server.id])
+        for revocation in _revocations_for(server, [row for row in rows if row.server_id == server.id])
     ]
     return revocations, total - len(rows)
 
@@ -373,7 +392,7 @@ _REVOCATION_DEADLINE_SECONDS = 10.0
 _revocation_tasks: set[asyncio.Task[None]] = set()
 
 
-def revoke_in_background(revocations: Collection[McpRevocation], *, unread: int = 0) -> None:
+def _revoke_in_background(revocations: Collection[McpRevocation], *, unread: int = 0) -> None:
     """Ask authorization servers to end these tokens, without waiting and without failing anything.
 
     For a removal that has already committed. Each call has a deadline, a few run at once, and
@@ -407,7 +426,7 @@ async def _revoke_all(revocations: list[McpRevocation], skipped: int) -> None:
     logger.info("MCP connections revoked in bulk sent=%d confirmed=%d skipped=%d", len(revocations), confirmed, skipped)
 
 
-async def sign_in_problem(server_url: str) -> CheckFailure | None:
+async def _sign_in_problem(server_url: str) -> CheckFailure | None:
     """Why users could not sign in to a server at this URL, found from its OAuth metadata, or ``None``.
 
     Run when a manager saves a per-user server, so a setup no sign-in can use is shown then
@@ -443,6 +462,21 @@ class McpConnectionService:
         self._config = config
         self._eligibility = eligibility
 
+    @staticmethod
+    def require_support(config: GatewayConfig) -> None:
+        """Refuse per-user mode on a deployment that could not run a sign-in or keep its tokens.
+
+        Raises:
+            McpConnectionSetupError: ``public_base_url`` is unset.
+            SecretBoxUnavailableTenancyError: ``OTARI_SECRET_KEY`` is unset.
+        """
+        _require_per_user_support(config)
+
+    @staticmethod
+    async def sign_in_problem(server_url: str) -> CheckFailure | None:
+        """Why users could not sign in to a server at this URL, found from its OAuth metadata, or ``None``."""
+        return await _sign_in_problem(server_url)
+
     async def start(
         self,
         *,
@@ -476,7 +510,7 @@ class McpConnectionService:
         return_to = checked_return_to(return_to)
         async with self._uow:
             server = await self._per_user_server(server_id)
-            url, stored = server.url, stored_oauth_client(server)
+            url, stored = server.url, StoredMcpOAuthClient.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
             client = await self._client(server_id, url, stored, metadata, redirect_uri)
@@ -496,7 +530,7 @@ class McpConnectionService:
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the
             # server as it was cannot be stored against the server as a manager has since made it.
             server = await self._per_user_server(server_id, lock=True)
-            current = stored_oauth_client(server)
+            current = StoredMcpOAuthClient.of(server)
             if server.url != url or current is None or current.client_id != client.client_id:
                 raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
             await self._flows.purge_expired(now)
@@ -556,7 +590,7 @@ class McpConnectionService:
             server = await self._per_user_server(server_id, lock=True)
             if server.url != url:
                 raise McpConnectionUpstreamError("The server's URL changed during the sign-in; start it again")
-            current = stored_oauth_client(server)
+            current = StoredMcpOAuthClient.of(server)
             if current is not None and current.serves(redirect_uri, datetime.now(UTC)):
                 secret = decrypt_secret(current.encrypted_secret) if current.encrypted_secret else None
                 return McpOAuthClient(
@@ -706,7 +740,7 @@ class McpConnectionService:
             # The exchange took seconds. Tokens issued for the server as it was are not stored
             # against the server as a manager has since made it.
             current = await self._servers.find(pending.server_id, lock=True)
-            client_now = stored_oauth_client(current) if current is not None else None
+            client_now = StoredMcpOAuthClient.of(current) if current is not None else None
             if (
                 current is None
                 or current.url != url_before
@@ -736,7 +770,7 @@ class McpConnectionService:
         if refusal is not None:
             # The authorization server issued these tokens and nothing will hold them: ask it to end them.
             if pending.revocation_endpoint is not None:
-                revoke_in_background(
+                _revoke_in_background(
                     [
                         McpRevocation(
                             endpoint=pending.revocation_endpoint,
@@ -758,7 +792,7 @@ class McpConnectionService:
         """
         async with self._uow:
             server = await self._servers.find(server_id, lock=True)
-            stored = stored_oauth_client(server) if server is not None else None
+            stored = StoredMcpOAuthClient.of(server) if server is not None else None
             if server is not None and stored is not None and stored.dynamic and stored.client_id == client_id:
                 server.oauth_client = None
                 logger.info("MCP OAuth client dropped server_id=%s reason=refused", server_id)
@@ -968,7 +1002,7 @@ class McpUserTokens:
                     # The refused client goes too, or the next sign-in would be sent through it.
                     servers = WorkspaceMcpServerRepository(uow)
                     row = await servers.find(server.id, lock=True)
-                    held = stored_oauth_client(row) if row is not None else None
+                    held = StoredMcpOAuthClient.of(row) if row is not None else None
                     if row is not None and held is not None and held.dynamic and held.client_id == client.client_id:
                         row.oauth_client = None
                 logger.info(
@@ -995,12 +1029,7 @@ __all__ = [
     "McpConnectionEligibility",
     "McpRevocation",
     "McpServerRef",
-    "revocations_for",
-    "collect_revocations",
-    "revoke_in_background",
-    "sign_in_problem",
     "CallbackOutcome",
-    "DASHBOARD_CALLBACK_ROUTE",
     "CompletedConnection",
     "FlowLanding",
     "McpConnectionService",
@@ -1008,6 +1037,4 @@ __all__ = [
     "StoredMcpOAuthClient",
     "callback_url",
     "checked_return_to",
-    "require_per_user_support",
-    "stored_oauth_client",
 ]

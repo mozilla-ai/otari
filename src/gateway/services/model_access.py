@@ -433,10 +433,10 @@ async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "tuple[list[
     many connections it ends past the page it reads.
     """
     # Imported here: the tools package reaches back into this module while it loads.
-    from gateway.services.tools import collect_revocations
+    from gateway.services.tools import McpRevocation
 
     connections = McpUserConnectionRepository(db)
-    revocations = await collect_revocations(connections, WorkspaceMcpServerRepository(db), user_id=user_id)
+    revocations = await McpRevocation.collect(connections, WorkspaceMcpServerRepository(db), user_id=user_id)
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
     await connections.remove_for_user(user_id)
     await McpOAuthFlowRepository(db).remove_for_user(user_id)

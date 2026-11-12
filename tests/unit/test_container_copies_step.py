@@ -6,6 +6,7 @@ import uuid
 from typing import Any, cast
 
 import pytest
+from any_llm import LLMProvider
 from fastapi import HTTPException
 
 from gateway.api.routes._attempts import CandidateCannotServe
@@ -13,6 +14,7 @@ from gateway.api.routes._normalize import container_copies_step
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadDisabledError, ProviderUploadFailedError
 from gateway.services.files import FileService, StagedFile
+from gateway.services.files._provider_uploads import provider_holds_copies
 from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
@@ -24,6 +26,9 @@ class _Files:
     def __init__(self, error: Exception | None = None) -> None:
         self.asked: list[tuple[list[str], ProviderAccount]] = []
         self._error = error
+
+    def provider_holds_copies(self, provider: LLMProvider) -> bool:
+        return provider_holds_copies(provider)
 
     async def provider_file_ids(
         self, files: list[StagedFile], account: ProviderAccount, credential: ResolvedCredential

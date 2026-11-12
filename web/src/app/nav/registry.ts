@@ -157,17 +157,11 @@ const BASE_NAV_SECTIONS = [
         // leads with Policies because `/routing` *is* the policies page, not to
         // make a parent reachable.
         children: [
-          {
-            to: "/tools/web-search",
-            label: "Web search",
-            icon: FiGlobe,
-            badge: "Beta",
-          },
+          { to: "/tools/web-search", label: "Web search", icon: FiGlobe },
           {
             to: "/tools/code-execution",
             label: "Code execution",
             icon: FiCode,
-            badge: "Beta",
           },
           { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
         ],

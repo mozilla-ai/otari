@@ -19,7 +19,7 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 
 import math
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import MISSING, dataclass, fields, is_dataclass
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
@@ -334,6 +334,17 @@ class ModelsDevProvider:
     name: str | None
     doc: str | None
     models: Mapping[str, ModelsDevModel]
+    _folded: Mapping[str, ModelsDevModel] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        folded: dict[str, ModelsDevModel] = {}
+        for key, model in self.models.items():
+            folded.setdefault(key.casefold(), model)
+        object.__setattr__(self, "_folded", folded)
+
+    def model_in_any_case(self, name: str) -> ModelsDevModel | None:
+        """The first model, in document order, whose key differs from ``name`` only in case."""
+        return self._folded.get(name.casefold())
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,11 +417,20 @@ class ModelsDevCatalog:
         return next((self.providers[key] for key in ids if key in self.providers), None)
 
     def model_for(self, provider_type: str, model_id: str) -> ModelsDevModel | None:
-        """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one."""
+        """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one.
+
+        An exact id wins; failing one, an id that differs only in case matches,
+        because models.dev lowercases some providers' ids (OVHcloud's) that the
+        provider itself lists in mixed case.
+        """
         names = (model_id, model_id.removeprefix(LISTING_PREFIX))
-        for key in models_dev_provider_ids(provider_type):
-            models = self.providers[key].models if key in self.providers else {}
+        providers = [self.providers[key] for key in models_dev_provider_ids(provider_type) if key in self.providers]
+        for provider in providers:
+            models = provider.models
             if (model := next((models[name] for name in names if name in models), None)) is not None:
+                return model
+        for provider in providers:
+            if (model := next(filter(None, map(provider.model_in_any_case, names)), None)) is not None:
                 return model
         return None
 
@@ -1207,10 +1227,12 @@ def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
 
 
 def _encoded(value: object) -> object:
-    """A catalog value as JSON: a dataclass without the fields left at their default, a tuple as a list."""
+    """A catalog value as JSON: a dataclass without its derived or default fields, a tuple as a list."""
     if is_dataclass(value) and not isinstance(value, type):
         document: dict[str, object] = {}
         for field in fields(value):
+            if not field.init:
+                continue
             item = getattr(value, field.name)
             if field.default is MISSING or item != field.default:
                 document[field.name] = _encoded(item)

@@ -103,7 +103,7 @@ brew install mozilla-ai/tap/otari
 ```
 
 See [Agent Guardrails](cli/docs/agent-guardrails.md) and
-[Use with Claude Code](docs/use-with-claude-code.md).
+[Claude Code](docs/claude-code.md).
 
 ## Run the full stack
 
@@ -181,7 +181,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
 - [Agent Guardrails](cli/docs/agent-guardrails.md)
-- [SDK and agent integrations](docs/framework-integrations.md)
+- [SDK and agent integrations](docs/integrations.md)
 - [Architecture](ARCHITECTURE.md)
 
 ## License

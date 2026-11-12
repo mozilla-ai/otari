@@ -72,7 +72,11 @@ from gateway.exceptions.identity_exceptions import (
     OAuthStateError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import OIDC_PROVIDER_PREFIX, EmailAssertion, ProviderIdentity
+from gateway.models.identity import (
+    EmailAssertion,
+    ProviderIdentity,
+    is_organization_connection_provider,
+)
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS
 from gateway.repositories.identity.oauth_pending_state_repository import OAuthPendingStateRepository
 
@@ -154,7 +158,7 @@ def provider_label(provider: str) -> str:
     known = _PROVIDERS.get(provider)
     if known is not None:
         return known.label
-    return "company sign-in" if provider.startswith(OIDC_PROVIDER_PREFIX) else provider
+    return "company sign-in" if is_organization_connection_provider(provider) else provider
 
 
 def trusts_email_claim(provider: str) -> bool:

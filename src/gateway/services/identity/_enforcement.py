@@ -2,7 +2,11 @@
 
 import uuid
 
-from gateway.models.identity import OIDC_PROVIDER_PREFIX, oidc_identity_provider
+from gateway.models.identity import (
+    OIDC_PROVIDER_PREFIX,
+    is_organization_connection_provider,
+    oidc_identity_provider,
+)
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.identity.identity_repositories import IdentityRepositories
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
@@ -51,7 +55,7 @@ async def has_route_without(
         return True
     others = await repositories.links.get_other_providers_for_user(provider=provider, user_id=user.id)
     for other in others:
-        if other.startswith(OIDC_PROVIDER_PREFIX):
+        if is_organization_connection_provider(other):
             issuer = other.removeprefix(OIDC_PROVIDER_PREFIX)
             if await repositories.connections.list_enabled_by_resolved_issuer(issuer):
                 return True

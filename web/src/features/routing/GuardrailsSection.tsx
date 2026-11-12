@@ -7,6 +7,7 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
+import { GuardrailReadsField } from "@/features/guardrails/GuardrailReadsField"
 
 import { ModeToggle } from "./ModeToggle"
 
@@ -70,7 +71,7 @@ export function GuardrailsSection({
               label="Mode"
               value={guardrail.mode}
               onChange={(mode) => update(index, { mode })}
-              hint="block rejects a flagged request; monitor records it and serves anyway."
+              hint="block refuses or withholds what it flags; monitor records it and serves anyway."
             />
             <ModeToggle
               label="If the service is down"
@@ -91,6 +92,11 @@ export function GuardrailsSection({
               </IconButton>
             </FieldAction>
           </div>
+          <GuardrailReadsField
+            value={guardrail.on ?? ["input"]}
+            onChange={(on) => update(index, { on })}
+            groupName={`What guardrail ${index + 1} checks`}
+          />
           {guardrail.mode === "block" &&
           (guardrail.on_unavailable ?? "block") === "block" ? (
             <p className="text-caption text-warning">

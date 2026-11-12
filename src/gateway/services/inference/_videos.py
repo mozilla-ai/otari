@@ -41,6 +41,19 @@ def _price_length(record: VideoJobRecord, found: ResolvedPricing | None, seconds
     return price_video(found.pricing, seconds, facts=facts)
 
 
+# How far, as a share of what the provider charged, a rate's price may sit from
+# it before the rate is taken to be stale or wrong.
+STRAY_CHARGE_MARGIN = Decimal("0.1")
+
+
+def _stray_charge(billed: Decimal, reported: float | None) -> Decimal | None:
+    """What the provider charged where ``billed`` sits further from it than the margin, else ``None``."""
+    charged = reported_video_cost(reported)
+    if charged is None or abs(billed - charged) <= charged * STRAY_CHARGE_MARGIN:
+        return None
+    return charged
+
+
 # The length a job is taken to be when nobody states one: the longest default a
 # served provider renders, so neither the reservation nor the bill is short.
 ESTIMATED_VIDEO_SECONDS = 8
@@ -254,8 +267,10 @@ class VideoJobService:
         states a length, it is billed what the provider charged for it, else
         the length its reservation assumed at the per-second rate. A job the
         rate has to price and no rate does stays unclaimed, so a later read
-        bills it once a rate exists. ``charge_deployment`` is given the cost
-        before the row is written, where the deployment paid for the job.
+        bills it once a rate exists. A rate's price far from what the provider
+        charged is warned of, since the rate is then likely stale or wrong.
+        ``charge_deployment`` is given the cost before the row is written,
+        where the deployment paid for the job.
         """
         if record.accounted_at is not None:
             return False
@@ -276,6 +291,17 @@ class VideoJobService:
                 record.model,
             )
             return False
+        stray = None if found is None else _stray_charge(charge.cost, reported_cost)
+        if stray is not None:
+            logger.warning(
+                "Video job %s on %s:%s was billed %s at the stored rate, but the provider charged %s; "
+                "the rate may be stale or wrong",
+                record.id,
+                record.provider,
+                record.model,
+                charge.cost,
+                stray,
+            )
         usage = CompletedVideoUsage(
             video_id=record.id,
             workspace_id=workspace_id,

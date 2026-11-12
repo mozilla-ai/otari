@@ -46,6 +46,8 @@ interface MockOpts {
   ssoResponse?: () => Response
   /** What a save answers, so a test can drive the refusal path. */
   save?: () => Response
+  /** What pausing or resuming answers, so a test can drive its refusal. */
+  setEnabled?: () => Response
   /** What setting enforcement answers, so a test can drive each of its refusals. */
   enforcement?: () => Response
 }
@@ -100,10 +102,27 @@ function mockApi(opts: MockOpts = {}) {
             issuer: body.issuer,
             resolved_issuer: body.issuer,
             client_id: body.client_id,
-            client_secret_last4: String(body.client_secret ?? "").slice(-4),
+            // A save that omits the secret keeps the stored one, so its digits do not move.
+            client_secret_last4:
+              typeof body.client_secret === "string"
+                ? body.client_secret.slice(-4)
+                : (served.connection?.client_secret_last4 ?? ""),
             display_name: body.display_name,
-            enabled: body.enabled,
+            // A save that leaves the setting out keeps the stored one.
+            enabled: body.enabled ?? served.connection?.enabled ?? true,
           }),
+        }
+        return jsonResponse(served)
+      }
+      if (method === "PATCH") {
+        if (opts.setEnabled) return opts.setEnabled()
+        // The stored connection keeps every other field, which is the whole point of the route.
+        const body = JSON.parse(String(init?.body ?? "{}"))
+        if (served.connection !== null) {
+          served = {
+            ...served,
+            connection: { ...served.connection, enabled: body.enabled },
+          }
         }
         return jsonResponse(served)
       }
@@ -256,7 +275,6 @@ describe("OrganizationSsoPage", () => {
       client_id: "acme-dashboard",
       client_secret: "s3cr3t-98",
       default_role: "member",
-      enabled: true,
     })
     // The form closes only on a save the gateway accepted, and the page then
     // shows the stored connection, which is what separates a create from a
@@ -289,6 +307,101 @@ describe("OrganizationSsoPage", () => {
     expect(saved?.body).toMatchObject({
       client_secret: null,
       display_name: "Renamed IdP",
+    })
+  })
+
+  it("turns sign-in off from the page, sending that field alone", async () => {
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("switch", {
+        name: "Allow sign-in through this connection",
+      }),
+    )
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    // No credential is resent, which is why pausing sign-in never belonged behind a form
+    // full of them.
+    expect(
+      requests.find((request) => request.method === "PATCH")?.body,
+    ).toEqual({ enabled: false })
+    expect(requests.some((request) => request.method === "PUT")).toBe(false)
+    expect(await screen.findByText("Disabled")).toBeInTheDocument()
+    expect(screen.getByText("••••wxyz")).toBeInTheDocument()
+  })
+
+  it("says that pausing leaves current sessions alone", async () => {
+    mockApi({ sso: organizationSso({ connection: oidcConnection() }) })
+    renderPage(<OrganizationSsoPage />)
+
+    // An operator reading "Disabled" cannot tell whether it signed everybody out.
+    expect(
+      await screen.findByText(
+        /Pausing refuses new sign-ins through your provider\. Anyone already signed in stays signed in, and everyone keeps their membership\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows the refusal when a required connection is switched off", async () => {
+    const refusal =
+      "A connection this organization requires must stay enabled. Stop requiring sign-in through it first, or enable it."
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      setEnabled: () => jsonResponse({ detail: refusal }, 409),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("switch", {
+        name: "Allow sign-in through this connection",
+      }),
+    )
+
+    expect(await screen.findByText(refusal)).toBeInTheDocument()
+  })
+
+  it("leaves a paused connection paused when its credentials are edited", async () => {
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection({ enabled: false }) }),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit connection" }),
+    )
+    // The form carries credentials and nothing else: an administrator pausing sign-in has no
+    // reason to open it, and editing credentials cannot resume sign-in by accident.
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Allow sign-in through this connection",
+      }),
+    ).not.toBeInTheDocument()
+    await user.clear(await screen.findByLabelText("Client ID"))
+    await user.type(screen.getByLabelText("Client ID"), "acme-renamed")
+    await user.type(screen.getByLabelText("Client secret"), "s3cr3t-98")
+    await user.click(screen.getByRole("button", { name: "Save connection" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PUT")).toBe(true)
+    })
+    const saved = requests.find((request) => request.method === "PUT")
+    expect(saved?.body).toMatchObject({ client_id: "acme-renamed" })
+    // Left out rather than resent, so a stale cache cannot resume sign-in behind the operator.
+    expect(saved?.body).not.toHaveProperty("enabled")
+    await waitFor(() => {
+      expect(
+        screen.getByRole("switch", {
+          name: "Allow sign-in through this connection",
+        }),
+      ).not.toBeChecked()
     })
   })
 

@@ -1863,3 +1863,68 @@ def test_a_stream_error_event_carries_the_providers_failure() -> None:
         "tag": "SERVICE_OVERLOADED",
         "retryable": True,
     }
+
+
+# What Groq answered, verbatim, when a strict ``json_schema`` generation failed.
+_GROQ_JSON_FAILED_MSG = "Failed to generate JSON. Please adjust your prompt. See 'failed_generation' for more details."
+_GROQ_SCHEMA_MISMATCH_MSG = (
+    "Generated JSON does not match the expected schema. Please adjust your prompt. "
+    "See 'failed_generation' for more details."
+)
+
+
+def _groq_json_validate_failed(message: str) -> openai.APIStatusError:
+    error = _openai_error(message, code="json_validate_failed") | {"failed_generation": '{"summary": "Fixes a'}
+    return _openai_status_error(400, error)
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (_GROQ_JSON_FAILED_MSG, "Failed to generate JSON. Please adjust your prompt."),
+        (_GROQ_SCHEMA_MISMATCH_MSG, "Generated JSON does not match the expected schema. Please adjust your prompt."),
+    ],
+    ids=["failed-to-generate", "schema-mismatch"],
+)
+def test_a_structured_output_failure_carries_its_code_and_drops_the_failed_generation_pointer(
+    message: str, expected: str, unified: bool
+) -> None:
+    upstream = _groq_json_validate_failed(message)
+    exc = convert_exception(upstream, "groq") if unified else upstream
+
+    assert classify_provider_error(exc) == (400, expected)
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
+    assert stream_error_code(exc) == "structured_output_failed"
+    assert stream_error_message(exc) == expected
+
+
+def test_a_structured_output_failure_never_relays_the_partial_generation() -> None:
+    exc = _groq_json_validate_failed(_GROQ_JSON_FAILED_MSG)
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert "Fixes a" not in mapping.detail
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("See 'failed_generation' for more details.", PROVIDER_BAD_REQUEST_DETAIL),
+        ("Output was not valid JSON for the schema.", "Output was not valid JSON for the schema."),
+    ],
+    ids=["pointer-only", "no-pointer"],
+)
+def test_a_structured_output_failure_detail_without_a_sentence_of_its_own(message: str, expected: str) -> None:
+    """A message that is only the pointer falls back to the generic detail; one without it is kept whole."""
+    exc = _groq_json_validate_failed(message)
+
+    assert classify_provider_error(exc) == (400, expected)
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
+
+
+def test_a_400_with_another_provider_code_carries_no_structured_output_code() -> None:
+    exc = _openai_status_error(400, _openai_error(_GROQ_JSON_FAILED_MSG, code="invalid_value"))
+
+    assert classify_provider_error(exc) == (400, _GROQ_JSON_FAILED_MSG)
+    assert provider_error_headers(exc, 400) is None

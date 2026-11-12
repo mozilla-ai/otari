@@ -68,9 +68,9 @@ from gateway.services.tools import (
     McpConnectionService,
     McpGrantMembershipListener,
     McpUserTokens,
+    StoredMcpOAuthClient,
     _mcp_connections,
     _mcp_oauth,
-    stored_oauth_client,
 )
 from gateway.services.tools._mcp_connections import checked_return_to
 from gateway.services.tools._mcp_oauth import (
@@ -419,7 +419,7 @@ async def test_a_sign_in_registers_a_client_once_and_stores_only_ciphertext(
         world.member.id,
         "/tools/mcp-servers",
     )
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is not None and client.dynamic and client.redirect_uri == CALLBACK
     assert client.encrypted_secret is not None and decrypt_secret(client.encrypted_secret) == "dynamic-secret"
 
@@ -547,7 +547,7 @@ async def test_a_managers_own_client_is_kept_when_the_authorization_server_refus
     with pytest.raises(McpConnectionUpstreamError):
         await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="c")
 
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is not None and client.client_id == "my-client"
 
 
@@ -1176,7 +1176,7 @@ async def test_a_change_the_tokens_do_not_fit_ends_every_connection(
     )
 
     assert await _connection(async_db, world.server.id, str(world.member.id)) is None
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is None or not client.dynamic, "the client Otari registered went with the tokens"
 
 
@@ -1197,7 +1197,7 @@ async def test_a_change_that_leaves_the_tokens_valid_keeps_the_connections(
         )
 
     assert await _connection(async_db, world.server.id, str(world.member.id)) is not None
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is not None and client.encrypted_secret is not None
     assert (client.client_id, decrypt_secret(client.encrypted_secret)) == ("my-client", "new-secret")
 
@@ -1391,7 +1391,7 @@ async def test_a_managers_client_does_not_follow_the_server_to_another_host(
     )
 
     assert (updated.oauth_client_id == "my-client") is kept
-    assert (stored_oauth_client(await _row(async_db, world.server.id)) is not None) is kept
+    assert (StoredMcpOAuthClient.of(await _row(async_db, world.server.id)) is not None) is kept
 
 
 async def test_a_new_host_with_a_new_client_keeps_the_new_client(async_db: AsyncSession, config: GatewayConfig) -> None:
@@ -1576,7 +1576,7 @@ async def test_a_secret_does_not_follow_its_client_to_another_host(
     )
 
     assert (updated.oauth_client_id, updated.has_oauth_client_secret) == ("my-client", False)
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is not None and client.encrypted_secret is None
 
 
@@ -1592,7 +1592,7 @@ async def test_a_secret_sent_with_the_move_is_kept(async_db: AsyncSession, confi
         ),
     )
 
-    client = stored_oauth_client(await _row(async_db, world.server.id))
+    client = StoredMcpOAuthClient.of(await _row(async_db, world.server.id))
     assert client is not None and client.encrypted_secret is not None
     assert decrypt_secret(client.encrypted_secret) == "new-host-secret"
 

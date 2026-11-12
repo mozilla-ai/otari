@@ -21,6 +21,13 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
+import {
+  filteredEmptyContent,
+  OfferedModelFilters,
+  type ServingFilter,
+  servedParam,
+  useModelSearchTerm,
+} from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
@@ -77,6 +84,10 @@ export function ProviderModelsPanel({
   onPageSizeChange,
   kind,
   onKindChange,
+  serving,
+  onServingChange,
+  search,
+  onSearchChange,
 }: {
   providerKey: OrgProviderKey
   canEdit: boolean
@@ -93,8 +104,22 @@ export function ProviderModelsPanel({
   /** Which kind of model is shown, empty for every kind. Owned above, in the URL, as the page is. */
   kind: KindFilter
   onKindChange: (kind: KindFilter) => void
+  /** Served models, withheld ones, or both. Owned above, in the URL, as the kind is. */
+  serving: ServingFilter
+  onServingChange: (serving: ServingFilter) => void
+  /** What is typed into the model search. Owned above, in the URL, as the kind is. */
+  search: string
+  onSearchChange: (search: string) => void
 }) {
-  const models = useOrgProviderModels(providerKey.id, page, pageSize, kind)
+  const term = useModelSearchTerm(search)
+  const models = useOrgProviderModels(
+    providerKey.id,
+    page,
+    pageSize,
+    kind,
+    term,
+    servedParam(serving),
+  )
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
   const clearRate = useDeleteOrganizationPricing()
@@ -218,9 +243,21 @@ export function ProviderModelsPanel({
     return <PageLoading label="Loading models…" />
   }
 
+  // A failed list is not an empty one: with a settled error, rendering "no
+  // models yet" would tell an admin their catalog is gone. A filter with no
+  // models left is an empty table, not this, and so is a search's answer still
+  // shown while the list it was cleared to loads.
+  const isEmptyCatalog =
+    !models.error &&
+    !models.isPlaceholderData &&
+    rows.length === 0 &&
+    kind === "" &&
+    serving === "" &&
+    term === ""
+
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {providerKey.name}</h3>
           <p className="text-caption">
@@ -230,43 +267,56 @@ export function ProviderModelsPanel({
             prices is offered but not served, and stays off until it has a rate.
           </p>
         </div>
-        {canEdit ? (
+        {canEdit || !isEmptyCatalog ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-11 md:min-h-9"
-              isPending={refreshModels.isPending}
-              onPress={() => {
-                clearOutcome()
-                refreshModels.mutate()
-              }}
-            >
-              <FiRefreshCw aria-hidden className="size-4" />
-              Refresh models
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-11 md:min-h-9"
-              isPending={refreshPricing.isPending}
-              onPress={() => {
-                clearOutcome()
-                refreshPricing.mutate()
-              }}
-            >
-              <FiRefreshCw aria-hidden className="size-4" />
-              Refresh pricing
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              className="min-h-11 md:min-h-9"
-              onPress={openOffer}
-            >
-              <FiPlus aria-hidden className="size-4" />
-              Add model
-            </Button>
+            {canEdit ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-11 md:min-h-9"
+                  isPending={refreshModels.isPending}
+                  onPress={() => {
+                    clearOutcome()
+                    refreshModels.mutate()
+                  }}
+                >
+                  <FiRefreshCw aria-hidden className="size-4" />
+                  Refresh models
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-11 md:min-h-9"
+                  isPending={refreshPricing.isPending}
+                  onPress={() => {
+                    clearOutcome()
+                    refreshPricing.mutate()
+                  }}
+                >
+                  <FiRefreshCw aria-hidden className="size-4" />
+                  Refresh pricing
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="min-h-11 md:min-h-9"
+                  onPress={openOffer}
+                >
+                  <FiPlus aria-hidden className="size-4" />
+                  Add model
+                </Button>
+              </div>
+            ) : null}
+            {isEmptyCatalog ? null : (
+              <OfferedModelFilters
+                providerName={providerKey.name}
+                serving={serving}
+                onServingChange={onServingChange}
+                search={search}
+                onSearchChange={onSearchChange}
+              />
+            )}
           </div>
         ) : null}
       </div>
@@ -286,18 +336,7 @@ export function ProviderModelsPanel({
         </p>
       ) : null}
 
-      {models.data && rows.length + kind.length > 0 ? (
-        <OfferedKindTabs
-          counts={models.data.type_counts}
-          shown={kind}
-          onShow={onKindChange}
-        />
-      ) : null}
-
-      {/* A failed list is not an empty one: with a settled error, rendering
-          "no models yet" would tell an admin their catalog is gone. A kind
-          with no models left is an empty table under its tab, not this. */}
-      {!models.error && rows.length === 0 && kind === "" ? (
+      {isEmptyCatalog ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -307,6 +346,13 @@ export function ProviderModelsPanel({
         />
       ) : (
         <>
+          {models.data ? (
+            <OfferedKindTabs
+              counts={models.data.type_counts}
+              shown={kind}
+              onShow={onKindChange}
+            />
+          ) : null}
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
@@ -315,6 +361,7 @@ export function ProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
+              emptyContent={filteredEmptyContent(term, serving)}
             />
           </TableScrollFrame>
           <TablePagination

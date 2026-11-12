@@ -96,7 +96,7 @@ brew install mozilla-ai/tap/otari
 ```
 
 参见 [Agent Guardrails](cli/docs/agent-guardrails.md) 和
-[在 Claude Code 中使用](docs/use-with-claude-code.md)。
+[在 Claude Code 中使用](docs/claude-code.md)。
 
 ## 运行完整服务栈
 
@@ -168,7 +168,7 @@ make typecheck
 - [访问控制](docs/access-control.md)
 - [内置工具](docs/tools.md)
 - [Agent Guardrails](cli/docs/agent-guardrails.md)
-- [SDK 与智能体集成](docs/framework-integrations.md)
+- [SDK 与智能体集成](docs/integrations.md)
 - [架构](ARCHITECTURE.md)
 
 ## 许可证

@@ -23,7 +23,6 @@ through the shared :func:`gateway.api.routes._pipeline.log_gateway_rejection`.
 
 import time
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -62,7 +61,7 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.ports.code_execution_port import (
     SandboxNotReachableError,
     SandboxSessionGoneError,
@@ -80,12 +79,18 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.code_execution import ContainerLease
-from gateway.services.files import FileScope, StagedFile, sandbox_path_for
+from gateway.services.files import FileScope
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
-from gateway.services.tools import CONTAINER_GONE_DETAIL_TEMPLATE, declare_code_execution, unpriced_tool_detail
+from gateway.services.tools import (
+    CONTAINER_GONE_DETAIL_TEMPLATE,
+    Tool,
+    declare_code_execution,
+    unfunded_tool_detail,
+    unpriced_tool_detail,
+)
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
 
@@ -197,7 +202,8 @@ async def execute_code(
             staged = await files.staged_upload(file_id, scope)
             if staged is None:
                 raise await refuse(FILE_NOT_FOUND_DETAIL_TEMPLATE.format(file_id=file_id), status.HTTP_400_BAD_REQUEST)
-            file_bridge.inputs.append(_named_for_the_sandbox(staged, file_bridge.inputs))
+            taken = {existing.filename for existing in file_bridge.inputs}
+            file_bridge.inputs.append(staged.named_for_sandbox(taken))
 
     # Admitted before any reservation, so a refused run costs nothing to be told about.
     try:
@@ -276,14 +282,18 @@ async def execute_code(
         funding = await admit_deployment_paid(
             billing,
             deployment_paid=True,
+            billed=None,
             organization_id=organization_id,
             api_key_id=api_key_id,
             user_id=user_id,
             request_id=request_id,
+            tools=frozenset({_PRICING_KEY}),
         )
     except InsufficientFundsError as exc:
         raise await refused_after_reservation(
-            exc.public_message, status.HTTP_402_PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
+            unfunded_tool_detail([Tool.CODE_EXECUTION], exc.public_message, declared=False),
+            status.HTTP_402_PAYMENT_REQUIRED,
+            error_headers(INSUFFICIENT_FUNDS),
         ) from exc
     except Exception as exc:
         logger.error(
@@ -387,6 +397,7 @@ async def execute_code(
     if funding is not None:
         await funding.settle(
             cost,
+            tools={_PRICING_KEY: ToolUse(calls=1, amount=cost)},
             model=CODE_EXECUTION_TOOL_NAME,
             description=_PRICING_KEY,
             expects_cost=False,
@@ -418,11 +429,6 @@ def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) 
     if unit_rate is not None:
         meter["unit_rate"] = float(unit_rate)
     return {TOOL_METER_NAMESPACE: {CODE_EXECUTION_TOOL_NAME: meter}}
-
-
-def _named_for_the_sandbox(staged: StagedFile, taken: list[StagedFile]) -> StagedFile:
-    """``staged`` under the name it gets in the working directory, unique among ``taken``."""
-    return replace(staged, filename=sandbox_path_for(staged.filename, {existing.filename for existing in taken}))
 
 
 def _sandbox_failure(exc: SandboxNotReachableError, claimed: ContainerLease | None) -> HTTPException:

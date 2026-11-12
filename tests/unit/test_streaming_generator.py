@@ -412,7 +412,8 @@ async def test_keepalives_are_emitted_while_awaiting_the_first_chunk(fmt: object
     assert await gen.__anext__() == expected_keepalive
     release.set()
     assert await gen.__anext__() == "data: usage\n\n"
-    assert await gen.__anext__() == fmt.done_marker  # type: ignore[attr-defined]
+    if fmt.done_marker is not None:  # type: ignore[attr-defined]
+        assert await gen.__anext__() == fmt.done_marker  # type: ignore[attr-defined]
     with pytest.raises(StopAsyncIteration):
         await gen.__anext__()
 
@@ -900,7 +901,8 @@ async def test_an_upstream_that_stops_before_its_completing_chunk_fails_after_wh
 async def test_a_stream_that_reaches_its_completing_chunk_is_unaffected_by_the_check() -> None:
     events, errors, settled = await _run_with_completion_check("hello", "usage", "stop")
 
-    assert events == ["data: hello\n\n", "data: usage\n\n", "data: stop\n\n", ANTHROPIC_STREAM_FORMAT.done_marker]
+    # A Messages stream ends at its own last event, with no marker after it.
+    assert events == ["data: hello\n\n", "data: usage\n\n", "data: stop\n\n"]
     assert errors == []
     assert settled == ["complete"]
 

@@ -739,7 +739,7 @@ class CheckFailure(StrEnum):
     NOT_MCP = "not_mcp"
     LIMITS_EXCEEDED = "limits_exceeded"
     CONNECTION_FAILED = "connection_failed"
-    # A per-user server's sign-in setup, found before anyone signs in (``sign_in_problem``).
+    # A per-user server's sign-in setup, found before anyone signs in (``McpConnectionService.sign_in_problem``).
     SIGN_IN_UNSUPPORTED = "sign_in_unsupported"
     SIGN_IN_UNAVAILABLE = "sign_in_unavailable"
 

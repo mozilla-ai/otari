@@ -66,6 +66,7 @@ from .tenancy_helpers import (
     NO_TERMS,
     create_member,
     create_organization,
+    membership_listener_on,
     membership_writes,
 )
 
@@ -93,6 +94,7 @@ def _connection_service(
         allow_private_hosts=False,
         passkey_rp_id="otari.test",
         offered_providers=offered_providers,
+        sso_redirect_uri="https://otari.test/auth/sso/callback",
     )
 
 
@@ -187,7 +189,7 @@ def _identity_service(db: AsyncSession) -> IdentityService:
     identity-provider policy it is built with is never consulted.
     """
     uow = UnitOfWork(db)
-    organizations = OrganizationService(db, membership_listener=None, uow=uow)
+    organizations = OrganizationService(db, membership_listener=membership_listener_on(uow), uow=uow)
     policy = DeploymentIdentityProviderAdapter(
         UserRepository(db), organizations, functools.partial(forget_unproven_access, db), open_signup=False
     )
@@ -197,7 +199,9 @@ def _identity_service(db: AsyncSession) -> IdentityService:
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
         session_ttl_hours=1,
         terms_url=None,
         mailer=Mailer(GatewayConfig(mail_transport="none")),
@@ -595,13 +599,14 @@ async def test_turning_enforcement_off_still_refuses_an_account_this_deployment_
 
 
 async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobody_can_enter(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    async_db: AsyncSession,
 ) -> None:
-    """Turning enforcement on and disabling the connection are read-then-write over each other.
+    """Turning enforcement on and pausing the connection are read-then-write over each other.
 
     Neither has a unique index to lose to, so only the row lock on the organization keeps what each
     one read still true when it writes. Without it both commit, and the organization then requires
-    a connection it has disabled, which admits nobody.
+    a connection it has paused, which admits nobody. Neither path reads the provider, so there is
+    no discovery to stand in for.
     """
     organization = await create_organization(async_db, slug=f"acme-{uuid.uuid4().hex[:8]}")
     owner = await _member_with_email(
@@ -609,7 +614,6 @@ async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobo
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
-    _stub_discovery(monkeypatch, resolved_issuer=_ISSUER)
     owner_id, organization_id = owner.id, organization.id
     engine = create_async_engine(async_db.get_bind().engine.url)
 
@@ -624,17 +628,7 @@ async def test_enforcing_and_disabling_at_once_cannot_leave_an_organization_nobo
     async def disable(session: AsyncSession) -> object:
         actor = await UserRepository(session).get(owner_id)
         assert actor is not None
-        return await _connection_service(session).save_for_user(
-            user=actor,
-            request=OIDCConnectionRequest(
-                issuer=_ISSUER,
-                client_id="a-client-id",
-                client_secret="s3cr3t-client-value",
-                display_name="Acme SSO",
-                default_role="member",
-                enabled=False,
-            ),
-        )
+        return await _connection_service(session).set_enabled_for_user(user=actor, enabled=False)
 
     async def run(attempt: Callable[[AsyncSession], Awaitable[object]]) -> object:
         async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -1093,7 +1087,6 @@ async def test_repointing_an_enforcing_connection_revokes_a_member_it_now_blocks
             client_secret="s3cr3t-client-value",
             display_name="Acme SSO",
             default_role="member",
-            enabled=True,
         ),
     )
 

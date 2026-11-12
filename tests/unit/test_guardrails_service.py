@@ -14,7 +14,7 @@ import ipaddress
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -90,32 +90,8 @@ async def test_list_result_is_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_output_only_guardrail_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """v1 enforces only input-direction guardrails; an output-only entry makes
-    no service call and never blocks."""
-    called = False
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal called
-        called = True
-        return httpx.Response(200, json={"profile": "prompt-injection", "result": {"valid": False}})
-
-    _patch_transport(monkeypatch, handler)
-    verdict = await run_input_guardrails(
-        [GuardrailConfig(profile="prompt-injection", on=["output"])], "x", default_url=_URL
-    )
-    assert verdict.results == []
-    assert verdict.blocked is False
-    assert called is False
-
-
-@pytest.mark.asyncio
 async def test_output_only_guardrail_url_is_still_ssrf_checked() -> None:
-    """An output-only guardrail is never *evaluated* (see the sibling test
-    above), but its `url` override must still be SSRF-checked: the check
-    covers every configured guardrail regardless of `on` direction, not just
-    the ones this function currently enforces. Otherwise output enforcement
-    landing later would silently need to remember to add the check itself."""
+    """A guardrail's `url` override is SSRF-checked whatever its `on` direction."""
     with pytest.raises(UnsafeURLError, match="link-local"):
         await run_input_guardrails(
             [GuardrailConfig(profile="prompt-injection", on=["output"], url="http://169.254.169.254/x")],
@@ -724,3 +700,59 @@ async def test_one_request_can_mix_a_held_guardrail_and_a_remote_one(monkeypatch
     assert sent == ["pii"]
     assert verdict.blocked is True
     assert [result.profile for result in verdict.results] == ["prompt-injection", "pii"]
+
+
+# -- kept verdicts -----------------------------------------------------------
+
+
+def test_a_kept_verdict_answers_only_the_check_that_gave_it() -> None:
+    from gateway.services.guardrails import GuardrailResult, cached_result, check_identity, remember_result
+
+    cfg = GuardrailConfig(profile="prompt-injection", mode="block")
+    ours = check_identity(cfg, base_url="https://a.example", credential="one", in_process={})
+    assert ours is not None
+    remember_result(ours, "text", GuardrailResult(profile=cfg.profile, mode="monitor", valid=False, score=0.9))
+
+    hit = cached_result(ours, "text", cfg)
+    assert hit is not None
+    assert (hit.valid, hit.score, hit.mode) == (False, 0.9, "block")
+    assert cached_result(ours, "other text", cfg) is None
+    for other in (
+        check_identity(cfg, base_url="https://a.example", credential="two", in_process={}),
+        check_identity(cfg, base_url="https://b.example", credential="one", in_process={}),
+        check_identity(
+            GuardrailConfig(profile="prompt-injection", validate_kwargs={"threshold": 0.1}),
+            base_url="https://a.example",
+            credential="one",
+            in_process={},
+        ),
+    ):
+        assert other is not None
+        assert other != ours
+        assert cached_result(other, "text", cfg) is None
+
+
+def test_a_check_without_a_verdict_or_an_identity_is_not_kept() -> None:
+    from gateway.services.guardrails import GuardrailResult, cached_result, check_identity, remember_result
+
+    cfg = GuardrailConfig(profile="pi")
+    identity = check_identity(cfg, base_url="https://a.example", credential=None, in_process={})
+    assert identity is not None
+    remember_result(identity, "text", GuardrailResult(profile="pi", mode="monitor", valid=None))
+    assert cached_result(identity, "text", cfg) is None
+
+    class _Unnamed:
+        async def check(self, prompt: str, **validate_kwargs: object) -> object: ...
+
+    unnamed = cast(Any, _Unnamed())
+    assert check_identity(cfg, base_url="", credential=None, in_process={"pi": unnamed}) is None
+
+    class _Named(_Unnamed):
+        identity = "pi@1"
+
+    named = cast(Any, _Named())
+    stricter = GuardrailConfig(profile="pi", validate_kwargs={"threshold": 0.1})
+    assert check_identity(cfg, base_url="", credential=None, in_process={"pi": named}) != check_identity(
+        stricter, base_url="", credential=None, in_process={"pi": named}
+    )
+    assert check_identity(cfg, base_url="", credential=None, in_process={}) is None
