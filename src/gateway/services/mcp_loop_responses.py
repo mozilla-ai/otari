@@ -22,7 +22,6 @@ execution path and the gateway has nothing to dispatch against.
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import replace
@@ -34,8 +33,10 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
     StreamAction,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -111,8 +112,8 @@ async def _execute_function_calls(
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
-    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
-    is refused as one of those errors.
+    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``,
+    or one whose arguments are not a JSON object, is refused as one of those errors.
 
     When ``native_items`` is given, each call appends the native items announcing it
     right after it ran, so they keep the order the calls ran in and a rendering that
@@ -120,8 +121,13 @@ async def _execute_function_calls(
     """
     out: list[dict[str, Any]] = []
     for item in items:
-        args = _parsed_arguments(item.arguments)
-        call = NativeCall(str(item.name or ""), str(item.call_id or ""), args)
+        args = parse_tool_arguments(str(item.name or ""), item.arguments)
+        call = NativeCall(str(item.name or ""), str(item.call_id or ""), args or {})
+        if args is None:
+            if native_items is not None:
+                native_items.extend(_native_items(call, pool, tools, refused=True))
+            out.append({"type": "function_call_output", "call_id": item.call_id, "output": INVALID_ARGUMENTS_ERROR})
+            continue
         capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted(item.name):
             if native_items is not None:
@@ -245,15 +251,6 @@ def _reoutput_indexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"output_index": visible_index})
 
 
-def _parsed_arguments(raw: Any) -> dict[str, Any]:
-    """The call's arguments, empty where the model sent something unusable."""
-    try:
-        parsed = json.loads(raw or "{}")
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: bool) -> list[Any]:
     """Native items announcing one gateway-run call, if this caller asked to hear about it.
 
@@ -304,8 +301,12 @@ async def _execute_stream_owned(
     """
     results: list[dict[str, Any]] = []
     for spec in state.owned_specs:
-        args = _parsed_arguments(spec.get("arguments"))
-        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args)
+        args = parse_tool_arguments(str(spec["name"]), spec.get("arguments"))
+        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args or {})
+        if args is None:
+            state.native_items.extend(_native_items(call, pool, tools, refused=True))
+            results.append({"type": "function_call_output", "call_id": call.id, "output": INVALID_ARGUMENTS_ERROR})
+            continue
         capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted(call.name):
             state.native_items.extend(_native_items(call, pool, tools, refused=True))

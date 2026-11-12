@@ -31,8 +31,10 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
     StreamAction,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -117,13 +119,13 @@ class _NativeSink:
         self._blocks.extend(blocks)
 
 
-def _max_uses_exceeded_result(call: NativeCall, native: _NativeSink | None) -> dict[str, Any]:
-    """The tool_result for a call the use cap refused, collecting its native blocks."""
+def _refused_result(call: NativeCall, native: _NativeSink | None, error: str) -> dict[str, Any]:
+    """The tool_result for a call refused before it ran, collecting its native blocks."""
     if native is not None and native.wants(call.name):
         rendering = native_rendering(call.name, Dialect.MESSAGES)
         if rendering is not None:
             native.extend(rendering.refused(call))
-    return {"type": "tool_result", "tool_use_id": call.id, "content": MAX_USES_EXCEEDED_ERROR}
+    return {"type": "tool_result", "tool_use_id": call.id, "content": error}
 
 
 def _native_blocks_for_call(pool: ToolBackend, call: NativeCall) -> list[Any]:
@@ -182,7 +184,7 @@ async def _execute_tool_uses(
         arguments = dict(block.input or {})
         capped = is_capped_call(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted(block.name):
-            out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native))
+            out.append(_refused_result(NativeCall(block.name, block.id, arguments), native, MAX_USES_EXCEEDED_ERROR))
             continue
         owner = owning_backend(pool, block.name)
         try:
@@ -365,7 +367,7 @@ class _MessagesStreamState:
 
 
 def _parsed_stream_input(state: _MessagesStreamState, spec: dict[str, Any]) -> dict[str, Any]:
-    """Parse one buffered tool input, falling back to the loop's historical empty object."""
+    """One buffered tool input as the assistant turn replays it, an empty object where it is not one."""
     try:
         value = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
     except json.JSONDecodeError:
@@ -435,15 +437,19 @@ async def _execute_stream_owned_events(
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Execute owned calls and optionally yield MCP activity representations.
 
-    A search past ``budget`` is refused before it reaches the backend, so it emits
-    no activity for work that never happened and spends nothing.
+    A search past ``budget``, or a call whose arguments are not a JSON object, is
+    refused before it reaches the backend, so it emits no activity for work that
+    never happened and spends nothing.
     """
     for spec in state.owned_specs:
         name = str(spec["name"])
-        parsed_input = _parsed_stream_input(state, spec)
+        parsed_input = parse_tool_arguments(name, state.tool_use_json_bufs.get(spec["index"], ""))
+        if parsed_input is None:
+            results.append(_refused_result(NativeCall(name, spec["id"], {}), native, INVALID_ARGUMENTS_ERROR))
+            continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
-            results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native))
+            results.append(_refused_result(NativeCall(name, spec["id"], parsed_input), native, MAX_USES_EXCEEDED_ERROR))
             continue
         owner = owning_backend(pool, name)
         mcp_backend = _as_mcp_tool_backend(owner)

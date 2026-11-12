@@ -31,7 +31,7 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
-from gateway.services._tool_loop import FINAL_ROUND_NOTE
+from gateway.services._tool_loop import FINAL_ROUND_NOTE, INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
     MaxToolIterationsExceeded,
@@ -908,6 +908,53 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
         "message_delta",
         "message_stop",
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_refuses_a_tool_use_whose_input_is_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[list[dict[str, Any]]] = []
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "fetch_url"),
+                _input_json_delta(0, '{"u":'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        captured.append(list(kwargs["messages"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _event in anthropic_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == []
+    assert captured[1][-1] == {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": INVALID_ARGUMENTS_ERROR}],
+    }
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
 
 
 @pytest.mark.asyncio
