@@ -9,7 +9,7 @@ The catalog permits nothing. A workspace's stored MCP servers are the ones it
 adds, so being listed here gives a workspace no access. A request can still name
 a server by URL where the workspace allows it, and the master key can do so even
 when the workspace does not. See
-[MCP servers](mcp-servers.md).
+[MCP servers](mcp-servers.md#add-servers-from-the-catalog).
 
 ## Settings
 

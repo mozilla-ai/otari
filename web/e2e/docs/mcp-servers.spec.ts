@@ -138,7 +138,7 @@ test("configure an MCP server", async ({ page }) => {
 
 test("browse the catalog", async ({ page }) => {
   await login(page)
-  await openNestedPage(page, "Tools", "MCP servers")
+  await openNested(page, "Tools", "MCP servers")
   await page.getByRole("button", { name: "Browse catalog" }).click()
 
   const dialog = page.getByRole("dialog", { name: "Browse catalog" })
