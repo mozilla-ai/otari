@@ -61,7 +61,8 @@ An API key reaches:
 
 - the inference routes;
 - `GET /api/v1/usage/requests/{request_id}` for its own requests;
-- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
+- `GET /api/v1/key/budget`, `/key/usage/summary` and `/key/usage/series` for
+  its [own budget and usage](#a-keys-own-budget-and-usage);
 - the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
   `/providers/catalog`, `/tool-settings/guardrails/catalog`,
   `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
