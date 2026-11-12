@@ -45,6 +45,7 @@ from gateway.core.usage import (
 from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
+    AnsweredRounds,
     MaxToolIterationsExceeded,
     StreamAction,
     ToolBackend,
@@ -80,6 +81,7 @@ __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
     "PURPOSE_HINT_HEADER",
     "TOOL_ACTIVITY_FIELD",
+    "AnsweredRounds",
     "MaxToolIterationsExceeded",
     "ToolBackend",
     "inject_purpose_hints",

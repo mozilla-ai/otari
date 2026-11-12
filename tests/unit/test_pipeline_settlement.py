@@ -54,8 +54,10 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     build_streaming_response,
+    log_exhausted_plan,
     log_usage,
     prepare_gateway_tools,
+    release_reservation,
     run_non_stream,
     run_single_attempt_stream,
 )
@@ -79,6 +81,7 @@ from gateway.services.budgets import (
     settle_cut_stream,
 )
 from gateway.services.inference import DeploymentCharge
+from gateway.services.mcp_loop import AnsweredRounds
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
@@ -631,6 +634,95 @@ async def test_stream_error_after_reported_usage_bills_it(monkeypatch: pytest.Mo
     assert logged["usage_override"].prompt_tokens == 120
     assert logged["error"] == "upstream broke"
     assert logged["request_id"] == "req-1"
+
+
+_ANSWERED = CompletionUsage(prompt_tokens=120, completion_tokens=30, total_tokens=150)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("failed", ["non-streaming", "before-the-stream", "mid-stream"])
+async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch, failed: str, cost: Decimal
+) -> None:
+    """A tool loop whose later round fails still owes for the rounds before it, as a broken stream does.
+
+    A round that only ran the gateway's tools sends the client nothing, so the failure can
+    land before the stream starts. Mid-stream, an Anthropic round's message_start has
+    already reported its input, which must not hide the output the round went on to bill.
+    A free model's rounds still count against a token ceiling.
+    """
+    settlement = _Settlement(row_cost=cost)
+    settlement.install(monkeypatch)
+    failure = RuntimeError("context length exceeded")
+
+    if failed == "non-streaming":
+        AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+        with pytest.raises(HTTPException):
+            await _run_non_stream(monkeypatch, error=failure, reservation=_reservation())
+    elif failed == "before-the-stream":
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        async def failing_provider(**kwargs: Any) -> Any:
+            raise failure
+
+        monkeypatch.setattr(chat, "acompletion", failing_provider)
+        with pytest.raises(HTTPException):
+            await run_single_attempt_stream(
+                adapter=chat._ADAPTER,
+                ctx=_ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation()),
+                tool_ctx=_tool_ctx(),
+                call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+                provider=LLMProvider.OPENAI,
+                model="gpt-4",
+            )
+    else:
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        async def broken() -> AsyncIterator[ChatCompletionChunk]:
+            yield _chunk(_PARTIAL_USAGE)
+            raise failure
+
+        await _drain(_build(broken(), GatewayConfig()))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [cost]
+    assert settlement.settled_tokens == [150]
+    (logged,) = settlement.logged
+    billed = logged["usage_override"]
+    assert (billed.prompt_tokens, billed.completion_tokens) == (120, 30)
+
+
+@pytest.mark.asyncio
+async def test_a_locked_plan_settles_the_tokens_of_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool loop that answered locks its plan, so a later failure exhausts it: its tokens settle as on one model."""
+    from gateway.services.routing import CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    granted: list[int] = []
+
+    class _Grant:
+        async def settle(self, tokens: int) -> None:
+            granted.append(tokens)
+
+    ctx = _ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation())
+    ctx.rate_limit_grant = cast(Any, _Grant())
+    ctx.plan = CompiledPlan("policy", [Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4")])
+    failure = RuntimeError("context length exceeded")
+    AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+    exhausted = HTTPException(status_code=400, detail="context length exceeded")
+    exhausted.__cause__ = failure
+
+    await log_exhausted_plan(ctx, chat._ADAPTER, exhausted)
+    await release_reservation(ctx)
+
+    assert settlement.reconciled == [Decimal("0.25")]
+    assert settlement.settled_tokens == [150]
+    assert granted == [150]
 
 
 @pytest.mark.asyncio
