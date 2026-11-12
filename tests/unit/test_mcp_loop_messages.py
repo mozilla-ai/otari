@@ -223,6 +223,52 @@ def test_inject_purpose_hints_anthropic_prepends_existing_list_system() -> None:
     assert out["system"][1]["cache_control"] == {"type": "ephemeral"}
 
 
+class _RoundGate:
+    """Admits every round and records how long each round's request was."""
+
+    def __init__(self) -> None:
+        self.asked: list[int] = []
+
+    async def admit(self, prompt_chars: int) -> bool:
+        self.asked.append(prompt_chars)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_round_is_held_on_its_whole_request_its_system_prompt_included(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every round resends the system prompt as well as the conversation, and is held for both."""
+    responses = iter(
+        [
+            _message_response(stop_reason="tool_use", content=[_tool_use("tu_1", "fetch_url", {})]),
+            _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return next(responses)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    gate = _RoundGate()
+    system = "S" * 40_000
+
+    await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "max_tokens": 10,
+            "system": system,
+            "messages": [{"role": "user", "content": "go"}],
+        },
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+        round_gate=gate,
+    )
+
+    assert len(gate.asked) == 1
+    assert gate.asked[0] > len(system)
+
+
 # ---------- non-streaming loop ----------
 
 

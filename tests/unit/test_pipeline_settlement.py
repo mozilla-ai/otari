@@ -73,6 +73,7 @@ from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchC
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import (
+    EstimateInputs,
     ReservationHandle,
     estimate_output_tokens,
     settle_abandoned_stream,
@@ -3373,3 +3374,37 @@ def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_pr
     assert final is not None and final.usage == started
     unestimated = settle_abandoned_stream(**args, policy="allow_free", reported_usage=started, usage_is_final=False)
     assert unestimated is not None and unestimated.usage == started
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("rate", "held"), [(10.0, True), (0.0, False)], ids=["priced", "free"])
+async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_holds_nothing(
+    monkeypatch: pytest.MonkeyPatch, rate: float, held: bool
+) -> None:
+    """A round grows the hold by its own prompt only: the request's one output limit is already held."""
+    holds: list[tuple[Decimal, int]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, calls: int = 1, tokens: int = 0
+    ) -> Decimal:
+        holds.append((amount, tokens))
+        return amount
+
+    monkeypatch.setattr(pipeline, "hold_tool_call", fake_hold)
+    monkeypatch.setattr(pipeline, "release_session", AsyncMock())
+    handle = _reservation()
+    handle.reservation_id = "reservation-1"
+    ctx = _ctx(GatewayConfig(), db=object(), reservation=handle)
+    ctx.estimate_inputs = EstimateInputs(prompt_chars=40, max_output_tokens=8000, default_output_tokens=1024)
+    ctx.serving = ("openai", "gpt-4", False)
+    pricing = ModelPricing(model_key="openai:gpt-4", input_price_per_million=rate, output_price_per_million=rate)
+    ctx.prices = cast(Any, SimpleNamespace(resolve=AsyncMock(return_value=ResolvedPricing(pricing, "deployment"))))
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
+
+    if held:
+        [(amount, tokens)] = holds
+        assert float(amount) == pytest.approx(0.1)
+        assert tokens == 10_000
+    else:
+        assert holds == []

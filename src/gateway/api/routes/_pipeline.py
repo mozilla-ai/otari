@@ -306,6 +306,7 @@ from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
+    RoundGate,
     ToolBackend,
 )
 from gateway.services.mcp_stateless import failure_class
@@ -1232,6 +1233,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -1242,6 +1244,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
@@ -1410,6 +1413,9 @@ class RequestContext:
         # Monotonic clock reading taken as the first provider attempt is sent,
         # which splits ``Server-Timing`` into the gateway's time and the provider's.
         self.dispatched_at: float | None = None
+        # The instance, model and funding of the candidate the request was last sent to, which a
+        # tool loop's later rounds are priced at.
+        self.serving: tuple[str, str, bool] | None = None
         # The request's fields beyond its schema's, forwarded only to a provider
         # instance whose ``request_fields`` lists them (``with_request_fields``).
         self.request_extras: dict[str, Any] = {}
@@ -1505,8 +1511,9 @@ def _served_by_headers(
     )
 
 
-def _mark_dispatched(ctx: RequestContext) -> None:
-    """Note that the request is going to its first provider, unless an earlier attempt already went."""
+def _mark_dispatched(ctx: RequestContext, instance: str, model: str, *, deployment_paid: bool) -> None:
+    """Note the candidate the request is going to, and when it first went to a provider."""
+    ctx.serving = (instance, model, deployment_paid)
     if ctx.dispatched_at is None:
         ctx.dispatched_at = time.monotonic()
 
@@ -2615,6 +2622,72 @@ class ReservationToolGate:
             # The lookup's connection must not be held across the next provider call either.
             await release_session(self._ctx.db)
         return self._unit_costs[key]
+
+
+class ReservationRoundGate:
+    """Grows the request's reservation by each tool-loop round's prompt before the round is sent.
+
+    The hold taken at admission covers the request's first round and one output
+    limit. Every later round resends the whole conversation and is billed too, so
+    each grows the hold by its own prompt, priced at the candidate serving it as
+    admission prices the first: about four characters per token. Earlier rounds'
+    output is already in that prompt, so the one output limit stays enough. A round
+    that does not fit is sent as the loop's last, without the gateway's tools
+    (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
+    holds nothing, as a free tool call does (``ReservationToolGate``).
+    """
+
+    def __init__(self, ctx: RequestContext) -> None:
+        self._ctx = ctx
+
+    @property
+    def in_force(self) -> bool:
+        """Whether the request holds a reservation a round could grow; a loop is handed the gate only then."""
+        handle = self._ctx.reservation
+        return handle is not None and handle.counts_toward_budget and handle.reservation_id is not None
+
+    async def admit(self, prompt_chars: int) -> bool:
+        ctx, handle = self._ctx, self._ctx.reservation
+        inputs, serving = ctx.estimate_inputs, ctx.serving
+        if handle is None or not self.in_force or inputs is None or serving is None:
+            return True
+        instance, model, deployment_paid = serving
+        try:
+            prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
+            resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
+            cost = estimate_cost(
+                resolved.pricing if resolved is not None else None,
+                prompt_chars=prompt_chars,
+                max_output_tokens=0,
+                default_output_tokens=0,
+                cache_write_ttl=inputs.cache_write_ttl,
+                facts=inputs.facts,
+            )
+            if cost <= ZERO:
+                return True
+            # Ends whatever the request left pending, so a failed hold rolls back only the hold.
+            await release_session(ctx.db)
+            held = await hold_tool_call(
+                ctx.db,
+                handle,
+                cost,
+                tokens=estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0),
+                strategy=ctx.config.budget_strategy,
+            )
+        except DATABASE_ERRORS as exc:
+            logger.error(
+                "Could not hold a tool-loop round on the budget; sending it as the last: %s",
+                describe_database_error(exc),
+            )
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await ctx.db.rollback()
+            return False
+        if held is None:
+            logger.info(
+                "Tool-loop round on %s:%s does not fit the request's budget; sending it as the last", instance, model
+            )
+            return False
+        return True
 
 
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
@@ -3802,6 +3875,8 @@ class ToolContext:
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
         self.use_budget: ToolUseBudget | None = shared.use_budget
+        # Holds each tool-loop round after the first on the request's budgets.
+        self.round_gate: ReservationRoundGate | None = shared.round_gate
         # On the old backend, Search and Fetch share a fixed attempted-call cap across routing attempts.
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
         # On the libraries, they share the deployment's ``web_search_max_calls`` across routing attempts.
@@ -3999,6 +4074,7 @@ class SharedToolUse:
 
     tally: ToolUsageTally = field(default_factory=ToolUsageTally)
     use_budget: ToolUseBudget | None = None
+    round_gate: ReservationRoundGate | None = None
     web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
     # Sized by the deployment's ``web_search_max_calls`` when the request is admitted.
     web_call_cap: WebToolCallCap = field(kw_only=True)
@@ -4312,6 +4388,7 @@ async def prepare_gateway_tools(
         web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
     )
     shared.tally.spend_gate = ReservationToolGate(ctx)
+    shared.round_gate = ReservationRoundGate(ctx)
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
@@ -5823,6 +5900,8 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     options: dict[str, Any] = {}
     if tool_ctx.use_budget is not None:
         options["use_budget"] = tool_ctx.use_budget
+    if tool_ctx.round_gate is not None and tool_ctx.round_gate.in_force:
+        options["round_gate"] = tool_ctx.round_gate
     return options
 
 
@@ -6910,7 +6989,7 @@ async def run_single_attempt_stream(
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
-                    _mark_dispatched(ctx)
+                    _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
                     return await open_stream(
                         adapter=adapter,
                         tool_ctx=served_tools,
@@ -6968,7 +7047,7 @@ async def run_single_attempt_stream(
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
-            _mark_dispatched(ctx)
+            _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
@@ -7317,7 +7396,7 @@ async def run_non_stream(
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
-                    _mark_dispatched(ctx)
+                    _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
                     result = await dispatch_non_stream(
                         adapter=adapter,
                         tool_ctx=served_tools,
@@ -7378,7 +7457,7 @@ async def run_non_stream(
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
-            _mark_dispatched(ctx)
+            _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to
