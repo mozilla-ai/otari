@@ -25652,6 +25652,8 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
                 /** @description Only models whose name contains this text, case-insensitively */
                 search?: string | null;
+                /** @description Only models served (`true`) or only models withheld (`false`) */
+                enabled?: boolean | null;
             };
             header?: never;
             path: {
@@ -29510,6 +29512,8 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
                 /** @description Only models whose name contains this text, case-insensitively */
                 search?: string | null;
+                /** @description Only models served (`true`) or only models withheld (`false`) */
+                enabled?: boolean | null;
             };
             header?: never;
             path: {
