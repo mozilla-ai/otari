@@ -180,6 +180,7 @@ from gateway.core.usage import (
 )
 from gateway.exceptions import TenancyError
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
+from gateway.exceptions.inference_exceptions import StoredStateOnManagedCredentialError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
@@ -6680,22 +6681,50 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     return _admit
 
 
-def refuse_container_on_deployment_credential(
+_STORED_STATE_FIELDS = ("previous_response_id", "conversation")
+
+
+def names_stored_provider_state(call_kwargs: Mapping[str, Any]) -> str | None:
+    """The field by which a Responses call continues state stored on the provider's account, or ``None``.
+
+    That is ``previous_response_id``, ``conversation``, or an ``item_reference``
+    in the input. Each names a response, conversation or item by an id the
+    provider minted on the account that served it, not on an Otari tenant.
+    """
+    for name in _STORED_STATE_FIELDS:
+        if call_kwargs.get(name):
+            return name
+    extra_body = call_kwargs.get("extra_body")
+    inputs = [call_kwargs.get("input_data"), extra_body.get("input") if isinstance(extra_body, Mapping) else None]
+    for input_data in inputs:
+        if isinstance(input_data, list) and any(
+            isinstance(item, dict) and item.get("type") == "item_reference" for item in input_data
+        ):
+            return "item_reference"
+    return None
+
+
+def refuse_provider_state_on_deployment_credential(
     adapter: FormatAdapter[Any, Any], call_kwargs: dict[str, Any], *, deployment_paid: bool
 ) -> None:
-    """Refuse to send a caller-chosen provider ``container`` on a credential the deployment owns.
+    """Refuse to send a caller-chosen id for provider-side state on a credential the deployment owns.
 
-    A provider container id addresses an execution environment and its files on
-    the provider account that minted it, not on an Otari workspace. The
-    deployment's own account is shared by every organization it serves, so
-    forwarding an id the caller picked would let one workspace resume another's
-    container. The id cannot be namespaced, so the candidate is refused.
+    A provider ``container``, a stored response or conversation, or a referenced
+    input item is addressed on the provider account that minted it, not on an
+    Otari workspace. The deployment's own account is shared by every
+    organization it serves, so forwarding an id the caller picked would let one
+    workspace resume another's state. The id cannot be namespaced, so the
+    candidate is refused.
 
     Raises:
-        CandidateCannotServe: ``deployment_paid`` and ``call_kwargs`` names a provider container.
+        CandidateCannotServe: ``deployment_paid`` and ``call_kwargs`` names provider-side state.
     """
-    if deployment_paid and names_provider_container(call_kwargs):
+    if not deployment_paid:
+        return
+    if names_provider_container(call_kwargs):
         raise CandidateCannotServe(domain_error(adapter, ContainerOnManagedCredentialError()))
+    if (name := names_stored_provider_state(call_kwargs)) is not None:
+        raise CandidateCannotServe(domain_error(adapter, StoredStateOnManagedCredentialError(name)))
 
 
 def _failover_kwargs(
@@ -6704,7 +6733,7 @@ def _failover_kwargs(
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
-    or that would carry a caller's provider container on the deployment's credential,
+    or that would carry a caller's provider-side state on the deployment's credential,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
     any candidate missing a key.
@@ -6716,7 +6745,7 @@ def _failover_kwargs(
         fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
         fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
-        refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
+        refuse_provider_state_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
         return _without_unused_reasoning_effort(attempt, call_kwargs)
 
     return _build
@@ -6783,7 +6812,7 @@ async def _admitted_and_prepared(
         hold = await ctx.rate_limit_grant.admit_model(instance, model, name_model=ctx.plan is None)
     try:
         try:
-            refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=ctx.deployment_paid)
+            refuse_provider_state_on_deployment_credential(adapter, call_kwargs, deployment_paid=ctx.deployment_paid)
         except CandidateCannotServe as exc:
             raise exc.refusal from exc
         return await _prepared(adapter, prepare_kwargs, instance, call_kwargs)

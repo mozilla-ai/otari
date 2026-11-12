@@ -508,6 +508,13 @@ Requests on other credentials skip billing, except a gateway tool run on the
 deployment's account, whose calls are gated and charged the same way (see
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
 
+A deployment-paid credential's provider account is shared by every
+organization the deployment serves, so a request on one cannot name state
+stored on that account. A provider `container` id, `previous_response_id`,
+`conversation` and an `item_reference` input item are refused with `400`, and a
+routing plan passes over the candidate to the next one. Send the previous turns
+in `input` instead, or use a model on the organization's own key.
+
 This covers every provider path: Chat Completions, Messages, Responses, the
 Playground, the pass-through endpoints (embeddings, images, audio, rerank,
 moderations) and batches. Each routing or fallback candidate is checked as it

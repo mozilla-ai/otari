@@ -1,8 +1,9 @@
-"""A caller's provider container never rides on a credential the deployment owns, end to end.
+"""A caller's id for provider-side state never rides on a credential the deployment owns, end to end.
 
 A provider container id names an execution environment and its files on the
-provider account that minted it. The deployment's own account is shared by every
-organization it serves, so a candidate served on it is refused a container the
+provider account that minted it, as a stored response, conversation or input
+item id names state on it. The deployment's own account is shared by every
+organization it serves, so a candidate served on it is refused an id the
 caller picked, and a plan falls through to a candidate on the caller's own key.
 A probe overlay serves ``openai`` on the deployment's key; the configured
 ``anthropic`` key is the caller's own.
@@ -145,19 +146,13 @@ def _messages(client: TestClient, model: str, container: str | None, *, stream: 
     return response, provider
 
 
-def _responses(client: TestClient, container: object) -> tuple[Any, AsyncMock]:
+def _responses(client: TestClient, container: object = None, **fields: Any) -> tuple[Any, AsyncMock]:
+    body: dict[str, Any] = {"model": "openai:gpt-4o", "input": "Hi", "user": "u1", **fields}
+    if container is not None:
+        body["tools"] = [{"type": "code_interpreter", "container": container}]
     provider = AsyncMock(return_value=_response())
     with patch("gateway.api.routes.responses.aresponses", new=provider):
-        response = client.post(
-            f"{API_ROOT}/responses",
-            json={
-                "model": "openai:gpt-4o",
-                "input": "Hi",
-                "tools": [{"type": "code_interpreter", "container": container}],
-                "user": "u1",
-            },
-            headers=MASTER,
-        )
+        response = client.post(f"{API_ROOT}/responses", json=body, headers=MASTER)
     return response, provider
 
 
@@ -215,6 +210,41 @@ def test_a_code_interpreter_container_id_is_refused_on_the_deployments_credentia
 
 def test_a_fresh_code_interpreter_container_is_served_on_the_deployments_credential(client: TestClient) -> None:
     response, provider = _responses(client, {"type": "auto"})
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert provider.call_args.kwargs["api_key"] == "fleet-key"
+
+
+@pytest.mark.parametrize(
+    ("fields", "field"),
+    [
+        ({"previous_response_id": "resp_abc"}, "previous_response_id"),
+        ({"conversation": "conv_abc"}, "conversation"),
+        ({"conversation": {"id": "conv_abc"}}, "conversation"),
+        ({"input": [{"type": "item_reference", "id": "msg_abc"}]}, "item_reference"),
+    ],
+    ids=["previous-response", "conversation", "conversation-object", "item-reference"],
+)
+def test_a_stored_state_id_is_refused_on_the_deployments_credential(
+    client: TestClient, fields: dict[str, Any], field: str
+) -> None:
+    response, provider = _responses(client, **fields)
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    assert f"{field} cannot be used on this route" in response.text
+    provider.assert_not_called()
+
+
+def test_a_streamed_stored_state_id_is_refused_on_the_deployments_credential(client: TestClient) -> None:
+    response, provider = _responses(client, previous_response_id="resp_abc", stream=True)
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    assert "previous_response_id cannot be used on this route" in response.text
+    provider.assert_not_called()
+
+
+def test_a_request_with_no_stored_state_is_served_on_the_deployments_credential(client: TestClient) -> None:
+    response, provider = _responses(client)
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert provider.call_args.kwargs["api_key"] == "fleet-key"
