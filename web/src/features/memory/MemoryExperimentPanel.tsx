@@ -21,18 +21,18 @@ const HOLDOUT_OPTIONS = [10, 20, 30, 50].map((percent) => ({
   label: `${percent}% of sessions`,
 }))
 
-const tokens = new Intl.NumberFormat("en", { maximumFractionDigits: 0 })
-const percent = new Intl.NumberFormat("en", {
+const tokens = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+const percent = new Intl.NumberFormat("en-US", {
   style: "percent",
   maximumFractionDigits: 1,
   signDisplay: "exceptZero",
 })
-const usd = new Intl.NumberFormat("en", {
+const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   maximumSignificantDigits: 3,
 })
-const when = new Intl.DateTimeFormat("en", {
+const when = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
 })
@@ -54,7 +54,7 @@ function Results({ report }: { report: MemoryExperiment }) {
   const needed = report.min_sessions
   const hitRate =
     report.recalls > 0
-      ? new Intl.NumberFormat("en", { style: "percent" }).format(
+      ? new Intl.NumberFormat("en-US", { style: "percent" }).format(
           report.recalls_with_results / report.recalls,
         )
       : "—"
