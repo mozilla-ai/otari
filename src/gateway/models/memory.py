@@ -273,6 +273,7 @@ class MemoryWorkspaceSettings(Base):
         CheckConstraint("retention_days IS NULL OR retention_days > 0", name="check_memory_settings_retention"),
         CheckConstraint("recall_min_similarity BETWEEN 0.3 AND 0.99", name="check_memory_settings_recall_similarity"),
         CheckConstraint("recall_max_entries BETWEEN 1 AND 5", name="check_memory_settings_recall_entries"),
+        CheckConstraint("recall_min_relevance BETWEEN 0.05 AND 0.99", name="check_memory_settings_recall_relevance"),
         CheckConstraint("experiment_holdout_percent BETWEEN 0 AND 50", name="check_memory_settings_experiment_holdout"),
     )
 
@@ -298,6 +299,10 @@ class MemoryWorkspaceSettings(Base):
     auto_recall: Mapped[bool] = mapped_column(default=False, server_default=false())
     recall_min_similarity: Mapped[float] = mapped_column(default=0.75, server_default="0.75")
     recall_max_entries: Mapped[int] = mapped_column(default=3, server_default="3")
+    # Have the deployment's rerank model score the entries most alike to the turn, and hand over only those that
+    # reach ``recall_min_relevance``; the similarity floor then no longer applies.
+    recall_rerank: Mapped[bool] = mapped_column(default=False, server_default=false())
+    recall_min_relevance: Mapped[float] = mapped_column(default=0.5, server_default="0.5")
     # The share of sessions the last experiment served without memory, to measure what it saves; zero is none ever.
     experiment_holdout_percent: Mapped[int] = mapped_column(default=0, server_default="0")
     # When it began, which deals the sessions, and when it stopped; it runs while it has begun and not stopped.

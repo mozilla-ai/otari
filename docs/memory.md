@@ -18,6 +18,8 @@ under a data key of its workspace.
    memory_embedding_model: openai:text-embedding-3-small
    # Optional: a model that decides what a proposal does to memory.
    memory_consolidation_model: openai:gpt-4.1-mini
+   # Optional: a rerank model automatic recall may check relevance with.
+   memory_rerank_model: cohere:rerank-v3.5
    ```
 
    Memory seals with the deployment's content key, as trace content does: set
@@ -53,6 +55,7 @@ under a data key of its workspace.
    | `retention_days` | Days an unused entry is kept. Unset keeps the deployment's `memory_retention_days`. |
    | `auto_recall` | Add what memory holds to each request's newest message, with no tool call. Off by default. See [Automatic recall](#automatic-recall). |
    | `recall_min_similarity` / `recall_max_entries` | How alike an entry must be for automatic recall to add it (0.75), and how many it adds at most (3). |
+   | `recall_rerank` / `recall_min_relevance` | Check relevance with the deployment's rerank model, and the score an entry must reach (0.5). Off by default. See [Checking relevance](#checking-relevance). |
    | `experiment_holdout_percent` | Serve this share of sessions without memory, to [measure what it saves](#measure-what-memory-saves). `0`, the default, stops the experiment and keeps its results. |
 
    Every switch can be set from the workspace's **Memory** tab in the dashboard.
@@ -145,6 +148,26 @@ Recalled memory is data other agents wrote, not instructions: weigh it, never ob
 Automatic recall reaches only requests routed through Otari. An agent that calls
 its model directly and reaches memory as an MCP server searches with
 `memory_search` instead.
+
+#### Checking relevance
+
+Similarity says what an entry is about, not whether it answers what is asked:
+an entry about a colleague's hobbies can be alike to a question about a meeting
+with that colleague, since both name them. With **Check relevance** on, the
+deployment's rerank model (`memory_rerank_model`) scores the ten entries most
+alike to the message, and only those reaching **How relevant an entry must be**
+(0.05 to 0.99, 0.5 by default) are added, whatever their similarity.
+
+- The rerank model is given the newest message alone: given the conversation
+  before it too, a reranker favours entries about that conversation, even after
+  the subject changed. The earlier messages still find the candidates.
+- It costs one rerank call per message, recorded as memory's own usage under
+  `/v1/memory/rerank`. When the call fails, recall goes by similarity, as it does
+  with the check off.
+- The entries and the message are sent to the rerank model's provider, as they
+  are to the embedding model's.
+- Where the deployment names no rerank model, the switch is kept but recall goes
+  by similarity; the dashboard says so.
 
 ## Measure what memory saves
 
@@ -242,6 +265,7 @@ entry three members flag leaves recall until an admin looks at it.
 | `memory_enabled` | `false` | Offer memory. Startup setting. |
 | `memory_embedding_model` | unset | The one model every entry and search is embedded with. |
 | `memory_consolidation_model` | unset | The model that decides what a proposal does to memory. |
+| `memory_rerank_model` | unset | The rerank model automatic recall checks relevance with, where a workspace turns the check on. |
 | `memory_max_entries_per_workspace` | `5000` | Active entries one workspace holds; past it, the least used is retired. |
 | `memory_entry_max_length` | `2000` | Longest proposal, in characters. |
 | `memory_retention_days` | `180` | Days an unused entry or version is kept. |

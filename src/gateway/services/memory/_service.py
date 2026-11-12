@@ -79,6 +79,10 @@ DEFAULT_RECALL_MAX_ENTRIES = 3
 # How far below the most alike entry another may be and still be handed over: one alike only in a name the
 # question mentions falls well below what the question is about.
 RECALL_MARGIN = 0.1
+# Where a workspace checks relevance: the score an entry must reach by default, and how many of the most alike
+# entries the rerank model scores, whatever their similarity, since it is the check.
+DEFAULT_RECALL_MIN_RELEVANCE = 0.5
+RERANK_CANDIDATES = 10
 # The read records automatic recall and the search tool leave, which the experiment counts.
 RECALL_TOOL = "auto_recall"
 SEARCH_TOOL = "memory_search"
@@ -213,6 +217,8 @@ class WorkspaceMemory:
     auto_recall: bool
     recall_min_similarity: float
     recall_max_entries: int
+    recall_rerank: bool
+    recall_min_relevance: float
     # The running experiment's holdout, zero while none runs; the last one's window is kept once it stops.
     experiment_holdout_percent: int
     experiment_started_at: datetime | None
@@ -232,6 +238,9 @@ class SwitchChange:
     auto_recall: bool = False
     recall_min_similarity: float = DEFAULT_RECALL_MIN_SIMILARITY
     recall_max_entries: int = DEFAULT_RECALL_MAX_ENTRIES
+    # Checked only where the deployment names a rerank model; kept either way, so naming one later honours it.
+    recall_rerank: bool = False
+    recall_min_relevance: float = DEFAULT_RECALL_MIN_RELEVANCE
     experiment_holdout_percent: int = 0
 
 
@@ -445,7 +454,12 @@ class MemoryService:
 
         ``context`` is the user's turns before it. An entry is as alike as the more alike of the turn alone and the
         turn read after ``context``: a follow-up finds what its conversation is about, and a question that changes
-        the subject is not held to the old one. Entries well below the most alike are left out.
+        the subject is not held to the old one.
+
+        Where the workspace checks relevance, the deployment's rerank model scores the entries most alike against
+        the turn alone, and those reaching the workspace's score are handed over; the turn alone, since the
+        conversation before it pulls a reranker toward entries about that. Otherwise, or when the check fails,
+        entries clearing the similarity floor are, less those well below the most alike.
 
         Empty where the workspace does not recall automatically. Only what is handed over is recorded as read.
 
@@ -459,6 +473,7 @@ class MemoryService:
             if settings is None or not settings.auto_recall:
                 return []
             floor, most = settings.recall_min_similarity, settings.recall_max_entries
+            min_relevance = settings.recall_min_relevance if settings.recall_rerank else None
         texts = [query] if not context else [query, f"{context}\n\n{query}"]
         vectors = await self._embed(texts, caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
         model = self._models.embedding_model
@@ -469,26 +484,49 @@ class MemoryService:
                 include_workspace=switches.workspace_scope,
                 include_external=not switches.hide_external,
             )
-            alike = [
-                (similarity, entry)
+        alike = sorted(
+            (
+                (max(cosine(vector, entry.embedding) for vector in vectors), entry)
                 for entry in entries
-                if entry.embedding is not None
-                and entry.embedding_model == model
-                and (similarity := max(cosine(vector, entry.embedding) for vector in vectors)) >= floor
+                if entry.embedding is not None and entry.embedding_model == model
+            ),
+            key=lambda scored: scored[0],
+            reverse=True,
+        )
+        kept: list[tuple[float, OpenedEntry]] | None = None
+        if min_relevance is not None and self._models.can_rerank:
+            relevant = await self._relevant(caller, query, [entry for _, entry in alike[:RERANK_CANDIDATES]])
+            if relevant is not None:
+                kept = [(score, entry) for score, entry in relevant if score >= min_relevance]
+        if kept is None:
+            best = alike[0][0] if alike else floor
+            kept = [
+                (similarity, entry) for similarity, entry in alike if similarity >= max(floor, best - RECALL_MARGIN)
             ]
-            best = max((similarity for similarity, _ in alike), default=floor)
-            ranked = sorted(
-                (
-                    Recalled(entry, relevance(similarity, entry.confidence))
-                    for similarity, entry in alike
-                    if similarity >= best - RECALL_MARGIN
-                ),
-                key=lambda recalled: recalled.relevance,
-                reverse=True,
-            )[:most]
-            if ranked:
+        ranked = sorted(
+            (Recalled(entry, relevance(score, entry.confidence)) for score, entry in kept),
+            key=lambda recalled: recalled.relevance,
+            reverse=True,
+        )[:most]
+        if ranked:
+            async with self._uow:
                 await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
         return ranked
+
+    async def _relevant(
+        self, caller: MemoryCaller, query: str, candidates: list[OpenedEntry]
+    ) -> list[tuple[float, OpenedEntry]] | None:
+        """Each candidate with how relevant the rerank model scores it to ``query``; None when it could not."""
+        if not candidates:
+            return []
+        try:
+            scores, use = await self._models.rerank(query, [entry.text for entry in candidates])
+        except MemoryModelError as exc:
+            await self._meter_use(caller.workspace_id, caller.api_key_id, exc.use)
+            logger.warning("Automatic recall could not check relevance; it falls back to similarity")
+            return None
+        await self._meter_use(caller.workspace_id, caller.api_key_id, use)
+        return list(zip(scores, candidates, strict=True))
 
     # -- What workspace managers call ----------------------------------------
 
@@ -535,6 +573,7 @@ class MemoryService:
                 auto_recall=change.auto_recall,
                 recall_min_similarity=change.recall_min_similarity,
                 recall_max_entries=change.recall_max_entries,
+                rerank=(change.recall_rerank, change.recall_min_relevance),
                 experiment=self._experiment_after(current, change.experiment_holdout_percent),
             )
             return await self._workspace_memory(workspace_id, organization_id)
@@ -647,6 +686,10 @@ class MemoryService:
                 settings.recall_min_similarity if settings is not None else DEFAULT_RECALL_MIN_SIMILARITY
             ),
             recall_max_entries=settings.recall_max_entries if settings is not None else DEFAULT_RECALL_MAX_ENTRIES,
+            recall_rerank=settings is not None and settings.recall_rerank,
+            recall_min_relevance=(
+                settings.recall_min_relevance if settings is not None else DEFAULT_RECALL_MIN_RELEVANCE
+            ),
             experiment_holdout_percent=(
                 settings.experiment_holdout_percent
                 if settings is not None and settings.experiment_started_at and settings.experiment_ended_at is None

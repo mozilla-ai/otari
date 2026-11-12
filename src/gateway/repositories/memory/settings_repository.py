@@ -39,11 +39,13 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         auto_recall: bool,
         recall_min_similarity: float,
         recall_max_entries: int,
+        rerank: tuple[bool, float],
         experiment: tuple[int, datetime | None, datetime | None],
     ) -> MemoryWorkspaceSettings:
         """Stage the workspace's switches, creating its row the first time.
 
-        ``experiment`` is the savings experiment's holdout, start and end.
+        ``rerank`` is whether recall checks relevance, and the score an entry must reach. ``experiment`` is the
+        savings experiment's holdout, start and end.
         """
         row = await self.of_workspace(workspace_id)
         if row is None:
@@ -59,6 +61,7 @@ class SettingsRepository(BaseRepository[MemoryWorkspaceSettings, Never, Never]):
         row.auto_recall = auto_recall
         row.recall_min_similarity = recall_min_similarity
         row.recall_max_entries = recall_max_entries
+        row.recall_rerank, row.recall_min_relevance = rerank
         row.experiment_holdout_percent, row.experiment_started_at, row.experiment_ended_at = experiment
         await self.db.flush()
         return row

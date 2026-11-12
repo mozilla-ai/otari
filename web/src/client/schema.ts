@@ -22734,10 +22734,25 @@ export interface components {
              */
             recall_max_entries: number;
             /**
+             * Recall Min Relevance
+             * @description The score an entry must reach where relevance is checked.
+             */
+            recall_min_relevance: number;
+            /**
              * Recall Min Similarity
              * @description How alike an entry must be to the turn to be added, 0.3-0.99.
              */
             recall_min_similarity: number;
+            /**
+             * Recall Rerank
+             * @description Have the deployment's rerank model score the entries most alike to the turn, and add only those relevant enough; the similarity floor then no longer applies.
+             */
+            recall_rerank: boolean;
+            /**
+             * Rerank Available
+             * @description Whether the deployment names a rerank model, without which relevance is not checked.
+             */
+            rerank_available: boolean;
             /**
              * Retention Days
              * @description Days an unused entry is kept; null keeps the deployment's.
@@ -22791,10 +22806,20 @@ export interface components {
              */
             recall_max_entries: number;
             /**
+             * Recall Min Relevance
+             * @default 0.5
+             */
+            recall_min_relevance: number;
+            /**
              * Recall Min Similarity
              * @default 0.75
              */
             recall_min_similarity: number;
+            /**
+             * Recall Rerank
+             * @default false
+             */
+            recall_rerank: boolean;
             /** Retention Days */
             retention_days?: number | null;
             /**

@@ -32,6 +32,14 @@ class MemorySettings(BaseModel):
             "as provider:model. It answers with a decision, never with text to store."
         ),
     )
+    memory_rerank_model: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
+        description=(
+            "The rerank model a workspace's automatic recall may check relevance with, as provider:model: it scores "
+            "the entries most alike to a turn, and only those relevant enough are handed over. Unset, a workspace "
+            "cannot turn the check on."
+        ),
+    )
     memory_max_entries_per_workspace: Annotated[int, OMITTED] = Field(
         default=5_000,
         gt=0,

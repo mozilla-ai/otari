@@ -1,7 +1,8 @@
-"""The two models memory calls: one embeds text, one decides what a proposal does to memory.
+"""The models memory calls: one embeds text, one decides what a proposal does to memory, and one, where the
+deployment names it, scores how relevant recalled entries are to a turn.
 
-Both are the deployment's own (``memory_embedding_model``,
-``memory_consolidation_model``), reached through its providers like any other
+All are the deployment's own (``memory_embedding_model``,
+``memory_consolidation_model``, ``memory_rerank_model``), reached through its providers like any other
 side call, so a hosted deployment keeps them in its region by naming a model of
 that region. A provider ``config.yml`` declares serves them first, then one of
 the deployment's hosted providers, as on a request's own path; being the
@@ -18,13 +19,14 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from time import monotonic
+from types import SimpleNamespace
 from typing import Literal, cast, get_args
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.provider_kwargs import ResolvedProvider, require_declared_credential, resolve_provider_selector
-from gateway.services.providers import acompletion, aembedding, serve_on_hosted_provider
+from gateway.services.providers import acompletion, aembedding, arerank, serve_on_hosted_provider
 
 DecisionAction = Literal["add", "update", "no_change", "conflict"]
 DECISION_ACTIONS = get_args(DecisionAction)
@@ -46,8 +48,11 @@ EMBEDDING_ENDPOINT = "/v1/memory/embedding"
 # Embedding a request's newest turn for automatic recall, metered apart so its attempts can be counted.
 RECALL_ENDPOINT = "/v1/memory/recall"
 CONSOLIDATION_ENDPOINT = "/v1/memory/consolidation"
+RERANK_ENDPOINT = "/v1/memory/rerank"
 # What every memory side call's endpoint starts with, so a request's own usage can leave them out.
-MEMORY_ENDPOINT_PREFIX = os.path.commonprefix([EMBEDDING_ENDPOINT, RECALL_ENDPOINT, CONSOLIDATION_ENDPOINT])
+MEMORY_ENDPOINT_PREFIX = os.path.commonprefix(
+    [EMBEDDING_ENDPOINT, RECALL_ENDPOINT, CONSOLIDATION_ENDPOINT, RERANK_ENDPOINT]
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,10 @@ class MemoryModels:
     def can_decide(self) -> bool:
         return self._config.memory_consolidation_model is not None
 
+    @property
+    def can_rerank(self) -> bool:
+        return self._config.memory_rerank_model is not None
+
     async def embed(
         self, texts: Sequence[str], *, endpoint: str = EMBEDDING_ENDPOINT
     ) -> tuple[list[list[float]], ModelUse]:
@@ -126,6 +135,37 @@ class MemoryModels:
         if len(vectors) != len(texts) or any(not isinstance(v, list) or not v for v in vectors):
             raise MemoryModelError("the memory embedding model answered with the wrong number of vectors", use)
         return vectors, use
+
+    async def rerank(self, query: str, documents: Sequence[str]) -> tuple[list[float], ModelUse]:
+        """How relevant each document is to ``query``, one score per document in order, and the call that scored.
+
+        Raises:
+            MemoryModelError: no rerank model is configured, or the call failed.
+        """
+        model = self._config.memory_rerank_model
+        if model is None:
+            raise MemoryModelError("no memory rerank model is configured")
+        started = monotonic()
+        provider: str | None = None
+        try:
+            resolved = await self._resolve(model)
+            provider = str(resolved.provider)
+            response = await arerank(
+                resolved.model, query, list(documents), provider=resolved.provider, **resolved.kwargs
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed check leaves recall to similarity alone
+            logger.warning("Memory rerank via %s failed (%s)", model, type(exc).__name__)
+            failed = _use(RERANK_ENDPOINT, model, provider, started, None, succeeded=False)
+            raise MemoryModelError("the memory rerank call failed", failed) from None
+        # A rerank call reads every token it is sent and writes none.
+        tokens = response.usage.total_tokens if response.usage is not None else None
+        use = _use(RERANK_ENDPOINT, model, provider, started, SimpleNamespace(prompt_tokens=tokens))
+        scores = [0.0] * len(documents)
+        for result in response.results:
+            if not 0 <= result.index < len(documents):
+                raise MemoryModelError("the memory rerank model scored a document it was not given", use)
+            scores[result.index] = result.relevance_score
+        return scores, use
 
     async def decide(self, proposal: str, existing: Sequence[str]) -> tuple[Decision, ModelUse]:
         """What ``proposal`` does to memory, given the ``existing`` entries nearest it, and the call that decided.

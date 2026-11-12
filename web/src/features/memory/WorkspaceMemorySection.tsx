@@ -26,6 +26,8 @@ const HIDE_EXTERNAL_LABEL = "Leave outside content out of recall"
 const RETENTION_LABEL = "Keep unused entries for (days)"
 const AUTO_RECALL_LABEL = "Recall automatically"
 const SIMILARITY_LABEL = "How alike an entry must be"
+const RERANK_LABEL = "Check relevance"
+const RELEVANCE_LABEL = "How relevant an entry must be"
 const MOST_LABEL = "Entries added at most"
 
 const SIMILARITY_OPTIONS = [
@@ -33,17 +35,22 @@ const SIMILARITY_OPTIONS = [
   { value: "0.75", label: "Balanced (0.75)" },
   { value: "0.85", label: "Strict (0.85)" },
 ]
+const RELEVANCE_OPTIONS = [
+  { value: "0.30", label: "Broad (0.30)" },
+  { value: "0.50", label: "Balanced (0.50)" },
+  { value: "0.80", label: "Strict (0.80)" },
+]
 const MOST_OPTIONS = [1, 2, 3, 4, 5].map((count) => ({
   value: String(count),
   label: String(count),
 }))
 
 // The workspace's own threshold, even one set through the API that none of the presets names.
-function similarityOptions(current: number) {
+function thresholdOptions(presets: typeof SIMILARITY_OPTIONS, current: number) {
   const value = current.toFixed(2)
-  return SIMILARITY_OPTIONS.some((option) => option.value === value)
-    ? SIMILARITY_OPTIONS
-    : [...SIMILARITY_OPTIONS, { value, label: `Custom (${value})` }]
+  return presets.some((option) => option.value === value)
+    ? presets
+    : [...presets, { value, label: `Custom (${value})` }]
 }
 
 type Pending = "on" | "erase"
@@ -59,6 +66,8 @@ function switches(memory: WorkspaceMemory): UpdateWorkspaceMemoryRequest {
     auto_recall: memory.auto_recall,
     recall_min_similarity: memory.recall_min_similarity,
     recall_max_entries: memory.recall_max_entries,
+    recall_rerank: memory.recall_rerank,
+    recall_min_relevance: memory.recall_min_relevance,
     experiment_holdout_percent: memory.experiment_holdout_percent,
   }
 }
@@ -105,6 +114,7 @@ export function WorkspaceMemorySection({
   }
   const current = memory.data
   const locked = !canManage || save.isPending
+  const checksRelevance = current.recall_rerank && current.rerank_available
   const change = (patch: Partial<UpdateWorkspaceMemoryRequest>) =>
     save.mutate({ workspaceId, body: { ...switches(current), ...patch } })
 
@@ -239,28 +249,68 @@ export function WorkspaceMemorySection({
           }
         />
         {current.auto_recall ? (
-          <div className="flex flex-col gap-2 md:flex-row">
-            <Select
-              label={SIMILARITY_LABEL}
-              value={current.recall_min_similarity.toFixed(2)}
-              onChange={(value) =>
-                change({ recall_min_similarity: Number(value) })
+          <>
+            <SettingRow
+              label={RERANK_LABEL}
+              help={
+                current.rerank_available
+                  ? "Have this deployment's rerank model score the entries most alike to the message, and add only those it finds relevant to what is asked, not those that merely share a name with it. One rerank call a message; when it fails, recall goes by similarity."
+                  : "This deployment names no rerank model (memory_rerank_model), so recall goes by similarity alone."
               }
-              options={similarityOptions(current.recall_min_similarity)}
-              description="Stricter adds less, and less often."
-              isDisabled={locked || !current.enabled}
-            />
-            <Select
-              label={MOST_LABEL}
-              value={String(current.recall_max_entries)}
-              onChange={(value) =>
-                change({ recall_max_entries: Number(value) })
+              isNested
+              control={
+                <Toggle
+                  isSelected={checksRelevance}
+                  onChange={(next) => change({ recall_rerank: next })}
+                  label={RERANK_LABEL}
+                  isDisabled={
+                    locked || !current.enabled || !current.rerank_available
+                  }
+                />
               }
-              options={MOST_OPTIONS}
-              description="The best matches first."
-              isDisabled={locked || !current.enabled}
             />
-          </div>
+            <div className="flex flex-col gap-2 md:flex-row">
+              {checksRelevance ? (
+                <Select
+                  label={RELEVANCE_LABEL}
+                  value={current.recall_min_relevance.toFixed(2)}
+                  onChange={(value) =>
+                    change({ recall_min_relevance: Number(value) })
+                  }
+                  options={thresholdOptions(
+                    RELEVANCE_OPTIONS,
+                    current.recall_min_relevance,
+                  )}
+                  description="The rerank model's score. Stricter adds less, and less often."
+                  isDisabled={locked || !current.enabled}
+                />
+              ) : (
+                <Select
+                  label={SIMILARITY_LABEL}
+                  value={current.recall_min_similarity.toFixed(2)}
+                  onChange={(value) =>
+                    change({ recall_min_similarity: Number(value) })
+                  }
+                  options={thresholdOptions(
+                    SIMILARITY_OPTIONS,
+                    current.recall_min_similarity,
+                  )}
+                  description="Stricter adds less, and less often."
+                  isDisabled={locked || !current.enabled}
+                />
+              )}
+              <Select
+                label={MOST_LABEL}
+                value={String(current.recall_max_entries)}
+                onChange={(value) =>
+                  change({ recall_max_entries: Number(value) })
+                }
+                options={MOST_OPTIONS}
+                description="The best matches first."
+                isDisabled={locked || !current.enabled}
+              />
+            </div>
+          </>
         ) : null}
         <div className="flex flex-col gap-2 md:flex-row md:items-end">
           <Field

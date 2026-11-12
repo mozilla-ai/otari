@@ -58,6 +58,7 @@ from gateway.services.providers._provider_clients import (
     acompletion,
     aembedding,
     amessages,
+    arerank,
     aresponses,
     provider_for,
 )
@@ -105,6 +106,7 @@ __all__ = [
     "acompletion",
     "aembedding",
     "amessages",
+    "arerank",
     "aresponses",
     "cached_owned_endpoint",
     "dispatch_on_hosted_credential",

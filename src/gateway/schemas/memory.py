@@ -112,6 +112,14 @@ class WorkspaceMemoryPublic(BaseModel):
     )
     recall_min_similarity: float = Field(description="How alike an entry must be to the turn to be added, 0.3-0.99.")
     recall_max_entries: int = Field(description="The most entries automatic recall adds to one turn.")
+    recall_rerank: bool = Field(
+        description="Have the deployment's rerank model score the entries most alike to the turn, and add only "
+        "those relevant enough; the similarity floor then no longer applies."
+    )
+    recall_min_relevance: float = Field(description="The score an entry must reach where relevance is checked.")
+    rerank_available: bool = Field(
+        description="Whether the deployment names a rerank model, without which relevance is not checked."
+    )
     experiment_holdout_percent: int = Field(
         description="The share of sessions the running savings experiment serves without memory; 0 while none runs."
     )
@@ -133,6 +141,8 @@ class WorkspaceMemoryUpdate(BaseModel):
     auto_recall: bool = False
     recall_min_similarity: float = Field(default=0.75, ge=0.3, le=0.99)
     recall_max_entries: int = Field(default=3, ge=1, le=5)
+    recall_rerank: bool = False
+    recall_min_relevance: float = Field(default=0.5, ge=0.05, le=0.99)
     experiment_holdout_percent: int = Field(
         default=0,
         ge=0,

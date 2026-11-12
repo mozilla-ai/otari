@@ -18,6 +18,7 @@ from weakref import WeakKeyDictionary
 from any_llm import AnyLLM, LLMProvider
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CreateEmbeddingResponse
 from any_llm.types.messages import MessageResponse, MessageStreamEvent, ParsedBetaMessage, ParsedMessage
+from any_llm.types.rerank import RerankResponse
 from any_llm.types.responses import ParsedResponse, Response, ResponseStreamEvent
 from openresponses_types import ResponseResource
 
@@ -111,6 +112,23 @@ async def aembedding(
     provider_key, model_id = _split(model, provider)
     llm = provider_for(provider_key, api_key, api_base, client_args)
     return await llm.aembedding(model=model_id, inputs=inputs, **kwargs)
+
+
+async def arerank(
+    model: str,
+    query: str,
+    documents: list[str],
+    *,
+    provider: str | LLMProvider | None = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+    client_args: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> RerankResponse:
+    """``any_llm.arerank`` on a reused provider."""
+    provider_key, model_id = _split(model, provider)
+    llm = provider_for(provider_key, api_key, api_base, client_args)
+    return await llm.arerank(model_id, query, documents, **kwargs)
 
 
 async def aresponses(

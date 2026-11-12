@@ -172,6 +172,9 @@ def _workspace_public(memory: WorkspaceMemory, config: GatewayConfig) -> Workspa
         auto_recall=memory.auto_recall,
         recall_min_similarity=memory.recall_min_similarity,
         recall_max_entries=memory.recall_max_entries,
+        recall_rerank=memory.recall_rerank,
+        recall_min_relevance=memory.recall_min_relevance,
+        rerank_available=config.memory_rerank_model is not None,
         experiment_holdout_percent=memory.experiment_holdout_percent,
         experiment_started_at=memory.experiment_started_at,
         experiment_ended_at=memory.experiment_ended_at,
@@ -223,6 +226,8 @@ async def set_workspace_memory(
         auto_recall=body.auto_recall,
         recall_min_similarity=body.recall_min_similarity,
         recall_max_entries=body.recall_max_entries,
+        recall_rerank=body.recall_rerank,
+        recall_min_relevance=body.recall_min_relevance,
         experiment_holdout_percent=body.experiment_holdout_percent,
     )
     return _workspace_public(await service.change_switches(current_identity, workspace_id, change), config)

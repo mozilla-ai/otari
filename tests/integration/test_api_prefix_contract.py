@@ -279,6 +279,7 @@ FROZEN_LABELS = frozenset(
         memory_models.EMBEDDING_ENDPOINT,
         memory_models.RECALL_ENDPOINT,
         memory_models.CONSOLIDATION_ENDPOINT,
+        memory_models.RERANK_ENDPOINT,
     }
 )
 # OpenAI's Batch API names the operation each line runs by OpenAI's own path,

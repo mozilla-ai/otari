@@ -30,6 +30,9 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     auto_recall: false,
     recall_min_similarity: 0.75,
     recall_max_entries: 3,
+    recall_rerank: false,
+    recall_min_relevance: 0.5,
+    rerank_available: true,
     experiment_holdout_percent: 0,
     experiment_started_at: null,
     experiment_ended_at: null,
@@ -157,9 +160,57 @@ describe("WorkspaceMemorySection", () => {
         auto_recall: false,
         recall_min_similarity: 0.75,
         recall_max_entries: 3,
+        recall_rerank: false,
+        recall_min_relevance: 0.5,
         experiment_holdout_percent: 0,
       },
     })
+  })
+
+  it("checks relevance, and then asks how relevant rather than how alike", async () => {
+    const sent = await renderSection(memory({ auto_recall: true }))
+    expect(
+      screen.getByLabelText("How alike an entry must be"),
+    ).toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Check relevance" }),
+    )
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({
+      method: "PUT",
+      body: expect.objectContaining({
+        auto_recall: true,
+        recall_rerank: true,
+        recall_min_relevance: 0.5,
+        recall_min_similarity: 0.75,
+      }),
+    })
+    expect(
+      await screen.findByLabelText("How relevant an entry must be"),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("How alike an entry must be")).toBeNull()
+  })
+
+  it("says when the deployment has no rerank model to check relevance with", async () => {
+    await renderSection(
+      memory({
+        auto_recall: true,
+        recall_rerank: true,
+        rerank_available: false,
+      }),
+    )
+
+    expect(
+      screen.getByRole("switch", { name: "Check relevance" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText(/names no rerank model \(memory_rerank_model\)/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("How alike an entry must be"),
+    ).toBeInTheDocument()
   })
 
   it("applies a switch as it is flipped", async () => {
