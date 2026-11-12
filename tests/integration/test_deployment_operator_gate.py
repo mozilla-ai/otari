@@ -62,6 +62,9 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/mcp-catalog/sync"),
     # A sync makes the gateway call the MCP Registry.
     ("POST", f"{API_ROOT}/mcp-catalog/sync"),
+    ("GET", f"{API_ROOT}/update-check"),
+    # Turns on a daily request from the deployment to otari.ai.
+    ("PUT", f"{API_ROOT}/update-check"),
     ("POST", f"{API_ROOT}/pricing"),
 ]
 

@@ -71,6 +71,7 @@ export const MCP_CATALOG = "mcp-catalog"
 // a time, so the status is worth re-reading this often only while one is
 // running or waiting to start.
 export const MCP_CATALOG_SYNC_POLL_MS = 5_000
+export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key

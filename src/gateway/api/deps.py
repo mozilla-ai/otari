@@ -106,6 +106,7 @@ from gateway.repositories.tools import (
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import (
     UsageLogRepository,
     new_usage_row,
@@ -240,6 +241,7 @@ from gateway.services.tools import (
     web_search_configured,
 )
 from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
+from gateway.services.update_check import UpdateCheckService
 from gateway.services.usage_and_telemetry import UsageScope, UsageService
 from gateway.services.workspace_scope import (
     default_workspace_id,
@@ -2188,6 +2190,22 @@ def get_mcp_catalog_service(
 
 
 McpCatalogServiceDep = Annotated[McpCatalogService, Depends(get_mcp_catalog_service)]
+
+
+def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
+    """Build the update check service on a request's Unit of Work, or the worker's own."""
+    return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
+
+
+def get_update_check_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> UpdateCheckService:
+    """The request's service. The poll builds its own through ``build_update_check_service``."""
+    return build_update_check_service(uow, config)
+
+
+UpdateCheckServiceDep = Annotated[UpdateCheckService, Depends(get_update_check_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
@@ -3122,6 +3140,8 @@ __all__ = [
     "build_health_check_service",
     "McpCatalogServiceDep",
     "build_mcp_catalog_service",
+    "UpdateCheckServiceDep",
+    "build_update_check_service",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",
