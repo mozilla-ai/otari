@@ -73,3 +73,50 @@ class ServedModel(Base):
     input_modalities: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     reasoning: Mapped[bool] = mapped_column(default=False, server_default=false())
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class ModelMetadataOverride(Base):
+    """What an operator or an organization says about a model, over what its server and models.dev say.
+
+    Keyed as ``ServedModel`` is, by the ``provider:model`` a caller names,
+    except that an organization's row belongs to the organization rather than
+    one key: every key it holds under a prefix serves the same selector. A null
+    field is not overridden.
+    """
+
+    __tablename__ = "model_metadata_overrides"
+    __table_args__ = (
+        Index(
+            "uq_model_metadata_overrides_deployment",
+            "provider",
+            "model",
+            unique=True,
+            postgresql_where=text("organization_id IS NULL"),
+            sqlite_where=text("organization_id IS NULL"),
+        ),
+        Index(
+            "uq_model_metadata_overrides_organization",
+            "organization_id",
+            "provider",
+            "model",
+            unique=True,
+            postgresql_where=text("organization_id IS NOT NULL"),
+            sqlite_where=text("organization_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(255))
+    model: Mapped[str] = mapped_column(String(512))
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organization.id", ondelete="CASCADE"), default=None, index=True
+    )
+    context_window: Mapped[int | None] = mapped_column(default=None)
+    max_output_tokens: Mapped[int | None] = mapped_column(default=None)
+    tool_call: Mapped[bool | None] = mapped_column(default=None)
+    reasoning: Mapped[bool | None] = mapped_column(default=None)
+    structured_output: Mapped[bool | None] = mapped_column(default=None)
+    input_modalities: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
