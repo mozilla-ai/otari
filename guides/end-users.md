@@ -29,9 +29,11 @@ cannot be deleted.
 1. Open **API keys** and click **Create key**.
 2. Enter a **Name**, such as `mlpa`.
 3. Click **Advanced** and tick **Service key**.
-4. Under **End-user budgets**, pick the budgets the key may start end users on.
-5. Pick the **Default end-user budget**, used when a request names none. It
-   must be one of the budgets you picked.
+4. Pick the **Budget for each end user**: every new end user starts on its own
+   copy of it. Picking **None** leaves new end users uncapped, limited only by
+   the key's own ceiling.
+5. Optionally, tick **Other budgets a request may choose**, which a request
+   names in the `Otari-End-User-Budget` header instead.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
 7. Click **Create key** and copy the key.
@@ -50,12 +52,12 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/0d2020a71a184eb87f15389a7103f8bb1699aab8/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/b50a9dd51f6dec778ec9f4023f6392313bb536a3/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
 Send the end user's id in the request's `user` field (`metadata.user_id` on
-Messages). A new end user starts on the key's **Default end-user budget**, or
+Messages). A new end user starts on the key's **Budget for each end user**, or
 with no budget of its own when the key has none. To start it on another budget on the key's
 list, name that budget in the `Otari-End-User-Budget` header:
 
