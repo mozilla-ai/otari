@@ -326,6 +326,7 @@ async def test_concurrent_member_adds_create_one_identity(
         ).create_active_organization_member_for_user(
             user=user,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+            open_signup=False,
             blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
@@ -349,6 +350,7 @@ async def test_concurrent_workspace_member_adds_conflict(
     added = await service.create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     workspace_service = WorkspaceService(async_db, **membership_writes(async_db))
@@ -491,6 +493,7 @@ async def test_concurrent_demotions_cannot_strip_the_last_owner(
                 organization_member_id=target_membership_id,
                 request=ActiveOrganizationMemberUpdateRequest(role="member"),
                 sso_enforcement=NO_SSO_ENFORCEMENT,
+                open_signup=False,
             )
 
         return attempt
@@ -938,6 +941,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     ).create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="grace@example.com"),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert added.organization_member_id is not None
@@ -1862,6 +1866,7 @@ async def test_a_key_write_during_a_membership_change_waits_for_it_and_is_refuse
                     organization_member_id=membership.id,
                     request=ActiveOrganizationMemberUpdateRequest(role="viewer"),
                     sso_enforcement=NO_SSO_ENFORCEMENT,
+                    open_signup=False,
                 )
 
     assert isinstance(await writing, NotAuthorizedError)

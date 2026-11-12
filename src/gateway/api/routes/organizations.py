@@ -282,6 +282,7 @@ async def create_active_organization_member(
     current_identity: CurrentIdentity,
     body: ActiveOrganizationMemberCreateRequest,
     identities: IdentityServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ActiveOrganizationMemberCreateResultPublic:
     """Add a member to the caller's active organization, by email address.
 
@@ -292,9 +293,13 @@ async def create_active_organization_member(
     GitHub sign-in; on a deployment with no mail and no provider it waits for
     an operator's password link, so invite it instead
     (``POST /me/member-invitations``), whose link can set its first password.
+
+    On a deployment with ``open_signup`` on, only a deployment operator may add
+    members this way (403 for anyone else, who invites instead). An address at an
+    email domain another organization has verified is refused with 409.
     """
     return await service.create_active_organization_member_for_user(
-        user=current_identity, request=body, blocked_addresses=identities
+        user=current_identity, request=body, blocked_addresses=identities, open_signup=config.open_signup
     )
 
 
@@ -305,13 +310,19 @@ async def update_active_organization_member(
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     body: ActiveOrganizationMemberUpdateRequest,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ActiveOrganizationMemberPublic:
-    """Change a member's role or status. Organization owners and admins only."""
+    """Change a member's role or status. Organization owners and admins only.
+
+    On a deployment with ``open_signup`` on, only a deployment operator may make
+    active a member who never accepted an invitation (403 for anyone else).
+    """
     return await service.update_active_organization_member_for_user(
         user=current_identity,
         organization_member_id=organization_member_id,
         request=body,
         sso_enforcement=connections,
+        open_signup=config.open_signup,
     )
 
 
@@ -426,9 +437,11 @@ async def invite_active_organization_member(
     once the recipient accepts (``POST /api/v1/invitations/accept``). When the
     email did not go out (``mail_sent`` is false: mail is not configured, the
     send failed, or the invitation mail limit was reached), the response
-    carries the accept link so the caller can share it themselves. An address
-    whose invitation is still pending is refused; reissue that invitation to
-    send a new link.
+    carries the accept link so the caller can share it themselves, except under
+    ``open_signup`` to a caller who is not a deployment operator, whose invitee
+    accepts from their pending invitations once signed in. An address whose
+    invitation is still pending is refused; reissue that invitation to send a
+    new link.
     """
     return await service.invite_active_organization_member_for_user(
         user=current_identity,
@@ -459,7 +472,8 @@ async def bulk_invite_active_organization_members(
     would check it, and an address that is refused lands in ``failed`` with the
     reason rather than failing the request, so the answer is 200 even when some
     or all were refused. Each invited entry carries its own ``mail_sent``, and
-    its accept link when that is false.
+    its accept link when that is false, on the terms ``POST /me/member-invitations``
+    returns one.
     """
     return await service.invite_active_organization_members_for_user(
         user=current_identity,
@@ -484,8 +498,9 @@ async def reissue_active_organization_member_invitation(
     """Give a pending or expired invitation a new accept link. Organization owners and admins only.
 
     The old link stops working. The new one is emailed as an invitation is, and
-    returned in ``accept_link`` when it was not, so a lost link can be
-    recovered whether or not the deployment sends mail.
+    returned in ``accept_link`` when it was not, on the terms
+    ``POST /me/member-invitations`` returns one. Where the link was neither emailed
+    nor returned, the invitee accepts from their pending invitations once signed in.
     """
     return await service.reissue_organization_member_invitation_for_user(
         user=current_identity,

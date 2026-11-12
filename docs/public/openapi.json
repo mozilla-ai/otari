@@ -12035,7 +12035,7 @@
                 "type": "null"
               }
             ],
-            "description": "The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them.",
+            "description": "The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. Where open_signup is on it is never set for an inviter who is not a deployment operator: the invitee accepts from their pending invitations once signed in, and one who has no way to sign in yet can get a password link from a deployment operator.",
             "title": "Accept Link"
           },
           "created_at": {
@@ -42691,7 +42691,7 @@
     },
     "/api/v1/organizations/me/member-invitations": {
       "post": {
-        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves. An address\nwhose invitation is still pending is refused; reissue that invitation to\nsend a new link.",
+        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves, except under\n``open_signup`` to a caller who is not a deployment operator, whose invitee\naccepts from their pending invitations once signed in. An address whose\ninvitation is still pending is refused; reissue that invitation to send a\nnew link.",
         "operationId": "organizations-invite_active_organization_member",
         "requestBody": {
           "content": {
@@ -42741,7 +42741,7 @@
     },
     "/api/v1/organizations/me/member-invitations/bulk": {
       "post": {
-        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent``, and\nits accept link when that is false.",
+        "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent``, and\nits accept link when that is false, on the terms ``POST /me/member-invitations``\nreturns one.",
         "operationId": "organizations-bulk_invite_active_organization_members",
         "requestBody": {
           "content": {
@@ -42843,7 +42843,7 @@
     },
     "/api/v1/organizations/me/member-invitations/{invitation_id}/reissue": {
       "post": {
-        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, so a lost link can be\nrecovered whether or not the deployment sends mail.",
+        "description": "Give a pending or expired invitation a new accept link. Organization owners and admins only.\n\nThe old link stops working. The new one is emailed as an invitation is, and\nreturned in ``accept_link`` when it was not, on the terms\n``POST /me/member-invitations`` returns one. Where the link was neither emailed\nnor returned, the invitee accepts from their pending invitations once signed in.",
         "operationId": "organizations-reissue_active_organization_member_invitation",
         "parameters": [
           {
@@ -42981,7 +42981,7 @@
         ]
       },
       "post": {
-        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately, with\nno invitation to accept and no email sent, so the person has to be told\nsome other way. An address that belongs to no identity yet creates one,\nwhich gets in by signing up, by \"Forgot your password?\" or by a Google or\nGitHub sign-in; on a deployment with no mail and no provider it waits for\nan operator's password link, so invite it instead\n(``POST /me/member-invitations``), whose link can set its first password.",
+        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately, with\nno invitation to accept and no email sent, so the person has to be told\nsome other way. An address that belongs to no identity yet creates one,\nwhich gets in by signing up, by \"Forgot your password?\" or by a Google or\nGitHub sign-in; on a deployment with no mail and no provider it waits for\nan operator's password link, so invite it instead\n(``POST /me/member-invitations``), whose link can set its first password.\n\nOn a deployment with ``open_signup`` on, only a deployment operator may add\nmembers this way (403 for anyone else, who invites instead). An address at an\nemail domain another organization has verified is refused with 409.",
         "operationId": "organizations-create_active_organization_member",
         "requestBody": {
           "content": {
@@ -43081,7 +43081,7 @@
         ]
       },
       "patch": {
-        "description": "Change a member's role or status. Organization owners and admins only.",
+        "description": "Change a member's role or status. Organization owners and admins only.\n\nOn a deployment with ``open_signup`` on, only a deployment operator may make\nactive a member who never accepted an invitation (403 for anyone else).",
         "operationId": "organizations-update_active_organization_member",
         "parameters": [
           {

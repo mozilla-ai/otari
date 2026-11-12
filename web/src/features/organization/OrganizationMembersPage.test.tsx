@@ -749,6 +749,52 @@ describe("OrganizationMembersPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
+  it("says the invitee finds the invitation by signing in when no link comes back", async () => {
+    // Where anyone can create an organization, the server returns an unsent
+    // link to an operator alone, since opening it accepts for the invitee. A
+    // failed send to a non-operator's invitee therefore leaves nothing to share.
+    mockApi({
+      members: [OWNER],
+      context: organizationContext({ deployment_operator: false }),
+      inviteResult: {
+        invitation_id: "invitation-1",
+        organization_member_id: "invited-membership",
+        email: "ada@example.com",
+        role: "member",
+        status: "invited",
+        mail_sent: false,
+        accept_link: null,
+        expires_at: "2026-01-08T00:00:00+00:00",
+        created_at: "2026-01-01T00:00:00+00:00",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, {
+      mail_ready: true,
+      open_signup: true,
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/will find the invitation once they/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Share this link/)).toBeNull()
+    expect(screen.queryByText(/#\/accept-invitation/)).toBeNull()
+
+    // Nothing is shown only here, so the dialog dismisses like any other.
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
   it("invites several addresses in one call and reports each one", async () => {
     const invitation = (email: string, mailSent: boolean) => ({
       invitation_id: `invitation-${email}`,
@@ -813,7 +859,7 @@ describe("OrganizationMembersPage", () => {
     expect(screen.queryByText(/token=ada@example.com/)).toBeNull()
   })
 
-  it("says a link comes back to share when mail cannot be sent", async () => {
+  it("says how the invitee joins when mail cannot be sent", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />, { mail_ready: false })
@@ -822,7 +868,9 @@ describe("OrganizationMembersPage", () => {
       await screen.findByRole("button", { name: "Invite member" }),
     )
     expect(
-      screen.getByText(/you get an accept link to share with them/),
+      screen.getByText(
+        /an accept link to share, or accepting once they sign in/,
+      ),
     ).toBeInTheDocument()
   })
 

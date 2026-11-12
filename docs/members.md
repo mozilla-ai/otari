@@ -9,13 +9,13 @@ Organization **Admins and Owners** can invite other members to collaborate and c
 3. Enter one or more **Email addresses** separated by commas or new lines.
 4. Select the **Role** you want to assign: Owner, Admin, Member, or Viewer.
 5. Choose the workspaces the new member should have access to.
-6. Click **Invite member**. The user will receive an invitation by email, and their membership will become active once they accept it. When no email goes out, the dialog shows an accept link to share with them instead.
+6. Click **Invite member**. The user will receive an invitation by email, and their membership will become active once they accept it. When no email goes out, the dialog shows an accept link to share with them instead, except where [Delivery](#invitations) says it does not.
 
 ![The Invite member dialog, with two addresses, the Admin role and one workspace chosen.](assets/screenshots/invite-member.png)
 
 You can paste up to 100 addresses at once. Everyone gets the same role and
 workspaces. Each address succeeds or fails on its own, and the result shows, for
-each one, whether its email went out or the link to share.
+each one, whether its email went out or, where one is shown, the link to share.
 
 ## Manage existing members
 
@@ -28,7 +28,7 @@ Admins and Owners can also manage existing members. On **Members & roles**:
 An invited row shows when its invitation has expired, and offers:
 
 - **Reissue**, which sends a new accept link (or shows it, when no email goes
-  out). The old link stops working. Use this to recover a lost link, or instead
+  out and links are shown). The old link stops working. Use this to recover a lost link, or instead
   of inviting the same address again, which is refused while an invitation is
   pending.
 - **Revoke**, which withdraws the invitation.
@@ -59,15 +59,12 @@ admitting people.
 
 ### Invitations
 
-**Delivery.** Where mail is set up, Otari emails the accept link. When the email
-does not go out (no mail, a failed send, or a mail limit), the dashboard shows the
-link to share by hand. A link that was emailed is never shown to the inviter. The
-email names the inviter by name and address.
+**Delivery.** Where mail is set up, Otari emails the accept link. When the email does not go out (no mail, a failed send, or a mail limit), the dashboard shows the link to share by hand. A link that was emailed is never shown to the inviter. The email names the inviter by name and address. Where [signup is open](configuration.md#signup), only a deployment operator is shown a link: opening one accepts for the invitee, so anyone else's invitee signs in with that address and accepts from their pending invitations instead. When that invitee cannot sign in yet and the email did not go out, the inviter sends a new one with **Reissue** once mail can go out again. On a deployment with no mail and no Google or GitHub, an invitee who cannot sign in gets a password link from a deployment operator.
 
 **Mail limits.** Over any 24 hours, an organization can send only so many
 invitation emails, and an address can receive only so many from all organizations
 together. An invitation over a limit is still created, and its link is shown to
-share, so a bulk invite never stops partway. Self-hosted deployments set the
+share where links are shown at all, so a bulk invite never stops partway. Self-hosted deployments set the
 limits under [Mail](configuration.md#invitations).
 
 **Accepting.**
@@ -121,7 +118,11 @@ that address, and may choose its first password. Send it only to that person.
 (`POST /api/v1/organizations/me/members`), active at once, with no email. A new
 address added that way has no password and must sign up, reset its password, or
 use Google or GitHub. Invite instead when you can, since the link sets the first
-password.
+password. Where [signup is open](configuration.md#signup), anyone can create an
+organization, so only a deployment operator can add members this way, and
+everyone else invites. For the same reason, only an operator can set to active
+someone who never accepted an invitation, such as one whose invitation was
+revoked; anyone who once joined can be reactivated as usual.
 
 **Which organization you act in.** After signing in, it is the one you last used,
 or the oldest you still belong to if you were removed from it. Being removed,
@@ -146,6 +147,9 @@ so it is deliberately limited.
 - **The workspace named Default workspace is granted** to a new member, at the same role, so they have somewhere to work. An organization that has no workspace of that name grants none, and an owner or admin assigns one from **Members & roles**.
 - **Joining does not change** the person's active organization.
 - **Public email providers** cannot be claimed.
+- **Other organizations cannot add, invite or reissue an invitation to** an
+  address at a proven domain while its proof is current. Only a deployment
+  operator can.
 
 A proof expires after the deployment's set time, since domains change hands.
 Otari does not re-check DNS between verifications, so until then a transferred

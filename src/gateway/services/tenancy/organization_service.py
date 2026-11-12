@@ -25,11 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
+from gateway.core.email_domains import email_domain
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
+    DirectMemberAddUnavailableError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     InvitationClosedError,
@@ -37,6 +39,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNotFoundError,
     InvitationPasswordNotAcceptedError,
     LastOrganizationError,
+    MembershipActivationNeedsAcceptanceError,
     MembershipUpdateError,
     NoActiveOrganizationError,
     NotAuthorizedError,
@@ -45,6 +48,7 @@ from gateway.exceptions.organizations_exceptions import (
     OrganizationMemberAddressUnresolvedError,
     OrganizationMemberAlreadyExistsError,
     OrganizationMemberDeactivatedError,
+    OrganizationMemberDomainClaimedError,
     OrganizationMemberNotFoundError,
     OrganizationNameInvalidError,
     OrganizationNameRequiredError,
@@ -101,6 +105,7 @@ from gateway.models.tenancy import (
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
     InvitationRepository,
+    OrganizationDomainRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
@@ -198,6 +203,15 @@ def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
     if not ways:
         return "ask whoever administers this gateway how to sign in"
     return ", or ".join(ways)
+
+
+def _admits_without_acceptance(*, operator: bool, open_signup: bool) -> bool:
+    """Whether a caller may give an address an active membership that its holder has not accepted.
+
+    Where ``open_signup`` is on, anyone can create an organization, so only a deployment operator may.
+    Holding an unsent accept link counts, because opening the link accepts for the invitee.
+    """
+    return operator or not open_signup
 
 
 def _hash_invitation_token(token: str) -> str:
@@ -416,6 +430,7 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
+        self.domains = OrganizationDomainRepository(db)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -1391,6 +1406,7 @@ class OrganizationService:
         user: User,
         request: ActiveOrganizationMemberCreateRequest,
         blocked_addresses: BlockedAddresses,
+        open_signup: bool,
     ) -> ActiveOrganizationMemberCreateResultPublic:
         """Add someone to the caller's organization, by address.
 
@@ -1405,12 +1421,19 @@ class OrganizationService:
 
         Any workspace assignments are applied in the same transaction rather than
         parked, since there is no acceptance to park them until.
+
+        Under ``open_signup`` only a deployment operator may add this way. Anyone can
+        create an organization there, so a membership nobody accepted would let a
+        stranger put any address on their roster; everyone else invites instead.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
             user=user,
             organization=organization,
         )
+        operator = await self.is_deployment_operator(user)
+        if not _admits_without_acceptance(operator=operator, open_signup=open_signup):
+            raise DirectMemberAddUnavailableError
 
         email = _validated_email(request.email)
         assignments = request.workspace_assignments or []
@@ -1421,6 +1444,8 @@ class OrganizationService:
                 # Inside the block, so the blocklist lock it holds lasts until the membership commits.
                 if await blocked_addresses.blocked_among([email]):
                     raise BlockedEmailError(email)
+                if not operator:
+                    await self._refuse_address_at_domain_proven_elsewhere(email, organization)
                 target = await self._identity_for_address(email, organization)
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
@@ -1656,6 +1681,10 @@ class OrganizationService:
 
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
+        # Before the commit, so a failed read cannot leave a committed invitation unmailed.
+        share_link = _admits_without_acceptance(
+            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
+        )
 
         try:
             async with self._require_unit_of_work():
@@ -1692,6 +1721,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
+            share_link=share_link,
         )
         # Last, so nothing an adapter does can stand between a committed invitation and its email.
         await _report_invitations(
@@ -1729,6 +1759,10 @@ class OrganizationService:
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
+        # Before the commit, and once, since the emails go out concurrently on one session.
+        share_link = _admits_without_acceptance(
+            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
+        )
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
@@ -1787,6 +1821,7 @@ class OrganizationService:
                     token=token,
                     config=config,
                     mail_limit=mail_limit,
+                    share_link=share_link,
                 )
 
         invited = await asyncio.gather(*(mail(*one) for one in staged))
@@ -1808,9 +1843,12 @@ class OrganizationService:
     ) -> tuple[Invitation, OrganizationMember, str]:
         """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
 
-        Refuses an address that already holds an active membership, or one with
-        a still-unexpired invitation pending.
+        Refuses an address that already holds an active membership, one with
+        a still-unexpired invitation pending, and, unless the caller is a
+        deployment operator, one at a domain another organization has proven.
         """
+        if not await self.is_deployment_operator(user):
+            await self._refuse_address_at_domain_proven_elsewhere(email, organization)
         target = await self._identity_for_address(email, organization)
 
         # Locked before the status check that decides create/revive/refuse,
@@ -1894,6 +1932,7 @@ class OrganizationService:
         token: str,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        share_link: bool,
     ) -> InviteOrganizationMemberResultPublic:
         """Email a committed invitation's accept link, where links can be mailed, and report whether it went.
 
@@ -1902,6 +1941,8 @@ class OrganizationService:
         also sitting with an admin who could open it as them. An email over
         ``mail_limit`` is held back the same way: the link costs the deployment
         nothing, and its sender's standing is what the limit protects.
+
+        Without ``share_link`` the link is never returned, and the invitee accepts from their pending invitations.
         """
         email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
@@ -1937,7 +1978,7 @@ class OrganizationService:
             role=membership.role,
             mail_sent=mail_sent,
             mail_limited=mail_limited,
-            accept_link=None if mail_sent else accept_link,
+            accept_link=None if mail_sent or not share_link else accept_link,
             expires_at=invitation.expires_at,
             created_at=invitation.created_at,
         )
@@ -2500,7 +2541,7 @@ class OrganizationService:
         ``invitation_expiry_hours``. The invitation keeps its id, role and
         workspace assignments; whoever reissues it becomes its inviter. This is
         how a lost link is recovered, including on a deployment with no mail,
-        where the new link is returned to share.
+        where the new link is returned to share, under ``open_signup`` to a deployment operator only.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -2527,6 +2568,10 @@ class OrganizationService:
                 raise OrganizationMemberDeactivatedError(invitation.email)
             if await blocked_addresses.blocked_among([invitation.email]):
                 raise BlockedEmailError(invitation.email)
+            # A domain proven since the first invitation refuses the new link, as it would a new invitation.
+            operator = await self.is_deployment_operator(user)
+            if not operator:
+                await self._refuse_address_at_domain_proven_elsewhere(invitation.email, organization)
             invitation = await self.invitations.update_status(
                 invitation,
                 {
@@ -2546,6 +2591,7 @@ class OrganizationService:
             token=token,
             config=config,
             mail_limit=mail_limit,
+            share_link=_admits_without_acceptance(operator=operator, open_signup=config.open_signup),
         )
 
     async def _update_membership(
@@ -2608,6 +2654,31 @@ class OrganizationService:
             return
         await self.users.set_active_organization(identity, None)
 
+    async def _refuse_address_at_domain_proven_elsewhere(self, email: str, organization: Organization) -> None:
+        """Refuse an address at an email domain another organization holds a current DNS proof for.
+
+        A proven domain is its organization's to admit people from, at sign-in or by
+        invitation, so no other organization may put one of its addresses on a roster.
+        Checked before the address's identity is looked up, so a refusal creates none.
+        """
+        domain = email_domain(email)
+        if domain is None:
+            return
+        claim = await self.domains.get_verified_by_domain(domain)
+        if claim is None or claim.organization_id == organization.id or claim.proof_expired(now=datetime.now(UTC)):
+            return
+        raise OrganizationMemberDomainClaimedError(email)
+
+    async def _membership_was_accepted(self, membership: OrganizationMember) -> bool:
+        """Whether a membership's holder ever agreed to it.
+
+        An accepted invitation says they did. A membership never invited at all
+        came from sign-in, domain auto-join, SSO or a direct add, each of which
+        the holder or an operator vouched for, so it counts too.
+        """
+        statuses = await self.invitations.get_statuses_by_organization_member(membership.id)
+        return not statuses or "accepted" in statuses
+
     async def _identity_for_address(self, email: str, organization: Organization) -> User:
         """The identity holding an address, created claimable if none does, refusing a deactivated one.
 
@@ -2633,8 +2704,13 @@ class OrganizationService:
         organization_member_id: uuid.UUID,
         request: ActiveOrganizationMemberUpdateRequest,
         sso_enforcement: SsoEnforcement,
+        open_signup: bool,
     ) -> ActiveOrganizationMemberPublic:
         """Change a member's role or status.
+
+        Under ``open_signup``, only a deployment operator may make active a membership
+        whose holder never accepted it, for the reason only an operator may add one
+        directly there. Reactivating someone who once accepted is anyone's.
 
         NOTE: A role or status this organization's own enforcement refuses also ends the member's
         live session, because no later request re-asks and the session was minted while it admitted
@@ -2661,6 +2737,15 @@ class OrganizationService:
             update_data=update_data,
             organization_id=organization.id,
         )
+        if (
+            update_data.get("status") == "active"
+            and target.status != "active"
+            and not await self._membership_was_accepted(target)
+            and not _admits_without_acceptance(
+                operator=await self.is_deployment_operator(user), open_signup=open_signup
+            )
+        ):
+            raise MembershipActivationNeedsAcceptanceError
 
         async with self._require_unit_of_work():
             # Suspension may move the identity's active-organization pointer.

@@ -239,6 +239,7 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
                 for workspace_id in (fresh.id, revived.id, already.id)
             ],
         ),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
@@ -261,6 +262,7 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
                 role="member",
                 workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
             ),
+            open_signup=False,
             blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
