@@ -16,9 +16,9 @@ from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
 
-from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_details import ProviderDetail
 
 from .conftest import build_test_client
 from .test_rate_limiting import _make_rate_limit_client
@@ -213,7 +213,7 @@ def _credential_rejected() -> Exception:
 def _assert_credential_rejected(resp: Any) -> None:
     assert resp.status_code == 424, resp.text
     assert resp.headers[ERROR_CODE_HEADER] == PROVIDER_CREDENTIAL_REJECTED
-    assert resp.json()["detail"] == PROVIDER_CREDENTIALS_DETAIL
+    assert resp.json()["detail"] == ProviderDetail.CREDENTIALS
     assert "sk-proj" not in resp.text
 
 

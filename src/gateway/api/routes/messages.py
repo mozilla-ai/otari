@@ -49,11 +49,8 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     domain_error,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -85,6 +82,7 @@ from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     CONVERSATION_CACHE_KEY_FIELD,
+    UpstreamFailure,
     bind_upstream_user,
     call_messages,
     conversation_cache_key,
@@ -548,7 +546,7 @@ _ERR_RATE_LIMIT = "rate_limit_error"
 _ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
-# through ``ErrorKind.for_status``, so one status cannot be classified two ways.
+# through ``ErrorKind.from_status``, so one status cannot be classified two ways.
 _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.API: _ERR_API,
     ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
@@ -569,7 +567,7 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
     """
     if isinstance(exc, BodyHTTPException):
         return exc
-    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.for_status(exc.status_code)]
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(exc.status_code)]
     detail = exc.detail
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
@@ -764,18 +762,19 @@ class _MessagesAdapter:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
-            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.for_status(mapping.status_code)]
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
                 mapping.status_code,
-                with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return _anthropic_error(
             _ERR_API,
-            provider_failure_detail(exc, _PROVIDER_ERROR),
+            failure.unclassified_detail(_PROVIDER_ERROR),
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             with_retry_hint(exc, status.HTTP_500_INTERNAL_SERVER_ERROR, None),
         )

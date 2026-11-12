@@ -96,7 +96,7 @@ class ErrorKind(Enum):
     REQUEST_TOO_LARGE = auto()
 
     @classmethod
-    def for_status(cls, status_code: int) -> "ErrorKind":
+    def from_status(cls, status_code: int) -> "ErrorKind":
         """The kind a bare status implies, falling back to ``API``.
 
         An error flattened into an ``HTTPException`` no longer carries its kind,

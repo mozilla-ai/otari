@@ -78,6 +78,7 @@ from gateway.services.inference._passthrough_usage import (
     transcription_usage,
     video_usage,
 )
+from gateway.services.inference._provider_errors import ProviderErrorMapping, UpstreamFailure
 from gateway.services.inference._responses_bridge import (
     REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
@@ -160,12 +161,14 @@ __all__ = [
     "InferenceService",
     "InvalidKey",
     "KeyReused",
+    "ProviderErrorMapping",
     "Replay",
     "ReportedUsage",
     "StillInFlight",
     "UnknownDecisionProviderError",
     "UnidentifiedEndUserError",
     "UnknownCaller",
+    "UpstreamFailure",
     "aresponses_via_chat_completions",
     "audio_seconds",
     "bind_upstream_user",

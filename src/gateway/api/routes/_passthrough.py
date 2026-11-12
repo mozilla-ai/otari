@@ -8,7 +8,7 @@ that scaffold; each route supplies only its endpoint-specific pieces: the budget
 estimate, the provider call, and its ``PassthroughBilling``, which says what the
 result reports. The pricing domain prices that report; no route prices itself.
 
-Provider failures are classified by ``classify_provider_error``, the helper the
+Provider failures are classified by :class:`UpstreamFailure`, the classifier the
 chat, messages, and responses routes use, so a provider's refusal of the
 caller's request (an upstream 400 or 404, an operation or parameter the provider
 does not support) answers with the same 4xx and redacted detail there, a
@@ -61,15 +61,10 @@ from gateway.api.routes._helpers import (
 )
 from gateway.api.routes._pipeline import (
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
-    PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
     _raise_for_unresolvable_model,
     _stored_error_message,
-    classify_provider_error,
-    failure_status_code,
     log_gateway_rejection,
-    provider_error_headers,
-    provider_failure_detail,
     request_started,
     throttle_early_rejection,
 )
@@ -85,6 +80,7 @@ from gateway.core.error_codes import (
     body_fields_of,
     error_headers,
 )
+from gateway.core.error_details import ProviderDetail
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
@@ -124,6 +120,7 @@ from gateway.services.inference import (
     PassthroughBilling,
     ReportedUsage,
     UnknownDecisionProviderError,
+    UpstreamFailure,
     admit_deployment_paid,
     billed_model,
     decision_body,
@@ -187,17 +184,18 @@ def provider_call_failure(exc: Exception) -> HTTPException:
     if is_provider_credential_rejection(exc):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=PROVIDER_CREDENTIALS_DETAIL,
+            detail=ProviderDetail.CREDENTIALS,
             headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
         )
-    mapping = classify_provider_error(exc)
+    failure = UpstreamFailure(exc)
+    mapping = failure.mapping
     if mapping is not None:
         return HTTPException(
             status_code=mapping.status_code,
             detail=mapping.detail,
-            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+            headers=with_retry_hint(exc, mapping.status_code, failure.headers),
         )
-    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ProviderDetail.ERROR)
 
 
 def parse_provider(provider: str) -> LLMProvider:
@@ -1072,10 +1070,11 @@ async def run_passthrough(
                 config, hosted_instance, resolved.model, e, deployment_paid=deployment_charge is not None
             )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
+        failure = UpstreamFailure(e, request_params=caller_params)
         failed_row = _usage_row(
             "error",
             error_message=_stored_error_message(str(e)),
-            status_code=failure_status_code(e, request_params=caller_params),
+            status_code=failure.logged_status,
         )
         if not served:
             record_attempt(
@@ -1099,7 +1098,7 @@ async def run_passthrough(
         if mapped is not None:
             raise mapped from e
 
-        mapping = classify_provider_error(e, request_params=caller_params)
+        mapping = failure.mapping
         if mapping is not None:
             logger.warning(
                 "Provider call failed for %s:%s (status %s)", resolved.provider, resolved.model, mapping.status_code
@@ -1113,14 +1112,14 @@ async def run_passthrough(
                     model=resolved.model,
                     dispatch_model=resolved.dispatch_model,
                 ),
-                headers=with_retry_hint(e, mapping.status_code, provider_error_headers(e, mapping.status_code)),
+                headers=with_retry_hint(e, mapping.status_code, failure.headers),
             ) from e
 
         _, error_class = classify_local_attempt_error(e)
         logger.error("Provider call failed for %s:%s (%s): %s", resolved.provider, resolved.model, error_class, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(e, PASSTHROUGH_PROVIDER_ERROR_DETAIL),
+            detail=failure.unclassified_detail(PASSTHROUGH_PROVIDER_ERROR_DETAIL),
             headers=with_retry_hint(e, status.HTTP_502_BAD_GATEWAY, None),
         ) from e
 
@@ -1277,7 +1276,7 @@ def decision_status_error(status_code: int | None) -> HTTPException:
     if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=PROVIDER_CREDENTIALS_DETAIL,
+            detail=ProviderDetail.CREDENTIALS,
             headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
         )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL)
@@ -1323,7 +1322,9 @@ class SelectorDecision:
             result = DecisionResponse.model_validate(await request_decision(self._provider, body))
         except DecisionProviderError as exc:
             raise DecisionCallError(
-                str(exc), logged_status=failure_status_code(exc), response=decision_status_error(exc.status_code)
+                str(exc),
+                logged_status=UpstreamFailure(exc).logged_status,
+                response=decision_status_error(exc.status_code),
             ) from exc
         except ValidationError as exc:
             # The error's own text quotes the upstream body, so only its size is kept.
