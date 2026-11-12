@@ -388,6 +388,44 @@ async def test_a_tool_call_the_user_budget_refuses_gives_the_ceilings_growth_bac
 
 
 @pytest.mark.asyncio
+async def test_a_free_model_past_its_dollar_cap_is_served_but_its_tool_calls_are_not(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A user out of credit keeps their $0 model, and a priced tool call still meets the dollar gate."""
+    org_cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
+    async_db.add(org_cap)
+    async_db.add(Budget(budget_id="spent", max_budget=1.0))
+    await async_db.commit()
+    user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
+    user.budget_id = "spent"
+    user.spend = Decimal("1.0")
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, model_is_free=True, scope=tenancy.scope())
+
+    assert handle.reservation_id is not None
+    assert handle.scoped_budget_ids == (org_cap.id,)
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") is None
+    await reconcile_reservation(async_db, handle, 0.0)
+    assert await _counters(async_db, org_cap.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_free_models_tool_spend_lands_on_its_ceilings(async_db: AsyncSession, tenancy: Fixture) -> None:
+    org_cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
+    async_db.add(org_cap)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, model_is_free=True, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") == Decimal("0.5")
+    assert await hold_tool_call(async_db, handle, Decimal("0.6"), strategy="for_update") is None
+    assert await _counters(async_db, org_cap.id) == (0.0, 0.5)
+    await reconcile_reservation(async_db, handle, 0.5)
+    assert await _counters(async_db, org_cap.id) == (0.5, 0.0)
+
+
+@pytest.mark.asyncio
 async def test_a_tool_call_hold_that_fails_to_commit_restores_the_handle(
     async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1825,6 +1863,23 @@ async def test_a_free_fallback_is_not_held_or_gated_on_dollars(async_db: AsyncSe
 
     assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
     assert await _request_counters(async_db, anthropic.id) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_free_fallback_holds_a_dollars_only_cap_for_its_tool_calls(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    anthropic = await _anthropic_cap(async_db, tenancy, max_budget=1.0)
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    await move(async_db, handle, "anthropic", cost=0.0)
+
+    assert handle.scoped_budget_ids == (anthropic.id,)
+    assert handle.reservation_id is not None
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") == Decimal("0.5")
+    assert await hold_tool_call(async_db, handle, Decimal("0.6"), strategy="for_update") is None
+    await reconcile_reservation(async_db, handle, 0.5)
+    assert await _counters(async_db, anthropic.id) == (0.5, 0.0)
 
 
 @pytest.mark.asyncio

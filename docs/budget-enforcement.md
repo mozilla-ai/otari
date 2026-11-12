@@ -32,8 +32,9 @@ Each field is optional and unlimited when unset:
 | `tpm_limit` | Tokens, per user | One minute |
 
 A request must have room on every axis the budget caps. It counts as one request
-when admitted. A model priced at zero spends no dollars but still spends tokens
-and one request.
+when admitted. A model priced at zero spends no dollars, so it is admitted when
+no dollars are left, but it still spends tokens and one request, and a priced
+tool it calls must fit the dollar cap.
 
 ## Holds and settlement
 
