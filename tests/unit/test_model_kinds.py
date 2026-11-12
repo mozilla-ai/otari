@@ -9,9 +9,10 @@ from gateway.types.model_type import ModelType
 @dataclass
 class _Row:
     model: str
+    enabled: bool = True
 
 
-ROWS = [_Row("dall-e-3"), _Row("gpt-4o"), _Row("gpt-4o-mini"), _Row("mystery")]
+ROWS = [_Row("dall-e-3"), _Row("gpt-4o"), _Row("gpt-4o-mini", enabled=False), _Row("mystery", enabled=False)]
 KINDS: dict[str, ModelType | None] = {"dall-e-3": "image", "gpt-4o": "chat", "gpt-4o-mini": "chat", "mystery": None}
 
 
@@ -62,3 +63,18 @@ def test_a_blank_search_keeps_every_row() -> None:
     page = page_by_kind(ROWS, KINDS, "model", model_type=None, skip=0, limit=10, search="  ")
 
     assert page.count == 4
+
+
+def test_enabled_narrows_the_rows_and_the_counts_to_served_or_withheld_models() -> None:
+    served = page_by_kind(ROWS, KINDS, "model", model_type=None, skip=0, limit=10, enabled=True)
+    withheld = page_by_kind(ROWS, KINDS, "model", model_type=None, skip=0, limit=10, enabled=False)
+
+    assert ([row.model for row in served.rows], served.type_counts) == (["dall-e-3", "gpt-4o"], {"image": 1, "chat": 1})
+    assert ([row.model for row in withheld.rows], withheld.count) == (["gpt-4o-mini", "mystery"], 2)
+    assert withheld.type_counts == {"chat": 1, "unknown": 1}
+
+
+def test_enabled_a_kind_and_a_search_narrow_together() -> None:
+    page = page_by_kind(ROWS, KINDS, "model", model_type="chat", skip=0, limit=10, search="mini", enabled=False)
+
+    assert ([row.model for row in page.rows], page.count) == (["gpt-4o-mini"], 1)

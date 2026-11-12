@@ -225,9 +225,15 @@ async def list_hosted_models(
         str | None,
         Query(max_length=200, description="Only models whose name contains this text, case-insensitively"),
     ] = None,
+    enabled: Annotated[
+        bool | None,
+        Query(description="Only models served (`true`) or only models withheld (`false`)"),
+    ] = None,
 ) -> HostedModelsPublic:
     """List the models offered on one provider, with the price each currently serves at."""
-    return await service.list_models(provider, skip=skip, limit=limit, model_type=model_type, search=search)
+    return await service.list_models(
+        provider, skip=skip, limit=limit, model_type=model_type, search=search, enabled=enabled
+    )
 
 
 @router.post("/{provider}/models", status_code=status.HTTP_201_CREATED)

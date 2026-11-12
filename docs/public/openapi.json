@@ -36581,6 +36581,24 @@
               "description": "Only models whose name contains this text, case-insensitively",
               "title": "Search"
             }
+          },
+          {
+            "description": "Only models served (`true`) or only models withheld (`false`)",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models served (`true`) or only models withheld (`false`)",
+              "title": "Enabled"
+            }
           }
         ],
         "responses": {
@@ -43369,6 +43387,24 @@
               ],
               "description": "Only models whose name contains this text, case-insensitively",
               "title": "Search"
+            }
+          },
+          {
+            "description": "Only models served (`true`) or only models withheld (`false`)",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models served (`true`) or only models withheld (`false`)",
+              "title": "Enabled"
             }
           }
         ],
