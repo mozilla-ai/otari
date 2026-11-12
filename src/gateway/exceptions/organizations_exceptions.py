@@ -146,11 +146,9 @@ class OrganizationDomainNotFoundError(TenancyNotFoundError):
 
 
 class OrganizationDomainAlreadyClaimedError(TenancyConflictError):
-    """The domain is already claimed, and the message does not say by whom.
+    """Verifying a claim is refused while another organization's proof is live.
 
-    Deliberately silent about the holder. A claim is unique deployment-wide, so
-    a message naming the other organization would let anyone who can create one
-    probe for which domains their neighbours have registered.
+    The message does not name that organization.
     """
 
     def __init__(self, domain: str):

@@ -556,11 +556,10 @@ async def create_active_organization_domain(
 ) -> OrganizationDomainPublic:
     """Claim an email domain for the caller's organization. Owners and admins only.
 
-    The claim lands unverified and does nothing until ``POST
-    /me/domains/{id}/verify`` finds the record in ``verification_record``
-    published at the domain's apex. A public email provider is refused outright,
-    and a domain another organization already claims answers 409 without saying
-    who holds it.
+    The claim starts unverified and does nothing.
+    ``POST /me/domains/{id}/verify`` verifies it by finding the record in ``verification_record`` at the domain's apex.
+    Verifying is refused while another organization has a current proof of the same domain.
+    A public email provider is refused, and so is a domain this organization has already claimed.
     """
     return await service.create_domain_for_user(user=current_identity, request=body)
 
