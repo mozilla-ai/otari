@@ -14,6 +14,7 @@ identically for every format. These tests pin that contract:
 import asyncio
 import contextlib
 import dataclasses
+import importlib
 import json
 import logging
 import re
@@ -3376,6 +3377,20 @@ def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_pr
     assert unestimated is not None and unestimated.usage == started
 
 
+def _round_gate_ctx(monkeypatch: pytest.MonkeyPatch, rate: float, hold: Callable[..., Any]) -> RequestContext:
+    """A request holding a reservation, served on a model priced at ``rate``, whose round holds go to ``hold``."""
+    monkeypatch.setattr(pipeline, "hold_tool_call", hold)
+    monkeypatch.setattr(pipeline, "release_session", AsyncMock())
+    handle = _reservation()
+    handle.reservation_id = "reservation-1"
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(rollback=AsyncMock()), reservation=handle)
+    ctx.estimate_inputs = EstimateInputs(prompt_chars=40, max_output_tokens=8000, default_output_tokens=1024)
+    ctx.serving = ("openai", "gpt-4", False)
+    pricing = ModelPricing(model_key="openai:gpt-4", input_price_per_million=rate, output_price_per_million=rate)
+    ctx.prices = cast(Any, SimpleNamespace(resolve=AsyncMock(return_value=ResolvedPricing(pricing, "deployment"))))
+    return ctx
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("rate", "held"), [(10.0, True), (0.0, False)], ids=["priced", "free"])
 async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_holds_nothing(
@@ -3384,21 +3399,11 @@ async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_holds_nothing(
     """A round grows the hold by its own prompt only: the request's one output limit is already held."""
     holds: list[tuple[Decimal, int]] = []
 
-    async def fake_hold(
-        db: Any, handle: Any, amount: Decimal, *, strategy: str, calls: int = 1, tokens: int = 0
-    ) -> Decimal:
+    async def fake_hold(db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0) -> Decimal:
         holds.append((amount, tokens))
         return amount
 
-    monkeypatch.setattr(pipeline, "hold_tool_call", fake_hold)
-    monkeypatch.setattr(pipeline, "release_session", AsyncMock())
-    handle = _reservation()
-    handle.reservation_id = "reservation-1"
-    ctx = _ctx(GatewayConfig(), db=object(), reservation=handle)
-    ctx.estimate_inputs = EstimateInputs(prompt_chars=40, max_output_tokens=8000, default_output_tokens=1024)
-    ctx.serving = ("openai", "gpt-4", False)
-    pricing = ModelPricing(model_key="openai:gpt-4", input_price_per_million=rate, output_price_per_million=rate)
-    ctx.prices = cast(Any, SimpleNamespace(resolve=AsyncMock(return_value=ResolvedPricing(pricing, "deployment"))))
+    ctx = _round_gate_ctx(monkeypatch, rate, fake_hold)
 
     assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
 
@@ -3408,3 +3413,67 @@ async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_holds_nothing(
         assert tokens == 10_000
     else:
         assert holds == []
+
+
+@pytest.mark.asyncio
+async def test_a_tool_loop_round_on_a_request_that_holds_nothing_takes_no_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    hold = AsyncMock()
+    ctx = _round_gate_ctx(monkeypatch, 10.0, hold)
+    assert ctx.reservation is not None
+    ctx.reservation.reservation_id = None
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
+    hold.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["no room", "database"])
+async def test_a_tool_loop_round_that_cannot_be_held_is_refused(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    """A round the budgets have no room for, or cannot be asked about, is not held and is sent as the last."""
+
+    async def fake_hold(db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0) -> Decimal | None:
+        if failure == "database":
+            raise SQLAlchemyError("budgets unavailable")
+        return None
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "loop", "stream"),
+    [
+        ("chat", "mcp_tool_loop", False),
+        ("chat", "mcp_tool_loop_stream", True),
+        ("messages", "anthropic_tool_loop", False),
+        ("messages", "anthropic_tool_loop_stream", True),
+        ("responses", "responses_tool_loop", False),
+        ("responses", "responses_tool_loop_stream", True),
+    ],
+)
+async def test_every_format_hands_the_round_gate_to_its_tool_loop(
+    monkeypatch: pytest.MonkeyPatch, route: str, loop: str, stream: bool
+) -> None:
+    module = importlib.import_module(f"gateway.api.routes.{route}")
+    seen: dict[str, Any] = {}
+    gate = cast(Any, object())
+
+    def fake_stream(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    async def fake_loop(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(module, loop, fake_stream if stream else fake_loop)
+    adapter = module._ADAPTER
+    kwargs = {"model": "m", "messages": []}
+    if stream:
+        adapter.open_tool_loop_stream(kwargs, cast(Any, object()), 3, round_gate=gate)
+    else:
+        await adapter.run_tool_loop(kwargs, cast(Any, object()), 3, round_gate=gate)
+
+    assert seen["round_gate"] is gate
