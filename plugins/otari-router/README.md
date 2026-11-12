@@ -26,7 +26,7 @@ The install asks for two values, and both are required:
 | Option | What it is |
 | --- | --- |
 | `otari_url` | Base URL of the gateway, such as `https://otari.example.com`. Plain `http` only for a gateway on this machine, since the key travels in a header. |
-| `otari_api_key` | The key each recommendation is billed to. Stored in secure storage, never in a settings file. |
+| `otari_api_key` | The key each recommendation is billed to. It needs the `agents` [scope](../../docs/api-keys.md#scopes), which the **Coding agent** choice under **Access** in the key form includes. Stored in secure storage, never in a settings file. |
 
 Change them later with `/plugin configure otari-router`. The plugin is active
 in the session that installed it and in every session after.

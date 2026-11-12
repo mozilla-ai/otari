@@ -133,7 +133,8 @@ def import_claude_code(
 
     if not api_key:
         raise click.UsageError(
-            "A credential is required to send events: a budget-exempt API key, or the master key. "
+            "A credential is required to send events: a budget-exempt API key with the usage:write scope, "
+            "or the master key. "
             "Pass --api-key, or set OTARI_API_KEY or OTARI_MASTER_KEY. "
             "Re-run with --dry-run to preview a scan without one."
         )

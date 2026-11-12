@@ -63,7 +63,8 @@ organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
 An API key reaches the routes its [scopes](api-keys.md#scopes) name, and is
-refused the others with `403` naming the scope it lacks:
+refused the others with `403` naming the scope it lacks (the MCP routes answer
+with a fixed `forbidden` error that names none):
 
 - the inference routes (`inference`), files, batches, search, fetch, code
   execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a

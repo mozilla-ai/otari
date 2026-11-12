@@ -138,13 +138,12 @@ every prompt as a turn, with its model requests, tool calls and cost. Claude
 Code exports this over OpenTelemetry.
 
 This works on a gateway you run, not on otari.ai today. It needs a
-budget-exempt API key, which only the deployment's operator can create (with
-**Exempt from budget** under **Advanced** in the key form; see
-[Create an import key](external-usage.md#create-an-import-key)). To see Claude Code
+budget-exempt API key holding `telemetry:write`, which only the deployment's
+operator can create (see [Create an import key](external-usage.md#create-an-import-key)). To see Claude Code
 sessions on otari.ai, [route them through Otari](#route-claude-code-through-otari)
 instead.
 
-1. Have the operator create a budget-exempt key. Traces must be on
+1. Have the operator create an import key. Traces must be on
    (`OTARI_TRACE_CAPTURE_ENABLED`, the default).
 2. Add the variables to the `env` block of `~/.claude/settings.json`, with your
    gateway's URL:
@@ -198,7 +197,8 @@ appear twice.
 ## Import Claude Code usage without routing
 
 To record only usage and cost, without turns and tools, export just the logs.
-The same limit applies: it needs a budget-exempt key, so it works on a gateway
+The same limit applies: it needs an
+[import key](external-usage.md#create-an-import-key), so it works on a gateway
 you run, not on otari.ai today.
 
 ```bash
@@ -220,8 +220,9 @@ export a session you also route. See
 
 Claude Code keeps one transcript per session under `~/.claude/projects` (or
 under `CLAUDE_CONFIG_DIR`, if set). `otari import claude-code` imports them, so
-history from before you set up the exporter gets in too. It needs a
-budget-exempt key or the master key, so it works on a gateway you run, not on
+history from before you set up the exporter gets in too. It needs an
+[import key](external-usage.md#create-an-import-key) (budget-exempt, with
+`usage:write`) or the master key, so it works on a gateway you run, not on
 otari.ai today.
 
 Install the command on its own with `brew install mozilla-ai/tap/otari`, then:
@@ -232,7 +233,7 @@ export OTARI_URL="http://localhost:8000"   # your gateway's URL
 # Preview what is on disk. No credential needed: a dry run sends nothing.
 otari import claude-code --dry-run
 
-# Then import it, with a budget-exempt API key. Usage binds to that key's own
+# Then import it, with the import key. Usage binds to that key's own
 # user, so do not pass --user-id here.
 export OTARI_API_KEY="tk-your-import-key"
 otari import claude-code
