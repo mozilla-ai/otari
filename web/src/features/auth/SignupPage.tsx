@@ -238,9 +238,7 @@ export function SignupPage({ hash }: { hash: string }) {
     }
   }
 
-  // One checkbox holds the providers and the form alike. It sits at the foot of
-  // the card, just above the submit button once the form is open, rather than
-  // above everything, where it read as the first thing to do.
+  // One checkbox holds the providers and the form alike.
   const terms =
     terms_url === null ? null : (
       <TermsAcceptanceField
@@ -377,7 +375,6 @@ export function SignupPage({ hash }: { hash: string }) {
             Sign up with email
           </AuthMethodRow>
         )}
-        {/* With the form closed, under every way in, which it holds alike. */}
         {isFormOpen || terms === null ? null : (
           <div className="pt-3">{terms}</div>
         )}

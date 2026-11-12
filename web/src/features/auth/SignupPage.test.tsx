@@ -596,7 +596,6 @@ describe("OAuth first", () => {
     await user.click(google)
     expect(fetchMock).not.toHaveBeenCalled()
 
-    // At the foot of the card, under every way in rather than above them.
     const follows = (earlier: Element, later: Element) =>
       Boolean(
         earlier.compareDocumentPosition(later) &
@@ -610,8 +609,7 @@ describe("OAuth first", () => {
       ),
     ).toBe(true)
 
-    // One box for the card: opening the form shows no second one, and it sits
-    // just above the submit button.
+    // One box for the card: opening the form shows no second one.
     await user.click(screen.getByRole("button", { name: "Sign up with email" }))
     expect(screen.getAllByRole("checkbox")).toHaveLength(1)
     expect(follows(screen.getByLabelText("Password"), checkbox())).toBe(true)
