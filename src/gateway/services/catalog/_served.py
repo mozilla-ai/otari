@@ -2,8 +2,10 @@
 
 vLLM and SGLang list each model with ``max_model_len``, the context length the
 server runs it at, and ``root``, the model it loaded under whatever name it is
-served by. SGLang also answers ``/model_info`` with the tool-call and reasoning
-parsers it was started with and what it reads besides text. Discovery reports
+served by. A server built on vLLM keeps ``max_model_len`` under an ``owned_by``
+of its own, and may describe the model's reasoning options in ``reasoning``.
+SGLang also answers ``/model_info`` with the tool-call and reasoning parsers it
+was started with and what it reads besides text. Discovery reports
 each listing here; a listing is the same whichever way the provider was
 connected, so a configured instance and a hosted provider are covered alike,
 and an organization's own key reports its listings under its organization.
@@ -72,6 +74,7 @@ class ServedFacts:
     reasoning_parser: str | None = None
     tool_call_parser: str | None = None
     input_modalities: tuple[str, ...] | None = None
+    reasoning: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +98,15 @@ def served_facts(provider: str, model_id: str, organization_id: uuid.UUID | None
 
 
 def _engine(model: Model) -> str | None:
-    """The engine that listed ``model``, known by the ``owned_by`` each one stamps and the fields only they add."""
+    """The engine whose listing format ``model`` is in, known by the fields only they add.
+
+    Any other ``owned_by`` with ``max_model_len`` is a server built on vLLM.
+    """
     extra = model.model_extra or {}
     if model.owned_by in SERVED_ENGINES and ("max_model_len" in extra or "root" in extra):
         return model.owned_by
+    if "max_model_len" in extra:
+        return "vllm"
     return None
 
 
@@ -115,7 +123,7 @@ def _text(value: object, limit: int) -> str | None:
 
 
 def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedFacts | None:
-    """What a vLLM or SGLang listing entry says about its model, or ``None`` for any other listing."""
+    """What a vLLM-format or SGLang listing entry says about its model, or ``None`` for any other listing."""
     engine = _engine(model)
     if engine is None or len(model.id) > _MAX_MODEL_CHARS:
         return None
@@ -124,6 +132,7 @@ def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedF
         engine=engine,
         context_window=_positive_int(extra.get("max_model_len")),
         root=_text(extra.get("root"), _MAX_MODEL_CHARS),
+        reasoning=isinstance(extra.get("reasoning"), dict),
     )
     if engine != "sglang" or settings is None:
         return facts
@@ -214,6 +223,7 @@ def _facts(row: ServedModel) -> ServedFacts:
         reasoning_parser=row.reasoning_parser,
         tool_call_parser=row.tool_call_parser,
         input_modalities=tuple(row.input_modalities) if row.input_modalities is not None else None,
+        reasoning=row.reasoning,
     )
 
 

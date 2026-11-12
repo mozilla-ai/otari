@@ -159,17 +159,19 @@ def model_capabilities(
 
     An engine that names its parsers overrides two of those flags: it calls
     tools only with a tool-call parser, whatever the model can do, and a
-    reasoning parser means the model reasons. What it says it reads overrides
-    models.dev's input modalities, whether or not it named its parsers.
+    reasoning parser means the model reasons, as does a listing that describes
+    its reasoning options. What it says it reads overrides models.dev's input
+    modalities, whether or not it named its parsers.
     """
     served = _served(config, model_key, organization_id)
     metadata = _entry(config, models_dev, model_key, served)
     settings = served if served is not None and served.settings_reported else None
     served_modalities = served.input_modalities if served is not None else None
-    if metadata is None and settings is None and served_modalities is None:
+    served_reasoning = served is not None and served.reasoning
+    if metadata is None and settings is None and served_modalities is None and not served_reasoning:
         return None
     tool_call = metadata.tool_call if metadata else None
-    reasoning = metadata.reasoning if metadata else None
+    reasoning = (metadata.reasoning if metadata else None) or served_reasoning
     instance, _, model_id = model_key.partition(":")
     structured_output = metadata.structured_output if metadata else None
     if not _sends_response_format(config.provider_instance_type(instance), model_id):
