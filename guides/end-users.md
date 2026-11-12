@@ -50,7 +50,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e0be8cfc81e43ae3b01534d8396e5ff19361af62/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/8cf32e24501c15adb8eac5f1e1522b0eda430b06/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
@@ -82,8 +82,12 @@ Otari-End-User-Budget: <memories budget id>
 A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
-End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/search` and
-`/v1/messages`. Other endpoints treat a service key as an ordinary key, so a
+End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`. On those endpoints, a request
+that sends `Otari-End-User-Budget` without naming an end user, or sends it on a
+key that is not a service key, is refused with `400`
+(`end_user_budget_without_end_user`), since there is no end user for the budget
+to apply to. Other endpoints treat a service key as an ordinary key, so a
 `user` naming someone else there follows the key's
 [mismatched `user` field](api-keys.md#mismatched-user-fields) setting.
 
