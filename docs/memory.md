@@ -249,9 +249,37 @@ member scope is its owner's alone: no other member, and no admin, recalls it.
    is stored is the proposal's own text, so an instruction hidden in a proposal
    has nothing to write. Without a consolidation model, a proposal nearly the
    same as an entry is a no change, and anything else is added.
+   - The model is given room to think (1,024 tokens) and asked for a JSON
+     object, so a reasoning model answers too. An answer with no decision is
+     asked again on a later pass, and counts toward the five below.
+   - An update or a no change stands only where the proposal is at least 0.85
+     alike to that entry; below, the proposal is added beside it. A model, a
+     small one most, takes two notes that share a name or a place for one:
+     adding the proposal costs a little room, while replacing or dropping what
+     should have stayed apart loses it from recall.
 5. **Review.** A conflict, a shared proposal under the `review` policy, an
    update an agent proposed to an entry an admin reviewed, and a proposal whose
    model call failed five times wait for an admin instead.
+
+### Choosing a consolidation model
+
+How often a model takes the right decision, on 34 proposals whose right
+decision is known: new notes that share a name or a place with an entry, newer
+versions of one, the same note reworded, and contradictions. A wrong
+replacement is an update or no change where the proposal should have been kept
+apart, the mistake that loses something from recall.
+
+| Model | Right | Right, with the 0.85 guard | Wrong replacements, with the guard |
+| --- | --- | --- | --- |
+| `deepseek-v4.1-flash` | 34 | 34 | 0 |
+| `gpt-oss-120b` | 34 | 34 | 0 |
+| `qwen2.5:7b` | 27 | 29 | 1 |
+| `qwen2.5:3b` | 20 | 24 | 2 |
+
+A deployment that runs its own model should run one of 7B or more: a 3B model
+errs often, and while the guard keeps most of its errors from losing anything,
+what it marks as a conflict waits for an admin. The embedding model was
+`nomic-embed-text`.
 
 Search ranks entries by their similarity to the query times their confidence.
 Confidence starts at 0.5, rises by 0.1 for each member who confirms an entry

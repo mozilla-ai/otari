@@ -2,7 +2,7 @@
 
 import pytest
 
-from gateway.services.memory._models import Decision, parse_decision
+from gateway.services.memory._models import DECIDE_MAX_TOKENS, Decision, decision_request, parse_decision
 from gateway.services.memory._scoring import (
     CONFIDENCE_CEILING,
     CONFIDENCE_FLOOR,
@@ -12,6 +12,7 @@ from gateway.services.memory._scoring import (
     relevance,
 )
 from gateway.services.memory._screening import screen
+from gateway.services.memory._service import REPLACE_FLOOR, guarded_decision
 
 
 def test_confidence_follows_cqs_rules() -> None:
@@ -89,16 +90,42 @@ def test_a_consolidation_answer_is_read(answer: str, decision: Decision) -> None
 @pytest.mark.parametrize(
     "answer",
     [
-        "",
-        "add it",
-        '{"action": "delete_everything"}',
         '{"action": "update"}',
         '{"action": "update", "target": 0}',
         '{"action": "update", "target": 9}',
         '{"action": "update", "target": true}',
         '{"action": "update", "target": "1"}',
-        "[1, 2]",
     ],
 )
 def test_an_answer_this_cannot_act_on_waits_for_an_admin(answer: str) -> None:
     assert parse_decision(answer, existing=3) == Decision("conflict")
+
+
+@pytest.mark.parametrize("answer", ["", "add it", '{"action": "delete_everything"}', "[1, 2]"])
+def test_an_answer_with_no_decision_decides_nothing(answer: str) -> None:
+    # The model is asked again on a later pass, rather than its silence holding the proposal for an admin.
+    assert parse_decision(answer, existing=3) is None
+
+
+def test_the_model_is_given_room_to_think_and_asked_for_json() -> None:
+    messages, options = decision_request("deploy with make", ["deploy with ci"])
+    assert messages[-1]["content"] == 'Existing notes:\n1. "deploy with ci"\n\nProposal: "deploy with make"'
+    assert options == {"max_tokens": DECIDE_MAX_TOKENS, "temperature": 0, "response_format": {"type": "json_object"}}
+    assert DECIDE_MAX_TOKENS >= 1024
+
+
+@pytest.mark.parametrize(
+    ("decision", "alike", "kept"),
+    [
+        (Decision("update", 1), [0.95, 0.80], Decision("add")),
+        (Decision("no_change", 0), [0.70], Decision("add")),
+        (Decision("update", 0), [0.90, 0.80], Decision("update", 0)),
+        (Decision("no_change", 0), [REPLACE_FLOOR], Decision("no_change", 0)),
+        (Decision("conflict", 0), [0.70], Decision("conflict", 0)),
+        (Decision("add"), [0.99], Decision("add")),
+    ],
+)
+def test_a_model_never_replaces_or_drops_for_an_entry_too_unlike_the_proposal(
+    decision: Decision, alike: list[float], kept: Decision
+) -> None:
+    assert guarded_decision(decision, alike) == kept

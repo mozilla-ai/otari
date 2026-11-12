@@ -6,7 +6,7 @@ writes in another.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
@@ -73,6 +73,8 @@ NEIGHBOURS = 5
 COMPARE_FLOOR = 0.75
 # Without a consolidation model, a proposal this alike to an entry adds nothing.
 SAME_FLOOR = 0.95
+# How alike a proposal must be to an entry for the model's update or no_change of it to stand.
+REPLACE_FLOOR = 0.85
 # Passes a proposal may fail on a model, or on a mandated guardrail that could not run, before it waits for an
 # admin instead.
 MAX_ATTEMPTS = 5
@@ -928,7 +930,15 @@ class MemoryService:
             await self._meter_use(proposal.workspace_id, proposal.provenance.api_key_id, exc.use)
             raise
         await self._meter_use(proposal.workspace_id, proposal.provenance.api_key_id, use)
-        return decision
+        guarded = guarded_decision(decision, [similarity for similarity, _ in nearest])
+        if guarded != decision:
+            logger.info(
+                "Memory proposal %s of workspace %s is added: the model's %s named an entry too unlike it",
+                proposal.id,
+                proposal.workspace_id,
+                decision.action,
+            )
+        return guarded
 
     async def _make_room(self, workspace_id: uuid.UUID) -> None:
         """Retire the least used entry while the workspace is at its cap."""
@@ -1017,6 +1027,19 @@ class MemoryService:
                 await self._meter.record(workspace_id, api_key_id, use)
         except DATABASE_ERRORS as exc:
             logger.warning("A memory model call could not be recorded as usage: %s", describe_database_error(exc))
+
+
+def guarded_decision(decision: Decision, alike: Sequence[float]) -> Decision:
+    """``decision``, unless it replaces an entry with the proposal, or drops the proposal as one, too unlike it.
+
+    ``alike`` is how alike the proposal is to each entry the model was shown, in order. A model, a small one
+    most, takes two notes that share a name or a place for one; adding the proposal beside it costs a little
+    room, while replacing or dropping what should have stayed apart loses it from recall.
+    """
+    if decision.action in ("update", "no_change") and decision.target is not None:
+        if alike[decision.target] < REPLACE_FLOOR:
+            return Decision("add")
+    return decision
 
 
 def _require_write(caller: MemoryCaller) -> None:
