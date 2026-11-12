@@ -4,6 +4,24 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.46.0](https://github.com/mozilla-ai/otari/releases/tag/v0.46.0) - 2026-11-12
+
+
+
+### Bug Fixes
+
+- **end-users:** Refuse Otari-End-User-Budget on a request naming no end user in [#3214](https://github.com/mozilla-ai/otari/pull/3214) by [@daavoo](https://github.com/daavoo) ([`8cf32e2`](https://github.com/mozilla-ai/otari/commit/8cf32e24501c15adb8eac5f1e1522b0eda430b06))
+- **repositories:** Create the two singleton rows without a savepoint in [#3218](https://github.com/mozilla-ai/otari/pull/3218) by [@peteski22](https://github.com/peteski22) ([`8d74d4d`](https://github.com/mozilla-ai/otari/commit/8d74d4d850aeb69bb9b11ccc8d2f60cc1dca37d1))
+- **end-users:** Point an end-user budget refusal to the ids the key may assign in [#3220](https://github.com/mozilla-ai/otari/pull/3220) by [@daavoo](https://github.com/daavoo) ([`0d2020a`](https://github.com/mozilla-ai/otari/commit/0d2020a71a184eb87f15389a7103f8bb1699aab8))
+
+
+### Features
+
+- **cors:** Let browser pages call the model endpoints with an API key in [#3192](https://github.com/mozilla-ai/otari/pull/3192) by [@agpituk](https://github.com/agpituk) ([`2cd77e4`](https://github.com/mozilla-ai/otari/commit/2cd77e46300f0c5ae7d4b8aad6d616a21e03f7ac))
+- **railway:** Expire uploaded files after a week on new deploys in [#2400](https://github.com/mozilla-ai/otari/pull/2400) by [@peteski22](https://github.com/peteski22) ([`54abdcb`](https://github.com/mozilla-ai/otari/commit/54abdcb8261ac34669196d9762d521eed0f5d1fa))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.45.0...v0.46.0
 ## [0.45.0](https://github.com/mozilla-ai/otari/releases/tag/v0.45.0) - 2026-11-12
 
 
