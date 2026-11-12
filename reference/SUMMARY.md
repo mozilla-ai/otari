@@ -62,6 +62,7 @@
   * [Tool settings](api-endpoints/tool-settings.md)
   * [Tools](api-endpoints/tools.md)
   * [Traces](api-endpoints/traces.md)
+  * [Update check](api-endpoints/update-check.md)
   * [Usage](api-endpoints/usage.md)
   * [Users](api-endpoints/users.md)
   * [Videos](api-endpoints/videos.md)

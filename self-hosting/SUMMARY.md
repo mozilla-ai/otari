@@ -21,5 +21,6 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [Update check](update-check.md)
 * [Store agent traces](trace-storage.md)
 * [Service keys on a deployment you run](operator-service-keys.md)
