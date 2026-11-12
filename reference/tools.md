@@ -221,9 +221,9 @@ rate before it runs, on top of the hold the model call took:
   fit, no page is read, the results show their snippets, and the search itself
   is billed as usual.
 - A hold stays until the request settles, as the model call's does.
-- A request on a free model whose budgets and ceilings cap only dollars holds
-  nothing for its model call or its tool calls; they are charged at settlement,
-  and the request can still end past the cap.
+- A model priced at zero is served to a user with no dollars left, but its
+  tool calls are held like any other request's, so a priced call that does not
+  fit is refused.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what

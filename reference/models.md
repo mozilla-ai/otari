@@ -170,7 +170,8 @@ from models.dev's entry for the model under the provider serving it:
 
 - A model a vLLM or SGLang server lists, through a configured instance, a
   hosted provider or an organization's own key, reports the context length
-  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  that server runs it at (`max_model_len`, which a server built on vLLM lists
+  under its own `owned_by` too), which beats models.dev's, and no `max_output_tokens`
   above it. Each listing of the server is stored, so the value survives a
   restart and reaches every worker within a minute. An organization's key is
   read only for that organization's callers, and is listed when the key is
@@ -206,7 +207,8 @@ uses:
 An SGLang server also says how it was started, and that overrides models.dev:
 without a tool-call parser it offers no `tools`, a reasoning parser adds
 `reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
-not say, so its models keep models.dev's flags.
+not say, so its models keep models.dev's flags, except that a listing entry
+with a `reasoning` object (the efforts it accepts) adds `reasoning`.
 
 All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
