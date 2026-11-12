@@ -231,6 +231,10 @@ keeps their word, and saving every field blank removes the override. It cannot
 add `response_format` where Otari cannot send it to the provider. An override
 changes what the listing says and nothing about how a request is served.
 
+Deleting a hosted provider deletes the details set for it. An organization's go
+when it deletes its last key under that prefix; archiving a key keeps them, so
+restoring it brings them back.
+
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
 `transcription`, `rerank`, `moderation`, `video`, `decision`, `realtime`, or
 `other` (not a chat model, nothing more known; OVHcloud's listing says this of a

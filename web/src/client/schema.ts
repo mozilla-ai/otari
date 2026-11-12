@@ -4249,6 +4249,8 @@ export interface paths {
         /**
          * Delete Org Provider Key
          * @description Permanently delete an archived key. Organization owners and admins only.
+         *
+         *     The model details the organization set under the key's prefix go with its last key there.
          */
         delete: operations["provider-keys-delete_org_provider_key"];
         options?: never;

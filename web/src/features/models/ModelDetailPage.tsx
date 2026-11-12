@@ -307,12 +307,26 @@ function offeringColumns({
       header: "Context / max out",
       align: "end",
       allowsSorting: true,
-      cell: ({ offering: row }) => (
-        <span className="text-mono-caption whitespace-nowrap">
-          {formatContext(row.context_window)} /{" "}
-          {formatContext(row.max_output_tokens)}
-        </span>
-      ),
+      cell: ({ offering: row }) => {
+        const set =
+          row.metadata_override?.context_window != null ||
+          row.metadata_override?.max_output_tokens != null
+        return (
+          <span className="flex flex-col items-end">
+            <span className="text-mono-caption whitespace-nowrap">
+              {formatContext(row.context_window)} /{" "}
+              {formatContext(row.max_output_tokens)}
+            </span>
+            {set ? (
+              <span className="whitespace-nowrap text-caption text-subtle">
+                {row.credential === "organization"
+                  ? "Set by your organization"
+                  : "Set by the operator"}
+              </span>
+            ) : null}
+          </span>
+        )
+      },
     },
   ]
   if (withUsage) {
@@ -706,8 +720,13 @@ export function ModelDetailView({
           onOpenChange={(open) => {
             if (!open) setEditing(undefined)
           }}
-          selector={editing.selector}
           current={editing.metadata_override ?? undefined}
+          limits={editing}
+          scope={
+            editing.credential === "organization"
+              ? `Applies to everyone in ${organization.data?.organization.name ?? "your organization"} who uses ${editing.selector}.`
+              : `Applies to everyone who uses ${editing.selector}.`
+          }
           onSubmit={(body) =>
             setOverride
               .mutateAsync({

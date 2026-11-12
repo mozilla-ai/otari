@@ -142,6 +142,16 @@ class OrgProviderKeyRepository(
         )
         return result.scalars().first()
 
+    async def any_under_prefix(self, organization_id: uuid.UUID, prefix: str) -> bool:
+        """Whether the organization holds a key, archived or not, that a selector names by ``prefix``."""
+        named = (col(OrgProviderKey.slug) == prefix) | (
+            col(OrgProviderKey.slug).is_(None) & (col(OrgProviderKey.provider) == prefix)
+        )
+        query = (
+            select(col(OrgProviderKey.id)).where(col(OrgProviderKey.organization_id) == organization_id, named).limit(1)
+        )
+        return (await self.db.execute(query)).first() is not None
+
     async def list_live_keys(self, organization_id: uuid.UUID) -> Sequence[OrgProviderKey]:
         """Every non-archived key this organization holds, oldest-first per provider.
 

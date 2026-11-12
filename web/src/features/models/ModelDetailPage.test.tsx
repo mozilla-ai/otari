@@ -889,6 +889,18 @@ describe("ModelDetailPage", () => {
     })
   })
 
+  it("says who set an offering's limits", async () => {
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [offering({ metadata_override: { context_window: 8192 } })],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    expect(await screen.findByText("Set by the operator")).toBeInTheDocument()
+  })
+
   it("lets an organization admin set the details of its own offering only", async () => {
     const user = userEvent.setup()
     const fetchSpy = mockApi({

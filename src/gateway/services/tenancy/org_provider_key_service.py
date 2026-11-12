@@ -705,8 +705,8 @@ class OrgProviderKeyService:
         await refresh_org_provider_cache(self.db)
         return await self._public_row(updated)
 
-    async def delete_key_for_user(self, *, user: User, key_id: uuid.UUID) -> None:
-        """Permanently delete an archived key. Organization owners and admins only.
+    async def delete_key_for_user(self, *, user: User, key_id: uuid.UUID) -> str:
+        """Permanently delete an archived key, returning the prefix selectors named it by. Owners and admins only.
 
         Overrides and model restrictions naming it ride the database cascade.
         """
@@ -719,9 +719,11 @@ class OrgProviderKeyService:
         if key.archived_at is None:
             raise OrgProviderKeyNotArchivedError(key_id)
 
+        prefix = key.selector_prefix
         await self.keys.delete_key(key)
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
+        return prefix
 
     async def set_org_default_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
         """Make a key the organization's default for its provider. Organization owners and admins only."""

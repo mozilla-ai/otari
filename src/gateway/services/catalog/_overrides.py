@@ -107,6 +107,12 @@ class ModelMetadataOverrideService:
         _overrides.setdefault((organization_id, provider), {})[model] = override
         return override
 
+    async def clear_provider(self, provider: str, organization_id: uuid.UUID | None = None) -> None:
+        """Drop every override the owner holds under ``provider``, which no longer serves anything."""
+        async with self.uow:
+            await ModelMetadataOverrideRepository(self.uow).remove_provider(provider, organization_id)
+        _overrides.pop((organization_id, provider), None)
+
     async def clear(self, selector: str, organization_id: uuid.UUID | None = None) -> bool:
         """Drop the owner's override of ``selector``. Whether there was one.
 

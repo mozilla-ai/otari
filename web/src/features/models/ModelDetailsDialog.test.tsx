@@ -13,8 +13,9 @@ async function renderDialog(
     <ModelDetailsDialog
       isOpen
       onOpenChange={vi.fn()}
-      selector="tensorfold:GLM-5.3-Flash"
       current={undefined}
+      limits={{ context_window: 131072, max_output_tokens: null }}
+      scope="Applies to everyone in Acme who uses tensorfold:GLM-5.3-Flash."
       onSubmit={onSubmit}
       {...props}
     />,
@@ -48,6 +49,24 @@ describe("ModelDetailsDialog", () => {
         input_modalities: ["text", "image"],
       }),
     )
+  })
+
+  it("says what a blank field keeps, and who the details apply to", async () => {
+    await renderDialog()
+
+    expect(screen.getByLabelText("Context window")).toHaveAttribute(
+      "placeholder",
+      "131072",
+    )
+    expect(screen.getByLabelText("Max output tokens")).toHaveAttribute(
+      "placeholder",
+      "Unknown",
+    )
+    expect(
+      screen.getByText(
+        "Applies to everyone in Acme who uses tensorfold:GLM-5.3-Flash. A blank field keeps what the provider says.",
+      ),
+    ).toBeInTheDocument()
   })
 
   it("refuses a token count that is not a whole number", async () => {

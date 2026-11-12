@@ -179,3 +179,53 @@ async def test_an_organization_overrides_only_what_its_own_keys_serve(
     reset_served_models()
     await refresh_served_models(UnitOfWork(async_db))
     assert metadata_override("tensorfold", "GLM-5.3-Flash", acme.id) is None
+
+
+@pytest.mark.asyncio
+async def test_an_organization_s_details_go_with_its_last_key_under_the_prefix(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    acme = await OrganizationRepository(async_db).create_organization(name="Acme", slug="acme", created_by_user_id=None)
+    admin = await _member(async_db, acme, "admin")
+    keys = OrgProviderKeyService(async_db)
+    first, second = [
+        await keys.create_key_for_user(
+            user=admin, request=OrgProviderKeyCreateRequest(provider="openai", name=name, api_key="sk-1")
+        )
+        for name in ("Research", "Sales")
+    ]
+    service = _service(async_db)
+    await service.set_metadata_override(user=admin, selector="openai:gpt-x", override=MetadataOverride(reasoning=True))
+
+    for key, left in ((first, MetadataOverride(reasoning=True)), (second, None)):
+        await keys.archive_key_for_user(user=admin, key_id=key.id)
+        prefix = await keys.delete_key_for_user(user=admin, key_id=key.id)
+        await service.forget_metadata_overrides(user=admin, prefix=prefix)
+        reset_served_models()
+        await refresh_served_models(UnitOfWork(async_db))
+        assert metadata_override("openai", "gpt-x", acme.id) == left
+
+
+def test_a_deleted_hosted_provider_takes_its_details_with_it(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    client_gen = build_test_client(_config(postgres_url))
+    client = next(client_gen)
+    try:
+        created = client.post(
+            f"{API_ROOT}/hosted-providers",
+            json={"provider": "openai", "name": "tensorfold", "api_key": "sk-hosted"},
+            headers=_MASTER,
+        )
+        assert created.status_code == 201, created.text
+        put = client.put(f"{API_ROOT}/model-overrides/tensorfold:glm", json={"context_window": 8192}, headers=_MASTER)
+        assert put.status_code == 200
+        assert metadata_override("tensorfold", "glm") == MetadataOverride(context_window=8192)
+
+        assert client.delete(f"{API_ROOT}/hosted-providers/tensorfold", headers=_MASTER).status_code == 200
+    finally:
+        client_gen.close()
+
+    assert metadata_override("tensorfold", "glm") is None

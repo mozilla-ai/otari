@@ -36,6 +36,12 @@ function flagValue(flag: string): boolean | null {
   return flag === "yes"
 }
 
+/** What a blank field falls back to: the value the offering shows when nothing overrides it. */
+function fallback(overridden: boolean, value: number | null | undefined) {
+  if (overridden) return "From the provider"
+  return value == null ? "Unknown" : value.toString()
+}
+
 /** A token count, `null` when blank, `NaN` when not a whole number in range. */
 function parseTokens(value: string): number | null {
   const trimmed = value.trim()
@@ -49,10 +55,12 @@ function parseTokens(value: string): number | null {
 export interface ModelDetailsDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** The `provider:model` the details describe. */
-  selector: string
   /** What is stored now; `undefined` when nothing is. */
   current: ModelMetadataOverride | undefined
+  /** The limits the offering shows now, to say what a blank field keeps. */
+  limits: { context_window?: number | null; max_output_tokens?: number | null }
+  /** Who the details apply to, as a sentence. */
+  scope: string
   /**
    * Saves the override. Awaited, and a rejection is reported inside this
    * dialog, as `SetPriceDialog` does.
@@ -67,8 +75,9 @@ export interface ModelDetailsDialogProps {
 export function ModelDetailsDialog({
   isOpen,
   onOpenChange,
-  selector,
   current,
+  limits,
+  scope,
   onSubmit,
 }: ModelDetailsDialogProps) {
   // Seeded on mount only: the caller remounts this on each open.
@@ -125,7 +134,7 @@ export function ModelDetailsDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title="Edit details"
-      description={`Leave a field blank to keep what the provider and models.dev say about ${selector}.`}
+      description={`${scope} A blank field keeps what the provider says.`}
       submitLabel="Save details"
       onSubmit={submit}
       isPending={isSaving}
@@ -139,7 +148,10 @@ export function ModelDetailsDialog({
           value={contextWindow}
           onChange={setContextWindow}
           inputMode="numeric"
-          placeholder="131072"
+          placeholder={fallback(
+            current?.context_window != null,
+            limits.context_window,
+          )}
           autoFocus
           isInvalid={windowInvalid}
           errorMessage="A whole number of tokens."
@@ -149,7 +161,10 @@ export function ModelDetailsDialog({
           value={maxOutput}
           onChange={setMaxOutput}
           inputMode="numeric"
-          placeholder="8192"
+          placeholder={fallback(
+            current?.max_output_tokens != null,
+            limits.max_output_tokens,
+          )}
           isInvalid={outputInvalid}
           errorMessage="A whole number of tokens."
         />

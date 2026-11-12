@@ -70,7 +70,7 @@ from gateway.schemas.providers import (
     HostedProviderTestRequest,
     HostedProviderUpdateRequest,
 )
-from gateway.services.catalog import offered_model_types
+from gateway.services.catalog import ModelMetadataOverrideService, offered_model_types
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import (
     DiscoveryDial,
@@ -344,9 +344,9 @@ class HostedProviderService:
         return public
 
     async def delete_provider(self, provider: str) -> None:
-        """Remove a provider and the roster offered on it. Pricing history stays.
+        """Remove a provider, the roster offered on it and the model details set for it. Pricing history stays.
 
-        A row that shadows a configuration entry takes no roster with it: the
+        A row that shadows a configuration entry takes neither with it: the
         entry serves again, on the same models.
 
         Raises:
@@ -358,6 +358,7 @@ class HostedProviderService:
             name = row.name
             if not source.shadows_config:
                 await self.models.delete_for_provider(name)
+                await ModelMetadataOverrideService(self.uow).clear_provider(name)
             await self.providers.delete_row(row)
         forget_hosted_name(name)
         remember_hosted_zero_data_retention(name, False)

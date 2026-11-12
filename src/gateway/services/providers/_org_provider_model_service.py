@@ -502,6 +502,16 @@ class OrgProviderModelService:
         organization_id = await self._organization_serving(user, selector)
         return await ModelMetadataOverrideService(self.uow).set(selector, override, organization_id)
 
+    async def forget_metadata_overrides(self, *, user: User, prefix: str) -> None:
+        """Drop the organization's model details under ``prefix`` once no key of it, archived or not, answers to it.
+
+        An archived key keeps them, so restoring it brings them back.
+        """
+        organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+        if not await self.keys.any_under_prefix(organization.id, prefix):
+            await ModelMetadataOverrideService(self.uow).clear_provider(prefix, organization.id)
+
     async def clear_metadata_override(self, *, user: User, selector: str) -> None:
         """Drop the organization's own override of a model, leaving the server and models.dev to describe it.
 
