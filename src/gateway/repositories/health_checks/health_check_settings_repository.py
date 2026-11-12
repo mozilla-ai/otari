@@ -3,9 +3,9 @@
 from datetime import datetime
 
 from sqlalchemy import or_, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import insert_ignoring_duplicates
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.health_checks import SETTINGS_ROW_ID, HealthCheckSettings
 from gateway.repositories.base_repository import BaseRepository
@@ -23,21 +23,19 @@ class HealthCheckSettingsRepository(
     async def get_or_create(self) -> HealthCheckSettings:
         """The settings row, created with its defaults the first time it is read.
 
-        Every replica's poll and a page load can find no row at once. The insert
-        runs in a SAVEPOINT, so the one that loses the race rolls back its row
-        alone and reads the winner's.
+        Concurrent first reads return the same row.
         """
         row = await self.db.get(HealthCheckSettings, SETTINGS_ROW_ID, populate_existing=True)
         if row is None:
-            try:
-                async with self.db.begin_nested():
-                    self.db.add(HealthCheckSettings(id=SETTINGS_ROW_ID))
-            except IntegrityError:
-                pass
+            await insert_ignoring_duplicates(
+                self.db,
+                [HealthCheckSettings(id=SETTINGS_ROW_ID)],
+                conflict=[HealthCheckSettings.id],
+                returning=HealthCheckSettings.id,
+            )
             row = await self.db.get(HealthCheckSettings, SETTINGS_ROW_ID, populate_existing=True)
             if row is None:
                 raise LookupError("the health check settings row is missing after its insert")
-            await self.db.refresh(row)
         return row
 
     async def claim_due_run(self, now: datetime, next_run_at: datetime) -> int | None:
