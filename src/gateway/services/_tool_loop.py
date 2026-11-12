@@ -20,9 +20,11 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
+from contextlib import AbstractAsyncContextManager, aclosing, nullcontext, suppress
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
 
@@ -117,6 +119,62 @@ def parse_tool_arguments(name: str, raw: str | None) -> dict[str, Any] | None:
 
 class MaxToolIterationsExceeded(Exception):
     """Raised when the loop fails to reach a non-tool-call finish in N rounds."""
+
+
+_ANSWERED_ROUNDS = "otari_answered_rounds"
+
+
+@dataclass(frozen=True)
+class AnsweredRounds:
+    """The usage of the rounds a failed tool loop had answered, carried on the exception it raised.
+
+    The provider bills every round it answers, but a loop that fails on a later round,
+    or hits its iteration cap, returns no answer to fold their usage onto. The rounds'
+    summed usage rides on the exception instead, so the failure row can bill it:
+    ``result`` is the last answered round as a finished loop would have returned it,
+    and ``events`` are a stream's terminal events in the same form.
+    """
+
+    result: Any = None
+    events: tuple[Any, ...] = ()
+
+    def attach(self, exc: BaseException) -> None:
+        """Leave these rounds on ``exc``, for whichever handler records the failure."""
+        with suppress(AttributeError):
+            setattr(exc, _ANSWERED_ROUNDS, self)
+
+    @staticmethod
+    def of(exc: BaseException | None) -> AnsweredRounds | None:
+        """The rounds a tool loop left on ``exc``, or None when it raised before one was answered."""
+        return getattr(exc, _ANSWERED_ROUNDS, None)
+
+
+def _carry_answered(exc: BaseException, strategy: ToolLoopStrategy[Any, Any], answered: Any, acc: Any) -> None:
+    """Fold the rounds answered so far onto the last of them, and leave it on ``exc``."""
+    if answered is not None:
+        strategy.fold_usage(answered, acc)
+        AnsweredRounds(result=answered).attach(exc)
+
+
+def _carry_answered_stream(exc: BaseException, strategy: StreamToolLoopStrategy[Any, Any, Any], answered: Any) -> None:
+    """Leave the terminal events of the last continued round, with every answered round's usage, on ``exc``.
+
+    ``answered`` is that round's state and the usage of the rounds before it.
+    """
+    if answered is not None:
+        AnsweredRounds(events=tuple(strategy.terminal_events(*answered))).attach(exc)
+
+
+async def _carrying_answered(
+    stream: AsyncIterator[Any], strategy: StreamToolLoopStrategy[Any, Any, Any], answered: Any
+) -> AsyncGenerator[Any]:
+    """``stream``'s events, leaving the rounds answered before it on an exception it raises."""
+    try:
+        async for event in stream:
+            yield event
+    except Exception as exc:
+        _carry_answered_stream(exc, strategy, answered)
+        raise
 
 
 class StreamAction(Enum):
@@ -467,6 +525,7 @@ async def run_tool_loop(
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
     written: int | None = None
+    answered: ResultT | None = None
 
     for iteration in range(1, max_iterations + 1):
         final = iteration == max_iterations
@@ -487,7 +546,11 @@ async def run_tool_loop(
             )
         kwargs["stream"] = False
 
-        result = await strategy.call(kwargs)
+        try:
+            result = await strategy.call(kwargs)
+        except Exception as exc:
+            _carry_answered(exc, strategy, answered, acc)
+            raise
         if not first_response_signaled:
             if check_first_response is not None:
                 result = check_first_response(result)
@@ -497,6 +560,7 @@ async def run_tool_loop(
         before = strategy.output_tokens(acc)
         strategy.accumulate_usage(acc, result)
         written = _written(before, strategy.output_tokens(acc))
+        answered = result
 
         stopped = strategy.exit_before_split(result)
         owned, has_foreign = strategy.split_owned(result, pool)
@@ -519,7 +583,9 @@ async def run_tool_loop(
 
         await strategy.advance_transcript(transcript, result, owned, pool, acc)
 
-    raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+    exceeded = MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+    _carry_answered(exceeded, strategy, answered, acc)
+    raise exceeded
 
 
 async def run_tool_loop_stream(
@@ -570,6 +636,8 @@ async def run_tool_loop_stream(
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
     written: int | None = None
+    # The last round the loop continued past, and the usage of the rounds before it.
+    answered: tuple[Any, Any] | None = None
 
     for iteration in range(1, max_iterations + 1):
         final = iteration == max_iterations
@@ -589,12 +657,16 @@ async def run_tool_loop_stream(
                 final=True,
             )
 
-        stream = await strategy.open_stream(kwargs)
+        try:
+            stream = await strategy.open_stream(kwargs)
+        except Exception as exc:
+            _carry_answered_stream(exc, strategy, answered)
+            raise
         state = strategy.new_stream_state()
         events = 0
 
-        async with _stream_scope(stream):
-            async for event in stream:
+        async with _stream_scope(stream), aclosing(_carrying_answered(stream, strategy, answered)) as carried:
+            async for event in carried:
                 events += 1
                 action, visible = strategy.observe(state, event, pool, acc)
                 if action is StreamAction.BREAK:
@@ -633,6 +705,7 @@ async def run_tool_loop_stream(
             return
 
         before = strategy.stream_output_tokens(acc)
+        answered = (state, copy.deepcopy(acc))
         strategy.accumulate_stream_usage(acc, state)
         written = _written(before, strategy.stream_output_tokens(acc))
         async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
@@ -643,4 +716,6 @@ async def run_tool_loop_stream(
         for synthetic in strategy.synthetic_events(state, acc):
             yield synthetic
 
-    raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+    exceeded = MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+    _carry_answered_stream(exceeded, strategy, answered)
+    raise exceeded
