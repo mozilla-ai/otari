@@ -1,5 +1,6 @@
 """Whether this deployment checks for new releases, sending a check when one is due, and what the last one heard."""
 
+import asyncio
 import os
 import random
 import uuid
@@ -7,8 +8,9 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.update_check import UpdateCheckSettings
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.update_check_exceptions import UpdateCheckSetInConfigError
 from gateway.log_config import logger
 from gateway.models.update_check import UpdateCheckState
@@ -32,6 +34,7 @@ from gateway.version import __version__
 # How long a claimed check holds the row. Longer than a check takes, so a replica
 # that dies mid-check leaves the row to be claimed again after it.
 CLAIM_HOLD = timedelta(minutes=10)
+POLL_SECONDS = 60.0
 
 SendCheck = Callable[[str, str, uuid.UUID], Awaitable[UpdateCheckReply]]
 
@@ -171,6 +174,22 @@ class UpdateCheckService:
             )
         self._log_news(reply)
         return True
+
+    @staticmethod
+    async def poll(build: Callable[[UnitOfWork], "UpdateCheckService"], interval: float = POLL_SECONDS) -> None:
+        """Poll for a due check forever, as every replica does. Errors are logged and retried; cancelled at shutdown."""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                async with create_unit_of_work() as uow:
+                    await build(uow).check_if_due()
+            except asyncio.CancelledError:
+                raise
+            except DATABASE_ERRORS as exc:
+                logger.warning("Update check poll failed: %s; retrying in %ss", describe_database_error(exc), interval)
+            except Exception as exc:
+                # The class only: an error a rolled-back unit of work raises chains the database error, and its row.
+                logger.warning("Update check poll failed (%s); retrying in %ss", type(exc).__name__, interval)
 
     def _log_news(self, reply: UpdateCheckReply) -> None:
         if reply.advisories:
