@@ -688,6 +688,17 @@ def test_streamed_text_chars_counts_tool_call_arguments_and_reasoning() -> None:
     assert [pipeline._streamed_text_chars(c) for c in events] == [4, 3, 2, 5, 1]
 
 
+def test_streamed_text_chars_counts_every_choice() -> None:
+    call = SimpleNamespace(function=SimpleNamespace(arguments="abcd"))
+    chunk = SimpleNamespace(
+        choices=[
+            SimpleNamespace(delta=SimpleNamespace(content=None)),
+            SimpleNamespace(delta=SimpleNamespace(content="ab", tool_calls=[call])),
+        ]
+    )
+    assert pipeline._streamed_text_chars(chunk) == 6
+
+
 def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
     chunk = SimpleNamespace(choices=[SimpleNamespace(delta=None)])
     assert pipeline._streamed_text_chars(chunk) == 0

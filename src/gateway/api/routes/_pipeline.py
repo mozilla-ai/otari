@@ -6163,12 +6163,18 @@ def _streamed_text_chars(chunk: Any) -> int:
     Text, tool-call arguments and reasoning all count, since the provider bills each as output.
     """
     if choices := getattr(chunk, "choices", None):
-        delta = getattr(choices[0], "delta", None)
-        calls = getattr(delta, "tool_calls", None) or []
+        deltas = [getattr(choice, "delta", None) for choice in choices]
         parts = [
-            getattr(delta, "content", None),
-            getattr(getattr(delta, "reasoning", None), "content", None),
-            *(getattr(getattr(call, "function", None), "arguments", None) for call in calls),
+            part
+            for delta in deltas
+            for part in (
+                getattr(delta, "content", None),
+                getattr(getattr(delta, "reasoning", None), "content", None),
+                *(
+                    getattr(getattr(call, "function", None), "arguments", None)
+                    for call in getattr(delta, "tool_calls", None) or []
+                ),
+            )
         ]
     elif str(getattr(chunk, "type", "")).endswith(_RESPONSES_OUTPUT_DELTAS):
         parts = [getattr(chunk, "delta", None)]

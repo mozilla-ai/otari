@@ -78,8 +78,17 @@ def _chunks() -> list[ChatCompletionChunk]:
     ]
 
 
-def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> Any:
-    async def _acompletion(**_kwargs: Any) -> Any:
+def _chat(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    stream: bool = False,
+    stream_options: dict[str, Any] | None = None,
+    sent: list[dict[str, Any]] | None = None,
+) -> Any:
+    async def _acompletion(**kwargs: Any) -> Any:
+        if sent is not None:
+            sent.append(kwargs)
         if not stream:
             return _completion()
 
@@ -98,6 +107,7 @@ def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) 
                 "messages": [{"role": "user", "content": "hi"}],
                 "user": "inline-cost-user",
                 "stream": stream,
+                **({} if stream_options is None else {"stream_options": stream_options}),
             },
             headers=headers,
         )
@@ -156,6 +166,25 @@ def test_streaming_response_carries_cost_on_its_terminal_usage_chunk(
     assert len(usages) == 1
     assert usages[0]["cost_usd"] == "0.300000"
     assert usages[0]["pricing_source"] == "deployment"
+    assert _logged_cost(db_session_factory) == Decimal("0.300000")
+
+
+def test_a_stream_that_turned_usage_off_is_billed_on_the_usage_it_does_not_receive(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _price_model(client, master_key_header)
+    _create_user(client, master_key_header)
+    sent: list[dict[str, Any]] = []
+
+    response = _chat(client, master_key_header, stream=True, stream_options={"include_usage": False}, sent=sent)
+
+    assert response.status_code == 200, response.text
+    assert sent[0]["stream_options"]["include_usage"] is True
+    frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    assert frames[-1] == "[DONE]"
+    assert not [frame for frame in frames[:-1] if json.loads(frame).get("usage")]
     assert _logged_cost(db_session_factory) == Decimal("0.300000")
 
 
