@@ -655,6 +655,7 @@ async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
     settlement = _Settlement(row_cost=cost)
     settlement.install(monkeypatch)
     failure = RuntimeError("context length exceeded")
+    granted: list[int] = []
 
     if failed == "non-streaming":
         AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
@@ -663,14 +664,23 @@ async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
     elif failed == "before-the-stream":
         AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
 
+        class _Grant:
+            async def admit_model(self, *_args: Any, **_kwargs: Any) -> None:
+                return None
+
+            async def settle(self, tokens: int) -> None:
+                granted.append(tokens)
+
         async def failing_provider(**kwargs: Any) -> Any:
             raise failure
 
+        ctx = _ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation())
+        ctx.rate_limit_grant = cast(Any, _Grant())
         monkeypatch.setattr(chat, "acompletion", failing_provider)
         with pytest.raises(HTTPException):
             await run_single_attempt_stream(
                 adapter=chat._ADAPTER,
-                ctx=_ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation()),
+                ctx=ctx,
                 tool_ctx=_tool_ctx(),
                 call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
                 provider=LLMProvider.OPENAI,
@@ -688,6 +698,8 @@ async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
     assert settlement.refunded == 0
     assert settlement.reconciled == [cost]
     assert settlement.settled_tokens == [150]
+    # The per-minute token limit settles them too, where the request holds a grant.
+    assert granted == ([150] if failed == "before-the-stream" else [])
     (logged,) = settlement.logged
     billed = logged["usage_override"]
     assert (billed.prompt_tokens, billed.completion_tokens) == (120, 30)
