@@ -4497,6 +4497,17 @@
             ],
             "title": "Metadata Output Price Per Million"
           },
+          "metadata_override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelMetadataOverrideRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What whoever holds the serving key set in place of the server's and models.dev's word: the organization for an `organization` offering, the operator otherwise. Null when nothing is set."
+          },
           "price_reference": {
             "anyOf": [
               {
@@ -13959,6 +13970,200 @@
           }
         },
         "title": "ModelMetadata",
+        "type": "object"
+      },
+      "ModelMetadataOverridePublic": {
+        "description": "An override as stored, under the selector it describes.",
+        "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2147483647.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "input_modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "text",
+                    "image",
+                    "audio",
+                    "video",
+                    "pdf"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the model reads; `text` unless it says otherwise.",
+            "title": "Input Modalities"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2147483647.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model reasons: `reasoning`.",
+            "title": "Reasoning"
+          },
+          "selector": {
+            "description": "The `provider:model` the override describes.",
+            "title": "Selector",
+            "type": "string"
+          },
+          "structured_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model takes `response_format`. Never offered where Otari cannot send it.",
+            "title": "Structured Output"
+          },
+          "tool_call": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model calls tools: `tools`, `tool_choice`.",
+            "title": "Tool Call"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "title": "ModelMetadataOverridePublic",
+        "type": "object"
+      },
+      "ModelMetadataOverrideRequest": {
+        "description": "What to say about a model in place of its server and models.dev. A null field is not overridden.",
+        "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2147483647.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "input_modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "text",
+                    "image",
+                    "audio",
+                    "video",
+                    "pdf"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 5,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the model reads; `text` unless it says otherwise.",
+            "title": "Input Modalities"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2147483647.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model reasons: `reasoning`.",
+            "title": "Reasoning"
+          },
+          "structured_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model takes `response_format`. Never offered where Otari cannot send it.",
+            "title": "Structured Output"
+          },
+          "tool_call": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the model calls tools: `tools`, `tool_choice`.",
+            "title": "Tool Call"
+          }
+        },
+        "title": "ModelMetadataOverrideRequest",
         "type": "object"
       },
       "ModelMetadataResponse": {
@@ -39830,6 +40035,109 @@
         ]
       }
     },
+    "/api/v1/model-overrides/{selector}": {
+      "delete": {
+        "description": "Drop the deployment's override of a model.",
+        "operationId": "model-overrides-clear_model_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "title": "Selector",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Model Override",
+        "tags": [
+          "model-overrides"
+        ]
+      },
+      "put": {
+        "description": "Replace the deployment's override of a model; every field null clears it.",
+        "operationId": "model-overrides-set_model_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "title": "Selector",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelMetadataOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelMetadataOverridePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Model Override",
+        "tags": [
+          "model-overrides"
+        ]
+      }
+    },
     "/api/v1/models": {
       "get": {
         "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
@@ -43210,6 +43518,115 @@
         ]
       }
     },
+    "/api/v1/organizations/me/model-overrides/{selector}": {
+      "delete": {
+        "description": "Drop the organization's override of a model. Organization owners and admins only.",
+        "operationId": "model-overrides-clear_organization_model_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "title": "Selector",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No key serves the prefix."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Organization Model Override",
+        "tags": [
+          "model-overrides"
+        ]
+      },
+      "put": {
+        "description": "Replace the organization's override of a model one of its keys serves; every field null clears it.\n\nOrganization owners and admins only.",
+        "operationId": "model-overrides-set_organization_model_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "title": "Selector",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelMetadataOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelMetadataOverridePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No key serves the prefix."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Organization Model Override",
+        "tags": [
+          "model-overrides"
+        ]
+      }
+    },
     "/api/v1/organizations/me/pending-memberships": {
       "get": {
         "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/api/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
@@ -43789,7 +44206,7 @@
     },
     "/api/v1/organizations/me/provider-keys/{key_id}": {
       "delete": {
-        "description": "Permanently delete an archived key. Organization owners and admins only.",
+        "description": "Permanently delete an archived key. Organization owners and admins only.\n\nThe model details the organization set under the key's prefix go with its last key there.",
         "operationId": "provider-keys-delete_org_provider_key",
         "parameters": [
           {

@@ -30,6 +30,7 @@
   * [MCP](api-endpoints/mcp.md)
   * [MCP servers](api-endpoints/mcp-servers.md)
   * [Messages](api-endpoints/messages.md)
+  * [Model overrides](api-endpoints/model-overrides.md)
   * [Models](api-endpoints/models.md)
   * [Moderations](api-endpoints/moderations.md)
   * [Oauth](api-endpoints/oauth.md)

@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e2363e3bd0451d3f0d76bc26f8fec18351b41bc1/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/2e5d930796c0200e72bb33749d47858c133e7ff1/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -12,6 +12,11 @@ parameters, and schemas.
 | otari.ai, an account in the United States | `https://api.otari.ai/api` |
 | otari.ai, an account in the European Union | `https://eu.api.otari.ai/api` |
 | Your own gateway | `https://<your-otari-host>/api`, or `http://localhost:8000/api` on your own machine |
+
+The dashboard reaches the API at `https://otari.ai/api` as well, but programs
+use the hosts above: the CDN in front of the dashboard's host ends a response
+it has waited about 30 seconds for with an HTML `504` and no `Otari-Request-ID`,
+while the gateway finishes the request and bills it.
 
 Every endpoint lives under the base URL, at `/v1/...`: an OpenAI-style request
 goes to `<base URL>/v1/chat/completions`, an Anthropic-style one to
@@ -136,7 +141,9 @@ Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
 streaming or not, and so do the responses of the embeddings, rerank, images,
 audio, moderations, decisions and search endpoints. A request rejected before
 the gateway handles it (a failed authentication `401`, or a body that does not
-validate, `422`) carries none. The gateway mints the id, sends it on its own
+validate, `422`) carries none, and so does an answer from a proxy or load
+balancer in front of the gateway, such as a `502` or `504` page on a timeout,
+since the gateway did not send it. The gateway mints the id, sends it on its own
 refusals as well, and records it on the request's usage rows, so
 [`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
 finds the request's cost by it.
@@ -489,7 +496,7 @@ provider or billing again.
 | Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
 | Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
 | Different request, same key | `422`. |
-| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer. |
+| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer, for as long as the original runs (a slow model writing a long answer can take minutes), unless its claim lapses, as the list below says. |
 | Original failed | The next retry runs in its place. Only a successful response is kept. |
 | Long-running original | The request holding a key renews its claim while it runs, so a retry never runs it a second time. If the worker running it dies, its key frees up within `idempotency_lease_sec` (a minute by default). |
 | Retention | A response, generated content included, is kept for `idempotency_retention_sec` (a day by default; `0` ignores the header) and then deleted. Expired responses are still deleted after the header is turned off. |
@@ -513,8 +520,14 @@ was not stored or can no longer be read:
 1. Generate a UUID for the request and send it as `Idempotency-Key`.
 2. On a lost response, resend the identical request with the same key.
 3. On a `409`, wait for `Retry-After` and retry with the same key, backing off
-   exponentially.
+   exponentially. Keep the same key until the original settles: a new key runs
+   the request again and bills it again.
 4. For a new or changed request, generate a new key; reusing one is a `422`.
+
+The same retry recovers what a lost response would have said: the replay
+carries the original's `Otari-Request-ID`, and its `usage.cost_usd` where the
+original had one. An answer from a proxy in front of the gateway carries
+neither (see [Request ID and inline cost](#request-id-and-inline-cost)).
 
 ## Rerank
 
