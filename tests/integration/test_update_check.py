@@ -1,11 +1,12 @@
 """``/api/v1/update-check`` and the check the worker sends: the operator's answer, the claim, and what is kept."""
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -14,6 +15,8 @@ from gateway.schemas.update_check import UpdateCheckAdvisory, UpdateCheckAnswer,
 from gateway.services.update_check import UpdateCheckService
 from gateway.services.update_check._client import UpdateCheckFailedError
 from gateway.services.update_check._schedule import next_daily_check
+
+from .conftest import _to_async_url
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECK = f"{API_ROOT}/update-check"
@@ -257,3 +260,26 @@ async def test_saying_no_forgets_what_the_checks_heard(async_db: AsyncSession, t
 
     status = await service.answer(UpdateCheckAnswer(enabled=False))
     assert (status.latest_version, status.last_checked_at, status.next_check_at) == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_waits_for_a_concurrent_one_and_returns_its_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def first_read(session: AsyncSession) -> uuid.UUID:
+        return (await UpdateCheckStateRepository(session).get_or_create()).install_id
+
+    try:
+        async with sessions() as first, sessions() as second:
+            first_install_id = await first_read(first)
+            waiting = asyncio.create_task(first_read(second))
+            # The first read has not committed, so the second cannot finish.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
+            await first.commit()
+            second_install_id = await waiting
+    finally:
+        await engine.dispose()
+
+    assert second_install_id == first_install_id
