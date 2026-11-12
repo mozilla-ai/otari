@@ -13,9 +13,7 @@ against what the provider's own redirect carried: substituting this deployment's
 issuer for it would make the check trivially true.
 """
 
-from typing import Annotated
-
-from fastapi import APIRouter, BackgroundTasks, Cookie, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
@@ -24,6 +22,7 @@ from gateway.api.deps import (
     OIDCConnectionServiceDep,
     record_auth_failure,
 )
+from gateway.api.routes._flow_cookies import FlowCookies
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
@@ -48,22 +47,11 @@ from gateway.schemas.identity import (
 )
 from gateway.services.dashboard_session_service import apply_session_cookie, request_is_https
 from gateway.services.identity import exchange_sso_code
-from gateway.services.oauth_service import (
-    BrowserAuthorization,
-    apply_flow_cookie,
-    browser_token_for,
-    drop_finished_flow,
-)
 from gateway.services.tenancy import report_new_account
 
 router = APIRouter(prefix="/auth/sso", tags=["auth"])
 
-# This router's own flow cookie, scoped to its own path. A browser only attaches a cookie to a
-# request under the path it was scoped to, so a cookie scoped elsewhere would never arrive here.
-SSO_FLOW_COOKIE_NAME = "otari_sso_flow"
-SSO_FLOW_COOKIE_PATH = f"{API_ROOT}/auth/sso"
-
-SsoFlowCookie = Annotated[str | None, Cookie(alias=SSO_FLOW_COOKIE_NAME, include_in_schema=False)]
+_FLOWS = FlowCookies(prefix="otari_sso_flow", path=f"{API_ROOT}{router.prefix}")
 
 
 @router.post("/lookup", response_model=SsoLookupResponse)
@@ -88,7 +76,6 @@ async def authorize_sso(
     request: Request,
     response: Response,
     connections: OIDCConnectionServiceDep,
-    flow_cookie: SsoFlowCookie = None,
 ) -> SsoAuthorizeResponse:
     """Start a sign-in through the organization's own connection at ``slug``.
 
@@ -107,14 +94,7 @@ async def authorize_sso(
         bound = await connections.start_sign_in(connection, metadata)
     except DATABASE_ERRORS as exc:
         raise database_error("record a pending SSO sign-in", exc) from None
-    apply_flow_cookie(
-        response,
-        flow_cookie,
-        BrowserAuthorization(url=bound.url, state=bound.state, browser_token=bound.browser_token),
-        secure=request_is_https(request),
-        cookie_name=SSO_FLOW_COOKIE_NAME,
-        cookie_path=SSO_FLOW_COOKIE_PATH,
-    )
+    _FLOWS.start(request, response, state=bound.state, browser_token=bound.browser_token)
     return SsoAuthorizeResponse(authorization_url=bound.url, state=bound.state)
 
 
@@ -128,7 +108,6 @@ async def callback_sso(
     growth: GrowthSignalPortDep,
     background_tasks: BackgroundTasks,
     maintenance_mode: MaintenanceModeDep,
-    flow_cookie: SsoFlowCookie = None,
 ) -> SsoSessionPublic:
     """Exchange an authorization code and set the HttpOnly session cookie.
 
@@ -157,7 +136,7 @@ async def callback_sso(
             code=body.code,
             state=body.state,
             iss=body.iss,
-            browser_token=browser_token_for(flow_cookie, body.state),
+            browser_token=_FLOWS.browser_token(request, body.state),
             connection=connection,
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
@@ -178,16 +157,10 @@ async def callback_sso(
     identity = signed_in.account
     logger.info("Signed in %s through organization %s's own connection", identity.id, connection.organization_id)
     await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
-    secure = request_is_https(request)
-    drop_finished_flow(
-        response,
-        flow_cookie,
-        body.state,
-        secure=secure,
-        cookie_name=SSO_FLOW_COOKIE_NAME,
-        cookie_path=SSO_FLOW_COOKIE_PATH,
+    _FLOWS.finish(request, response, body.state)
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )
-    apply_session_cookie(response, signed_in.session_token, signed_in.session_expires_at, secure=secure)
     return SsoSessionPublic(
         expires_at=signed_in.session_expires_at,
         user_id=identity.id,

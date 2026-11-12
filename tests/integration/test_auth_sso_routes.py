@@ -242,8 +242,9 @@ def test_authorize_hands_back_a_consent_url_and_sets_the_flow_cookie(client: Tes
 
     assert bound["authorization_url"].startswith(f"{ISSUER}/authorize")
     assert bound["state"]
-    jar = {cookie.name for cookie in client.cookies.jar}
-    assert "otari_sso_flow" in jar
+    (cookie,) = client.cookies.jar
+    assert cookie.name.startswith("otari_sso_flow_")
+    assert cookie.path == f"{API_ROOT}/auth/sso"
 
 
 def test_a_disabled_connection_answers_the_same_as_no_connection(client: TestClient, db_session: Session) -> None:
@@ -267,7 +268,7 @@ def test_the_callback_refuses_without_the_flow_cookie(client: TestClient, db_ses
     bound = _authorize(client, organization.slug)
     # The browser lost the cookie: the request names a real, still-pending state with no token to
     # bind it to, the way a tab that lost its HttpOnly cookie between redirect and return would.
-    client.cookies.delete("otari_sso_flow")
+    client.cookies.clear()
 
     response = client.post(
         f"{API_ROOT}/auth/sso/callback", json={"code": "a-code", "state": bound["state"], "iss": ISSUER}
@@ -384,6 +385,24 @@ def test_a_valid_flow_cookie_reaches_the_provider_rather_than_a_state_refusal(
     )
 
     assert response.status_code == 502, response.text
+
+
+def test_two_tabs_that_start_together_both_reach_the_provider(client: TestClient, db_session: Session) -> None:
+    """Neither authorize response has landed when the other request is sent.
+
+    A 400 would mean one tab's token was lost. The fake issuer answers 502 once a token reaches the exchange.
+    """
+    organization = _acme(db_session)
+    first = client.get(f"{API_ROOT}/auth/sso/{organization.slug}/authorize")
+    client.cookies.clear()
+    second = client.get(f"{API_ROOT}/auth/sso/{organization.slug}/authorize")
+    client.cookies.extract_cookies(first)
+
+    for started in (first, second):
+        response = client.post(
+            f"{API_ROOT}/auth/sso/callback", json={"code": "a-code", "state": started.json()["state"], "iss": ISSUER}
+        )
+        assert response.status_code == 502, response.text
 
 
 # ---------- first sign-in ----------

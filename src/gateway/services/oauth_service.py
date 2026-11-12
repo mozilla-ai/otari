@@ -27,7 +27,7 @@ written to the access log and to browser history, so a flow keyed on the state
 alone would let whoever reads either finish the sign-in for the full TTL
 (RFC 9700, section 4.7.1). apron-auth issues a browser token per authorization
 request and refuses a callback that token does not match. The token lives in an
-HttpOnly cookie, one entry per sign-in in flight, which is what lets two tabs
+HttpOnly cookie of its own per sign-in in flight, which is what lets two tabs
 each finish their own.
 
 What is this module's own is the two overrides in ``_as_configured_here``: the
@@ -41,10 +41,7 @@ flow this deployment actually started, which the browser cannot do. They fail
 in different directions. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 """
 
-import base64
 import hashlib
-import json
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlsplit
@@ -61,10 +58,9 @@ from apron_auth.errors import (
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
-from fastapi import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import (
     OAuthExchangeError,
     OAuthNotConfiguredError,
@@ -98,7 +94,7 @@ class BrowserAuthorization:
     ``state`` names the flow wherever one is recorded or looked up, and reveals
     nothing about ``browser_token``.
 
-    NOTE: ``browser_token`` belongs in ``FLOW_COOKIE_NAME`` and nowhere script
+    NOTE: ``browser_token`` belongs in an HttpOnly cookie and nowhere script
     can read it.
     """
 
@@ -118,23 +114,6 @@ class _Provider:
     scopes: tuple[str, ...]
     email_claim_trusted: bool
 
-
-# The resource the OAuth routes are mounted at. The router takes its prefix from
-# here and the flow cookie its path, so the cookie cannot end up scoped to
-# somewhere the routes are not.
-OAUTH_ROUTE_PREFIX = "/auth/oauth"
-# The cookie that binds each pending authorization to the browser that started
-# it. Scoped to the OAuth routes, which are the only ones that read it.
-FLOW_COOKIE_NAME = "otari_oauth_flow"
-FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
-# How many sign-ins one browser may have in flight. A browser holds one cookie,
-# so an unbounded one would grow for as long as somebody keeps starting flows,
-# and three concurrent sign-ins is already more than a person does.
-MAX_LIVE_FLOWS = 3
-# Three live flows encode to under 500 characters, so a longer value is one this
-# deployment never wrote. The bound is what an unauthenticated caller can make
-# this process decode.
-MAX_FLOW_COOKIE_CHARS = 1024
 
 _PROVIDERS: dict[str, _Provider] = {
     "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
@@ -315,108 +294,6 @@ async def pending_flow_provider(pending: OAuthPendingStateRepository, state: str
     guess here only fails the exchange that follows.
     """
     return await pending.get_provider(state_hash(state))
-
-
-def browser_token_for(flow_cookie: str | None, state: str) -> str | None:
-    """The browser token ``flow_cookie`` holds for ``state``, or ``None`` where it holds none.
-
-    This selects which of the browser's live flows to present and decides
-    nothing about it: apron-auth makes the one binding check, against the state
-    the callback carried.
-    """
-    return _live_flows(flow_cookie).get(state)
-
-
-def apply_flow_cookie(
-    response: Response,
-    flow_cookie: str | None,
-    authorization: BrowserAuthorization,
-    *,
-    secure: bool,
-    cookie_name: str = FLOW_COOKIE_NAME,
-    cookie_path: str = FLOW_COOKIE_PATH,
-) -> None:
-    """Add ``authorization`` to the flows the browser has in flight, and write the cookie back.
-
-    The oldest flow is evicted once a browser holds more than ``MAX_LIVE_FLOWS``. ``cookie_name``
-    and ``cookie_path`` default to this module's own flow cookie; pass a different pair to scope
-    the cookie elsewhere.
-    """
-    flows = _live_flows(flow_cookie)
-    flows[authorization.state] = authorization.browser_token
-    _write_flow_cookie(
-        response,
-        dict(list(flows.items())[-MAX_LIVE_FLOWS:]),
-        secure=secure,
-        cookie_name=cookie_name,
-        cookie_path=cookie_path,
-    )
-
-
-def drop_finished_flow(
-    response: Response,
-    flow_cookie: str | None,
-    state: str,
-    *,
-    secure: bool,
-    cookie_name: str = FLOW_COOKIE_NAME,
-    cookie_path: str = FLOW_COOKIE_PATH,
-) -> None:
-    """Write the cookie back without ``state``, or delete it where that was the last flow.
-
-    A redeemed flow's token can buy nothing and must not sit in the browser for the rest of the
-    cookie's life. ``cookie_name`` and ``cookie_path`` default to this module's own flow cookie.
-    """
-    kept = {flow: token for flow, token in _live_flows(flow_cookie).items() if flow != state}
-    _write_flow_cookie(response, kept, secure=secure, cookie_name=cookie_name, cookie_path=cookie_path)
-
-
-def _live_flows(flow_cookie: str | None) -> dict[str, str]:
-    """The browser token of each sign-in this cookie has in flight, keyed by its state, oldest first.
-
-    A cookie that cannot be read carries no flows, so a mangled, stale or
-    over-long one costs a person a sign-in to start again rather than a failed
-    request. Refusing one on the way in would be worse than reading none: it is
-    HttpOnly, so nothing but a new authorization request can rewrite it.
-    """
-    if not flow_cookie or len(flow_cookie) > MAX_FLOW_COOKIE_CHARS:
-        return {}
-    try:
-        flows = json.loads(base64.urlsafe_b64decode(flow_cookie + "=" * (-len(flow_cookie) % 4)))
-    except ValueError:
-        return {}
-    if not isinstance(flows, dict):
-        return {}
-    return {state: token for state, token in flows.items() if isinstance(state, str) and isinstance(token, str)}
-
-
-def _write_flow_cookie(
-    response: Response,
-    flows: Mapping[str, str],
-    *,
-    secure: bool,
-    cookie_name: str = FLOW_COOKIE_NAME,
-    cookie_path: str = FLOW_COOKIE_PATH,
-) -> None:
-    """Set ``cookie_name`` to exactly ``flows`` at ``cookie_path``, or delete it where ``flows`` is empty.
-
-    The cookie is HttpOnly and SameSite=Lax. Its value is base64url of compact JSON, so braces
-    and quotes stay out of a header the browser has to hand back byte for byte. It conceals
-    nothing.
-    """
-    if not flows:
-        response.delete_cookie(cookie_name, path=cookie_path, httponly=True, secure=secure, samesite="lax")
-        return
-    encoded = base64.urlsafe_b64encode(json.dumps(flows, separators=(",", ":")).encode()).decode().rstrip("=")
-    response.set_cookie(
-        cookie_name,
-        encoded,
-        max_age=OAUTH_STATE_TTL_SECONDS,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-        path=cookie_path,
-    )
 
 
 async def authorization_url(config: GatewayConfig, provider: str, *, db: AsyncSession) -> BrowserAuthorization:
@@ -643,17 +520,9 @@ def _as_configured_here(provider_config: ProviderConfig, provider: str) -> Provi
 __all__ = [
     "BrowserAuthorization",
     "DatabaseStateStore",
-    "FLOW_COOKIE_NAME",
-    "FLOW_COOKIE_PATH",
-    "MAX_FLOW_COOKIE_CHARS",
-    "MAX_LIVE_FLOWS",
-    "OAUTH_ROUTE_PREFIX",
-    "apply_flow_cookie",
     "authorization_url",
     "base_url",
-    "browser_token_for",
     "callback_landing_target",
-    "drop_finished_flow",
     "exchange_code",
     "pending_flow_provider",
     "provider_label",
