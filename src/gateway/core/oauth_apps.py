@@ -4,6 +4,9 @@ from urllib.parse import SplitResult, urlsplit
 
 from pydantic import HttpUrl
 
+# The only hosts plain HTTP is admitted for, and where RFC 8252 lets the port vary.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
 
 def parse_oauth_redirect(value: str) -> SplitResult | None:
     """Parse a callback without browser URL normalization.
@@ -26,10 +29,7 @@ def parse_oauth_redirect(value: str) -> SplitResult | None:
         or "%" in parsed.netloc
         or parsed.netloc.endswith(":")
         or port == 0
-        or (
-            parsed.scheme != "https"
-            and not (parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1"))
-        )
+        or (parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS))
     ):
         return None
     return parsed
@@ -42,6 +42,6 @@ def redirect_matches(registered: str, requested: str) -> bool:
         return False
     if registered == requested:
         return True
-    if expected.scheme != "http" or expected.hostname not in ("localhost", "127.0.0.1", "::1"):
+    if expected.scheme != "http" or expected.hostname not in _LOOPBACK_HOSTS:
         return False
     return actual.scheme == expected.scheme and actual.hostname == expected.hostname and actual.path == expected.path
