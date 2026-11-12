@@ -59,15 +59,7 @@ admitting people.
 
 ### Invitations
 
-**Delivery.** Where mail is set up, Otari emails the accept link. When the email
-does not go out (no mail, a failed send, or a mail limit), the dashboard shows the
-link to share by hand. A link that was emailed is never shown to the inviter. The
-email names the inviter by name and address. Where
-[signup is open](configuration.md#signup), only a deployment operator is shown a
-link: opening one accepts for the invitee, so anyone else's invitee signs in with
-that address and accepts from their pending invitations instead. One with no way
-to sign in yet (no mail and no Google or GitHub) needs a password link from a
-deployment operator.
+**Delivery.** Where mail is set up, Otari emails the accept link. When the email does not go out (no mail, a failed send, or a mail limit), the dashboard shows the link to share by hand. A link that was emailed is never shown to the inviter. The email names the inviter by name and address. Where [signup is open](configuration.md#signup), only a deployment operator is shown a link: opening one accepts for the invitee, so anyone else's invitee signs in with that address and accepts from their pending invitations instead. When that invitee cannot sign in yet and the email did not go out, the inviter sends a new one with **Reissue** once mail can go out again. On a deployment with no mail and no Google or GitHub, an invitee who cannot sign in gets a password link from a deployment operator.
 
 **Mail limits.** Over any 24 hours, an organization can send only so many
 invitation emails, and an address can receive only so many from all organizations
