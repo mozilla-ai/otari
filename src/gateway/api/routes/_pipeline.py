@@ -6717,32 +6717,43 @@ def _failover_kwargs(
         fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
         refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
-        return _without_unused_reasoning_effort(attempt, call_kwargs)
+        return _without_unused_reasoning(attempt, call_kwargs)
 
     return _build
 
 
-def _without_unused_reasoning_effort(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Leave ``reasoning_effort`` off a fallback candidate that models.dev says does not reason.
+# Where each format carries its reasoning hint: Chat Completions, Responses and Messages.
+_REASONING_FIELDS = ("reasoning_effort", "reasoning", "thinking")
+_ENCRYPTED_REASONING = "reasoning.encrypted_content"
 
-    The caller of a routing policy did not pick the candidate, and the effort is
-    only a hint, so a model with nothing to tune is sent the request without it
-    rather than counted as failed for it. A model models.dev does not describe
-    is sent the field as asked. The model is looked up under the provider it is
-    dispatched to, because an instance's name (a hosted provider's, an owned
-    endpoint's) need not name one.
+
+def _without_unused_reasoning(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Leave the reasoning hint off a fallback candidate that models.dev says does not reason.
+
+    The caller of a routing policy did not pick the candidate, and the hint has
+    nothing to tune on such a model, so it is sent the request without it rather
+    than counted as failed for it. That covers a Responses ``include`` asking for
+    encrypted reasoning too. A model models.dev does not describe is sent the
+    fields as asked. The model is looked up under the provider it is dispatched
+    to, because an instance's name (a hosted provider's, an owned endpoint's)
+    need not name one.
     """
-    if call_kwargs.get("reasoning_effort") is None:
+    include = call_kwargs.get("include")
+    kept_include = [item for item in include if item != _ENCRYPTED_REASONING] if isinstance(include, list) else include
+    if kept_include == include and all(call_kwargs.get(field) is None for field in _REASONING_FIELDS):
         return call_kwargs
     entry = metadata_entry(cached_models_dev_catalog(), attempt.provider.value, attempt.model)
     if entry is None or entry.reasoning:
         return call_kwargs
     logger.debug(
-        "Dropped reasoning_effort for a model that does not reason instance=%s model=%s",
+        "Dropped the reasoning hint for a model that does not reason instance=%s model=%s",
         attempt.instance,
         attempt.model,
     )
-    return {key: value for key, value in call_kwargs.items() if key != "reasoning_effort"}
+    sent = {key: value for key, value in call_kwargs.items() if key not in (*_REASONING_FIELDS, "include")}
+    if kept_include:
+        sent["include"] = kept_include
+    return sent
 
 
 def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
