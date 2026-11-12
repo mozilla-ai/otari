@@ -193,8 +193,10 @@ Every key may read the model, tool, price and provider catalogs, whatever its
 scopes. No scope lets a key create or manage keys: that takes a dashboard
 session or the master key, so revoking a key always ends what it can do.
 
-A key created without naming any scopes gets `inference` alone. Name them in
-`scopes` when you create the key, through `POST /api/v1/keys` or
+A key created through the API or the dashboard without naming any scopes gets
+`inference` alone. (A key declared in the config file has a
+[different default](configuration.md#budgets-and-api-keys-in-config).) Name
+them in `scopes` when you create the key, through `POST /api/v1/keys` or
 `POST /api/v1/organizations/me/keys`:
 
 ```json
