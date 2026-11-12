@@ -162,7 +162,7 @@ carries neither.
     choice (providers such as Cohere and Gemini report usage on the chunk
     carrying `finish_reason`). Otari asks the provider for that chunk even when
     a request sets `include_usage` to `false`, since it is what the request is
-    billed on, so such a stream ends with it too;
+    billed on, and leaves it out of the stream that request receives;
   - Messages: `message_delta`;
   - Responses: `response.completed`.
 

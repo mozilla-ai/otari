@@ -2,6 +2,9 @@
 
 from typing import Any
 
+import pytest
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
+
 from gateway.api.routes import chat
 from gateway.api.routes.chat import ChatCompletionRequest
 
@@ -113,3 +116,27 @@ def test_preserves_client_stream_options() -> None:
         }
     )
     assert kwargs["stream_options"] == custom
+
+
+def _chunk(*, text: str | None = None, usage: bool = False) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c1",
+        choices=[] if text is None else [ChunkChoice(delta=ChoiceDelta(content=text), index=0)],
+        created=0,
+        model="m",
+        object="chat.completion.chunk",
+        usage=CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2) if usage else None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stream_options", "forwarded"),
+    [(None, True), ({"include_usage": True}, True), ({"include_usage": False}, False), ({}, False)],
+)
+def test_the_usage_chunk_reaches_the_caller_only_when_it_asked_for_usage(
+    stream_options: dict[str, Any] | None, forwarded: bool
+) -> None:
+    """The provider is asked for usage either way; a caller that turned it off still gets a stream without it."""
+    adapter = chat._ADAPTER.for_stream_options(stream_options)
+    assert bool(adapter.format_chunk(_chunk(usage=True))) is forwarded
+    assert adapter.format_chunk(_chunk(text="hi")).startswith("data: ")

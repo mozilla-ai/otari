@@ -256,11 +256,22 @@ class _ChatAdapter:
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
-        # The only thing that varies between instances, and the only reason
-        # there is more than one: the Playground's rows carry their own label.
-        # Everything else about the format is identical, which is the point.
+    def __init__(self, endpoint: str = USAGE_ENDPOINT, *, forwards_usage_chunk: bool = True) -> None:
+        # What varies between instances: the Playground's rows carry their own
+        # label, and a stream whose caller turned include_usage off keeps the
+        # usage chunk off the wire. Everything else about the format is identical.
         self.endpoint = endpoint
+        self.forwards_usage_chunk = forwards_usage_chunk
+
+    def for_stream_options(self, stream_options: dict[str, Any] | None) -> "_ChatAdapter":
+        """This adapter, or one that drops the usage chunk when the caller set ``include_usage`` off.
+
+        The provider is asked for that chunk regardless (``prepare_stream_kwargs``), since the
+        stream is billed on it; the caller still gets the stream it asked for.
+        """
+        if stream_options is None or stream_options.get("include_usage"):
+            return self
+        return _ChatAdapter(self.endpoint, forwards_usage_chunk=False)
 
     def error(
         self,
@@ -298,6 +309,8 @@ class _ChatAdapter:
         )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
+        if not self.forwards_usage_chunk and chunk.usage is not None and not chunk.choices:
+            return ""
         return f"data: {json.dumps(_without_nulls(chunk), separators=(',', ':'))}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
@@ -555,7 +568,9 @@ async def run_chat_completion(
     also what picks the usage row's endpoint label, so a Playground request is
     countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
-    adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
+    adapter = (_PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER).for_stream_options(
+        request.stream_options
+    )
     if not request.model.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
