@@ -226,6 +226,10 @@ def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str 
         return "in a private range (RFC 1918 / ULA)"
     if addr.is_reserved:
         return "in a reserved range"
+    # Catches what the tests above miss, such as RFC 6598 shared space (100.64.0.0/10),
+    # which CGNAT, Tailscale and some cluster networks use.
+    if not addr.is_global:
+        return "outside the public address space"
     return None
 
 
