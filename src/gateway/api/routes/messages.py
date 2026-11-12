@@ -37,7 +37,6 @@ from gateway.api.deps import (
 )
 from gateway.api.error_body import BodyHTTPException
 from gateway.api.routes._guardrail_targets import messages_targets
-from gateway.api.routes._guardrails import AnswerRefused
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
@@ -78,6 +77,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
 from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig

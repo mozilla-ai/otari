@@ -101,7 +101,7 @@ from gateway.api.routes._attempts import (
 )
 from gateway.api.routes._guardrail_answers import finish_result, guarded_stream
 from gateway.api.routes._guardrail_targets import RequestTarget
-from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
+from gateway.api.routes._guardrails import RequestGuardrails
 from gateway.api.routes._helpers import (
     GUARDRAILS_RESULT_HEADER,
     country_gate_for,
@@ -184,6 +184,7 @@ from gateway.exceptions.budget_exceptions import (
     ProviderSpendCeilingExceededError,
     SpendCeilingExceededError,
 )
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.exceptions.inference_exceptions import StoredStateOnManagedCredentialError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
