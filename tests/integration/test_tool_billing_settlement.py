@@ -348,7 +348,7 @@ async def test_a_free_model_keeps_serving_past_the_budget_but_its_searches_stop_
                 headers={API_KEY_HEADER: f"Bearer {key}"},
             )
         assert response.status_code == 200, response.text
-        return search.await_count
+        return int(search.await_count)
 
     assert ask(3) == 2
     assert ask(1) == 0
