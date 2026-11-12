@@ -13,7 +13,7 @@ from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.schemas.update_check import UpdateCheckAnswer, UpdateCheckStatus
-from gateway.services.update_check import UpdateCheckService, run_update_check_worker
+from gateway.services.update_check import UpdateCheckService
 
 router = APIRouter(
     prefix="/update-check",
@@ -41,7 +41,7 @@ async def _poll(config: GatewayConfig) -> None:
     def build(uow: UnitOfWork) -> UpdateCheckService:
         return build_update_check_service(uow, config)
 
-    await run_update_check_worker(build)
+    await UpdateCheckService.poll(build)
 
 
 FEATURE = CoreFeature(
