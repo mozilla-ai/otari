@@ -610,6 +610,11 @@ How a video is billed:
   That row has the cost and no meter, charge line or pricing source, because
   no rate priced it. Where the provider gives no charge either, the job is
   billed 8 seconds, the length the start reserved, at the per-second price.
+- A job the per-second price bills is still checked against what the
+  provider charged, where it says. When the two differ by more than 10% of
+  the provider's charge, the server log warns with both amounts, because the
+  stored price is then likely stale or wrong. The job is still billed at the
+  stored price.
 - A completed job whose model has lost its per-second price stays
   unbilled, and the first read after the price is back bills it. Later reads
   bill nothing, a failed job is never billed, and a job nobody reads is never
