@@ -89,4 +89,4 @@ You've sent your first LLM request! Now you can:
 - [Set a budget and ceiling](https://docs.otari.ai/guides/control/set-a-budget-and-ceiling)
 - [Create a multi-provider routing](https://docs.otari.ai/guides/control/create-a-multi-provider-routing)
 - [Configure guardrails](https://docs.otari.ai/guides/control/configure-guardrails)
-- [Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code)
+- [Claude Code](https://docs.otari.ai/guides/integrations/claude-code)

@@ -1,4 +1,4 @@
-# Use with Codex
+# Codex
 
 Codex can use Otari as a custom model provider over the Responses API.
 

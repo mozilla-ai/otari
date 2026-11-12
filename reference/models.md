@@ -128,6 +128,12 @@ aliases, and routing-policy names, and lists each model once however many
 providers serve it (see [Listing available models](#listing-available-models)). A provider's embedding and rerank models are
 offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
+Together lists every model it can deploy, but serves most of them only on a
+dedicated endpoint. Discovery leaves those out: it also asks Together for its
+serverless models (`GET /v1/models?serverless=true`) and keeps only those. If
+that listing fails, or is not shorter than the full listing, discovery keeps
+every model. To serve a model on a dedicated endpoint of your own, add it to the
+roster by hand.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
@@ -164,7 +170,8 @@ from models.dev's entry for the model under the provider serving it:
 
 - A model a vLLM or SGLang server lists, through a configured instance, a
   hosted provider or an organization's own key, reports the context length
-  that server runs it at, which beats models.dev's, and no `max_output_tokens`
+  that server runs it at (`max_model_len`, which a server built on vLLM lists
+  under its own `owned_by` too), which beats models.dev's, and no `max_output_tokens`
   above it. Each listing of the server is stored, so the value survives a
   restart and reaches every worker within a minute. An organization's key is
   read only for that organization's callers, and is listed when the key is
@@ -200,7 +207,8 @@ uses:
 An SGLang server also says how it was started, and that overrides models.dev:
 without a tool-call parser it offers no `tools`, a reasoning parser adds
 `reasoning`, and what it reads besides text sets `input_modalities`. vLLM does
-not say, so its models keep models.dev's flags.
+not say, so its models keep models.dev's flags, except that a listing entry
+with a `reasoning` object (the efforts it accepts) adds `reasoning`.
 
 All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
@@ -282,10 +290,16 @@ unit is shown under the side it bills, so an image price, or a video model's
 per-second price, is under **Output**, and hovering it names what it prices and
 its unit ("Video output, $0.045/second"). A per-second price on any other kind
 of model is audio, shown on the side it is stored on. On a phone, which cannot
-hover, the unit is shown beside the amount. The list endpoint,
+hover, the unit is shown beside the amount. The search box beside the tabs
+keeps the models whose name contains what is typed, in any case, and the
+**Serving** / **Not serving** choice beside it keeps the models switched on or
+off; the tab counts then count only those. The list endpoint,
 `GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
-kind as `type` (`unknown` included), returns each model's `type`, and counts
-every kind in `type_counts` whichever one it returns.
+kind as `type` (`unknown` included), the search as `search` and the switch as
+`enabled` (`true` or `false`), returns each model's `type`, and counts every
+kind the search and the switch keep in `type_counts` whichever one it returns.
+The hosted providers' `GET /api/v1/hosted-providers/{provider}/models` takes
+the same three.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the

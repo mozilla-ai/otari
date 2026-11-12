@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.44.0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.45.0/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -298,7 +298,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](https://docs.otari.ai/guides/build/use-with-claude-code#tag-claude-code-traffic)), sends
+[its guide](https://docs.otari.ai/guides/integrations/claude-code#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```
@@ -408,6 +408,7 @@ looked up by its `Otari-Request-ID`:
 |---|---|
 | Totals | The sum of every usage row the request wrote. A request routed through a policy writes one per attempt, all sharing the id as their `request_group_id`, so the total covers the attempts it fell over from as well as the one that served. |
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
+| `status` | `error` if any row is an error, `incomplete` for a stream the client abandoned before the provider reported any usage (billed on an estimate), otherwise `success`. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
 
@@ -610,6 +611,11 @@ How a video is billed:
   That row has the cost and no meter, charge line or pricing source, because
   no rate priced it. Where the provider gives no charge either, the job is
   billed 8 seconds, the length the start reserved, at the per-second price.
+- A job the per-second price bills is still checked against what the
+  provider charged, where it says. When the two differ by more than 10% of
+  the provider's charge, the server log warns with both amounts, because the
+  stored price is then likely stale or wrong. The job is still billed at the
+  stored price.
 - A completed job whose model has lost its per-second price stays
   unbilled, and the first read after the price is back bills it. Later reads
   bill nothing, a failed job is never billed, and a job nobody reads is never
@@ -1142,7 +1148,7 @@ at the top level of the body.
 | `structured_output_failed` | 400 | The model failed to produce output matching the request's JSON schema (`response_format` or `text.format`), which the provider reported with its own code (Groq's `json_validate_failed`). Unlike other 400s, resending the same request may succeed, so a client can retry it or send it to another model. The partial output the provider returns is not relayed. A routing policy moves on to its next candidate first, and answers with this code when every candidate failed this way | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
-| `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
+| `insufficient_funds` | 402 | The organization has no funds paid in to cover what the deployment's account would run: the model, served on a credential the deployment pays for, or a gateway-run tool ([Tools](tools.md#pricing-a-gateway-run-tool)). A tool's refusal names the tool in `detail`; a model's does not name the model. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](https://docs.otari.ai/self-hosting/providers/hosted-providers) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |

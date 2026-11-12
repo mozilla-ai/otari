@@ -1,8 +1,8 @@
-# Use with oh-my-pi
+# oh-my-pi
 
 [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) is a coding agent built on
 pi. The same [pi-otari](https://github.com/mozilla-ai/pi-otari) package that
-serves [pi](use-with-pi.md) is also an omp plugin.
+serves [pi](pi.md) is also an omp plugin.
 
 ## Quick start
 
@@ -25,7 +25,7 @@ omp caches the model list for a day. Run `omp models refresh` after you change
 models in Otari.
 
 On a gateway you run, set `OTARI_BASE_URL` to its URL plus `/api/v1` first, as on
-[pi](use-with-pi.md#on-a-gateway-you-run). For CI and containers, set
+[pi](pi.md#on-a-gateway-you-run). For CI and containers, set
 `OTARI_API_KEY` instead of logging in.
 
 ## Differences from pi
@@ -36,5 +36,5 @@ on pi only. The details are under "Install and use on omp" in the
 
 ## See also
 
-- [Use with pi](use-with-pi.md)
-- [Use with Claude Code](use-with-claude-code.md)
+- [pi](pi.md)
+- [Claude Code](claude-code.md)

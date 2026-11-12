@@ -1,4 +1,4 @@
-# Use with Pydantic AI
+# Pydantic AI
 
 `pydantic-ai-otari` gives [Pydantic AI](https://ai.pydantic.dev) a model class
 that sends requests through Otari. Your agents then get Otari's budgets, usage
@@ -163,5 +163,5 @@ models from other families lose their own capabilities.
 
 ## See also
 
-- [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md)
+- [LangChain](langchain.md) and [LangGraph](langgraph.md)
 - [Sessions](sessions.md): what Otari records about an agent's runs.

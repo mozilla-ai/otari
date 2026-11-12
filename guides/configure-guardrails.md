@@ -1,11 +1,10 @@
 ---
 description: Create guardrails that monitor or block unsafe requests across workspaces.
-icon: shield-halved
 ---
 
 # Configure guardrails
 
-Guardrails evaluate model traffic before it reaches a provider. Use them to detect content that violates your safety or compliance requirements.
+Guardrails evaluate model traffic: what a model is sent, the results of the tools it calls, the calls it makes, and its answers. Use them to detect content that violates your safety or compliance requirements.
 
 A guardrail can monitor matching requests or block them, and can be applied to the entire organization or only to selected workspaces.
 
@@ -35,10 +34,11 @@ Each guardrail can be applied across the entire organization or to specific work
 
 1. In **Guardrails**, click **Mandate a guardrail**.
 2. Choose whether you want to use a guardrail configured from the catalog or your own guardrail service.
-3. Choose the **Mode**: whether the guardrail should block requests or monitor them only.
-4. Choose what should happen **If unreachable**: refuse the request or serve it unchecked. Only blocking guardrails can refuse requests; monitoring guardrails will always serve them.
-5. Select where the guardrail should run: every workspace, including new ones, or selected workspaces.
-6. Click **Mandate a guardrail** to save your settings.
+3. Choose **What it checks**: user input, tool results, tool calls, answers, or any of them.
+4. Choose the **Mode**: whether the guardrail should block requests or monitor them only. A blocked tool result, or a blocked call to a tool Otari runs, is replaced with a note saying why, so the agent can carry on. A blocked call to a tool your client runs refuses the answer with a `403`.
+5. Choose what should happen **If unreachable**: refuse the request or serve it unchecked. Only blocking guardrails can refuse requests; monitoring guardrails will always serve them.
+6. Select where the guardrail should run: every workspace, including new ones, or selected workspaces.
+7. Click **Mandate a guardrail** to save your settings.
 
 ![The Mandated guardrail dialog, with a guardrail profile and endpoint, its mode and where it runs.](assets/screenshots/configure-guardrails-mandate.png)
 

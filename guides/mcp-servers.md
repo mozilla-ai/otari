@@ -1,8 +1,4 @@
----
-icon: computer-classic
----
-
-# Configure an MCP server
+# MCP servers
 
 MCP servers allow requests from a workspace to connect to external tools and services. Each server is configured at the **workspace level**, so you can control which MCP tools are available to requests within that workspace. How requests use MCP servers is described in [MCP](https://docs.otari.ai/reference/gateway/mcp).
 
@@ -20,7 +16,7 @@ MCP servers allow requests from a workspace to connect to external tools and ser
 10. Under **Default policy**, choose **Allow** to let every key in the workspace use the server, or **Deny** to let none use it until you add rules for them.
 11. Click **Add MCP server** to save it.
 
-![The New MCP server dialog, with a name, URL, token, purpose hint and allowed tools filled in.](assets/screenshots/configure-an-mcp-server.png)
+![The New MCP server dialog, with a name, URL, token, purpose hint and allowed tools filled in.](assets/screenshots/mcp-servers.png)
 
 Saving opens the server's page, where its access rules live.
 
