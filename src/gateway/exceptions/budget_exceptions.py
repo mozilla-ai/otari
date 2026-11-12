@@ -251,7 +251,10 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
     error_code = END_USER_BUDGET_NOT_ALLOWED
 
     def __init__(self, budget_id: str):
-        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+        super().__init__(
+            f"This key may not assign budget '{budget_id}' to its end users: no budget on its list has that id. "
+            "Pass a budget_id from GET /api/v1/end-user-budgets"
+        )
 
 
 class EndUserBudgetWithoutEndUserError(TenancyValidationError):

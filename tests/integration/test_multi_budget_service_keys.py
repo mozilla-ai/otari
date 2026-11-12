@@ -221,6 +221,7 @@ def test_a_budget_off_the_list_is_refused_with_a_code(client: TestClient, master
         assert refused.status_code == 403, user
         assert refused.headers["Otari-Error-Code"] == "end_user_budget_not_allowed"
         assert refused.json()["code"] == "end_user_budget_not_allowed"
+        assert "GET /api/v1/end-user-budgets" in refused.json()["detail"]
     assert _end_user(client, master_key_header, key_id, "new-user").status_code == 404
 
 
