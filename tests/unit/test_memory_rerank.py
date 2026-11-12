@@ -3,6 +3,8 @@
 The provider call is captured at the any-llm boundary and never made.
 """
 
+import asyncio
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -70,3 +72,18 @@ async def test_a_failed_call_or_an_answer_about_documents_never_sent_is_an_error
     with pytest.raises(MemoryModelError):
         await MemoryModels(GatewayConfig()).rerank("q", ["a"])
     assert not MemoryModels(GatewayConfig()).can_rerank and _models().can_rerank
+
+
+@pytest.mark.asyncio
+async def test_a_check_slower_than_its_time_is_cut_short_and_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def slow(*args: Any, **kwargs: Any) -> RerankResponse:
+        await asyncio.sleep(5)
+        return RerankResponse(results=[])
+
+    monkeypatch.setattr("gateway.services.memory._models.RERANK_TIMEOUT_S", 0.05)
+    started = time.monotonic()
+    with patch("gateway.services.memory._models.arerank", new=slow), pytest.raises(MemoryModelError) as cut:
+        await _models().rerank("q", ["a"])
+
+    assert time.monotonic() - started < 1
+    assert cut.value.use is not None and not cut.value.use.succeeded and cut.value.use.endpoint == RERANK_ENDPOINT

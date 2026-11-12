@@ -14,6 +14,7 @@ what is stored is built from the proposal and the decision, so an instruction
 hidden in a proposal or in an entry it is compared with has nothing to write.
 """
 
+import asyncio
 import json
 import os
 from collections.abc import Sequence
@@ -49,6 +50,9 @@ EMBEDDING_ENDPOINT = "/v1/memory/embedding"
 RECALL_ENDPOINT = "/v1/memory/recall"
 CONSOLIDATION_ENDPOINT = "/v1/memory/consolidation"
 RERANK_ENDPOINT = "/v1/memory/rerank"
+# Longest a relevance check may take. Automatic recall has three seconds in all, embedding the turn included, and
+# a check cut short leaves it time to fall back to similarity rather than hand over nothing.
+RERANK_TIMEOUT_S = 1.5
 # What every memory side call's endpoint starts with, so a request's own usage can leave them out.
 MEMORY_ENDPOINT_PREFIX = os.path.commonprefix(
     [EMBEDDING_ENDPOINT, RECALL_ENDPOINT, CONSOLIDATION_ENDPOINT, RERANK_ENDPOINT]
@@ -139,8 +143,11 @@ class MemoryModels:
     async def rerank(self, query: str, documents: Sequence[str]) -> tuple[list[float], ModelUse]:
         """How relevant each document is to ``query``, one score per document in order, and the call that scored.
 
+        The call has ``RERANK_TIMEOUT_S``: one that takes longer is cut short and failed, so recall falls back
+        to similarity within its own time rather than running out of it.
+
         Raises:
-            MemoryModelError: no rerank model is configured, or the call failed.
+            MemoryModelError: no rerank model is configured, or the call failed or took too long.
         """
         model = self._config.memory_rerank_model
         if model is None:
@@ -150,9 +157,10 @@ class MemoryModels:
         try:
             resolved = await self._resolve(model)
             provider = str(resolved.provider)
-            response = await arerank(
-                resolved.model, query, list(documents), provider=resolved.provider, **resolved.kwargs
-            )
+            async with asyncio.timeout(RERANK_TIMEOUT_S):
+                response = await arerank(
+                    resolved.model, query, list(documents), provider=resolved.provider, **resolved.kwargs
+                )
         except Exception as exc:  # noqa: BLE001 - a failed check leaves recall to similarity alone
             logger.warning("Memory rerank via %s failed (%s)", model, type(exc).__name__)
             failed = _use(RERANK_ENDPOINT, model, provider, started, None, succeeded=False)

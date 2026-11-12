@@ -167,8 +167,8 @@ need another.
   run?" is understood. Led by the earlier messages instead, a reranker favours
   entries about them even once the subject changed.
 - It costs one rerank call per message, recorded as memory's own usage under
-  `/v1/memory/rerank`. When the call fails, recall goes by similarity, as it does
-  with the check off.
+  `/v1/memory/rerank`. When the call fails or takes over 1.5 seconds, recall goes
+  by similarity, as it does with the check off, within its own three seconds.
 - The entries and the message are sent to the rerank model's provider, as they
   are to the embedding model's.
 - Where the deployment names no rerank model, the switch is kept but recall goes
