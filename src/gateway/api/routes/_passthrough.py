@@ -63,7 +63,6 @@ from gateway.api.routes._pipeline import (
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     _elapsed_ms,
     _raise_for_unresolvable_model,
-    _stored_error_message,
     log_gateway_rejection,
     request_started,
     throttle_early_rejection,
@@ -167,7 +166,7 @@ from gateway.services.providers import (
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
-from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
+from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL, stored_error_message
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -1073,7 +1072,7 @@ async def run_passthrough(
         failure = UpstreamFailure(e, request_params=caller_params)
         failed_row = _usage_row(
             "error",
-            error_message=_stored_error_message(str(e)),
+            error_message=stored_error_message(str(e)),
             status_code=failure.logged_status,
         )
         if not served:
@@ -1625,7 +1624,7 @@ async def run_decision(
         )
     except DecisionCallError as exc:
         await log_writer.put(
-            usage_row(status="error", error_message=_stored_error_message(str(exc)), status_code=exc.logged_status)
+            usage_row(status="error", error_message=stored_error_message(str(exc)), status_code=exc.logged_status)
         )
         await undo()
         logger.error("Decision failed for %s:%s: %s", provider_name, model, exc)

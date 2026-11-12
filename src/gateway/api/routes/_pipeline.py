@@ -143,7 +143,6 @@ from gateway.core.error_codes import (
     error_code_of,
     error_headers,
 )
-from gateway.core.error_details import ProviderDetail
 from gateway.core.metered_pricing import (
     ChargeLine,
     billable_usage_of,
@@ -433,7 +432,7 @@ from gateway.services.traces import (
     read_turn_content,
     resolve_session,
 )
-from gateway.services.upstream_redaction import redacted_upstream_detail
+from gateway.services.upstream_redaction import stored_error_message
 from gateway.services.web_retrieval_backend import (
     WebRetrievalBackend,
     WebRetrievalCounter,
@@ -4422,20 +4421,6 @@ def _ttft_ms(started_at: float | None, first_chunk_at: float | None) -> int | No
     return round((first_chunk_at - started_at) * 1000)
 
 
-def _stored_error_message(error: str | None) -> str | None:
-    """The error text a usage row may carry.
-
-    ``UsageLog.error_message`` is read by every member of the workspace, including
-    a viewer, through ``/api/v1/organizations/me/usage``, so the upstream text is
-    put through the same redaction the HTTP detail gets before it is persisted.
-    Redacting at write time rather than on the read path is what covers every
-    reader of the column at once. A gateway-generated reason passes unchanged.
-    """
-    if error is None:
-        return None
-    return redacted_upstream_detail(error, ProviderDetail.ERROR)
-
-
 # Per-process memory of when each unpriced model was last warned about, so a busy
 # unpriced model logs once per interval rather than once per request. Bounded:
 # a full map drops expired entries, then the oldest if none had expired.
@@ -4634,7 +4619,7 @@ async def record_usage(
         provider=provider,
         endpoint=endpoint,
         status=_row_status(error=error, attribution=attribution, incomplete=incomplete),
-        error_message=_stored_error_message(error),
+        error_message=stored_error_message(error),
         stream_cut_by=stream_cut_by,
         status_code=status_code,
         latency_ms=latency_ms,
