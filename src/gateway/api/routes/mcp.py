@@ -111,7 +111,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
-from gateway.services.tools import sign_in_link
+from gateway.services.tools import McpConnectionService
 from gateway.services.traces import RequestTrace, harness_of, resolve_session
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
@@ -403,7 +403,7 @@ def _sign_in_url(config: GatewayConfig | None, server_id: uuid.UUID, user_id: st
     if config is None or user_id is None:
         return None
     try:
-        return sign_in_link(config, server_id=server_id, user_id=user_id)
+        return McpConnectionService.sign_in_link(config, server_id=server_id, user_id=user_id)
     except (McpConnectionSetupError, SecretBoxUnavailableTenancyError):
         return None
 

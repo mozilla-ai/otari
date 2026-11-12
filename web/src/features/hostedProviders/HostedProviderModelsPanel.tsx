@@ -16,6 +16,13 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
+import {
+  filteredEmptyContent,
+  OfferedModelFilters,
+  type ServingFilter,
+  servedParam,
+  useModelSearchTerm,
+} from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
@@ -66,7 +73,17 @@ export function HostedProviderModelsPanel({
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
   const [kind, setKind] = useState<KindFilter>("")
-  const models = useHostedModels(provider.name, page, pageSize, kind)
+  const [serving, setServing] = useState<ServingFilter>("")
+  const [search, setSearch] = useState("")
+  const term = useModelSearchTerm(search)
+  const models = useHostedModels(
+    provider.name,
+    page,
+    pageSize,
+    kind,
+    term,
+    servedParam(serving),
+  )
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
 
@@ -154,9 +171,20 @@ export function HostedProviderModelsPanel({
     return <PageLoading label="Loading models…" />
   }
 
+  // A failed list is not an empty one, and a filter with no models left is an
+  // empty table rather than "no models offered". So is a search's answer still
+  // shown while the list it was cleared to loads.
+  const isEmptyCatalog =
+    !models.error &&
+    !models.isPlaceholderData &&
+    rows.length === 0 &&
+    kind === "" &&
+    serving === "" &&
+    term === ""
+
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {provider.name}</h3>
           {provider.source === "config" ? (
@@ -173,24 +201,41 @@ export function HostedProviderModelsPanel({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            className="min-h-11 md:min-h-9"
-            isPending={refresh.isPending}
-            onPress={() => refresh.mutate()}
-          >
-            <FiRefreshCw aria-hidden className="size-4" />
-            Refresh models
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            className="min-h-11 md:min-h-9"
-            onPress={openAdd}
-          >
-            <FiPlus aria-hidden className="size-4" />
-            Add model
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              className="min-h-11 md:min-h-9"
+              isPending={refresh.isPending}
+              onPress={() => refresh.mutate()}
+            >
+              <FiRefreshCw aria-hidden className="size-4" />
+              Refresh models
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              className="min-h-11 md:min-h-9"
+              onPress={openAdd}
+            >
+              <FiPlus aria-hidden className="size-4" />
+              Add model
+            </Button>
+          </div>
+          {isEmptyCatalog ? null : (
+            <OfferedModelFilters
+              providerName={provider.name}
+              serving={serving}
+              onServingChange={(next) => {
+                setServing(next)
+                setPage(0)
+              }}
+              search={search}
+              onSearchChange={(next) => {
+                setSearch(next)
+                setPage(0)
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -201,20 +246,7 @@ export function HostedProviderModelsPanel({
         </p>
       ) : null}
 
-      {models.data && rows.length + kind.length > 0 ? (
-        <OfferedKindTabs
-          counts={models.data.type_counts}
-          shown={kind}
-          onShow={(next) => {
-            setKind(next)
-            setPage(0)
-          }}
-        />
-      ) : null}
-
-      {/* A failed list is not an empty one, and a kind with no models left is
-          an empty table under its tab rather than "no models offered". */}
-      {!models.error && rows.length === 0 && kind === "" ? (
+      {isEmptyCatalog ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what the provider lists, or add a model to say what this provider serves and at what price."
@@ -224,6 +256,16 @@ export function HostedProviderModelsPanel({
         />
       ) : (
         <>
+          {models.data ? (
+            <OfferedKindTabs
+              counts={models.data.type_counts}
+              shown={kind}
+              onShow={(next) => {
+                setKind(next)
+                setPage(0)
+              }}
+            />
+          ) : null}
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${provider.name}`}
@@ -232,6 +274,7 @@ export function HostedProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
+              emptyContent={filteredEmptyContent(term, serving)}
             />
           </TableScrollFrame>
           <TablePagination

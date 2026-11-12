@@ -442,7 +442,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberPublic": {
-        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
+        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, except that ``email`` is nullable here (a\nlocal operator identity has no sign-in address).\n\n``invitation_id`` and ``invitation_expires_at`` name an ``invited`` row's\ncurrent invitation, which may have expired, so the roster can offer to\nrevoke or reissue it.\n\n``is_sso_account`` records how the account came about, not whether the\nconnection still admits it: an organization that repoints or drops its\nconnection leaves the account provisioned by one and unable to sign in.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
           "attribution": {
             "anyOf": [
@@ -528,6 +528,12 @@
               }
             ],
             "title": "Invitation Id"
+          },
+          "is_sso_account": {
+            "default": false,
+            "description": "Whether an organization's own OIDC connection provisioned this member's account. Such an account is created with no sign-in address, so email is null until one is set.",
+            "title": "Is Sso Account",
+            "type": "boolean"
           },
           "organization_member_id": {
             "anyOf": [
@@ -2037,6 +2043,184 @@
           "expires_at"
         ],
         "title": "AnthropicFileMetadata",
+        "type": "object"
+      },
+      "AppAuthorizationRequest": {
+        "additionalProperties": false,
+        "description": "The dashboard records explicit approval for one workspace.",
+        "properties": {
+          "client_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "code_challenge": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Code Challenge",
+            "type": "string"
+          },
+          "code_challenge_method": {
+            "const": "S256",
+            "title": "Code Challenge Method",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "maxLength": 2048,
+            "title": "Redirect Uri",
+            "type": "string"
+          },
+          "response_type": {
+            "const": "code",
+            "default": "code",
+            "title": "Response Type",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 256,
+            "minLength": 16,
+            "pattern": "^[A-Za-z0-9._~+/=-]+$",
+            "title": "State",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "redirect_uri",
+          "state",
+          "code_challenge",
+          "code_challenge_method",
+          "workspace_id"
+        ],
+        "title": "AppAuthorizationRequest",
+        "type": "object"
+      },
+      "AppAuthorizationResponse": {
+        "properties": {
+          "redirect_uri": {
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_uri"
+        ],
+        "title": "AppAuthorizationResponse",
+        "type": "object"
+      },
+      "AppDetails": {
+        "properties": {
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "redirect_uri",
+          "issuer"
+        ],
+        "title": "AppDetails",
+        "type": "object"
+      },
+      "AppRevocationRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          },
+          "token_type_hint": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Type Hint"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "AppRevocationRequest",
+        "type": "object"
+      },
+      "AppTokenRequest": {
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
+        "properties": {
+          "client_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 128,
+            "minLength": 43,
+            "title": "Code",
+            "type": "string"
+          },
+          "code_verifier": {
+            "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+            "title": "Code Verifier",
+            "type": "string"
+          },
+          "grant_type": {
+            "const": "authorization_code",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "maxLength": 2048,
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant_type",
+          "client_id",
+          "redirect_uri",
+          "code",
+          "code_verifier"
+        ],
+        "title": "AppTokenRequest",
+        "type": "object"
+      },
+      "AppTokenResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "Bearer",
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token"
+        ],
+        "title": "AppTokenResponse",
         "type": "object"
       },
       "AudioContent": {
@@ -7636,6 +7820,15 @@
         "title": "DeploymentUsersPublic",
         "type": "object"
       },
+      "DisabledReason": {
+        "description": "Represents the reason an API key cannot be enabled.\n\nEvery reason blocks the key's owner. Some also block an operator, which\n``operator_may_clear`` records. A key with no reason set can be enabled by\nits owner.",
+        "enum": [
+          "operator",
+          "revoked"
+        ],
+        "title": "DisabledReason",
+        "type": "string"
+      },
       "DiscoverableModel": {
         "description": "A model one provider instance reports as available.",
         "properties": {
@@ -9485,7 +9678,7 @@
         "type": "string"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
           "credential": {
             "anyOf": [
@@ -9514,10 +9707,13 @@
             "items": {
               "enum": [
                 "input",
+                "tool_results",
+                "tool_calls",
                 "output"
               ],
               "type": "string"
             },
+            "minItems": 1,
             "title": "On",
             "type": "array"
           },
@@ -12029,6 +12225,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisabledReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "end_user_budget_id": {
             "anyOf": [
               {
@@ -12139,9 +12345,8 @@
             "title": "Metadata",
             "type": "object"
           },
-          "operator_disabled": {
-            "default": false,
-            "title": "Operator Disabled",
+          "operator_can_enable": {
+            "title": "Operator Can Enable",
             "type": "boolean"
           },
           "reject_user_mismatch": {
@@ -12182,6 +12387,8 @@
           "last_used_at",
           "expires_at",
           "is_active",
+          "disabled_reason",
+          "operator_can_enable",
           "allowed_models",
           "allowed_tools",
           "exclude_from_budget",
@@ -12693,7 +12900,7 @@
             "type": "array"
           },
           "available": {
-            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
+            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for what the tool runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
             "title": "Available",
             "type": "boolean"
           },
@@ -12730,7 +12937,8 @@
               {
                 "enum": [
                   "not_configured",
-                  "workspace_disabled"
+                  "workspace_disabled",
+                  "insufficient_funds"
                 ],
                 "type": "string"
               },
@@ -12738,7 +12946,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.",
+            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would run on the deployment's account and the API key's organization has no funds to pay for it, which adding funds changes.",
             "title": "Reason"
           }
         },
@@ -14644,6 +14852,21 @@
         "title": "OIDCConnectionDomain",
         "type": "object"
       },
+      "OIDCConnectionEnabledRequest": {
+        "description": "What an organization administrator submits to pause or resume sign-in through its connection.",
+        "properties": {
+          "enabled": {
+            "description": "Whether this connection admits sign-in.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OIDCConnectionEnabledRequest",
+        "type": "object"
+      },
       "OIDCConnectionPublic": {
         "description": "An organization's own sign-in connection, as its admins see it.\n\nCarries ``client_secret_last4`` and never the secret itself.",
         "properties": {
@@ -14713,7 +14936,7 @@
         "type": "object"
       },
       "OIDCConnectionRequest": {
-        "description": "What an organization administrator submits to configure its own sign-in connection.",
+        "description": "What an organization administrator submits to configure its own sign-in connection.\n\nWhether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only\nway to change it, so storing a connection can neither pause nor resume one.",
         "properties": {
           "client_id": {
             "description": "The OAuth client ID this deployment authenticates with.",
@@ -14751,12 +14974,6 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
-          },
-          "enabled": {
-            "default": true,
-            "description": "Whether this connection currently admits sign-in.",
-            "title": "Enabled",
-            "type": "boolean"
           },
           "issuer": {
             "description": "The identity provider's issuer URL, as the organization's own claim.",
@@ -16321,7 +16538,7 @@
         "type": "object"
       },
       "OrganizationGuardrailCreate": {
-        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`tools.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
+        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`tools.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.",
         "example": {
           "applies_to_all_workspaces": true,
           "credential": "sk-guardrails-...",
@@ -16370,13 +16587,28 @@
           },
           "mode": {
             "default": "monitor",
-            "description": "block rejects a flagged request with 403; monitor annotates the response and forwards it",
+            "description": "monitor records the verdict and forwards the request; block refuses flagged input or a flagged answer with 403 and withholds a flagged tool result or tool call",
             "enum": [
               "block",
               "monitor"
             ],
             "title": "Mode",
             "type": "string"
+          },
+          "on": {
+            "description": "What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call before it runs or reaches the client), output (the model's answer)",
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "On",
+            "type": "array"
           },
           "on_unavailable": {
             "default": "block",
@@ -16733,6 +16965,19 @@
             "title": "Mode",
             "type": "string"
           },
+          "on": {
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "title": "On",
+            "type": "array"
+          },
           "on_unavailable": {
             "title": "On Unavailable",
             "type": "string"
@@ -16791,6 +17036,7 @@
           "has_credential",
           "definition_id",
           "mode",
+          "on",
           "on_unavailable",
           "validate_kwargs",
           "enabled",
@@ -16922,6 +17168,20 @@
             ],
             "title": "Mode",
             "type": "string"
+          },
+          "on": {
+            "items": {
+              "enum": [
+                "input",
+                "tool_results",
+                "tool_calls",
+                "output"
+              ],
+              "type": "string"
+            },
+            "minLength": 1,
+            "title": "On",
+            "type": "array"
           },
           "on_unavailable": {
             "enum": [
@@ -22902,7 +23162,7 @@
         "type": "object"
       },
       "SetPasswordRequest": {
-        "description": "Set or change the signed-in identity's password.\n\nThe example is the first-boot claim, because that is the call an operator\nmakes first and the one whose required fields are not obvious from the\nschema: ``email`` is optional here in general and *required* when the\nidentity has no address yet. Without it the generated Postman body carries\nonly ``new_password``, which is the one shape that cannot complete the flow\nthe docs walk through.",
+        "description": "Set or change the signed-in identity's password.\n\nThe example is the first-boot claim, because that is the call an operator\nmakes first and the one whose required fields are not obvious from the\nschema: ``email`` is optional here in general and *required* when the\nidentity has no address yet. Without it a request body built from the spec\ncarries only ``new_password``, which is the one shape that cannot complete the flow\nthe docs walk through.",
         "example": {
           "email": "operator@example.com",
           "new_password": "a-real-password"
@@ -23108,6 +23368,19 @@
             "description": "Filled in only if not already set.",
             "title": "Full Name"
           },
+          "invite": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An invitation token from a link emailed to this address. Where it names the same address, the account is verified at once and no verification email is sent.",
+            "title": "Invite"
+          },
           "password": {
             "description": "The password to sign in with once verified. At least 8 characters, at most 72 bytes.",
             "maxLength": 1024,
@@ -23136,6 +23409,12 @@
             "description": "What the caller should do next.",
             "title": "Message",
             "type": "string"
+          },
+          "verified": {
+            "default": false,
+            "description": "The account is verified already, through its invitation, so the caller can sign in now.",
+            "title": "Verified",
+            "type": "boolean"
           }
         },
         "required": [
@@ -32579,7 +32858,7 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.",
+        "description": "Claim a roster identity, register a new one, or do nothing: the response never says which.\n\nWhich of the three this deployment will do is ``open_signup``, published in\nthe bootstrap so the page can say so before anyone types an address.\n\nNo session is minted. A newly claimed or registered identity is hard-blocked\nfrom signing in until it verifies, so there is nothing yet to sign it into.\n\nRefused with a 400 where the deployment publishes terms and ``terms_accepted``\nis not set, whatever the address.\n\nWith an ``invite`` that names this address, the account is verified as it is\ncreated and ``verified`` says so: the invitation reached the mailbox, so a\nverification email would prove nothing more. Only the token's holder learns that.",
         "operationId": "auth-signup",
         "requestBody": {
           "content": {
@@ -36883,6 +37162,43 @@
               "description": "Only models of this kind; `unknown` for those no source names a kind for",
               "title": "Type"
             }
+          },
+          {
+            "description": "Only models whose name contains this text, case-insensitively",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models whose name contains this text, case-insensitively",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "Only models served (`true`) or only models withheld (`false`)",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models served (`true`) or only models withheld (`false`)",
+              "title": "Enabled"
+            }
           }
         ],
         "responses": {
@@ -40019,6 +40335,400 @@
         "summary": "Create Moderation",
         "tags": [
           "moderations"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/authorize": {
+      "get": {
+        "description": "Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in.",
+        "operationId": "oauth-apps-authorization_redirect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "title": "Redirect Uri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^[A-Za-z0-9._~+/=-]+$",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{43}$",
+              "title": "Code Challenge",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge_method",
+            "required": true,
+            "schema": {
+              "const": "S256",
+              "title": "Code Challenge Method",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "response_type",
+            "required": false,
+            "schema": {
+              "const": "code",
+              "default": "code",
+              "title": "Response Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Continue to dashboard sign-in and consent.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "Authorization Redirect",
+        "tags": [
+          "oauth-apps"
+        ]
+      },
+      "post": {
+        "description": "Approve access to the caller's selected workspace, with normal budget enforcement.",
+        "operationId": "oauth-apps-authorize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppAuthorizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Authorize",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/clients": {
+      "get": {
+        "description": "Validate the app and redirect before the dashboard offers consent.",
+        "operationId": "oauth-apps-app_details",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "title": "Redirect Uri",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppDetails"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "App Details",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/revoke": {
+      "post": {
+        "description": "Revoke the presented app token. Unknown or previously revoked tokens also succeed (RFC 7009).",
+        "operationId": "oauth-apps-revoke",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRevocationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "Revoke",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/token": {
+      "post": {
+        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
+        "operationId": "oauth-apps-exchange",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AppTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [],
+        "summary": "Exchange",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/workspaces": {
+      "get": {
+        "description": "List workspaces where the signed-in identity may authorize app access.",
+        "operationId": "oauth-apps-app_workspaces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "App Workspaces",
+        "tags": [
+          "oauth-apps"
         ]
       }
     },
@@ -43703,6 +44413,43 @@
               "description": "Only models of this kind; `unknown` for those no source names a kind for",
               "title": "Type"
             }
+          },
+          {
+            "description": "Only models whose name contains this text, case-insensitively",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models whose name contains this text, case-insensitively",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "Only models served (`true`) or only models withheld (`false`)",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models served (`true`) or only models withheld (`false`)",
+              "title": "Enabled"
+            }
           }
         ],
         "responses": {
@@ -44602,6 +45349,54 @@
           }
         ],
         "summary": "Get Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "patch": {
+        "description": "Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.\n\nWrites the one field, so the issuer is neither re-read nor re-submitted and the stored client\nsecret stands. Refused with 404 when the organization has not saved a connection yet, and with\n409 when pausing a connection the organization still requires sign-in through: stop requiring\nit first.",
+        "operationId": "organization-sso-patch_organization_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OIDCConnectionEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Patch Organization Sso",
         "tags": [
           "organization-sso"
         ]
@@ -52810,7 +53605,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable, and so is a tool that runs on the deployment's account while\nthe key's organization has no funds. Every other `tools[]` entry, including\nprovider-native keywords not listed here, is forwarded to the upstream\nprovider untouched.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {

@@ -10,6 +10,8 @@ recorded but never committed shows up as missing. A request on the gateway's
 own provider key never reaches the probe at all.
 """
 
+import asyncio
+import concurrent.futures
 import itertools
 import logging
 import sys
@@ -18,7 +20,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -38,17 +40,21 @@ from any_llm.types.completion import (
     Function,
     Usage,
 )
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.routes import _pipeline as pipeline
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
-from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
+from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE_LIMIT_RULE_HEADER, RATE_LIMITED
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
+from gateway.ports.billing_port import BilledModel, ToolUse
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import FAKE_SEARCH, build_test_client, price_fake_search
 
@@ -61,11 +67,15 @@ from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedCredential, ModelProviderPort
 
 GATES = []  # Every gate call, landed or not.
+BILLED = []  # The model each gate and charge was told it pays for.
+TOOLS = []  # The gateway-run tool calls each charge was told it pays for.
+GATE_TOOLS = []  # The gateway-run tools each gate was told a call may run.
 LEDGER = []  # What landed: a session's entries move here when it commits.
 PENDING = {}  # Entries written on a session, by its id, until it commits, rolls back or closes.
 SESSIONS = []
 FUNDS = {"available": Decimal("10")}
 FAULTS = set()
+LIMIT = {"concurrency": None}
 
 
 class Fleet:
@@ -89,12 +99,22 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         GATES.append(("apply_due_credit", str(organization_id)))
 
-    async def require_funds_on_deposit(self, *, organization_id):
+    async def require_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
         GATES.append(("require_funds_on_deposit", str(organization_id)))
+        BILLED.append(("gate", billed))
+        GATE_TOOLS.append(tools)
         if "funds" in FAULTS:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
+
+    async def has_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
+        GATES.append(("has_funds_on_deposit", str(organization_id)))
+        GATE_TOOLS.append(tools)
+        return FUNDS["available"] > 0
+
+    async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
+        return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):
         raise AssertionError("no holds on the completion path")
@@ -105,9 +125,13 @@ class ProbeBilling:
     async def release_hold(self, *, organization_id, amount):
         raise AssertionError("no holds on the completion path")
 
-    async def charge(self, *, organization_id, amount, description=None, actor_user_id=None, api_key_id=None):
+    async def charge(
+        self, *, organization_id, amount, billed, tools, description=None, actor_user_id=None, api_key_id=None
+    ):
         if "charge" in FAULTS:
             raise RuntimeError("ledger down")
+        BILLED.append(("charge", billed))
+        TOOLS.append(dict(tools))
         entry = ("charge", str(organization_id), amount, description, api_key_id)
         PENDING.setdefault(id(self.session), []).append(entry)
 
@@ -181,6 +205,14 @@ def billed_in_loop_search(
     """``billed``, with the in-loop search on a search tool on the deployment's account that its own row prices."""
     tools = {FAKE_SEARCH: {"provider": "fake", "options": {"hits": [{"url": "https://otari.example"}]}}}
     yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools, web_search_extract=False)
+
+
+@pytest.fixture
+def billed_sandbox(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, with a sandbox on the deployment's account that no test reaches."""
+    yield from _billed(postgres_url, tmp_path, monkeypatch, sandbox_url="http://sandbox.invalid")
 
 
 def _billed(
@@ -334,10 +366,108 @@ def test_a_deployment_paid_completion_is_gated_then_charged_its_settled_cost(
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
     # Landed with the settlement's commit, once, on the organization that was gated.
     assert probe.LEDGER == [("charge", organization, COST, "openai:gpt-4o", key["id"])]
+    served = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
+    assert probe.BILLED == [("gate", served), ("charge", served)]
     user = _user(client)
     assert user["spend"] == pytest.approx(float(COST))
     assert user["reserved"] == pytest.approx(0.0)
     assert _deployment_paid_flags(db_session_factory) == [True]
+
+
+def test_a_completion_over_its_organizations_concurrency_limit_waits_then_is_refused(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    key = _key(client)
+    probe.LIMIT["concurrency"] = 1
+    monkeypatch.setattr(pipeline, "_ORGANIZATION_SLOT_WAIT_SEC", 0.05)
+
+    served, _ = _chat(client, key, "openai:gpt-4o")
+    assert served.status_code == status.HTTP_200_OK, served.text
+    (organization,) = {org for _, org in probe.GATES}
+    store: RateLimitStorePort = cast(FastAPI, client.app).state.rate_limit_store
+    slot = f"organization:{organization}:concurrent"
+    # The served request gave its slot back when its response ended, so another request can take it.
+    other = asyncio.run(store.acquire(slot, 1, 60.0))
+    assert other is not None
+
+    refused, provider = _chat(client, key, "openai:gpt-4o")
+
+    assert refused.status_code == status.HTTP_429_TOO_MANY_REQUESTS, refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == RATE_LIMITED
+    assert refused.headers["Retry-After"] == "1"
+    assert refused.headers[RATE_LIMIT_RULE_HEADER] == "organization_concurrency"
+    provider.assert_not_awaited()
+    assert len(probe.LEDGER) == 1
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    asyncio.run(store.release(slot, other))
+
+
+def test_a_completion_canceled_while_waiting_for_a_slot_gives_its_reservation_back(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _probe = billed
+    _price(client, "openai:gpt-4o")
+    key = _key(client)
+
+    async def canceled(ctx: Any, charge: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pipeline, "_hold_organization_slot", canceled)
+
+    with pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)):
+        _chat(client, key, "openai:gpt-4o")
+
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
+def test_a_failover_canceled_while_waiting_for_a_slot_gives_its_reservation_back(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+
+    waits: list[Any] = []
+    held: list[Decimal] = []
+    hold = pipeline._hold_organization_slot
+
+    async def canceled(ctx: Any, charge: Any) -> None:
+        # The head (the gateway's own key) is admitted with nothing to charge; only the fleet fallback waits.
+        if charge is None:
+            await hold(ctx, charge)
+            return
+        waits.append(charge)
+        held.append(ctx.reservation.estimate if ctx.reservation is not None else Decimal(0))
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pipeline, "_hold_organization_slot", canceled)
+
+    tried: list[str] = []
+
+    async def acompletion(**kwargs: Any) -> Any:
+        tried.append(kwargs["model"])
+        request = httpx.Request("POST", "http://upstream")
+        raise httpx.HTTPStatusError("down", request=request, response=httpx.Response(503, request=request))
+
+    with (
+        patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=acompletion)),
+        # The test client hands the server's cancellation back as concurrent.futures' own.
+        pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)),
+    ):
+        client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "fleet_second", "messages": [{"role": "user", "content": "Hi"}]},
+            headers=_auth(key),
+        )
+    # The head was tried and failed over: the fallback's wait is what was canceled.
+
+    assert len(waits) == 1
+    assert tried == ["anthropic:claude-opus-4"]
+    assert held[0] > 0
+    assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
 def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
@@ -518,6 +648,31 @@ def test_a_policy_skips_a_deployment_paid_candidate_its_organization_cannot_fund
     assert served == [False]
 
 
+def test_a_policy_skips_a_deployment_paid_candidate_with_no_free_slot(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+    # One served request names the organization whose slot is then taken.
+    assert _chat(client, key, "openai:gpt-4o")[0].status_code == status.HTTP_200_OK
+    (organization,) = {org for _, org in probe.GATES}
+    probe.LIMIT["concurrency"] = 1
+    monkeypatch.setattr(pipeline, "_ORGANIZATION_SLOT_WAIT_SEC", 0.05)
+    store: RateLimitStorePort = cast(FastAPI, client.app).state.rate_limit_store
+    slot = f"organization:{organization}:concurrent"
+    taken = asyncio.run(store.acquire(slot, 1, 60.0))
+    assert taken is not None
+
+    response, provider = _routed(client, key, "fleet_first", failing="none")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [call.kwargs["api_key"] for call in provider.call_args_list] == ["sk-ant"]
+    assert len(probe.LEDGER) == 1
+    asyncio.run(store.release(slot, taken))
+
+
 def test_embeddings_on_a_deployment_paid_credential_are_gated_then_charged(
     billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
@@ -635,8 +790,10 @@ def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_anothe
     assert response.status_code == status.HTTP_200_OK, response.text
     assert {call.kwargs["api_key"] for call in provider.call_args_list} == {"sk-ant"}
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert probe.GATE_TOOLS == [frozenset({"otari:web_search"})]
     # The search alone: the model ran on the gateway's own key, which the organization's funds do not pay for.
     assert [(entry[0], entry[2]) for entry in probe.LEDGER] == [("charge", SEARCH_COST)]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=SEARCH_COST)}]
     user = _user(client)
     assert user["spend"] == pytest.approx(float(2 * COST + SEARCH_COST))
     assert user["reserved"] == pytest.approx(0.0)
@@ -656,11 +813,86 @@ def test_a_search_on_the_deployments_account_is_refused_without_funds_before_the
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    # Named, so it reads apart from the refusal of a model the deployment pays for.
+    assert response.json()["detail"] == (
+        "Insufficient funds ($0.00) to serve this request. The gateway tool 'otari_web_search' runs on this "
+        "deployment's account, which this organization's funds pay for. Add funds, or leave it out of tools[]."
+    )
     provider.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
     assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "otari:web_search")]
+
+
+def _tool_reasons(client: TestClient, headers: dict[str, str]) -> dict[str, tuple[bool, str | None]]:
+    response = client.get(f"{API_ROOT}/tools", headers=headers)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    return {tool["id"]: (tool["available"], tool["reason"]) for tool in response.json()["data"]}
+
+
+def test_tools_lists_a_search_on_the_deployments_account_as_unavailable_without_funds(
+    billed_in_loop_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_in_loop_search
+    key = _key(client)
+
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (True, None)
+
+    probe.FUNDS["available"] = Decimal("0")
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (False, "insufficient_funds")
+    # A master key belongs to no organization the gate would read, so it gets the deployment's answer.
+    assert _tool_reasons(client, MASTER)["otari_web_search"] == (True, None)
+    # Listing grants no credit and refuses nothing, so it starts none of what a refusal starts.
+    assert {gate for gate, _ in probe.GATES} == {"has_funds_on_deposit"}
+
+
+def test_tools_lists_a_search_on_the_organizations_key_as_available_without_funds(
+    billed_in_loop_search: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed_in_loop_search
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key(client)
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "tavily", "name": "ours", "api_key": "tvly-ours"},
+        headers=MASTER,
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    starred = client.post(f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=MASTER)
+    assert starred.status_code == status.HTTP_200_OK, starred.text
+    probe.FUNDS["available"] = Decimal("0")
+
+    assert _tool_reasons(client, _auth(key))["otari_web_search"] == (True, None)
+
+
+def test_code_execution_on_a_key_the_organization_brought_is_refused_by_name_without_funds(
+    billed_sandbox: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_sandbox
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    assert _tool_reasons(client, _auth(key))["otari_code_execution"] == (False, "insufficient_funds")
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock()) as provider:
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "anthropic:claude-opus-4",
+                "messages": [{"role": "user", "content": "compute 17*23"}],
+                "tools": [{"type": "otari_code_execution"}],
+            },
+            headers=_auth(key),
+        )
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert "The gateway tool 'otari_code_execution' runs on this deployment's account" in response.json()["detail"]
+    provider.assert_not_called()
+
+    probe.FUNDS["available"] = Decimal("10")
+    assert _tool_reasons(client, _auth(key))["otari_code_execution"] == (True, None)
 
 
 def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
@@ -678,6 +910,8 @@ def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
         ("charge", 2 * COST + SEARCH_COST, "openai:gpt-4o")
     ]
+    # The one charge names its search and that search's share, so the model's share is the rest.
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=SEARCH_COST)}]
     assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
@@ -698,6 +932,9 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
         ("charge", Decimal("0.007"), "fake:fake-search")
     ]
+    # A search is no model's call, so nothing funded per model may pay for it.
+    assert probe.BILLED == [("gate", None), ("charge", None)]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=Decimal("0.007"))}]
     user = _user(client)
     assert user["spend"] == pytest.approx(0.007)
     assert user["reserved"] == pytest.approx(0.0)
@@ -715,6 +952,10 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert response.json()["detail"] == (
+        "Insufficient funds ($0.00) to serve this request. The gateway tool 'fake-search' runs on this "
+        "deployment's account, which this organization's funds pay for. Add funds to run it."
+    )
     searched.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)

@@ -25,9 +25,16 @@ from gateway.api.routes._attempts import (
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
     request_too_large_for_every_attempt_detail,
+    structured_output_failed_for_every_attempt_detail,
     walk_attempts,
 )
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, REQUEST_TOO_LARGE, error_code_of
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    REQUEST_TOO_LARGE,
+    STRUCTURED_OUTPUT_FAILED,
+    error_code_of,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -348,6 +355,33 @@ async def test_exhaustion_where_every_prompt_was_too_long_keeps_that_code() -> N
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == prompt_too_long_for_every_attempt_detail(2)
     assert error_code_of(exc_info.value.headers) == CONTEXT_LENGTH_EXCEEDED
+
+
+class _StructuredOutputFailure(Exception):
+    """Groq's 400 for a generation that did not match the requested schema, as the OpenAI SDK parses its body."""
+
+    def __init__(self) -> None:
+        super().__init__("Failed to generate JSON. Please adjust your prompt.")
+        self.status_code = 400
+        self.body = {"message": str(self), "type": "invalid_request_error", "code": "json_validate_failed"}
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_generation_failed_its_schema_keeps_that_code() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [_StructuredOutputFailure(), _StructuredOutputFailure()])
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == structured_output_failed_for_every_attempt_detail(2)
+    assert error_code_of(exc_info.value.headers) == STRUCTURED_OUTPUT_FAILED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_one_generation_failed_its_schema_is_the_generic_rejection() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")], [_StructuredOutputFailure(), _Rejection(400, "bad temperature")]
+        )
+    assert error_code_of(exc_info.value.headers) == ALL_CANDIDATES_REJECTED
 
 
 @pytest.mark.asyncio

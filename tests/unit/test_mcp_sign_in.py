@@ -14,11 +14,10 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.tools_exceptions import McpConnectionSetupError
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import (
+    McpConnectionService,
     McpSignInBackend,
     McpSignInNeeded,
     McpSignInReason,
-    sign_in_link,
-    sign_in_link_prefix,
 )
 from gateway.services.tools._mcp_connections import SIGN_IN_LINK_LIFETIME, read_sign_in_link
 
@@ -41,17 +40,17 @@ def _ticket(link: str) -> str:
 
 
 def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
-    link = sign_in_link(_config(), server_id=SERVER, user_id="alice")
+    link = McpConnectionService.sign_in_link(_config(), server_id=SERVER, user_id="alice")
 
     assert link.startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
-    assert link.startswith(cast(str, sign_in_link_prefix(_config())))
+    assert link.startswith(cast(str, McpConnectionService.sign_in_link_prefix(_config())))
     assert "=" not in _ticket(link), "no padding for a chat to mangle"
     assert "alice" not in link
     assert read_sign_in_link(_ticket(link)) == (SERVER, "alice")
 
 
 def test_a_link_is_refused_once_altered_forged_or_old(monkeypatch: pytest.MonkeyPatch) -> None:
-    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    ticket = _ticket(McpConnectionService.sign_in_link(_config(), server_id=SERVER, user_id="alice"))
     altered = ticket[:-2] + ("A" if ticket[-2] != "A" else "B") + ticket[-1]
     other_purpose = encrypt_secret('{"p":"x","s":"00000000-0000-0000-0000-0000000000aa","u":"alice"}')
 
@@ -67,10 +66,10 @@ def test_a_link_is_refused_once_altered_forged_or_old(monkeypatch: pytest.Monkey
 
 def test_no_link_without_a_public_address_or_for_the_shared_default_user() -> None:
     with pytest.raises(McpConnectionSetupError):
-        sign_in_link(_config(None), server_id=SERVER, user_id="alice")
+        McpConnectionService.sign_in_link(_config(None), server_id=SERVER, user_id="alice")
     with pytest.raises(McpConnectionSetupError):
-        sign_in_link(_config(), server_id=SERVER, user_id="default")
-    assert sign_in_link_prefix(_config(None)) is None
+        McpConnectionService.sign_in_link(_config(), server_id=SERVER, user_id="default")
+    assert McpConnectionService.sign_in_link_prefix(_config(None)) is None
 
 
 def _need(name: str = "jira", **fields: Any) -> McpSignInNeeded:
@@ -90,9 +89,10 @@ def _backend(*needed: McpSignInNeeded, taken: tuple[str, ...] = ()) -> tuple[Mcp
 
     def mint(server_id: uuid.UUID, user_id: str) -> str:
         minted.append((server_id, user_id))
-        return sign_in_link(_config(), server_id=server_id, user_id=user_id)
+        return McpConnectionService.sign_in_link(_config(), server_id=server_id, user_id=user_id)
 
-    return McpSignInBackend(needed, mint=mint, link_prefix=sign_in_link_prefix(_config()), taken=taken), minted
+    prefix = McpConnectionService.sign_in_link_prefix(_config())
+    return McpSignInBackend(needed, mint=mint, link_prefix=prefix, taken=taken), minted
 
 
 @pytest.mark.asyncio

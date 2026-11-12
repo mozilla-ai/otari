@@ -10,6 +10,7 @@ import {
 } from "react"
 import type {
   ApiKey,
+  ApiKeyDisabledReason,
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOwnKeyRequest,
@@ -141,6 +142,22 @@ type Layout = "wide" | "compact" | "mobile"
 function layoutFor(viewport: number, region = viewport): Layout {
   if (viewport < 768 || region < 600) return "mobile"
   return region < 1100 ? "compact" : "wide"
+}
+
+/**
+ * The reason this viewer cannot enable the key, or undefined if they can.
+ *
+ * Only an operator clears a reason, and `operator_can_enable` says whether this
+ * one is theirs to clear. Reading that rather than the reason itself keeps a
+ * reason the server adds later locked here instead of silently enabled.
+ */
+function cannotEnableReason(
+  apiKey: ApiKey,
+  isDeploymentWide: boolean,
+): ApiKeyDisabledReason | undefined {
+  const reason = apiKey.disabled_reason ?? undefined
+  if (reason === undefined) return undefined
+  return isDeploymentWide && apiKey.operator_can_enable ? undefined : reason
 }
 
 function isExpired(key: ApiKey): boolean {
@@ -1434,7 +1451,7 @@ export function KeysPage() {
           apiKey.is_service_key ? () => setListingEndUsers(apiKey) : undefined
         }
         isReadOnly={isReadOnly}
-        isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
+        cannotEnable={cannotEnableReason(apiKey, isDeploymentWide)}
       />
     ),
     [

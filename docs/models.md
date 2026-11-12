@@ -128,6 +128,12 @@ aliases, and routing-policy names, and lists each model once however many
 providers serve it (see [Listing available models](#listing-available-models)). A provider's embedding and rerank models are
 offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
+Together lists every model it can deploy, but serves most of them only on a
+dedicated endpoint. Discovery leaves those out: it also asks Together for its
+serverless models (`GET /v1/models?serverless=true`) and keeps only those. If
+that listing fails, or is not shorter than the full listing, discovery keeps
+every model. To serve a model on a dedicated endpoint of your own, add it to the
+roster by hand.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
@@ -190,7 +196,9 @@ uses:
 - `supported_parameters`: `tools` and `tool_choice` for a model that calls
   tools, `response_format` for one with structured output, and `reasoning` for
   a reasoning model. It names only the parameters models.dev records a flag
-  for, not every parameter the model takes.
+  for, not every parameter the model takes. `response_format` is left out where
+  Otari cannot send it to the provider, as on Bedrock for every model but
+  Anthropic's.
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
@@ -280,10 +288,16 @@ unit is shown under the side it bills, so an image price, or a video model's
 per-second price, is under **Output**, and hovering it names what it prices and
 its unit ("Video output, $0.045/second"). A per-second price on any other kind
 of model is audio, shown on the side it is stored on. On a phone, which cannot
-hover, the unit is shown beside the amount. The list endpoint,
+hover, the unit is shown beside the amount. The search box beside the tabs
+keeps the models whose name contains what is typed, in any case, and the
+**Serving** / **Not serving** choice beside it keeps the models switched on or
+off; the tab counts then count only those. The list endpoint,
 `GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
-kind as `type` (`unknown` included), returns each model's `type`, and counts
-every kind in `type_counts` whichever one it returns.
+kind as `type` (`unknown` included), the search as `search` and the switch as
+`enabled` (`true` or `false`), returns each model's `type`, and counts every
+kind the search and the switch keep in `type_counts` whichever one it returns.
+The hosted providers' `GET /api/v1/hosted-providers/{provider}/models` takes
+the same three.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the

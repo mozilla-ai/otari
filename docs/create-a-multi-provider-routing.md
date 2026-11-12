@@ -1,6 +1,5 @@
 ---
 description: Route requests to models from multiple providers through one API.
-icon: arrows-split-up-and-left
 ---
 
 # Create a multi-provider routing

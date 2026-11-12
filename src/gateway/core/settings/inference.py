@@ -31,6 +31,28 @@ def country_codes(values: Iterable[object]) -> list[str]:
     return codes
 
 
+# Which models no open-weight plan covers; see ``is_closed_model`` in the inference domain.
+DEFAULT_CLOSED_MODEL_PROVIDERS: tuple[str, ...] = (
+    "anthropic",
+    "azureanthropic",
+    "vertexaianthropic",
+    "gemini",
+    "vertexai",
+    "xai",
+    "openai",
+    "azureopenai",
+)
+DEFAULT_CLOSED_MODEL_FAMILIES: tuple[str, ...] = (
+    "claude",
+    "gemini",
+    "grok",
+    "gpt-",
+    "chatgpt",
+    *(f"o{n}" for n in range(1, 10)),
+)
+DEFAULT_OPEN_MODEL_FAMILIES: tuple[str, ...] = ("gpt-oss", "gemma")
+
+
 class InferenceSettings(BaseModel):
     """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user.
 
@@ -95,6 +117,29 @@ class InferenceSettings(BaseModel):
             "Path to a MaxMind DB country file (GeoLite2 Country, DB-IP Lite Country) in which the "
             "client address is looked up. A replaced file is read again without a restart. When set, "
             "a country file stored from the Settings page is not read. Needs the geoip extra."
+        ),
+    )
+
+    closed_model_providers: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_CLOSED_MODEL_PROVIDERS),
+        description=(
+            "Providers whose models are all closed, so no plan for open-weight models covers them, "
+            "unless the model is in closed_model_open_families. Every other model counts as open-weight."
+        ),
+    )
+    closed_model_families: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_CLOSED_MODEL_FAMILIES),
+        description=(
+            "Model name prefixes that are closed on any provider, matched on the name after its last '/' "
+            "(so OpenRouter's anthropic/claude-sonnet-4 is a 'claude'). A prefix ending in '-' matches any "
+            "name it starts; any other matches a whole word ('o3' matches o3-mini, not o3x)."
+        ),
+    )
+    closed_model_open_families: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_OPEN_MODEL_FAMILIES),
+        description=(
+            "Model name prefixes that are open-weight even on a closed provider or in a closed family, "
+            "such as OpenAI's gpt-oss and Google's Gemma."
         ),
     )
 

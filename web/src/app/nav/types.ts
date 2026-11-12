@@ -127,8 +127,6 @@ export type NavItem = NavItemBase & {
 export interface NavChild {
   to: NavPath
   label: string
-  /** A short marker after the label, such as "Beta". Hidden on a collapsed rail. */
-  badge?: string
   /**
    * The child's own glyph, as `otari-ai/frontend`'s nested leaves carry one.
    * The rail does not draw it on an expanded row, where the indent marks the

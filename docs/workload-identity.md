@@ -409,4 +409,4 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 
 - [Access control](access-control.md): API keys, service keys and budgets.
 - [Configuration](configuration.md): where `federation_issuers` and `federation_member_rules` are set.
-- [Use with Claude Code](use-with-claude-code.md): routing Claude Code through Otari.
+- [Claude Code](claude-code.md): routing Claude Code through Otari.

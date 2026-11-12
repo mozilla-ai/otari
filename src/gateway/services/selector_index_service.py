@@ -130,6 +130,7 @@ def models_by_identity(
     *,
     organization_id: uuid.UUID | None = None,
     alias_targets: Set[str] = frozenset(),
+    slug_providers: Mapping[str, str] | None = None,
 ) -> list[ModelObject]:
     """Fold a flat listing into one row per model, keyed by catalog id, sorted by id.
 
@@ -142,6 +143,10 @@ def models_by_identity(
     An offering whose canonical key is in ``alias_targets`` still ranks, since
     the catalog id reaches it, but a model offered only by alias targets gets
     no row: the alias stands in for it.
+
+    ``slug_providers`` maps the viewer's key slugs to their provider, as
+    :func:`seed_for` takes it. Without it an offering on an organization's key
+    is folded under an id the index never built, which no request can call.
     """
     names: dict[str, ModelObject] = {}
     offerings: dict[str, ModelObject] = {}
@@ -150,7 +155,7 @@ def models_by_identity(
             names[obj.id] = obj
         else:
             offerings[obj.id] = obj
-    seeds = [offering_seed(config, catalog, offerings[selector])[0] for selector in sorted(offerings)]
+    seeds = [offering_seed(config, catalog, offerings[selector], slug_providers)[0] for selector in sorted(offerings)]
     rows = dict(names)
     for identity in group_offerings(seeds).values():
         if identity.id in rows:

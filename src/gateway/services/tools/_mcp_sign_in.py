@@ -59,7 +59,7 @@ class McpSignInNeeded:
     reason: McpSignInReason
 
 
-# Mints a sign-in link for ``(server_id, user_id)``. ``sign_in_link`` bound to the deployment's config.
+# Mints a sign-in link for ``(server_id, user_id)``: ``McpConnectionService.sign_in_link`` bound to a config.
 SignInLinkMinter = Callable[[uuid.UUID, str], str]
 
 

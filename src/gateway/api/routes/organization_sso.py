@@ -10,21 +10,16 @@ with no overlay has exactly one organization and the caller's identity already p
 at it.
 """
 
-from typing import Annotated
-
 from fastapi import APIRouter, Depends, status
 
-from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_config, verify_master_key
-from gateway.core.config import GatewayConfig
+from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, verify_master_key
 from gateway.schemas.identity import (
-    OIDCConnectionPublic,
+    OIDCConnectionEnabledRequest,
     OIDCConnectionRequest,
-    OrganizationSsoEnforcementPublic,
     OrganizationSsoEnforcementRequest,
     OrganizationSsoPreflightPublic,
     OrganizationSsoPublic,
 )
-from gateway.services.oauth_service import redirect_uri as _oauth_redirect_uri
 
 # Master key on the router, as the rest of the ``/api/v1/organizations/me`` surface
 # declares it. What the caller may change is decided per request by the service's own
@@ -36,31 +31,16 @@ router = APIRouter(
 )
 
 
-def _settings(
-    config: GatewayConfig,
-    connection: OIDCConnectionPublic | None,
-    enforcement: OrganizationSsoEnforcementPublic,
-) -> OrganizationSsoPublic:
-    # A deployment with no public address of its own builds a path rather than an address, which no
-    # provider accepts, so there is nothing to register and the caller is told that rather than
-    # handed a value that cannot work.
-    registerable = _oauth_redirect_uri(config, "sso") if config.public_base_url else None
-    return OrganizationSsoPublic(redirect_uri=registerable, connection=connection, enforcement=enforcement)
-
-
 @router.get("")
 async def get_organization_sso(
     identity: CurrentIdentity,
     connections: OIDCConnectionServiceDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationSsoPublic:
     """Read the caller's organization's own sign-in connection. Owners and admins only.
 
     ``connection`` is null until the organization saves one.
     """
-    connection = await connections.get_for_user(user=identity)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await connections.settings_for_user(user=identity)
 
 
 @router.put("")
@@ -68,31 +48,41 @@ async def put_organization_sso(
     request: OIDCConnectionRequest,
     identity: CurrentIdentity,
     connections: OIDCConnectionServiceDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationSsoPublic:
     """Discover the submitted issuer and save the caller's organization's own sign-in connection.
 
     Owners and admins only. Replaces any existing connection. The client secret is
     encrypted at rest and never served back.
     """
-    connection = await connections.save_for_user(user=identity, request=request)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await connections.save_for_user(user=identity, request=request)
+
+
+@router.patch("")
+async def patch_organization_sso(
+    request: OIDCConnectionEnabledRequest,
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> OrganizationSsoPublic:
+    """Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.
+
+    Writes the one field, so the issuer is neither re-read nor re-submitted and the stored client
+    secret stands. Refused with 404 when the organization has not saved a connection yet, and with
+    409 when pausing a connection the organization still requires sign-in through: stop requiring
+    it first.
+    """
+    return await connections.set_enabled_for_user(user=identity, enabled=request.enabled)
 
 
 @router.post("/test")
 async def test_organization_sso(
     identity: CurrentIdentity,
     connections: OIDCConnectionServiceDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationSsoPublic:
     """Re-discover the caller's organization's own issuer and store the result. Owners and admins only.
 
     Refused with 404 when the organization has not saved a connection yet.
     """
-    connection = await connections.test_for_user(user=identity)
-    enforcement = await connections.get_enforcement_for_user(user=identity)
-    return _settings(config, connection, enforcement)
+    return await connections.test_for_user(user=identity)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)

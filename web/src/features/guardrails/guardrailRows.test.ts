@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { BuiltInGuardrailCatalog } from "@/client"
 import {
+  checksLabel,
   credentialsLabel,
   definitionChecks,
   guardrailLabel,
@@ -149,5 +150,15 @@ describe("mandatesOn", () => {
       organizationGuardrail({ id: "b", profile: "b" }),
     ]
     expect(mandatesOn(lakera, mandates).map((m) => m.profile)).toEqual(["a"])
+  })
+})
+
+describe("checksLabel", () => {
+  it("names what it reads in the dialog's order, whatever order it was stored in", () => {
+    expect(
+      checksLabel(
+        organizationGuardrail({ on: ["output", "input", "tool_results"] }),
+      ),
+    ).toBe("User input, Tool results, Answers")
   })
 })

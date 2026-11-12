@@ -46,7 +46,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import BatchRecord
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
 from gateway.services.api_keys import resolve_user_id
@@ -64,8 +64,9 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.inference import (
-    DeploymentCharge,
     admit_deployment_paid,
+    billed_model,
+    deferred_charge,
     describe_port_error,
 )
 from gateway.services.log_writer import LogWriter
@@ -438,6 +439,7 @@ async def create_batch(
                 billing_port_on(raw_request, db),
                 deployment_paid=True,
                 organization_id=organization_id,
+                billed=billed_model(served.provider, served.model),
                 api_key_id=api_key_id,
                 user_id=user_id,
                 request_id=None,
@@ -932,15 +934,17 @@ async def retrieve_batch_results(
         )
         # Charged once, with the claim that accounts a recorded batch once.
         if deployment_paid and record is not None and origin_organization_id is not None:
-            charge = DeploymentCharge(
-                billing=billing_port_on(raw_request, db),
+            charge = deferred_charge(
+                billing_port_on(raw_request, db),
                 organization_id=origin_organization_id,
-                api_key_id=record.api_key_id if record is not None else api_key_id,
-                actor_user_id=None,
-                request_id=None,
+                api_key_id=record.api_key_id,
+                creator_user_id=record.user_id,
+                provider=provider_enum,
+                model=record.model,
             )
             await charge.settle(
                 cost,
+                tools=NO_TOOLS,
                 model=batch_model,
                 description=f"{provider}:{batch_model}",
                 expects_cost=bool(total_tokens),

@@ -36,13 +36,19 @@ class MembershipWrites(TypedDict):
     membership_listener: MembershipListener
 
 
+def membership_listener_on(uow: UnitOfWork) -> MembershipListener:
+    """Build the budget listener on ``uow``.
+
+    The budget half alone, not the whole composition the request path builds, so a test using this
+    exercises members' ceilings and not their keys, traces or MCP grants.
+    """
+    return BudgetMembershipListener(BudgetRepositories.on(uow))
+
+
 def membership_writes(db: AsyncSession) -> MembershipWrites:
-    """Build a Unit of Work over ``db`` and the listener on it, as a standalone deployment's request path does."""
+    """Build a Unit of Work over ``db`` and the budget listener on it, for a service that writes membership."""
     uow = UnitOfWork(db)
-    return {
-        "uow": uow,
-        "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
-    }
+    return {"uow": uow, "membership_listener": membership_listener_on(uow)}
 
 
 # A deployment that publishes no terms, for an accept that does not exercise them.

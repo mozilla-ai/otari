@@ -13,11 +13,14 @@ unavailable rather than hidden, with a ``reason`` saying who can change that.
 An API key's answer also takes in its workspace's web search and code execution
 switches, read the way the request path reads them, so a tool the workspace has
 turned off (or never turned on, where the deployment makes it opt-in) is not
-advertised to a key whose requests would be refused. A master key or a dashboard
-session belongs to no single workspace and gets the deployment's answer.
+advertised to a key whose requests would be refused. The same goes for a tool
+that would run on the deployment's account while the key's organization has no
+funds to pay for it. A master key or a dashboard session belongs to no single
+workspace and gets the deployment's answer.
 """
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -25,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
     WorkspaceCodeExecutionPoliciesDep,
+    WorkspaceFundingDep,
     WorkspaceWebSearchPoliciesDep,
     get_config,
     verify_catalog_reader,
@@ -39,6 +43,7 @@ from gateway.services.tools import (
     code_execution_declaration_forms,
     fetch_resolves,
     search_resolves,
+    unfunded_tools,
     web_fetch_tool_definition,
     web_search_configured,
     web_search_declaration_forms,
@@ -52,7 +57,7 @@ router = APIRouter(
 
 SURFACE = Surface("tools")
 
-ToolUnavailableReason = Literal["not_configured", "workspace_disabled"]
+ToolUnavailableReason = Literal["not_configured", "workspace_disabled", "insufficient_funds"]
 
 
 class ManagedTool(BaseModel):
@@ -64,7 +69,8 @@ class ManagedTool(BaseModel):
     available: bool = Field(
         description=(
             "Whether a request from this caller may declare the tool: the deployment has "
-            "enabled and configured it and, for an API key, the key's workspace allows it. "
+            "enabled and configured it and, for an API key, the key's workspace allows it "
+            "and its organization can pay for what the tool runs on the deployment's account. "
             "A master key or a dashboard session gets the deployment's answer alone. A "
             "request declaring an unavailable tool is refused."
         )
@@ -76,7 +82,9 @@ class ManagedTool(BaseModel):
             "nothing is set up to run it (for web search, neither the deployment nor the API "
             "key's organization has a search provider). `workspace_disabled`: the API key's "
             "workspace does not allow it, which a workspace admin changes under Tools in the "
-            "dashboard."
+            "dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would "
+            "run on the deployment's account and the API key's organization has no funds to pay "
+            "for it, which adding funds changes."
         ),
     )
     accepted_types: list[str] = Field(
@@ -109,6 +117,8 @@ class _WorkspaceSwitches:
     code_execution: bool = True
     # What the web tools resolve on, with the workspace's own keys; ``None`` for the deployment's alone.
     search_policy: ResolvedWebSearchConfig | None = None
+    # The tools that would run on the deployment's account while the organization cannot pay for them.
+    unfunded: frozenset[Tool] = frozenset()
 
 
 async def _workspace_switches(
@@ -116,6 +126,7 @@ async def _workspace_switches(
     api_key: APIKey | None,
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    funding: WorkspaceFundingDep,
 ) -> _WorkspaceSwitches:
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
@@ -127,13 +138,18 @@ async def _workspace_switches(
             api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
         ),
         search_policy=search_policy,
+        unfunded=await unfunded_tools(
+            config, search_policy, partial(funding.funded, api_key.workspace_id, api_key.user_id)
+        ),
     )
 
 
-def _reason(configured: bool, workspace_allows: bool) -> ToolUnavailableReason | None:
+def _reason(configured: bool, workspace_allows: bool, *, funded: bool = True) -> ToolUnavailableReason | None:
     if not configured:
         return "not_configured"
-    return None if workspace_allows else "workspace_disabled"
+    if not workspace_allows:
+        return "workspace_disabled"
+    return None if funded else "insufficient_funds"
 
 
 def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[ManagedTool]:
@@ -148,12 +164,16 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     policy = switches.search_policy
     can_web_fetch = config.web_fetch_enabled and (policy is None or fetch_resolves(config, policy))
     can_web_search = deployment_searches if policy is None else search_resolves(config, policy)
+    unfunded = switches.unfunded
+    fetch_reason = _reason(can_web_fetch, switches.web, funded=Tool.WEB_FETCH not in unfunded)
+    search_reason = _reason(can_web_search, switches.web, funded=Tool.WEB_SEARCH not in unfunded)
+    code_reason = _reason(sandbox_configured, switches.code_execution, funded=Tool.CODE_EXECUTION not in unfunded)
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
-            available=can_web_fetch and switches.web,
-            reason=_reason(can_web_fetch, switches.web),
+            available=fetch_reason is None,
+            reason=fetch_reason,
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
             example={"type": Tool.WEB_FETCH},
@@ -161,8 +181,8 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
         ManagedTool(
             id=Tool.WEB_SEARCH,
             description=web_search["description"],
-            available=can_web_search and switches.web,
-            reason=_reason(can_web_search, switches.web),
+            available=search_reason is None,
+            reason=search_reason,
             # Admission claims a provider's own search keywords only for a deployment that searches itself.
             accepted_types=web_search_declaration_forms(config) if deployment_searches else [str(Tool.WEB_SEARCH)],
             input_schema=web_search["parameters"],
@@ -171,8 +191,8 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
         ManagedTool(
             id=Tool.CODE_EXECUTION,
             description=code_execution["description"],
-            available=sandbox_configured and switches.code_execution,
-            reason=_reason(sandbox_configured, switches.code_execution),
+            available=code_reason is None,
+            reason=code_reason,
             accepted_types=(
                 code_execution_declaration_forms(config) if sandbox_configured else [str(Tool.CODE_EXECUTION)]
             ),
@@ -188,13 +208,16 @@ async def list_tools(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    funding: WorkspaceFundingDep,
 ) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
     Called with an API key, a tool its workspace does not allow is listed as
-    unavailable. Every other `tools[]` entry, including provider-native keywords
-    not listed here, is forwarded to the upstream provider untouched.
+    unavailable, and so is a tool that runs on the deployment's account while
+    the key's organization has no funds. Every other `tools[]` entry, including
+    provider-native keywords not listed here, is forwarded to the upstream
+    provider untouched.
     """
     api_key, _ = auth
-    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
+    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, funding)
     return ToolsResponse(data=_managed_tools(config, switches))

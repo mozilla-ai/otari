@@ -11,10 +11,21 @@ import {
   FiUserCheck,
   FiUsers,
 } from "react-icons/fi"
-import type { ApiKey } from "@/client"
+import type { ApiKey, ApiKeyDisabledReason } from "@/client"
 import { TOOLTIP_OPEN_DELAY_MS } from "@/design-system/overlays/Tooltip"
 import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { keyFingerprint } from "./secretCaption"
+
+/** The hint shown when the viewer cannot enable this key. */
+function cannotEnableHint(
+  reason: ApiKeyDisabledReason,
+  operatorCanEnable: boolean,
+): string {
+  if (reason === "revoked") return "Revoked permanently"
+  return operatorCanEnable
+    ? "Only an operator can enable it"
+    : "Cannot be enabled again"
+}
 
 export function KeyActionsMenu({
   apiKey,
@@ -31,7 +42,7 @@ export function KeyActionsMenu({
   onWorkloadIdentity,
   onEndUsers,
   isReadOnly = false,
-  isEnableLocked = false,
+  cannotEnable,
 }: {
   apiKey: ApiKey
   triggerRef?: RefObject<HTMLButtonElement | null>
@@ -60,8 +71,11 @@ export function KeyActionsMenu({
   onEndUsers?: () => void
   /** A viewer's popover: the key's details, and no writes. */
   isReadOnly?: boolean
-  /** Switched off by an operator, so its owner may not switch it back on. */
-  isEnableLocked?: boolean
+  /**
+   * The reason this viewer cannot enable the key, absent if they can. A reason
+   * rather than a flag, because each one shows a different hint.
+   */
+  cannotEnable?: ApiKeyDisabledReason
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const name = apiKey.key_name ?? "(unnamed)"
@@ -83,11 +97,11 @@ export function KeyActionsMenu({
       label: apiKey.is_active ? "Disable" : "Enable",
       hint: apiKey.is_active
         ? "Callers get 401"
-        : isEnableLocked
-          ? "Switched off by an operator"
+        : cannotEnable
+          ? cannotEnableHint(cannotEnable, apiKey.operator_can_enable)
           : "Allow requests",
       icon: apiKey.is_active ? FiPause : FiPlay,
-      isDisabled: isPending || (!apiKey.is_active && isEnableLocked),
+      isDisabled: isPending || (!apiKey.is_active && Boolean(cannotEnable)),
       run: onToggle,
     },
     {

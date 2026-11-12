@@ -24,8 +24,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions import TenancyConflictError, TenancyValidationError
+from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
@@ -52,6 +53,8 @@ from gateway.exceptions.organizations_exceptions import (
     SignupRegistrationUnresolvedError,
     WorkspaceNotFoundError,
 )
+from gateway.log_config import logger
+from gateway.models.identity import is_organization_connection_provider
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
@@ -92,6 +95,8 @@ from gateway.models.tenancy import (
     WorkspaceAssignmentRequest,
     WorkspaceMember,
     WorkspaceMemberUpdate,
+    WorkspacePublic,
+    WorkspacesPublic,
 )
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
@@ -112,7 +117,7 @@ from gateway.services.mail import Mailer
 from gateway.services.organizations import BlockedAddresses, InvitationMailLimit, SsoEnforcement
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.email_address import validated_email as _validated_email
 from gateway.services.tenancy.invitation_email import render_invitation_email
 
@@ -381,6 +386,12 @@ class SignInDestination:
     refused_everywhere: bool
 
 
+# What a default-workspace grant absorbs: a database refusal, contention on the workspace row
+# included, and a listener's own not-found, which is a workspace default naming a budget that is
+# gone. Neither is a reason to refuse the admission the grant completes.
+_GRANT_REFUSALS: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, TenancyNotFoundError)
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -421,14 +432,14 @@ class OrganizationService:
         Delegated rather than re-derived, so this and the gate on the deployment-wide routers cannot
         come to disagree about who holds that authority.
         """
-        return await DeploymentUserService(self.db).has_administration_access(user)
+        return await DeploymentAdministrationAccess(self.db).has_administration_access(user)
 
     async def deployment_operator_ids(self, users: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``users`` the deployment admits across every organization, in one lookup.
 
         The plural form, for deciding over several accounts without a lookup each.
         """
-        return await DeploymentUserService(self.db).administration_access_ids(users)
+        return await DeploymentAdministrationAccess(self.db).administration_access_ids(users)
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, or a live membership where the pointer is stale.
@@ -555,6 +566,23 @@ class OrganizationService:
             user=user, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
         )
 
+    async def hold_delegated_workspace_access(self, *, user_id: uuid.UUID, workspace_id: uuid.UUID) -> User:
+        """Recheck a prior approval against today's identity and membership, independent of the active organization.
+
+        Hold the identity and workspace through key issuance so deactivation or
+        membership removal cannot race the delegated write.
+        """
+        user = await self.users.get_locked(user_id)
+        if user is None or not user.is_active:
+            raise NotAuthorizedError("The approving identity is no longer active")
+        organization_id = await self.get_organization_id_for_workspace(workspace_id)
+        if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        await self.hold_workspace_write_access(
+            user=user, organization_id=organization_id, workspace_id=workspace_id, revoking=False
+        )
+        return user
+
     async def require_workspace_contributor_access(
         self,
         *,
@@ -589,6 +617,24 @@ class OrganizationService:
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member of an organization."""
         return await self.members.get_active_by_organization_and_user(organization_id, user_id) is not None
+
+    async def list_app_workspaces(
+        self, *, user: User, search: str = "", skip: int = 0, limit: int = 50
+    ) -> WorkspacesPublic:
+        """List the caller's writable workspaces using the same two-level role rule as app approval."""
+        organization = await self.get_active_organization_for_user(user)
+        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
+        if membership is None or membership.role not in _CONTRIBUTOR_ROLES:
+            return WorkspacesPublic(data=[], count=0)
+        rows, count = await self.workspace_rows.page_for_contributor(
+            organization.id,
+            member_id=None if membership.role in MANAGEMENT_ROLES else user.id,
+            contributor_roles=_CONTRIBUTOR_ROLES,
+            search=search,
+            skip=skip,
+            limit=limit,
+        )
+        return WorkspacesPublic(data=[WorkspacePublic.model_validate(row) for row in rows], count=count)
 
     async def has_live_membership(self, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member anywhere, or holds an invitation it can still accept.
@@ -710,7 +756,7 @@ class OrganizationService:
                 has_password=user.hashed_password is not None,
                 claims_deployment=await password_claims_deployment(self.db, user),
             ),
-            deployment_operator=await DeploymentUserService(self.db).has_administration_access(user),
+            deployment_operator=await DeploymentAdministrationAccess(self.db).has_administration_access(user),
             provider_key_encryption_available=secret_box_configured(),
         )
 
@@ -910,8 +956,8 @@ class OrganizationService:
         """Create an address-less account as a member of one existing organization.
 
         Unlike ``provision_signup_tenancy``, there is no address to match an existing account against,
-        so this always creates a new identity, and it creates no personal organization or workspace of
-        its own.
+        so this always creates a new identity, and it founds no organization of its own. It works in
+        the admitting organization's default workspace instead.
 
         The writes run in a block of this service's Unit of Work, so they join a block the caller
         already holds.
@@ -932,7 +978,63 @@ class OrganizationService:
             # without which this account carries no attribution id and could never be offered as
             # the owner of a key.
             await get_or_create_attribution_user(self.db, user_id=str(identity.id), alias=full_name)
+            await self.grant_default_workspace(user_id=identity.id, organization_id=organization_id, role=default_role)
             return identity
+
+    async def grant_default_workspace(
+        self, *, user_id: uuid.UUID, organization_id: uuid.UUID, role: OrganizationDomainRole
+    ) -> None:
+        """Grant the organization's default workspace to a member admitted without one named.
+
+        A member with no workspace sits where ``delete_workspace`` refuses to leave an
+        organization: no surface to hold a key, a budget or a usage row. Provisioning one
+        takes the management authority a plain member has not got, so nobody but a manager
+        could resolve it.
+
+        Keyed on ``DEFAULT_WORKSPACE_NAME``, the name every path that provisions a workspace
+        gives the first one. An organization whose workspaces are all named something else is
+        granted nothing. A membership of that workspace the user already holds is set to the
+        role named here and made active.
+
+        Owns every failure of its own, the workspace lookup included, rather than passing one
+        up, because the admission this completes matters more than the workspace it adds. Both
+        statements run in one savepoint, so a refusal is discarded and logged while the
+        admission around it still lands, leaving the member exactly where an organization with
+        no such workspace leaves them. Without that, contending for the workspace row with
+        another membership write would refuse the admission, and on the paths that admit
+        somebody as they sign in it would refuse the sign-in. The lookup is inside the savepoint
+        rather than merely inside the handler because a failed statement leaves the transaction
+        around it unusable, so catching one outside a savepoint would trade a refused admission
+        for a refused commit.
+
+        NOTE: The caller must have just created an active organization membership, inside the
+        open block the membership listener writes through.
+        Nothing here proves either.
+        """
+        try:
+            async with self._require_unit_of_work().savepoint():
+                workspace = await self.workspace_rows.get_by_organization_and_name(
+                    organization_id, DEFAULT_WORKSPACE_NAME
+                )
+                if workspace is None:
+                    logger.info(
+                        "Organization %s has no workspace named %r, so identity %s holds none in it",
+                        organization_id,
+                        DEFAULT_WORKSPACE_NAME,
+                        user_id,
+                    )
+                    return
+                await self._apply_workspace_assignments(
+                    user_id=user_id,
+                    assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role=role)],
+                )
+        except _GRANT_REFUSALS as exc:
+            logger.warning(
+                "Could not grant the default workspace to identity %s, who holds none in organization %s: %s",
+                user_id,
+                organization_id,
+                describe_database_error(exc),
+            )
 
     async def provision_tenancy_for_claim(
         self,
@@ -1161,11 +1263,15 @@ class OrganizationService:
                 # row, and each workspace lock against a member joining it after
                 # the listener's snapshot (see ``delete_workspace``).
                 await self.organizations.lock(organization.id)
+                pointed = await self.users.get_ids_by_active_organization(organization.id)
+                # App-key issuance holds identity before workspace. Pointer moves
+                # write identities too, so acquire those locks in the same order.
+                for user_id in sorted({user.id, *pointed}):
+                    await self.users.lock(user_id)
                 workspace_ids = await self.workspace_rows.get_ids_by_organization(organization.id)
-                for workspace_id in workspace_ids:
+                for workspace_id in sorted(workspace_ids):
                     await self.workspace_rows.lock(workspace_id)
 
-                pointed = await self.users.get_ids_by_active_organization(organization.id)
                 blocks = _blocks_for(user, sso_enforcement)
                 admits_the_caller = [
                     candidate
@@ -1250,7 +1356,7 @@ class OrganizationService:
         # would read as a member who has spent nothing.
         spend_rows = (
             await attribution_spend(self.db, [str(member_user.id) for _, member_user in rows])
-            if await DeploymentUserService(self.db).has_administration_access(user)
+            if await DeploymentAdministrationAccess(self.db).has_administration_access(user)
             else {}
         )
         spend = {
@@ -2557,6 +2663,9 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            # Suspension may move the identity's active-organization pointer.
+            # Match app-key issuance's identity-before-workspace lock order.
+            await self.users.lock(target.user_id)
             workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, update_data)
             target_user = await self.users.get(updated.user_id)
@@ -2607,6 +2716,7 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            await self.users.lock(target.user_id)
             workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, {"status": "suspended"})
             await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
@@ -2675,6 +2785,7 @@ class OrganizationService:
             invitation_id=invitation.id if invitation is not None else None,
             invitation_expires_at=invitation.expires_at if invitation is not None else None,
             email=user.email,
+            is_sso_account=is_organization_connection_provider(user.oauth_provider),
             full_name=user.full_name,
             avatar_face=user.avatar_face,
             role=membership.role,

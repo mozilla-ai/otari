@@ -66,7 +66,7 @@ every API key you own in this workspace, and the Playground, use the server with
 your account.
 
 Connecting does not change who may use the server. Its
-[access list](configure-an-mcp-server.md#control-who-can-use-it) still decides that: a key the
+[access list](mcp-servers.md#control-who-can-use-it) still decides that: a key the
 access list denies is told the server does not exist, whether or not you have
 connected.
 

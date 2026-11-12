@@ -1,6 +1,5 @@
 ---
 description: Create, switch, organize, and delete workspaces in the dashboard.
-icon: desk
 ---
 
 # Manage workspaces

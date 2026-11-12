@@ -458,7 +458,8 @@ menu, and is listed only for a deployment operator.
   goes through `POST /api/v1/pricing` instead); an unpriced model arrives
   switched off. Tabs show one kind of model at a time (the kind comes from
   models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as
-  `type`). See [Who is shown which models](models.md#who-is-shown-which-models).
+  `type`), and the search box beside them finds models by name (`search`).
+  See [Who is shown which models](models.md#who-is-shown-which-models).
 - **Refresh models** asks one provider again. **Update catalog** fetches the
   latest models.dev prices and every provider's listing, and shows the price
   changes and new models before applying them (see

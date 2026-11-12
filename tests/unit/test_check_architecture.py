@@ -1734,3 +1734,218 @@ def test_main_fails_on_a_second_module_that_uses_a_model(tmp_path: Path, monkeyp
         tmp_path, "src/gateway/services/things/_store.py", "from gateway.models.things import Thing\n\nROW = Thing()\n"
     )
     assert check.main() == 1
+
+
+def _service_root(tmp_path: Path, exports: str, body: str) -> None:
+    """A one-package service layer whose root re-exports ``exports`` from a private module holding ``body``."""
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", body)
+    names = ", ".join(exports.split())
+    listed = "".join(f'    "{name}",\n' for name in exports.split())
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        f"from gateway.services.things._thing import {names}\n\n__all__ = [\n{listed}]\n",
+    )
+
+
+def _use_empty_service_root_export_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SERVICE_ROOT_EXPORT_BASELINE", {})
+
+
+def test_a_service_root_exporting_the_service_and_its_types_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "ThingService NewThing", "class ThingService:\n    pass\n\n\nclass NewThing:\n    pass\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_service_root_exporting_a_free_function_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "names_a_thing", "def names_a_thing(value: str) -> bool:\n    return True\n")
+    assert check.check_service_root_exports(tmp_path) == [
+        "gateway/services/things/__init__.py exports names_a_thing, which is neither the service nor a type its "
+        "public methods use; make it a method on what owns it, move it below the domain, or stop exporting it"
+    ]
+
+
+def test_a_service_root_exporting_an_async_free_function_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "run_things", "async def run_things() -> None:\n    return None\n")
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_service_root_exporting_a_constant_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "MAX_THINGS", "MAX_THINGS = 10\n")
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_service_root_exporting_a_type_alias_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A type alias is a type rather than a constant, so its lower-case assignment is left alone."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "ThingStore", "from collections.abc import Callable\n\nThingStore = Callable[[str], str]\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_baselined_free_function_is_allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _service_root(tmp_path, "names_a_thing", "def names_a_thing(value: str) -> bool:\n    return True\n")
+    monkeypatch.setattr(check, "SERVICE_ROOT_EXPORT_BASELINE", {"gateway/services/things/": ("names_a_thing",)})
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_baseline_entry_that_is_no_longer_exported_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The baseline only shrinks, so cleaning an export up without removing its entry fails."""
+    _service_root(tmp_path, "ThingService", "class ThingService:\n    pass\n")
+    monkeypatch.setattr(check, "SERVICE_ROOT_EXPORT_BASELINE", {"gateway/services/things/": ("names_a_thing",)})
+    assert check.check_service_root_exports(tmp_path) == [
+        "gateway/services/things/ is on the service root export baseline but no longer exports names_a_thing; "
+        "remove it from the baseline"
+    ]
+
+
+def test_a_root_re_exporting_a_free_function_from_another_layer_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source is followed, so moving the function out of the package does not hide it."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/types/things.py", "def names_a_thing(value: str) -> bool:\n    return True\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.types.things import names_a_thing\n\n__all__ = ["names_a_thing"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_main_fails_on_a_service_root_that_exports_a_free_function(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "tests/__init__.py", "")
+    _service_root(tmp_path / "src", "ThingService", "class ThingService:\n    pass\n")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _service_root(tmp_path / "src", "names_a_thing", "def names_a_thing(value: str) -> bool:\n    return True\n")
+    assert check.main() == 1
+
+
+_FREE_FUNCTION = "def names_a_thing(value: str) -> bool:\n    return True\n"
+
+
+def test_a_root_with_no_dunder_all_is_still_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """__all__ governs a star import alone, so a root that declares none still offers what it binds."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", _FREE_FUNCTION)
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        "from gateway.services.things._thing import names_a_thing\n",
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_binding_left_out_of_dunder_all_is_still_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A name omitted from __all__ remains importable from the root, so omitting it hides nothing."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", f"class ThingService:\n    pass\n\n\n{_FREE_FUNCTION}")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._thing import ThingService, names_a_thing\n\n__all__ = ["ThingService"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_function_defined_in_the_root_itself_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/__init__.py", f'{_FREE_FUNCTION}\n__all__ = ["names_a_thing"]\n')
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_renamed_import_is_resolved_under_its_original_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The alias is what a caller imports, and the definition is under the original name."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", "THING = 1\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._thing import THING as THING_TOOL\n\n__all__ = ["THING_TOOL"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_source_that_is_a_package_is_resolved_through_its_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subpackage has no module file of its own, so the definition sits in its __init__.py."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_inner/__init__.py", _FREE_FUNCTION)
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._inner import names_a_thing\n\n__all__ = ["names_a_thing"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_an_intermediate_re_export_is_followed_to_the_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The root imports from a subpackage that re-exports from a module, so neither hop holds the definition."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_inner/_leaf.py", _FREE_FUNCTION)
+    _write(
+        tmp_path,
+        "gateway/services/things/_inner/__init__.py",
+        "from gateway.services.things._inner._leaf import names_a_thing\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._inner import names_a_thing\n\n__all__ = ["names_a_thing"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_an_annotated_constant_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _service_root(tmp_path, "MAX_THINGS", "MAX_THINGS: int = 10\n")
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_private_binding_is_not_offered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An underscored name is private by convention, so a root that binds one for its own use is clean."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", "def _names_a_thing(value: str) -> bool:\n    return True\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        "from gateway.services.things._thing import _names_a_thing\n",
+    )
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_circular_re_export_does_not_recurse_forever(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_a.py", "from gateway.services.things._b import looping\n")
+    _write(tmp_path, "gateway/services/things/_b.py", "from gateway.services.things._a import looping\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._a import looping\n\n__all__ = ["looping"]\n',
+    )
+    assert check.check_service_root_exports(tmp_path) == []

@@ -721,6 +721,10 @@ export interface paths {
          *
          *     Refused with a 400 where the deployment publishes terms and ``terms_accepted``
          *     is not set, whatever the address.
+         *
+         *     With an ``invite`` that names this address, the account is verified as it is
+         *     created and ``verified`` says so: the invitation reached the mailbox, so a
+         *     verification email would prove nothing more. Only the token's holder learns that.
          */
         post: operations["auth-signup"];
         delete?: never;
@@ -2992,6 +2996,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/apps/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorization Redirect
+         * @description Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in.
+         */
+        get: operations["oauth-apps-authorization_redirect"];
+        put?: never;
+        /**
+         * Authorize
+         * @description Approve access to the caller's selected workspace, with normal budget enforcement.
+         */
+        post: operations["oauth-apps-authorize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * App Details
+         * @description Validate the app and redirect before the dashboard offers consent.
+         */
+        get: operations["oauth-apps-app_details"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke
+         * @description Revoke the presented app token. Unknown or previously revoked tokens also succeed (RFC 7009).
+         */
+        post: operations["oauth-apps-revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange
+         * @description Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.
+         */
+        post: operations["oauth-apps-exchange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/apps/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * App Workspaces
+         * @description List workspaces where the signed-in identity may authorize app access.
+         */
+        get: operations["oauth-apps-app_workspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oauth/token": {
         parameters: {
             query?: never;
@@ -4505,7 +4613,16 @@ export interface paths {
         delete: operations["organization-sso-delete_organization_sso"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Organization Sso
+         * @description Pause or resume sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Writes the one field, so the issuer is neither re-read nor re-submitted and the stored client
+         *     secret stands. Refused with 404 when the organization has not saved a connection yet, and with
+         *     409 when pausing a connection the organization still requires sign-in through: stop requiring
+         *     it first.
+         */
+        patch: operations["organization-sso-patch_organization_sso"];
         trace?: never;
     };
     "/api/v1/organizations/me/sso/enforcement": {
@@ -6783,8 +6900,10 @@ export interface paths {
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
          *     Called with an API key, a tool its workspace does not allow is listed as
-         *     unavailable. Every other `tools[]` entry, including provider-native keywords
-         *     not listed here, is forwarded to the upstream provider untouched.
+         *     unavailable, and so is a tool that runs on the deployment's account while
+         *     the key's organization has no funds. Every other `tools[]` entry, including
+         *     provider-native keywords not listed here, is forwarded to the upstream
+         *     provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -8625,6 +8744,10 @@ export interface components {
          *     current invitation, which may have expired, so the roster can offer to
          *     revoke or reissue it.
          *
+         *     ``is_sso_account`` records how the account came about, not whether the
+         *     connection still admits it: an organization that repoints or drops its
+         *     connection leaves the account provisioned by one and unable to sign in.
+         *
          *     ``attribution_user_id`` is the addition the platform has no counterpart for.
          *     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
          *     not to this UUID identity, so this carries the ``user_id`` a caller passes to
@@ -8660,6 +8783,12 @@ export interface components {
             invitation_expires_at?: string | null;
             /** Invitation Id */
             invitation_id?: string | null;
+            /**
+             * Is Sso Account
+             * @description Whether an organization's own OIDC connection provisioned this member's account. Such an account is created with no sign-in address, so email is null until one is set.
+             * @default false
+             */
+            is_sso_account: boolean;
             /** Organization Member Id */
             organization_member_id?: string | null;
             /** Role */
@@ -9372,6 +9501,87 @@ export interface components {
              * @constant
              */
             type: "file";
+        };
+        /**
+         * AppAuthorizationRequest
+         * @description The dashboard records explicit approval for one workspace.
+         */
+        AppAuthorizationRequest: {
+            /** Client Id */
+            client_id: string;
+            /** Code Challenge */
+            code_challenge: string;
+            /**
+             * Code Challenge Method
+             * @constant
+             */
+            code_challenge_method: "S256";
+            /** Redirect Uri */
+            redirect_uri: string;
+            /**
+             * Response Type
+             * @default code
+             * @constant
+             */
+            response_type: "code";
+            /** State */
+            state: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** AppAuthorizationResponse */
+        AppAuthorizationResponse: {
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppDetails */
+        AppDetails: {
+            /** Issuer */
+            issuer: string;
+            /** Name */
+            name: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppRevocationRequest */
+        AppRevocationRequest: {
+            /** Token */
+            token: string;
+            /** Token Type Hint */
+            token_type_hint?: string | null;
+        };
+        /**
+         * AppTokenRequest
+         * @description Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.
+         */
+        AppTokenRequest: {
+            /** Client Id */
+            client_id: string;
+            /** Code */
+            code: string;
+            /** Code Verifier */
+            code_verifier: string;
+            /**
+             * Grant Type
+             * @constant
+             */
+            grant_type: "authorization_code";
+            /** Redirect Uri */
+            redirect_uri: string;
+        };
+        /** AppTokenResponse */
+        AppTokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default Bearer
+             * @constant
+             */
+            token_type: "Bearer";
         };
         /**
          * AudioContent
@@ -11960,6 +12170,16 @@ export interface components {
             data: components["schemas"]["DeploymentUserPublic"][];
         };
         /**
+         * DisabledReason
+         * @description Represents the reason an API key cannot be enabled.
+         *
+         *     Every reason blocks the key's owner. Some also block an operator, which
+         *     ``operator_may_clear`` records. A key with no reason set can be enabled by
+         *     its owner.
+         * @enum {string}
+         */
+        DisabledReason: "operator" | "revoked";
+        /**
          * DiscoverableModel
          * @description A model one provider instance reports as available.
          */
@@ -12872,7 +13092,7 @@ export interface components {
          * @description A single guardrail check the caller wants the gateway to enforce.
          *
          *     URL safety: when ``url`` is supplied it is validated by
-         *     :func:`gateway.services.guardrails.run_input_guardrails` (not here at parse
+         *     :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
          *     time — the check does a DNS lookup that must be awaited) with the same
          *     SSRF guard used for MCP server URLs (loopback allowed by default for
          *     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
@@ -12889,7 +13109,7 @@ export interface components {
              */
             mode: "block" | "monitor";
             /** On */
-            on?: ("input" | "output")[];
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @default block
@@ -14039,6 +14259,7 @@ export interface components {
             config_name?: string | null;
             /** Created At */
             created_at: string;
+            disabled_reason: components["schemas"]["DisabledReason"] | null;
             /** End User Budget Id */
             end_user_budget_id: string | null;
             /** End User Budget Ids */
@@ -14072,11 +14293,8 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
-            /**
-             * Operator Disabled
-             * @default false
-             */
-            operator_disabled: boolean;
+            /** Operator Can Enable */
+            operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */
@@ -14342,7 +14560,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it and its organization can pay for what the tool runs on the deployment's account. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -14377,9 +14595,9 @@ export interface components {
             object: "tool";
             /**
              * Reason
-             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would run on the deployment's account and the API key's organization has no funds to pay for it, which adding funds changes.
              */
-            reason?: ("not_configured" | "workspace_disabled") | null;
+            reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
         };
         /**
          * McpConnectionComplete
@@ -15264,6 +15482,17 @@ export interface components {
             proof_expires_at: string | null;
         };
         /**
+         * OIDCConnectionEnabledRequest
+         * @description What an organization administrator submits to pause or resume sign-in through its connection.
+         */
+        OIDCConnectionEnabledRequest: {
+            /**
+             * Enabled
+             * @description Whether this connection admits sign-in.
+             */
+            enabled: boolean;
+        };
+        /**
          * OIDCConnectionPublic
          * @description An organization's own sign-in connection, as its admins see it.
          *
@@ -15310,6 +15539,9 @@ export interface components {
         /**
          * OIDCConnectionRequest
          * @description What an organization administrator submits to configure its own sign-in connection.
+         *
+         *     Whether the connection admits sign-in is not here: `OIDCConnectionEnabledRequest` is the only
+         *     way to change it, so storing a connection can neither pause nor resume one.
          */
         OIDCConnectionRequest: {
             /**
@@ -15334,12 +15566,6 @@ export interface components {
              * @description The identity provider's name, as shown to people signing in.
              */
             display_name: string;
-            /**
-             * Enabled
-             * @description Whether this connection currently admits sign-in.
-             * @default true
-             */
-            enabled: boolean;
             /**
              * Issuer
              * @description The identity provider's issuer URL, as the organization's own claim.
@@ -16054,11 +16280,6 @@ export interface components {
          *     ``http://`` sidecar) and this row cannot see what it is set to, so an entry
          *     that fell back to it could not promise the bearer was sent over https. See
          *     `_require_url_for_credential`.
-         *
-         *     ``on`` is not offered. This plane mandates input-direction checks, which is
-         *     the only direction the request path enforces
-         *     (`services.guardrails.run_input_guardrails`); an organization that could
-         *     store an output-direction mandate would be storing one nothing runs.
          * @example {
          *       "applies_to_all_workspaces": true,
          *       "credential": "sk-guardrails-...",
@@ -16092,11 +16313,16 @@ export interface components {
             enabled: boolean;
             /**
              * Mode
-             * @description block rejects a flagged request with 403; monitor annotates the response and forwards it
+             * @description monitor records the verdict and forwards the request; block refuses flagged input or a flagged answer with 403 and withholds a flagged tool result or tool call
              * @default monitor
              * @enum {string}
              */
             mode: "block" | "monitor";
+            /**
+             * On
+             * @description What the guardrail reads: input (the caller's input), tool_results, tool_calls (each call before it runs or reaches the client), output (the model's answer)
+             */
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @description What a block-mode entry does when the guardrails service cannot be reached or gives no verdict
@@ -16337,6 +16563,8 @@ export interface components {
             id: string;
             /** Mode */
             mode: string;
+            /** On */
+            on: ("input" | "tool_results" | "tool_calls" | "output")[];
             /** On Unavailable */
             on_unavailable: string;
             /**
@@ -16441,6 +16669,8 @@ export interface components {
              * @enum {string}
              */
             mode?: "block" | "monitor";
+            /** On */
+            on?: ("input" | "tool_results" | "tool_calls" | "output")[];
             /**
              * On Unavailable
              * @enum {string}
@@ -19310,8 +19540,8 @@ export interface components {
          *     The example is the first-boot claim, because that is the call an operator
          *     makes first and the one whose required fields are not obvious from the
          *     schema: ``email`` is optional here in general and *required* when the
-         *     identity has no address yet. Without it the generated Postman body carries
-         *     only ``new_password``, which is the one shape that cannot complete the flow
+         *     identity has no address yet. Without it a request body built from the spec
+         *     carries only ``new_password``, which is the one shape that cannot complete the flow
          *     the docs walk through.
          * @example {
          *       "email": "operator@example.com",
@@ -19411,6 +19641,11 @@ export interface components {
              */
             full_name?: string | null;
             /**
+             * Invite
+             * @description An invitation token from a link emailed to this address. Where it names the same address, the account is verified at once and no verification email is sent.
+             */
+            invite?: string | null;
+            /**
              * Password
              * @description The password to sign in with once verified. At least 8 characters, at most 72 bytes.
              */
@@ -19432,6 +19667,12 @@ export interface components {
              * @description What the caller should do next.
              */
             message: string;
+            /**
+             * Verified
+             * @description The account is verified already, through its invitation, so the caller can sign in now.
+             * @default false
+             */
+            verified: boolean;
         };
         /**
          * SpanPublic
@@ -25770,6 +26011,10 @@ export interface operations {
                 limit?: number;
                 /** @description Only models of this kind; `unknown` for those no source names a kind for */
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
+                /** @description Only models whose name contains this text, case-insensitively */
+                search?: string | null;
+                /** @description Only models served (`true`) or only models withheld (`false`) */
+                enabled?: boolean | null;
             };
             header?: never;
             path: {
@@ -27335,6 +27580,232 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModerationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-authorization_redirect": {
+        parameters: {
+            query: {
+                client_id: string;
+                redirect_uri: string;
+                state: string;
+                code_challenge: string;
+                code_challenge_method: "S256";
+                response_type?: "code";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Continue to dashboard sign-in and consent. */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppAuthorizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppAuthorizationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-app_details": {
+        parameters: {
+            query: {
+                client_id: string;
+                redirect_uri: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["AppRevocationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["AppTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppTokenResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-app_workspaces": {
+        parameters: {
+            query?: {
+                search?: string;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacesPublic"];
                 };
             };
             /** @description Validation Error */
@@ -29433,6 +29904,10 @@ export interface operations {
                 limit?: number;
                 /** @description Only models of this kind; `unknown` for those no source names a kind for */
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
+                /** @description Only models whose name contains this text, case-insensitively */
+                search?: string | null;
+                /** @description Only models served (`true`) or only models withheld (`false`) */
+                enabled?: boolean | null;
             };
             header?: never;
             path: {
@@ -29991,6 +30466,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "organization-sso-patch_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCConnectionEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
