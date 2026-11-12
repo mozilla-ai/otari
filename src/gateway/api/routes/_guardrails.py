@@ -238,11 +238,11 @@ class RequestGuardrails:
         try:
             await self._run([content])
         except _Unchecked as unchecked:
-            self._count(self._withheld, unchecked.profile)
+            self._count_withheld(unchecked.profile)
             self._write_header()
             return _skipped_call(unchecked.profile, unchecked=True)
         if content.refusals:
-            self._count(self._withheld, content.refusals[0].profile)
+            self._count_withheld(content.refusals[0].profile)
         self._write_header()
         return _skipped_call(content.refusals[0].profile) if content.refusals else None
 
@@ -289,11 +289,10 @@ class RequestGuardrails:
         except _Unchecked as unchecked:
             self._write_header()
             raise AnswerRefused(
-                {
-                    "message": f"The answer could not be checked by the {unchecked.profile!r} guardrail.",
-                    "code": GUARDRAIL_VIOLATION,
-                    "guardrails": [{"profile": unchecked.profile, "explanation": None, "score": None}],
-                }
+                _refusal(
+                    f"The answer could not be checked by the {unchecked.profile!r} guardrail.",
+                    [GuardrailResult(profile=unchecked.profile, mode="block", valid=None)],
+                )
             ) from unchecked.__cause__
         self._write_header()
         refused = [r for c in contents for r in c.refusals]
@@ -330,9 +329,7 @@ class RequestGuardrails:
             assert isinstance(outcome, GuardrailVerdict)
             blocking = [r for r in outcome.results if r.flagged and r.mode == "block"]
             if blocking and content.withhold is not None:
-                content.withhold(withheld_tool_result(blocking[0].profile))
-                content.withheld = True
-                self._count(self._withheld, blocking[0].profile)
+                self._withhold(content, content.withhold, blocking[0].profile)
             elif blocking:
                 content.refusals += blocking
             if content.reported:
@@ -348,9 +345,7 @@ class RequestGuardrails:
         self._record_span(profile, mode, None, content, started, ended, withheld=content.withhold is not None)
         if content.withhold is not None:
             logger.warning("guardrail check on a tool result could not be evaluated; withholding it: %s", exc)
-            content.withhold(withheld_tool_result(profile, unchecked=True))
-            content.withheld = True
-            self._count(self._withheld, profile)
+            self._withhold(content, content.withhold, profile, unchecked=True)
             return
         # The full reason, endpoint included, goes to the log; the caller gets
         # the error's `public_detail`, which names the profile and nothing else.
@@ -401,9 +396,16 @@ class RequestGuardrails:
 
     # -- what is reported ------------------------------------------------------
 
-    @staticmethod
-    def _count(counts: dict[str, int], profile: str) -> None:
-        counts[profile] = counts.get(profile, 0) + 1
+    def _withhold(
+        self, content: _Content, withhold: Callable[[str], None], profile: str, *, unchecked: bool = False
+    ) -> None:
+        """Put the notice ``profile`` leaves in place of ``content``, and count it on the header."""
+        withhold(withheld_tool_result(profile, unchecked=unchecked))
+        content.withheld = True
+        self._count_withheld(profile)
+
+    def _count_withheld(self, profile: str) -> None:
+        self._withheld[profile] = self._withheld.get(profile, 0) + 1
 
     def _report(
         self, results: Sequence[GuardrailResult], content: _Content, started: datetime, ended: datetime

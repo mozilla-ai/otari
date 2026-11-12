@@ -24,6 +24,11 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 
 
+def _code_hash(code: str) -> str:
+    """How an authorization code is stored and looked up, so the code itself is never kept."""
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
 class OAuthAppService:
     def __init__(
         self,
@@ -78,7 +83,7 @@ class OAuthAppService:
                 user=user, organization_id=workspace.organization_id, workspace_id=workspace.id, revoking=False
             )
             await self.grants.issue(
-                code_hash=hashlib.sha256(code.encode()).hexdigest(),
+                code_hash=_code_hash(code),
                 client_id=request.client_id,
                 redirect_uri=request.redirect_uri,
                 challenge=request.code_challenge,
@@ -106,7 +111,7 @@ class OAuthAppService:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
-                code_hash=hashlib.sha256(request.code.encode()).hexdigest(),
+                code_hash=_code_hash(request.code),
                 client_id=request.client_id,
                 redirect_uri=request.redirect_uri,
                 challenge=generate_code_challenge(request.code_verifier),
