@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import insert_ignoring_duplicates
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.update_check import STATE_ROW_ID, UpdateCheckState
 from gateway.repositories.base_repository import BaseRepository
@@ -23,21 +23,19 @@ class UpdateCheckStateRepository(BaseRepository[UpdateCheckState, UpdateCheckAns
     async def get_or_create(self) -> UpdateCheckState:
         """The state row, created with a new install id the first time it is read.
 
-        Every replica's poll and a page load can find no row at once. The insert
-        runs in a SAVEPOINT, so the one that loses the race rolls back its row
-        alone and reads the winner's, and the deployment keeps one install id.
+        Concurrent first reads return the same row, so the deployment keeps one install ID.
         """
         row = await self.db.get(UpdateCheckState, STATE_ROW_ID, populate_existing=True)
         if row is None:
-            try:
-                async with self.db.begin_nested():
-                    self.db.add(UpdateCheckState(id=STATE_ROW_ID))
-            except IntegrityError:
-                pass
+            await insert_ignoring_duplicates(
+                self.db,
+                [UpdateCheckState(id=STATE_ROW_ID)],
+                conflict=[UpdateCheckState.id],
+                returning=UpdateCheckState.id,
+            )
             row = await self.db.get(UpdateCheckState, STATE_ROW_ID, populate_existing=True)
             if row is None:
                 raise LookupError("the update check state row is missing after its insert")
-            await self.db.refresh(row)
         return row
 
     async def schedule_if_unset(self, next_check_at: datetime) -> None:
