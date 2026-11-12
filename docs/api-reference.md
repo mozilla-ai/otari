@@ -494,7 +494,7 @@ provider or billing again.
 | Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
 | Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
 | Different request, same key | `422`. |
-| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer, for as long as the original runs: a slow model writing a long answer can take minutes. |
+| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer, for as long as the original runs (a slow model writing a long answer can take minutes), unless its claim lapses, as the list below says. |
 | Original failed | The next retry runs in its place. Only a successful response is kept. |
 | Long-running original | The request holding a key renews its claim while it runs, so a retry never runs it a second time. If the worker running it dies, its key frees up within `idempotency_lease_sec` (a minute by default). |
 | Retention | A response, generated content included, is kept for `idempotency_retention_sec` (a day by default; `0` ignores the header) and then deleted. Expired responses are still deleted after the header is turned off. |
@@ -523,7 +523,8 @@ was not stored or can no longer be read:
 4. For a new or changed request, generate a new key; reusing one is a `422`.
 
 The same retry recovers what a lost response would have said: the replay
-carries the original's `Otari-Request-ID` and `usage.cost_usd`, which an answer
+carries the original's `Otari-Request-ID`, and its `usage.cost_usd` where the
+original had one, which an answer
 from a proxy in front of the gateway (see
 [Request ID and inline cost](#request-id-and-inline-cost)) does not.
 
