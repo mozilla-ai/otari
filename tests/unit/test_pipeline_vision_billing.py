@@ -56,6 +56,7 @@ class _Recorder:
                 reject_user_mismatch=None,
                 is_service_key=False,
                 workspace_id=uuid.uuid4(),
+                holds_scope=lambda scope: True,
             ), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:

@@ -173,7 +173,7 @@ owner can do.
 | Scope | Lets the key |
 | --- | --- |
 | `inference` | Call models: chat completions, messages, responses, embeddings, moderations, rerank, audio, images, video, and decisions |
-| `files:read` | List and download files |
+| `files:read` | List and download files, attach a stored file to a model request by its `file_id`, and stage one into a code run |
 | `files:write` | Upload and delete files |
 | `batches:read` | List batches and read their results |
 | `batches:write` | Create and cancel batches |
