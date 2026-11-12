@@ -1029,6 +1029,8 @@ export function useOrgProviderModels(
   type = "",
   /** Only models whose name contains this text; empty for every model. */
   search = "",
+  /** Only served models, or only withheld ones; undefined for both. */
+  served: boolean | undefined = undefined,
   enabled = true,
 ) {
   return useQuery({
@@ -1039,10 +1041,11 @@ export function useOrgProviderModels(
       pageSize,
       type,
       search,
+      served,
     ],
     queryFn: () =>
       apiFetch<OrgProviderModels>(
-        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
       ),
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>

@@ -289,12 +289,15 @@ per-second price, is under **Output**, and hovering it names what it prices and
 its unit ("Video output, $0.045/second"). A per-second price on any other kind
 of model is audio, shown on the side it is stored on. On a phone, which cannot
 hover, the unit is shown beside the amount. The search box beside the tabs
-keeps the models whose name contains what is typed, in any case, and the tab
-counts then count only those. The list endpoint,
+keeps the models whose name contains what is typed, in any case, and the
+**Serving** / **Not serving** choice beside it keeps the models switched on or
+off; the tab counts then count only those. The list endpoint,
 `GET /api/v1/organizations/me/provider-keys/{key_id}/models`, takes the same
-kind as `type` (`unknown` included) and the search as `search`, returns each
-model's `type`, and counts every kind the search keeps in `type_counts`
-whichever one it returns.
+kind as `type` (`unknown` included), the search as `search` and the switch as
+`enabled` (`true` or `false`), returns each model's `type`, and counts every
+kind the search and the switch keep in `type_counts` whichever one it returns.
+The hosted providers' `GET /api/v1/hosted-providers/{provider}/models` takes
+the same three.
 
 A model nothing prices is offered switched off while `require_pricing` is on,
 and the switch refuses to turn it on until it has a rate, so a model the
