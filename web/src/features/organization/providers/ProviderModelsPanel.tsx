@@ -20,6 +20,7 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
 import {
   filteredEmptyContent,
   OfferedModelFilters,
@@ -242,9 +243,21 @@ export function ProviderModelsPanel({
     return <PageLoading label="Loading models…" />
   }
 
+  // A failed list is not an empty one: with a settled error, rendering "no
+  // models yet" would tell an admin their catalog is gone. A filter with no
+  // models left is an empty table, not this, and so is a search's answer still
+  // shown while the list it was cleared to loads.
+  const isEmptyCatalog =
+    !models.error &&
+    !models.isPlaceholderData &&
+    rows.length === 0 &&
+    kind === "" &&
+    serving === "" &&
+    term === ""
+
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex min-w-0 flex-col">
           <h3 className="text-title">Models on {providerKey.name}</h3>
           <p className="text-caption">
@@ -254,43 +267,56 @@ export function ProviderModelsPanel({
             prices is offered but not served, and stays off until it has a rate.
           </p>
         </div>
-        {canEdit ? (
+        {canEdit || !isEmptyCatalog ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-11 md:min-h-9"
-              isPending={refreshModels.isPending}
-              onPress={() => {
-                clearOutcome()
-                refreshModels.mutate()
-              }}
-            >
-              <FiRefreshCw aria-hidden className="size-4" />
-              Refresh models
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-11 md:min-h-9"
-              isPending={refreshPricing.isPending}
-              onPress={() => {
-                clearOutcome()
-                refreshPricing.mutate()
-              }}
-            >
-              <FiRefreshCw aria-hidden className="size-4" />
-              Refresh pricing
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              className="min-h-11 md:min-h-9"
-              onPress={openOffer}
-            >
-              <FiPlus aria-hidden className="size-4" />
-              Add model
-            </Button>
+            {canEdit ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-11 md:min-h-9"
+                  isPending={refreshModels.isPending}
+                  onPress={() => {
+                    clearOutcome()
+                    refreshModels.mutate()
+                  }}
+                >
+                  <FiRefreshCw aria-hidden className="size-4" />
+                  Refresh models
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-11 md:min-h-9"
+                  isPending={refreshPricing.isPending}
+                  onPress={() => {
+                    clearOutcome()
+                    refreshPricing.mutate()
+                  }}
+                >
+                  <FiRefreshCw aria-hidden className="size-4" />
+                  Refresh pricing
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="min-h-11 md:min-h-9"
+                  onPress={openOffer}
+                >
+                  <FiPlus aria-hidden className="size-4" />
+                  Add model
+                </Button>
+              </div>
+            ) : null}
+            {isEmptyCatalog ? null : (
+              <OfferedModelFilters
+                providerName={providerKey.name}
+                serving={serving}
+                onServingChange={onServingChange}
+                search={search}
+                onSearchChange={onSearchChange}
+              />
+            )}
           </div>
         ) : null}
       </div>
@@ -310,16 +336,7 @@ export function ProviderModelsPanel({
         </p>
       ) : null}
 
-      {/* A failed list is not an empty one: with a settled error, rendering
-          "no models yet" would tell an admin their catalog is gone. A filter
-          with no models left is an empty table, not this, and so is
-          a search's answer still shown while the list it was cleared to loads. */}
-      {!models.error &&
-      !models.isPlaceholderData &&
-      rows.length === 0 &&
-      kind === "" &&
-      serving === "" &&
-      term === "" ? (
+      {isEmptyCatalog ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -329,17 +346,13 @@ export function ProviderModelsPanel({
         />
       ) : (
         <>
-          <OfferedModelFilters
-            providerName={providerKey.name}
-            counts={models.data?.type_counts}
-            showTabs={models.data !== undefined}
-            kind={kind}
-            onKindChange={onKindChange}
-            serving={serving}
-            onServingChange={onServingChange}
-            search={search}
-            onSearchChange={onSearchChange}
-          />
+          {models.data ? (
+            <OfferedKindTabs
+              counts={models.data.type_counts}
+              shown={kind}
+              onShow={onKindChange}
+            />
+          ) : null}
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
