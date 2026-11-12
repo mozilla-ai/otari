@@ -218,7 +218,11 @@ def test_an_upload_the_caller_cannot_reach_is_a_400(
 
 
 def test_a_service_keys_upload_is_seeded_into_a_run_it_sends_for_an_end_user(
-    client: TestClient, port: _FakePort, master_key_header: dict[str, str], tmp_file_store: None
+    client: TestClient,
+    port: _FakePort,
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    db_session_factory: Any,
 ) -> None:
     """A service key uploads as its own user, so the runs it sends for its end users reach the upload."""
     key = client.post(
@@ -244,6 +248,18 @@ def test_a_service_keys_upload_is_seeded_into_a_run_it_sends_for_an_end_user(
     assert port.seeded == {"data.csv": b"a,b\n1,2\n"}
     # What the run wrote belongs to the end user, and its next run still reads it.
     (written,) = resp.json()["files"]
+    session = db_session_factory()
+    try:
+        owner = session.execute(
+            text(
+                "SELECT u.parent_user_id, u.external_id FROM file_objects f"
+                " JOIN users u ON u.user_id = f.user_id WHERE f.id = :id"
+            ),
+            {"id": written["file_id"]},
+        ).one()
+    finally:
+        session.close()
+    assert tuple(owner) == ("code-service", "fxa-123")
     again = client.post(
         _ENDPOINT, json={"code": "print(1)", "file_ids": [written["file_id"]], "user": "fxa-123"}, headers=headers
     )
