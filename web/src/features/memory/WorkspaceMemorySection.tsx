@@ -31,14 +31,14 @@ const RELEVANCE_LABEL = "How relevant an entry must be"
 const MOST_LABEL = "Entries added at most"
 
 const SIMILARITY_OPTIONS = [
-  { value: "0.65", label: "Broad (0.65)" },
-  { value: "0.75", label: "Balanced (0.75)" },
-  { value: "0.85", label: "Strict (0.85)" },
+  { value: "0.60", label: "Broad (0.60)" },
+  { value: "0.65", label: "Balanced (0.65)" },
+  { value: "0.70", label: "Strict (0.70)" },
 ]
 const RELEVANCE_OPTIONS = [
-  { value: "0.30", label: "Broad (0.30)" },
-  { value: "0.50", label: "Balanced (0.50)" },
-  { value: "0.80", label: "Strict (0.80)" },
+  { value: "0.50", label: "Broad (0.50)" },
+  { value: "0.80", label: "Balanced (0.80)" },
+  { value: "0.90", label: "Strict (0.90)" },
 ]
 const MOST_OPTIONS = [1, 2, 3, 4, 5].map((count) => ({
   value: String(count),

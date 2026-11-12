@@ -30873,14 +30873,14 @@
             "type": "integer"
           },
           "recall_min_relevance": {
-            "default": 0.5,
+            "default": 0.8,
             "maximum": 0.99,
             "minimum": 0.05,
             "title": "Recall Min Relevance",
             "type": "number"
           },
           "recall_min_similarity": {
-            "default": 0.75,
+            "default": 0.65,
             "maximum": 0.99,
             "minimum": 0.3,
             "title": "Recall Min Similarity",

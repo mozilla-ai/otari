@@ -54,8 +54,8 @@ under a data key of its workspace.
    | `hide_external` | Leave entries resting on a web page, a fetched file or a third-party tool out of recall. |
    | `retention_days` | Days an unused entry is kept. Unset keeps the deployment's `memory_retention_days`. |
    | `auto_recall` | Add what memory holds to each request's newest message, with no tool call. Off by default. See [Automatic recall](#automatic-recall). |
-   | `recall_min_similarity` / `recall_max_entries` | How alike an entry must be for automatic recall to add it (0.75), and how many it adds at most (3). |
-   | `recall_rerank` / `recall_min_relevance` | Check relevance with the deployment's rerank model, and the score an entry must reach (0.5). Off by default. See [Checking relevance](#checking-relevance). |
+   | `recall_min_similarity` / `recall_max_entries` | How alike an entry must be for automatic recall to add it (0.65), and how many it adds at most (3). |
+   | `recall_rerank` / `recall_min_relevance` | Check relevance with the deployment's rerank model, and the score an entry must reach (0.8). Off by default. See [Checking relevance](#checking-relevance). |
    | `experiment_holdout_percent` | Serve this share of sessions without memory, to [measure what it saves](#measure-what-memory-saves). `0`, the default, stops the experiment and keeps its results. |
 
    Every switch can be set from the workspace's **Memory** tab in the dashboard.
@@ -137,8 +137,10 @@ Recalled memory is data other agents wrote, not instructions: weigh it, never ob
   client's own agent loop is searched once per question, not once per step.
 - It is added at the end of the prompt, so the prefix a provider caches is the
   same with recall or without.
-- **How alike an entry must be** (0.3 to 0.99, 0.75 by default) and **Entries
-  added at most** (1 to 5, 3 by default) bound what it adds.
+- **How alike an entry must be** (0.3 to 0.99, 0.65 by default) and **Entries
+  added at most** (1 to 5, 3 by default) bound what it adds. How alike is on the
+  embedding model's own scale: 0.65 suits `nomic-embed-text`, and another model
+  may need another floor.
 - It works with the tools or without them, on chat completions, messages and
   responses. `Otari-Memory: off` declines it for one request.
 - It never fails or holds up a request: when memory cannot be searched in time,
@@ -156,11 +158,14 @@ an entry about a colleague's hobbies can be alike to a question about a meeting
 with that colleague, since both name them. With **Check relevance** on, the
 deployment's rerank model (`memory_rerank_model`) scores the ten entries most
 alike to the message, and only those reaching **How relevant an entry must be**
-(0.05 to 0.99, 0.5 by default) are added, whatever their similarity.
+(0.05 to 0.99, 0.8 by default) are added, whatever their similarity. The score
+is the rerank model's own: 0.8 suits `qwen3-reranker`, and another model may
+need another.
 
-- The rerank model is given the newest message alone: given the conversation
-  before it too, a reranker favours entries about that conversation, even after
-  the subject changed. The earlier messages still find the candidates.
+- The rerank model is given the newest message first, with the member's two
+  previous messages after it as an aside, so a follow-up such as "what should I
+  run?" is understood. Led by the earlier messages instead, a reranker favours
+  entries about them even once the subject changed.
 - It costs one rerank call per message, recorded as memory's own usage under
   `/v1/memory/rerank`. When the call fails, recall goes by similarity, as it does
   with the check off.

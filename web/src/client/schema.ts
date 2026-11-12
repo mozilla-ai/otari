@@ -22807,12 +22807,12 @@ export interface components {
             recall_max_entries: number;
             /**
              * Recall Min Relevance
-             * @default 0.5
+             * @default 0.8
              */
             recall_min_relevance: number;
             /**
              * Recall Min Similarity
-             * @default 0.75
+             * @default 0.65
              */
             recall_min_similarity: number;
             /**

@@ -139,10 +139,10 @@ class WorkspaceMemoryUpdate(BaseModel):
     hide_external: bool = False
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     auto_recall: bool = False
-    recall_min_similarity: float = Field(default=0.75, ge=0.3, le=0.99)
+    recall_min_similarity: float = Field(default=0.65, ge=0.3, le=0.99)
     recall_max_entries: int = Field(default=3, ge=1, le=5)
     recall_rerank: bool = False
-    recall_min_relevance: float = Field(default=0.5, ge=0.05, le=0.99)
+    recall_min_relevance: float = Field(default=0.8, ge=0.05, le=0.99)
     experiment_holdout_percent: int = Field(
         default=0,
         ge=0,

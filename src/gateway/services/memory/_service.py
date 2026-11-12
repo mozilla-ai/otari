@@ -73,15 +73,16 @@ COMPARE_FLOOR = 0.75
 SAME_FLOOR = 0.95
 # Passes a proposal may fail on a model before it waits for an admin instead.
 MAX_ATTEMPTS = 5
-# Automatic recall: how alike an entry must be to a request's newest turn, and how many are handed over.
-DEFAULT_RECALL_MIN_SIMILARITY = 0.75
+# Automatic recall: how alike an entry must be to a request's newest turn, and how many are handed over. How alike
+# is the embedding model's own scale: 0.65 suits nomic-embed-text, and another model may want another floor.
+DEFAULT_RECALL_MIN_SIMILARITY = 0.65
 DEFAULT_RECALL_MAX_ENTRIES = 3
 # How far below the most alike entry another may be and still be handed over: one alike only in a name the
 # question mentions falls well below what the question is about.
 RECALL_MARGIN = 0.1
-# Where a workspace checks relevance: the score an entry must reach by default, and how many of the most alike
-# entries the rerank model scores, whatever their similarity, since it is the check.
-DEFAULT_RECALL_MIN_RELEVANCE = 0.5
+# Where a workspace checks relevance: the score an entry must reach by default, on qwen3-reranker's scale, and how
+# many of the most alike entries the rerank model scores, whatever their similarity, since it is the check.
+DEFAULT_RECALL_MIN_RELEVANCE = 0.8
 RERANK_CANDIDATES = 10
 # The read records automatic recall and the search tool leave, which the experiment counts.
 RECALL_TOOL = "auto_recall"
@@ -457,9 +458,10 @@ class MemoryService:
         the subject is not held to the old one.
 
         Where the workspace checks relevance, the deployment's rerank model scores the entries most alike against
-        the turn alone, and those reaching the workspace's score are handed over; the turn alone, since the
-        conversation before it pulls a reranker toward entries about that. Otherwise, or when the check fails,
-        entries clearing the similarity floor are, less those well below the most alike.
+        the turn, with ``context`` after it as an aside, and those reaching the workspace's score are handed over.
+        The turn comes first: led by the conversation before it, a reranker favours entries about that
+        conversation even once the subject changed. Otherwise, or when the check fails, entries clearing the
+        similarity floor are, less those well below the most alike.
 
         Empty where the workspace does not recall automatically. Only what is handed over is recorded as read.
 
@@ -495,7 +497,8 @@ class MemoryService:
         )
         kept: list[tuple[float, OpenedEntry]] | None = None
         if min_relevance is not None and self._models.can_rerank:
-            relevant = await self._relevant(caller, query, [entry for _, entry in alike[:RERANK_CANDIDATES]])
+            asked = query if not context else f"{query}\n(Said earlier in the conversation: {context})"
+            relevant = await self._relevant(caller, asked, [entry for _, entry in alike[:RERANK_CANDIDATES]])
             if relevant is not None:
                 kept = [(score, entry) for score, entry in relevant if score >= min_relevance]
         if kept is None:

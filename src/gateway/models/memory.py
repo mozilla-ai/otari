@@ -297,12 +297,12 @@ class MemoryWorkspaceSettings(Base):
     retention_days: Mapped[int | None] = mapped_column()
     # Search memory for each request's newest user turn and hand the model what is alike enough, with no tool call.
     auto_recall: Mapped[bool] = mapped_column(default=False, server_default=false())
-    recall_min_similarity: Mapped[float] = mapped_column(default=0.75, server_default="0.75")
+    recall_min_similarity: Mapped[float] = mapped_column(default=0.65, server_default="0.65")
     recall_max_entries: Mapped[int] = mapped_column(default=3, server_default="3")
     # Have the deployment's rerank model score the entries most alike to the turn, and hand over only those that
     # reach ``recall_min_relevance``; the similarity floor then no longer applies.
     recall_rerank: Mapped[bool] = mapped_column(default=False, server_default=false())
-    recall_min_relevance: Mapped[float] = mapped_column(default=0.5, server_default="0.5")
+    recall_min_relevance: Mapped[float] = mapped_column(default=0.8, server_default="0.8")
     # The share of sessions the last experiment served without memory, to measure what it saves; zero is none ever.
     experiment_holdout_percent: Mapped[int] = mapped_column(default=0, server_default="0")
     # When it began, which deals the sessions, and when it stopped; it runs while it has begun and not stopped.

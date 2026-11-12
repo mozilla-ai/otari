@@ -29,7 +29,7 @@ MEMORY_WORKSPACE_SETTINGS = "memory_workspace_settings"
 def upgrade() -> None:
     with op.batch_alter_table(MEMORY_WORKSPACE_SETTINGS) as batch:
         batch.add_column(sa.Column("auto_recall", sa.Boolean(), server_default=sa.false(), nullable=False))
-        batch.add_column(sa.Column("recall_min_similarity", sa.Float(), server_default="0.75", nullable=False))
+        batch.add_column(sa.Column("recall_min_similarity", sa.Float(), server_default="0.65", nullable=False))
         batch.add_column(sa.Column("recall_max_entries", sa.Integer(), server_default="3", nullable=False))
         batch.add_column(sa.Column("experiment_holdout_percent", sa.Integer(), server_default="0", nullable=False))
         batch.add_column(sa.Column("experiment_started_at", sa.DateTime(timezone=True), nullable=True))

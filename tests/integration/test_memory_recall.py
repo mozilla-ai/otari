@@ -186,7 +186,7 @@ def test_checking_relevance_hands_over_what_the_reranker_scores_relevant_whateve
     memory = reranking_client.get(
         f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory", headers=master_key_header
     ).json()
-    assert memory["rerank_available"] is True and memory["recall_min_relevance"] == 0.5
+    assert memory["rerank_available"] is True and memory["recall_min_relevance"] == 0.8
 
     with _provider(_completion(None), _completion(None)) as sent:
         branch = _chat(reranking_client, headers, messages=[{"role": "user", "content": WHICH_BRANCH}])
@@ -197,6 +197,31 @@ def test_checking_relevance_hands_over_what_the_reranker_scores_relevant_whateve
     assert DEPLOY in text and NEARBY not in text
     assert deploy.headers["Otari-Memory-Recalled"] == "0", "alike, yet scored not relevant"
     assert _rerank_calls(db_session_factory) == [True, True], "each check is metered as memory's own call"
+
+
+def test_the_reranker_reads_the_turn_first_and_the_conversation_after_it(
+    reranking_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = _key(reranking_client, master_key_header, db_session_factory)
+    _remembered(reranking_client, headers)
+    _switches(reranking_client, db_session_factory, master_key_header, auto_recall=True, recall_rerank=True)
+    queries: list[str] = []
+
+    async def capture(self: MemoryModels, query: str, documents: Sequence[str]) -> tuple[list[float], ModelUse]:
+        queries.append(query)
+        return await _rerank_on_branch(self, query, documents)
+
+    monkeypatch.setattr(MemoryModels, "rerank", capture)
+    conversation = [{"role": "user", "content": ASK}, {"role": "assistant", "content": "With make."}]
+
+    with _provider(_completion(None), _completion(None)):
+        _chat(reranking_client, headers, messages=[{"role": "user", "content": WHICH_BRANCH}])
+        _chat(reranking_client, headers, messages=[*conversation, {"role": "user", "content": WHICH_BRANCH}])
+
+    assert queries == [WHICH_BRANCH, f"{WHICH_BRANCH}\n(Said earlier in the conversation: {ASK})"]
 
 
 def test_recall_falls_back_to_similarity_when_relevance_cannot_be_checked(
