@@ -47,12 +47,10 @@ from gateway.api.routes._normalize import (
 )
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
     classify_provider_error,
     domain_error,
-    error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
@@ -72,7 +70,7 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, ErrorKind, body_fields_of, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
@@ -550,7 +548,7 @@ _ERR_RATE_LIMIT = "rate_limit_error"
 _ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
-# through ``error_kind_for_status``, so one status cannot be classified two ways.
+# through ``ErrorKind.for_status``, so one status cannot be classified two ways.
 _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.API: _ERR_API,
     ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
@@ -571,7 +569,7 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
     """
     if isinstance(exc, BodyHTTPException):
         return exc
-    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.for_status(exc.status_code)]
     detail = exc.detail
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
@@ -768,7 +766,7 @@ class _MessagesAdapter:
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
         mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
-            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.for_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,

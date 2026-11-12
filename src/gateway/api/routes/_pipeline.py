@@ -53,7 +53,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from enum import Enum, StrEnum, auto
+from enum import StrEnum
 from functools import partial, reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, cast
 
@@ -153,6 +153,7 @@ from gateway.core.error_codes import (
     USER_BLOCKED,
     USER_NOT_FOUND,
     WRONG_MODEL_TYPE,
+    ErrorKind,
     RefusalException,
     body_fields_of,
     error_code_of,
@@ -580,38 +581,6 @@ WEB_SEARCH_UNREACHABLE_DETAIL = (
     "web_search backend unreachable. Check the deployment's web search settings, and that the search "
     "provider is reachable."
 )
-
-
-class ErrorKind(Enum):
-    """Coarse error category, for a dialect that names one on the wire.
-
-    The set covers every category a dialect distinguishes, so an error can say what it is.
-    """
-
-    API = auto()
-    AUTHENTICATION = auto()
-    INVALID_REQUEST = auto()
-    NOT_FOUND = auto()
-    PERMISSION = auto()
-    RATE_LIMIT = auto()
-    REQUEST_TOO_LARGE = auto()
-
-
-# An error flattened into an ``HTTPException`` no longer carries its kind, so a
-# status stands in for one here.
-_STATUS_ERROR_KINDS = {
-    status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
-    status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
-    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
-    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
-    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
-    status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
-}
-
-
-def error_kind_for_status(status_code: int) -> ErrorKind:
-    """The kind a bare status implies, falling back to ``API``."""
-    return _STATUS_ERROR_KINDS.get(status_code, ErrorKind.API)
 
 
 class ProviderErrorMapping(NamedTuple):
@@ -1769,7 +1738,7 @@ async def _hold_at_deployment_paid_rate(
         kind = (
             ErrorKind.INVALID_REQUEST
             if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED
-            else error_kind_for_status(exc.status_code)
+            else ErrorKind.for_status(exc.status_code)
         )
         headers = dict(exc.headers) if exc.headers is not None else None
         raise adapter.error(exc.status_code, detail, kind, headers=headers) from exc
@@ -1950,7 +1919,7 @@ async def _provider_not_configured(
     return adapter.error(
         public.status_code,
         public.detail,
-        error_kind_for_status(public.status_code),
+        ErrorKind.for_status(public.status_code),
         headers=error_headers(public.code),
     )
 
@@ -3161,7 +3130,7 @@ async def resolve_request_context(
         raise adapter.error(
             key_refusal.status_code,
             key_refusal.detail,
-            error_kind_for_status(key_refusal.status_code),
+            ErrorKind.for_status(key_refusal.status_code),
             headers=error_headers(key_refusal.code),
         )
 
@@ -3431,7 +3400,7 @@ async def resolve_request_context(
         raise adapter.error(
             unresolved.status_code,
             unresolved.detail,
-            error_kind_for_status(unresolved.status_code),
+            ErrorKind.for_status(unresolved.status_code),
             headers=error_headers(unresolved.code),
         )
     # require_pricing is a budget-enforcement safety gate: it refuses a request
@@ -3475,7 +3444,7 @@ async def resolve_request_context(
             refusal.detail,
             ErrorKind.INVALID_REQUEST
             if refusal.code == PRICING_REQUIRED
-            else error_kind_for_status(refusal.status_code),
+            else ErrorKind.for_status(refusal.status_code),
             headers=error_headers(refusal.code),
         )
 

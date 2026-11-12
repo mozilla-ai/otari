@@ -31,7 +31,6 @@ from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentRepla
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
     classify_provider_error,
@@ -51,6 +50,7 @@ from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader,
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ErrorKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import RequestedGuardrails
