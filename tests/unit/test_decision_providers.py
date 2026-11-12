@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig, validate_decision_provider_entry
-from gateway.schemas.inference import MAX_DECISION_IMAGES, DecisionRequest
+from gateway.schemas.inference import MAX_DECISION_IMAGES, DecisionRequest, DecisionResponse
 from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
@@ -28,6 +28,7 @@ QUESTIONS = {"urgent": {"type": "noul", "instructions": "Is this urgent?"}}
     [
         ("typesafe", {"api_key": "k"}),
         ("router", {"provider": "openrouter", "api_key": "k", "api_base": "https://proxy.example/api"}),
+        ("gemini", {"api_key": "k"}),
         ("local", {"provider": "llamacpp", "api_base": "http://127.0.0.1:8080"}),
         ("remote", {"provider": "llamacpp", "api_base": "https://llm.example", "api_key": "k", "timeout": 5}),
     ],
@@ -40,6 +41,7 @@ def test_a_valid_entry_is_accepted(name: str, entry: dict[str, Any]) -> None:
     ("name", "entry", "message"),
     [
         ("typesafe", {}, "api_key is required"),
+        ("google", {"provider": "gemini"}, "api_key is required"),
         ("openrouter", {"api_key": "k", "api_base": "http://proxy.example"}, "must use https"),
         ("local", {"provider": "llamacpp"}, "api_base is required"),
         ("local", {"provider": "llamacpp", "api_base": "http://h:8080", "api_key": "k"}, "must use https"),
@@ -60,6 +62,7 @@ def test_selector_resolves_to_the_provider_endpoint() -> None:
         decision_providers={
             "typesafe": {"api_key": "ts"},
             "openrouter": {"api_key": "or"},
+            "google": {"provider": "gemini", "api_key": "gm"},
             "local": {"provider": "llamacpp", "api_base": "http://127.0.0.1:8080/"},
         }
     )
@@ -67,6 +70,12 @@ def test_selector_resolves_to_the_provider_endpoint() -> None:
     assert (typesafe.url, typesafe.api_key, model) == ("https://api.typesafe.ai/v1/systemone", "ts", "jev-latest")
     openrouter, model = resolve_decision_provider(config, "openrouter:typesafe/jev-1.13")
     assert (openrouter.url, model) == ("https://openrouter.ai/api/alpha/decisions", "typesafe/jev-1.13")
+    google, model = resolve_decision_provider(config, "google:gemini-decision-1")
+    assert (google.url, google.api_key, model) == (
+        "https://generativelanguage.googleapis.com/v1beta/decisions",
+        "gm",
+        "gemini-decision-1",
+    )
     local, model = resolve_decision_provider(config, "local:openjev")
     assert (local.url, local.api_key, model) == ("http://127.0.0.1:8080/v1/systemone", None, "openjev")
 
@@ -112,6 +121,110 @@ async def test_the_body_and_key_reach_the_provider() -> None:
 async def test_a_keyless_provider_sends_no_authorization_header() -> None:
     _, seen = await _send(httpx.Response(200, json={"answers": {}}), _provider(api_key=None))
     assert "authorization" not in seen[0].headers
+
+
+def _gemini() -> DecisionProvider:
+    return DecisionProvider(
+        name="google",
+        provider="gemini",
+        api_key="gkey",
+        url="https://generativelanguage.googleapis.com/v1beta/decisions",
+        timeout_s=5,
+    )
+
+
+async def _ask_gemini(body: dict[str, Any], reply: dict[str, Any]) -> tuple[dict[str, Any], httpx.Request]:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=reply)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        answer = await request_decision(_gemini(), body, client=client)
+    (request,) = seen
+    return answer, request
+
+
+@pytest.mark.asyncio
+async def test_gemini_is_asked_in_its_own_words_with_its_own_key_header() -> None:
+    body = {
+        "model": "gemini-decision-1",
+        "state": {"message": "charged twice"},
+        "questions": {
+            "defect": {
+                "type": "noul",
+                "instructions": "Is this a defect?",
+                "criteria": {"true": "Broken", "false": None},
+                "typesafe_only": 1,
+            },
+            "team": {"type": "choice", "instructions": "Team?", "criteria": {"billing": None, "tech": {"k": "v"}}},
+            "mood": {"type": "score", "instructions": ["Mood", "?"], "criteria": ["calm", "angry"]},
+        },
+    }
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
+    assert request.headers["x-goog-api-key"] == "gkey"
+    assert "authorization" not in request.headers
+    assert json.loads(request.content) == {
+        "model": "gemini-decision-1",
+        "input": '{"message": "charged twice"}',
+        "questions": {
+            "defect": {"type": "noul", "instructions": "Is this a defect?", "criteria": {"true_description": "Broken"}},
+            "team": {"type": "choice", "instructions": "Team?", "criteria": {"billing": "", "tech": '{"k": "v"}'}},
+            "mood": {"type": "score", "instructions": '["Mood", "?"]', "criteria": ["calm", "angry"]},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_gemini_receives_inline_images_as_image_blocks() -> None:
+    body = {
+        "model": "gemini-decision-1",
+        "state": "photo",
+        "questions": QUESTIONS,
+        "images": ["data:image/png;base64,AA"],
+    }
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
+    assert json.loads(request.content)["input"] == [
+        {"type": "text", "text": "photo"},
+        {"type": "image", "mime_type": "image/png", "data": "AA"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gemini_answer_names_the_model_and_counts_tokens_under_typesafe_keys() -> None:
+    reply = {
+        "answers": {"urgent": {"type": "noul", "noul": 0.97, "confidence": 0.97}},
+        "usage": {"total_input_tokens": 100, "total_output_tokens": 0, "total_tokens": 100},
+    }
+    answer, _ = await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    response = DecisionResponse.model_validate(answer)
+    assert response.model == "gemini-decision-1"
+    assert response.answers["urgent"].noul == 0.97
+    assert response.usage is not None
+    assert (response.usage.input_tokens, response.usage.output_tokens, response.usage.cost) == (100, 0, None)
+
+
+@pytest.mark.asyncio
+async def test_gemini_answer_without_an_input_count_falls_back_to_the_total() -> None:
+    reply = {"answers": {}, "usage": {"total_tokens": 42}}
+    answer, _ = await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert (answer["usage"]["input_tokens"], answer["usage"]["output_tokens"]) == (42, 0)
+
+
+@pytest.mark.asyncio
+async def test_gemini_answer_reporting_zero_input_tokens_keeps_the_zero() -> None:
+    reply = {"answers": {}, "usage": {"total_input_tokens": 0, "total_tokens": 7}}
+    answer, _ = await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert answer["usage"]["input_tokens"] == 0
+
+
+@pytest.mark.parametrize("reply", [{"answers": {}}, {"answers": {}, "usage": {"total_output_tokens": 0}}])
+@pytest.mark.asyncio
+async def test_gemini_answer_with_no_token_count_is_refused(reply: dict[str, Any]) -> None:
+    with pytest.raises(DecisionProviderError, match="no input token count") as raised:
+        await _ask_gemini({"model": "gemini-decision-1", "state": "s", "questions": QUESTIONS}, reply)
+    assert raised.value.status_code == 200
 
 
 @pytest.mark.parametrize("status_code", [401, 422, 429, 501, 529])

@@ -921,7 +921,8 @@ it is empty where the Files API is off. A held sandbox is named in
 probabilities rather than generated text: `noul` (the probability of yes),
 `choice` (one of the named options) and `score` (a level on an ordered scale).
 The body is TypeSafe's System One shape, which OpenRouter's alpha Decisions API
-and llama-server also take:
+and llama-server also take, and which Otari translates for Google's Gemini
+Decisions API:
 
 ```json
 {
@@ -941,8 +942,9 @@ and llama-server also take:
 `model` is `<provider>:<model>`, where the provider is an entry under
 [`decision_providers`](configuration.md#decision-providers). The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
-`confidence` and `usage`. `images` takes data URLs for a vision decision model
-served by llama-server; other providers refuse it.
+`confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
+as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a
+vision decision model served by llama-server or Gemini; other providers refuse it.
 
 `POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works against Otari with its

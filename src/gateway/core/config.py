@@ -176,13 +176,14 @@ VISION_STRATEGIES = ("describe", "ocr", "off")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
-# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# llama-server's /v1/systemone adopted and Gemini's Decisions API is translated
+# to and from, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
 # here, as the search providers are in ``core/settings/tools.py``, so startup
 # validation needs no service module.
-DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+DECISION_PROVIDERS = ("typesafe", "openrouter", "gemini", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
@@ -1043,7 +1044,7 @@ class GatewayConfig(
         description=(
             "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
-            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "openrouter, gemini, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
         ),
