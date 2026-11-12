@@ -31,7 +31,7 @@ from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.catalog import SERVED_ENGINES, ServedModel
 from gateway.repositories.catalog import ModelMetadataOverrideRepository, ServedModelRepository
-from gateway.services.catalog._overrides import replace_overrides
+from gateway.services.catalog._overrides import overrides_generation, replace_overrides
 
 SERVED_MODEL_REFRESH_SECONDS = 60.0
 
@@ -291,10 +291,11 @@ async def refresh_served_models(uow: UnitOfWork) -> None:
     """Reload every row, and the metadata overrides beside them, and swap each copy in one step."""
     global _served  # noqa: PLW0603
 
+    generation = overrides_generation()
     async with uow:
         rows = await ServedModelRepository(uow).list_all()
         overrides = await ModelMetadataOverrideRepository(uow).list_all()
-    replace_overrides(overrides)
+    replace_overrides(overrides, generation)
     served: dict[tuple[uuid.UUID | None, str], dict[str, ServedFacts]] = {}
     for row in rows:
         served.setdefault((row.organization_id, row.provider), {})[row.model] = _facts(row)

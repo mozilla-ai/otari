@@ -59,6 +59,7 @@ from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.catalog import ModelMetadataOverrideRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
     HealthCheckRecoveryRepository,
@@ -1115,8 +1116,13 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
+def build_model_metadata_override_service(uow: UnitOfWork) -> ModelMetadataOverrideService:
+    """Build the model details service on ``uow``, for the request dependency and the services that compose it."""
+    return ModelMetadataOverrideService(uow, overrides=ModelMetadataOverrideRepository(uow))
+
+
 def get_model_metadata_override_service(uow: UnitOfWorkDep) -> ModelMetadataOverrideService:
-    return ModelMetadataOverrideService(uow)
+    return build_model_metadata_override_service(uow)
 
 
 ModelMetadataOverrideServiceDep = Annotated[ModelMetadataOverrideService, Depends(get_model_metadata_override_service)]
@@ -1836,6 +1842,7 @@ def get_org_provider_model_service(
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
+        metadata_overrides=build_model_metadata_override_service(uow),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
 
@@ -1983,6 +1990,7 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 

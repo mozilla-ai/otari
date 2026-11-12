@@ -146,7 +146,6 @@ async def restore_org_provider_key(
 
 @org_router.delete("/{key_id}")
 async def delete_org_provider_key(
-    service: OrgProviderKeyServiceDep,
     models: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     key_id: uuid.UUID,
@@ -155,8 +154,7 @@ async def delete_org_provider_key(
 
     The model details the organization set under the key's prefix go with its last key there.
     """
-    prefix = await service.delete_key_for_user(user=current_identity, key_id=key_id)
-    await models.forget_metadata_overrides(user=current_identity, prefix=prefix)
+    await models.delete_key(user=current_identity, key_id=key_id)
     return Message(message="Provider key deleted")
 
 

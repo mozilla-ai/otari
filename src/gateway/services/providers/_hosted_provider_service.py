@@ -156,6 +156,7 @@ class HostedProviderService:
         pricing: DeploymentPricingService,
         live_byo_pairs: LiveByoPairs,
         organization_exists: OrganizationExists,
+        metadata_overrides: ModelMetadataOverrideService,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
@@ -168,6 +169,7 @@ class HostedProviderService:
         restriction names; callables, because the rows they read are another
         domain's.
         """
+        self.metadata_overrides = metadata_overrides
         self.uow = uow
         self.config = config
         self.providers = providers
@@ -358,8 +360,10 @@ class HostedProviderService:
             name = row.name
             if not source.shadows_config:
                 await self.models.delete_for_provider(name)
-                await ModelMetadataOverrideService(self.uow).clear_provider(name)
+                await self.metadata_overrides.clear_provider(name)
             await self.providers.delete_row(row)
+        if not source.shadows_config:
+            self.metadata_overrides.forget_provider(name)
         forget_hosted_name(name)
         remember_hosted_zero_data_retention(name, False)
         if source.shadows_config:

@@ -17,7 +17,7 @@ const MODALITIES: readonly { id: ModelInputModality; label: string }[] = [
 // "auto" leaves the flag to the provider's listing and models.dev. Not "": the
 // form Select reads that as nothing selected.
 const FLAG_OPTIONS = [
-  { value: "auto", label: "From the provider" },
+  { value: "auto", label: "Automatic" },
   { value: "yes", label: "Yes" },
   { value: "no", label: "No" },
 ] as const
@@ -38,7 +38,7 @@ function flagValue(flag: string): boolean | null {
 
 /** What a blank field falls back to: the value the offering shows when nothing overrides it. */
 function fallback(overridden: boolean, value: number | null | undefined) {
-  if (overridden) return "From the provider"
+  if (overridden) return "Automatic"
   return value == null ? "Unknown" : value.toString()
 }
 
@@ -134,7 +134,7 @@ export function ModelDetailsDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title="Edit details"
-      description={`${scope} A blank field keeps what the provider says.`}
+      description={`${scope} A blank field is filled in automatically.`}
       submitLabel="Save details"
       onSubmit={submit}
       isPending={isSaving}
@@ -189,11 +189,11 @@ export function ModelDetailsDialog({
       </div>
       <MultiSelect
         label="Reads"
-        description="Leave empty to keep what the provider says."
+        description="Leave empty to fill in automatically."
         options={MODALITIES}
         value={modalities}
         onChange={setModalities}
-        searchPlaceholder="From the provider"
+        searchPlaceholder="Automatic"
       />
     </FormDialog>
   )

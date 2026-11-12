@@ -272,6 +272,7 @@ class OrgProviderModelService:
         org_pricing: OrganizationPricingService,
         models: OrgProviderKeyModelRepository,
         keys: OrgProviderKeyRepository,
+        metadata_overrides: ModelMetadataOverrideService,
         refresh_overlay: Callable[[], Awaitable[None]],
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
@@ -295,6 +296,7 @@ class OrgProviderModelService:
         self.org_pricing = org_pricing
         self.models = models
         self.keys = keys
+        self.metadata_overrides = metadata_overrides
         self.refresh_overlay = refresh_overlay
 
     @property
@@ -339,7 +341,7 @@ class OrgProviderModelService:
         organization = await self.organizations.get_active_organization_for_user(user)
         await self.organizations.require_active_organization_management_access(user=user, organization=organization)
         prefix = selector.partition(":")[0]
-        if not any(key.selector_prefix == prefix for key in await self.keys.list_live_keys(organization.id)):
+        if not await self.keys.any_under_prefix(organization.id, prefix, live=True):
             raise OrgProviderKeyNotFoundError(prefix)
         return organization.id
 
@@ -500,17 +502,28 @@ class OrgProviderModelService:
             ValueError: ``selector`` is not in ``provider:model`` form.
         """
         organization_id = await self._organization_serving(user, selector)
-        return await ModelMetadataOverrideService(self.uow).set(selector, override, organization_id)
+        return await self.metadata_overrides.set(selector, override, organization_id)
 
-    async def forget_metadata_overrides(self, *, user: User, prefix: str) -> None:
-        """Drop the organization's model details under ``prefix`` once no key of it, archived or not, answers to it.
+    async def delete_key(self, *, user: User, key_id: uuid.UUID) -> None:
+        """Permanently delete an archived key, in one step with the model details its prefix loses.
 
-        An archived key keeps them, so restoring it brings them back.
+        The details go with the organization's last key under the prefix. An archived
+        key keeps them, so restoring it brings them back.
+
+        Raises:
+            OrgProviderKeyNotFoundError: no such key in the caller's organization.
+            OrgProviderKeyNotArchivedError: the key is still live.
         """
-        organization = await self.organizations.get_active_organization_for_user(user)
-        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
-        if not await self.keys.any_under_prefix(organization.id, prefix):
-            await ModelMetadataOverrideService(self.uow).clear_provider(prefix, organization.id)
+        async with self.uow:
+            key = await self._key_for_user(user, key_id)
+            prefix, organization_id = key.selector_prefix, key.organization_id
+            last = not await self.keys.any_under_prefix(organization_id, prefix, excluding=key.id)
+            if last:
+                await self.metadata_overrides.clear_provider(prefix, organization_id)
+            # Its commit, on this same session, also settles the rows cleared above.
+            await self.provider_keys.delete_key_for_user(user=user, key_id=key_id)
+        if last:
+            self.metadata_overrides.forget_provider(prefix, organization_id)
 
     async def clear_metadata_override(self, *, user: User, selector: str) -> None:
         """Drop the organization's own override of a model, leaving the server and models.dev to describe it.
@@ -520,7 +533,7 @@ class OrgProviderModelService:
             ValueError: ``selector`` is not in ``provider:model`` form.
         """
         organization_id = await self._organization_serving(user, selector)
-        await ModelMetadataOverrideService(self.uow).clear(selector, organization_id)
+        await self.metadata_overrides.clear(selector, organization_id)
 
     async def remove_model(self, *, user: User, key_id: uuid.UUID, model_id: uuid.UUID) -> None:
         """Stop offering one model. Its rate and its history stay.

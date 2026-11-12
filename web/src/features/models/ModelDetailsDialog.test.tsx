@@ -64,7 +64,7 @@ describe("ModelDetailsDialog", () => {
     )
     expect(
       screen.getByText(
-        "Applies to everyone in Acme who uses tensorfold:GLM-5.3-Flash. A blank field keeps what the provider says.",
+        "Applies to everyone in Acme who uses tensorfold:GLM-5.3-Flash. A blank field is filled in automatically.",
       ),
     ).toBeInTheDocument()
   })

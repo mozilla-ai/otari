@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.models.catalog import ModelMetadataOverride
 from gateway.services.catalog import _overrides, _served
 from gateway.services.catalog._limits import ModelLimits, model_capabilities, model_limits, served_context_window
 from gateway.services.catalog._overrides import MetadataOverride
@@ -122,3 +123,17 @@ def test_the_trace_view_reads_the_overridden_window() -> None:
 
     assert served_context_window("cairn", "glm") == 131072
     assert served_context_window("cairn", "glm", ACME) == 65536
+
+
+def test_a_reload_read_before_a_local_write_does_not_undo_it() -> None:
+    _overrides.replace_overrides([])
+    stale = ModelMetadataOverride(provider="cairn", model="qwen", organization_id=None, context_window=8192)
+
+    generation = _overrides.overrides_generation()
+    _overrides.ModelMetadataOverrideService.forget_provider("cairn")
+    _overrides.replace_overrides([stale], generation)
+    assert _overrides.metadata_override("cairn", "qwen") is None
+
+    _overrides.replace_overrides([stale], _overrides.overrides_generation())
+    assert _overrides.metadata_override("cairn", "qwen") == MetadataOverride(context_window=8192)
+    _overrides.replace_overrides([])

@@ -35,6 +35,8 @@ _FIELDS = tuple(field.name for field in fields(MetadataOverride))
 
 # (organization, provider) -> model id -> override; the organization is ``None`` for the deployment's.
 _overrides: dict[tuple[uuid.UUID | None, str], dict[str, MetadataOverride]] = {}
+# Bumped by each local write, so a reload that read the rows before it does not undo it.
+_generation = 0
 
 
 def metadata_override(
@@ -55,10 +57,22 @@ def _override(row: ModelMetadataOverride) -> MetadataOverride:
     )
 
 
-def replace_overrides(rows: Sequence[ModelMetadataOverride]) -> None:
-    """Swap the copy for ``rows`` in one step."""
+def overrides_generation() -> int:
+    """A token to pass to :func:`replace_overrides`, taken before the rows are read."""
+    return _generation
+
+
+def _written() -> None:
+    global _generation  # noqa: PLW0603
+    _generation += 1
+
+
+def replace_overrides(rows: Sequence[ModelMetadataOverride], generation: int | None = None) -> None:
+    """Swap the copy for ``rows`` in one step, unless a local write landed since ``generation`` was taken."""
     global _overrides  # noqa: PLW0603
 
+    if generation is not None and generation != _generation:
+        return
     overrides: dict[tuple[uuid.UUID | None, str], dict[str, MetadataOverride]] = {}
     for row in rows:
         overrides.setdefault((row.organization_id, row.provider), {})[row.model] = _override(row)
@@ -78,8 +92,9 @@ class ModelMetadataOverrideService:
     Who may act for the owner is the caller's to check.
     """
 
-    def __init__(self, uow: UnitOfWork):
+    def __init__(self, uow: UnitOfWork, *, overrides: ModelMetadataOverrideRepository):
         self.uow = uow
+        self.overrides = overrides
 
     @staticmethod
     def current(selector: str, organization_id: uuid.UUID | None = None) -> MetadataOverride | None:
@@ -103,15 +118,25 @@ class ModelMetadataOverrideService:
         if override.input_modalities is not None:
             values["input_modalities"] = list(override.input_modalities)
         async with self.uow:
-            await ModelMetadataOverrideRepository(self.uow).put(provider, model, organization_id, values)
+            await self.overrides.put(provider, model, organization_id, values)
         _overrides.setdefault((organization_id, provider), {})[model] = override
+        _written()
         return override
 
     async def clear_provider(self, provider: str, organization_id: uuid.UUID | None = None) -> None:
-        """Drop every override the owner holds under ``provider``, which no longer serves anything."""
+        """Drop every row the owner holds under ``provider``, which no longer serves anything.
+
+        Meant to join the caller's block, so the worker's copy is left alone: the caller
+        calls :meth:`forget_provider` once that block has committed.
+        """
         async with self.uow:
-            await ModelMetadataOverrideRepository(self.uow).remove_provider(provider, organization_id)
+            await self.overrides.remove_provider(provider, organization_id)
+
+    @staticmethod
+    def forget_provider(provider: str, organization_id: uuid.UUID | None = None) -> None:
+        """Drop the worker's copy of what :meth:`clear_provider` removed, after it committed."""
         _overrides.pop((organization_id, provider), None)
+        _written()
 
     async def clear(self, selector: str, organization_id: uuid.UUID | None = None) -> bool:
         """Drop the owner's override of ``selector``. Whether there was one.
@@ -121,6 +146,7 @@ class ModelMetadataOverrideService:
         """
         provider, model = _split(selector)
         async with self.uow:
-            removed = await ModelMetadataOverrideRepository(self.uow).remove(provider, model, organization_id)
+            removed = await self.overrides.remove(provider, model, organization_id)
         _overrides.get((organization_id, provider), {}).pop(model, None)
+        _written()
         return removed

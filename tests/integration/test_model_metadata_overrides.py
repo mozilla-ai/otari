@@ -8,10 +8,11 @@ import pytest
 from any_llm.types.model import Model
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
-from gateway.exceptions.providers_exceptions import OrgProviderKeyNotFoundError
+from gateway.exceptions.providers_exceptions import OrgProviderKeyNotArchivedError, OrgProviderKeyNotFoundError
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -136,6 +137,7 @@ def _service(db: AsyncSession) -> OrgProviderModelService:
         org_pricing=OrganizationPricingService(db, config, model_provider=None),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
+        metadata_overrides=build_model_metadata_override_service(uow),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
 
@@ -198,13 +200,26 @@ async def test_an_organization_s_details_go_with_its_last_key_under_the_prefix(
     service = _service(async_db)
     await service.set_metadata_override(user=admin, selector="openai:gpt-x", override=MetadataOverride(reasoning=True))
 
-    for key, left in ((first, MetadataOverride(reasoning=True)), (second, None)):
-        await keys.archive_key_for_user(user=admin, key_id=key.id)
-        prefix = await keys.delete_key_for_user(user=admin, key_id=key.id)
-        await service.forget_metadata_overrides(user=admin, prefix=prefix)
+    acme_id = acme.id
+
+    async def reloaded() -> MetadataOverride | None:
         reset_served_models()
         await refresh_served_models(UnitOfWork(async_db))
-        assert metadata_override("openai", "gpt-x", acme.id) == left
+        return metadata_override("openai", "gpt-x", acme_id)
+
+    await keys.archive_key_for_user(user=admin, key_id=first.id)
+    await service.delete_key(user=admin, key_id=first.id)
+    assert await reloaded() == MetadataOverride(reasoning=True)
+
+    # The last key, refused while live: the details it would have taken roll back with it.
+    with pytest.raises(OrgProviderKeyNotArchivedError):
+        await service.delete_key(user=admin, key_id=second.id)
+    await async_db.refresh(admin)  # the rollback expired it
+    assert await reloaded() == MetadataOverride(reasoning=True)
+
+    await keys.archive_key_for_user(user=admin, key_id=second.id)
+    await service.delete_key(user=admin, key_id=second.id)
+    assert await reloaded() is None
 
 
 def test_a_deleted_hosted_provider_takes_its_details_with_it(
