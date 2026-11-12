@@ -31,6 +31,7 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    RoundGate,
     StreamAction,
     log_tool_failure,
     run_tool_loop,
@@ -939,6 +940,7 @@ async def anthropic_tool_loop(
     native_tools: frozenset[str] = frozenset(),
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
+    round_gate: RoundGate | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
 
@@ -970,6 +972,7 @@ async def anthropic_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
     )
 
 
@@ -983,6 +986,7 @@ async def anthropic_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -1025,6 +1029,7 @@ async def anthropic_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for event in inner:
