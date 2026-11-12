@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from starlette.datastructures import URL, MutableHeaders
+from starlette.datastructures import URL, Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -699,6 +699,112 @@ _CACHEABLE_PREFIXES = ("/assets/",)
 # rather than content-hashed, so they get a day of caching like the favicon, not
 # the immutable year /assets gets.
 _SHORT_CACHE_PREFIXES = ("/pwa/", "/fonts/")
+
+
+_CORS_ALLOW_HEADERS = (
+    "Content-Type",
+    "Authorization",
+    API_KEY_HEADER,
+    X_API_KEY_HEADER,
+    TAGS_HEADER,
+    CONVERSATION_HEADER,
+    "Otari-Region",
+    *_SDK_CORS_HEADERS,
+)
+# A speech response carries its cost on headers, which a browser on
+# another origin reads only when they are exposed.
+_CORS_EXPOSE_HEADERS = (
+    COST_USD_HEADER,
+    ERROR_CODE_HEADER,
+    PRICING_SOURCE_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
+)
+# The model endpoints ``cors_inference_origins`` opens to a browser: each one
+# takes an API key and calls a model, except the model list a page reads to
+# offer its models, and none changes the deployment.
+_INFERENCE_CORS_PATHS = frozenset(
+    {
+        f"{API_ROOT}/chat/completions",
+        f"{API_ROOT}/responses",
+        f"{API_ROOT}/messages",
+        f"{API_ROOT}/messages/count_tokens",
+        f"{API_ROOT}/embeddings",
+        f"{API_ROOT}/rerank",
+        f"{API_ROOT}/moderations",
+        f"{API_ROOT}/models",
+    }
+)
+_INFERENCE_CORS_PREFIXES = (f"{API_ROOT}/audio/", f"{API_ROOT}/images/", f"{API_ROOT}/models/")
+# Under the model list's prefix but for the operator alone, so a page never needs them.
+_INFERENCE_CORS_OPERATOR_PATHS = frozenset({f"{API_ROOT}/models/discoverable", f"{API_ROOT}/models/metadata"})
+
+
+class ScopedCORSMiddleware:
+    """CORS from ``cors_allow_origins`` everywhere, and from ``cors_inference_origins`` on the model endpoints alone.
+
+    One policy answers each request, both over the same app, rather than two
+    middlewares stacked: the credentialed one, inside, would add
+    ``Access-Control-Allow-Credentials`` to a response the other had opened to
+    any origin. The model endpoints' policy never allows credentials, and a
+    request from an origin ``cors_allow_origins`` lists, the dashboard's, keeps
+    that list's policy on every path, so a Playground session still works.
+    """
+
+    def __init__(self, app: ASGIApp, *, allow_origins: list[str], inference_origins: list[str]) -> None:
+        self.app = app
+        self.deployment = (
+            CORSMiddleware(
+                app,
+                allow_origins=allow_origins,
+                allow_credentials="*" not in allow_origins,
+                # An overlay mounts its own routes behind this same app, so this
+                # list has to cover every method those routes use too, not just
+                # the gateway's. A workspace's web-search config is PUT, and was rejected with
+                # "Disallowed CORS method" everywhere this middleware was enabled
+                # (mozilla-ai/infrastructure -- reported from both EU stacks,
+                # which are the only ones that set cors_allow_origins at all).
+                allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                allow_headers=_CORS_ALLOW_HEADERS,
+                expose_headers=_CORS_EXPOSE_HEADERS,
+            )
+            if allow_origins
+            else None
+        )
+        self.inference = (
+            CORSMiddleware(
+                app,
+                allow_origins=inference_origins,
+                allow_credentials=False,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=_CORS_ALLOW_HEADERS,
+                expose_headers=_CORS_EXPOSE_HEADERS,
+            )
+            if inference_origins
+            else None
+        )
+        self.listed = frozenset(allow_origins) - {"*"}
+        # A wildcard deployment policy already answers every origin on every path,
+        # without credentials, so the narrower one would only take access away.
+        self.everyone = "*" in allow_origins
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        policy = self.deployment
+        if (
+            self.inference is not None
+            and not self.everyone
+            and scope["type"] == "http"
+            and _is_inference_path(scope["path"])
+            and Headers(scope=scope).get("origin") not in self.listed
+        ):
+            policy = self.inference
+        await (policy or self.app)(scope, receive, send)
+
+
+def _is_inference_path(path: str) -> bool:
+    if path in _INFERENCE_CORS_OPERATOR_PATHS:
+        return False
+    return path in _INFERENCE_CORS_PATHS or path.startswith(_INFERENCE_CORS_PREFIXES)
 
 
 class SecurityHeadersMiddleware:
@@ -1515,38 +1621,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     if config.accept_incoming_trace_context:
         app.add_middleware(TraceContextPropagationMiddleware)
 
-    if config.cors_allow_origins:
-        allow_credentials = "*" not in config.cors_allow_origins
+    if config.cors_allow_origins or config.cors_inference_origins:
         app.add_middleware(
-            CORSMiddleware,
+            ScopedCORSMiddleware,
             allow_origins=config.cors_allow_origins,
-            allow_credentials=allow_credentials,
-            # An overlay mounts its own routes behind this same app, so this
-            # list has to cover every method those routes use too, not just
-            # the gateway's. A workspace's web-search config is PUT, and was rejected with
-            # "Disallowed CORS method" everywhere this middleware was enabled
-            # (mozilla-ai/infrastructure -- reported from both EU stacks,
-            # which are the only ones that set cors_allow_origins at all).
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=[
-                "Content-Type",
-                "Authorization",
-                API_KEY_HEADER,
-                X_API_KEY_HEADER,
-                TAGS_HEADER,
-                CONVERSATION_HEADER,
-                "Otari-Region",
-                *_SDK_CORS_HEADERS,
-            ],
-            # A speech response carries its cost on headers, which a browser on
-            # another origin reads only when they are exposed.
-            expose_headers=[
-                COST_USD_HEADER,
-                ERROR_CODE_HEADER,
-                PRICING_SOURCE_HEADER,
-                USAGE_UNIT_HEADER,
-                USAGE_UNITS_HEADER,
-            ],
+            inference_origins=config.cors_inference_origins,
         )
 
     # Tracks what the gateway is serving right now, so the activity log can show

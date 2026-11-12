@@ -205,6 +205,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "database_url",
         "db_pool_size",
         "cors_allow_origins",
+        "cors_inference_origins",
         "budget_strategy",
         "rate_limit_rpm",
     )

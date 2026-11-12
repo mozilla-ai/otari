@@ -41,6 +41,7 @@ _SETTING_NAMES = frozenset(
         "code_execution_executor",
         "code_execution_workspace_default",
         "cors_allow_origins",
+        "cors_inference_origins",
         "dashboard_login_rate_limit_per_minute",
         "dashboard_session_ttl_hours",
         "database_url",

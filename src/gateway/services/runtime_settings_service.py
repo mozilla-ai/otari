@@ -10,7 +10,7 @@ Only fields that are genuinely safe to hot-change belong here: each key in
 the next model discovery / catalog lookup), so mutating ``config`` takes effect
 immediately in this worker. Startup-only fields (``host``, ``port``,
 ``database_url``, ``mode``, the ``db_pool_*`` sizing, ``rate_limit_rpm``,
-``cors_allow_origins``, ``budget_strategy``, docs/metrics toggles, the log
+``cors_allow_origins``, ``cors_inference_origins``, ``budget_strategy``, docs/metrics toggles, the log
 writer) are deliberately excluded: they are consumed once at startup, so
 mutating ``config`` alone would not change running behavior. The outbound
 network-safety gates (``mcp_allow_*``, ``web_search_allow_private_hosts``, the

@@ -573,6 +573,32 @@ def _default_database_url() -> str:
     return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _is_origin(value: str) -> bool:
+    """Whether ``value`` is an http(s) origin as a browser sends it in ``Origin``.
+
+    That is a scheme and a lowercase ASCII host, a port only when it is not the
+    scheme's default, and nothing else: a browser never sends any other spelling,
+    so an entry written another way could never match.
+    """
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return False
+    return (
+        parts.scheme in _DEFAULT_PORTS
+        and bool(parts.hostname)
+        and "@" not in parts.netloc
+        and value.isascii()
+        and parts.netloc == parts.netloc.lower()
+        and port != _DEFAULT_PORTS[parts.scheme]
+        and value == f"{parts.scheme}://{parts.netloc}"
+    )
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -757,6 +783,13 @@ class GatewayConfig(
     )
     cors_allow_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
+    )
+    cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default_factory=list,
+        description=(
+            "Origins whose pages may call the model endpoints from a browser with an API key, or '*' for any. "
+            "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
+        ),
     )
     enable_metrics: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
@@ -2197,6 +2230,20 @@ class GatewayConfig(
         if value is not None and not value.strip():
             return None
         return value
+
+    @field_validator("cors_inference_origins")
+    @classmethod
+    def _validate_inference_origins(cls, origins: list[str]) -> list[str]:
+        """Accept ``*`` or an origin as a browser sends it, so an entry that could never match is refused at load."""
+        for origin in origins:
+            if origin != "*" and not _is_origin(origin):
+                msg = (
+                    f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
+                    "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
+                    "such as https://app.example.com, or '*'"
+                )
+                raise ValueError(msg)
+        return origins
 
     @field_validator("rate_limits")
     @classmethod
