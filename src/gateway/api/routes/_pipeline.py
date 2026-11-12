@@ -5633,7 +5633,7 @@ async def release_reservation(ctx: RequestContext) -> None:
         await ctx.rate_limit_grant.settle(ctx.tool_charge_tokens)
     if ctx.reservation is None:
         return
-    if ctx.tool_charge:
+    if ctx.tool_charge or ctx.tool_charge_tokens:
         await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge, actual_tokens=ctx.tool_charge_tokens)
         return
     await refund_reservation(ctx.db, ctx.reservation)
@@ -5808,6 +5808,7 @@ async def _log_failure_and_refund(
         tags=ctx.tags,
         source_label=ctx.source_label,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -7170,6 +7171,8 @@ async def log_exhausted_plan(
             ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
         )
     answered = answered_rounds_usage(adapter, exc.__cause__)
+    # Rounds the locked candidate answered ran on its account, so they are funded as a served request is.
+    funded = ctx.deployment_charge if answered is not None else None
     logged = await record_usage(
         request_facts=ctx.price_facts,
         db=ctx.db,
@@ -7190,12 +7193,14 @@ async def log_exhausted_plan(
         tags=ctx.tags,
         source_label=ctx.source_label,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
+        deployment_paid=funded is not None,
     )
     ctx.tool_charge = logged.cost or Decimal(0)
     ctx.tool_charge_tokens = _settled_tokens(answered)
     if ctx.reservation is not None:
         await charge_deployment_paid(
-            None,
+            funded,
             ctx.db,
             logged.deployment_paid_cost,
             tools=logged.deployment_paid_tools,

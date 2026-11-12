@@ -476,7 +476,7 @@ What a retry costs depends on how the first attempt ended:
 | First attempt | Billed | A retry |
 |---|---|---|
 | Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded, unless its gateway tool loop had rounds the provider answered (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Can be sent as it is. |
-| A stream that failed or that the client disconnected from | The tokens the provider reported before it ended, and nothing more (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| A stream that failed or that the client disconnected from | The tokens the provider reported before it ended, plus the gateway tool loop rounds the provider answered, and nothing more (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
 | A non-streaming request that succeeded while its response was lost (a dropped connection, a client timeout) | Yes | Calls the provider again and is billed again, unless both carry the same `Idempotency-Key`. |
 
 #### `Idempotency-Key`

@@ -1355,6 +1355,44 @@ async def test_a_failed_round_carries_the_usage_of_the_rounds_answered_before_it
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_tool_that_ends_the_loop_carries_the_usage_of_the_rounds_answered_before_it(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    """A backend's shared search and fetch limit ends the loop from inside a tool call, after round 1 was billed."""
+    round_one = CompletionUsage(prompt_tokens=100, completion_tokens=20, total_tokens=120)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        if stream:
+            return _async_iter(
+                _chunk(tool_calls=[(0, "c1", "fetch_url", "{}")]), *_round_end("tool_calls", round_one, trailing=True)
+            )
+        return _completion(
+            finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=100, completion_tokens=20
+        )
+
+    class _LimitedPool(_FakePool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise MaxToolIterationsExceeded("web retrieval limit reached")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _LimitedPool(tool_names=["fetch_url"])
+
+    with pytest.raises(MaxToolIterationsExceeded) as failure:
+        if stream:
+            async for _ in mcp_tool_loop_stream(completion_kwargs=completion_kwargs, pool=pool, max_iterations=5):
+                pass
+        else:
+            await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=5)
+
+    answered = AnsweredRounds.of(failure.value)
+    assert answered is not None
+    usage = answered.events[-1].usage if stream else answered.result.usage
+    assert (usage.prompt_tokens, usage.completion_tokens) == (100, 20)
+
+
+@pytest.mark.asyncio
 async def test_loop_omitting_on_first_response_is_backward_compatible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

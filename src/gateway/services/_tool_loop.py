@@ -386,7 +386,11 @@ async def run_tool_loop(
         owned, has_foreign = strategy.split_owned(result, pool)
         if has_foreign and not stopped:
             if owned:
-                await strategy.execute_owned(pool, owned, acc)
+                try:
+                    await strategy.execute_owned(pool, owned, acc)
+                except Exception as exc:
+                    _carry_answered(exc, strategy, answered, acc)
+                    raise
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
@@ -398,7 +402,11 @@ async def run_tool_loop(
             strategy.fold_usage(result, acc)
             return result
 
-        await strategy.advance_transcript(transcript, result, owned, pool, acc)
+        try:
+            await strategy.advance_transcript(transcript, result, owned, pool, acc)
+        except Exception as exc:
+            _carry_answered(exc, strategy, answered, acc)
+            raise
 
     exceeded = MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
     _carry_answered(exceeded, strategy, answered, acc)
@@ -490,7 +498,8 @@ async def run_tool_loop_stream(
             # search and would get silence. Executing them for their side effects is
             # what the non-streaming loop already does before returning a mixed
             # result (see ``run_tool_loop``), so the two agree.
-            async for activity in strategy.finalize_exit(state, pool, acc):
+            exiting = (state, copy.deepcopy(acc))
+            async for activity in _carrying_answered(strategy.finalize_exit(state, pool, acc), strategy, exiting):
                 yield activity
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
@@ -498,7 +507,8 @@ async def run_tool_loop_stream(
 
         answered = (state, copy.deepcopy(acc))
         strategy.accumulate_stream_usage(acc, state)
-        async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
+        advancing = strategy.advance_stream_transcript(transcript, state, pool, acc)
+        async for activity in _carrying_answered(advancing, strategy, answered):
             yield activity
         # A format with a native vocabulary for server-side tool calls announces
         # the calls the gateway just ran, in place of the raw tool-call events that

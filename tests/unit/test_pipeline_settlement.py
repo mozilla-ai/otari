@@ -694,23 +694,33 @@ async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("deployment_paid", [False, True], ids=["own-credential", "deployment-paid"])
 async def test_a_locked_plan_settles_the_tokens_of_the_rounds_the_provider_answered(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, cost: Decimal, deployment_paid: bool
 ) -> None:
-    """A tool loop that answered locks its plan, so a later failure exhausts it: its tokens settle as on one model."""
+    """A tool loop that answered locks its plan, so a later failure exhausts it: its rounds settle as on one model."""
     from gateway.services.routing import CompiledPlan
     from gateway.types.attempt import Attempt
 
-    settlement = _Settlement()
+    settlement = _Settlement(row_cost=cost)
     settlement.install(monkeypatch)
     granted: list[int] = []
+    charged: list[Decimal | None] = []
 
     class _Grant:
         async def settle(self, tokens: int) -> None:
             granted.append(tokens)
 
-    ctx = _ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation())
+    class _Charge:
+        async def settle(self, amount: Decimal | None, **_kwargs: Any) -> None:
+            charged.append(amount)
+
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(begin_nested=None), log_writer=object(), reservation=_reservation())
     ctx.rate_limit_grant = cast(Any, _Grant())
+    ctx.prices = cast(Any, object())
+    if deployment_paid:
+        ctx.deployment_charge = cast(Any, _Charge())
     ctx.plan = CompiledPlan("policy", [Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4")])
     failure = RuntimeError("context length exceeded")
     AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
@@ -720,9 +730,13 @@ async def test_a_locked_plan_settles_the_tokens_of_the_rounds_the_provider_answe
     await log_exhausted_plan(ctx, chat._ADAPTER, exhausted)
     await release_reservation(ctx)
 
-    assert settlement.reconciled == [Decimal("0.25")]
+    assert settlement.reconciled == [cost]
     assert settlement.settled_tokens == [150]
     assert granted == [150]
+    (logged,) = settlement.logged
+    assert logged["prices"] is ctx.prices
+    assert logged["deployment_paid"] is deployment_paid
+    assert charged == ([cost] if deployment_paid else [])
 
 
 @pytest.mark.asyncio
