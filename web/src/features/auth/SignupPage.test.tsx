@@ -596,9 +596,31 @@ describe("OAuth first", () => {
     await user.click(google)
     expect(fetchMock).not.toHaveBeenCalled()
 
-    // One box for the card: opening the form shows no second one.
+    // At the foot of the card, under every way in rather than above them.
+    const follows = (earlier: Element, later: Element) =>
+      Boolean(
+        earlier.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    const checkbox = () => screen.getByRole("checkbox")
+    expect(
+      follows(
+        screen.getByRole("button", { name: "Sign up with email" }),
+        checkbox(),
+      ),
+    ).toBe(true)
+
+    // One box for the card: opening the form shows no second one, and it sits
+    // just above the submit button.
     await user.click(screen.getByRole("button", { name: "Sign up with email" }))
     expect(screen.getAllByRole("checkbox")).toHaveLength(1)
+    expect(follows(screen.getByLabelText("Password"), checkbox())).toBe(true)
+    expect(
+      follows(
+        checkbox(),
+        screen.getByRole("button", { name: "Create account" }),
+      ),
+    ).toBe(true)
   })
 
   it("carries the accepted terms into the provider round trip", async () => {
