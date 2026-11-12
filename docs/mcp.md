@@ -280,7 +280,7 @@ one per key.
   - an `mcp_servers` name colliding with a stored server of your workspace: `400` with a fixed detail that names neither server (rename or remove the inline entry);
   - two stored servers sharing a name: `500`, with the names in the log
 - A URL whose host Otari cannot read is refused as invalid with a `400` before any address check, so an IPv6 host needs brackets (`http://[2400:8901::1]:8787/mcp`) and a port has to be a number
-- MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
+- MCP URLs are validated to reduce SSRF risk; by default, private, reserved and other non-public addresses (such as the `100.64.0.0/10` shared range) are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
 - The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
 
