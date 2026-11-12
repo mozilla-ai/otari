@@ -50,6 +50,7 @@ two of which mean off, therefore reduces here to plain membership.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast, get_args
 
@@ -90,7 +91,12 @@ from gateway.models.secret_fields import redact_secret_like_values, restore_reda
 from gateway.models.tenancy import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.guardrails import (
+    GuardrailsNotReachableError,
+    GuardrailVerdict,
+    InProcessGuardrail,
+    run_input_guardrails,
+)
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     decrypt_secret,
@@ -528,6 +534,42 @@ def _stored_directions(value: object) -> list[GuardrailDirection]:
     known = get_args(GuardrailDirection)
     directions = [d for d in value if d in known] if isinstance(value, list) else []
     return cast("list[GuardrailDirection]", directions) or list(DEFAULT_DIRECTIONS)
+
+
+async def run_organization_guardrails(
+    mandates: Sequence[ResolvedOrganizationGuardrail],
+    text: str,
+    *,
+    organization_id: uuid.UUID,
+    default_url: str | None,
+    held: Callable[[uuid.UUID, uuid.UUID], InProcessGuardrail | None],
+) -> GuardrailVerdict:
+    """Run an organization's mandates over ``text`` as a request's input is run, with no caller or policy layer.
+
+    For what reaches no completion endpoint but still answers to the organization's mandates, such as what an
+    agent proposes to memory. Each mandate keeps its own endpoint, credential, ``mode`` and ``on_unavailable``,
+    and one that names a definition is answered by the guardrail this worker holds (``held``, the runner's
+    lookup), exactly as :func:`gateway.api.routes._pipeline.merge_guardrail_layers` leaves them when nothing
+    else is merged in: a profile an organization mandates once, so nothing here overlays.
+
+    Every entry is mandated, so an endpoint that fails its safety check is the mandate being unevaluable, governed
+    by its own settings, and never a caller's malformed request.
+
+    Raises:
+        GuardrailsNotReachableError: a mandate that fails closed could not be evaluated, or gave no verdict.
+    """
+    return await run_input_guardrails(
+        [mandate.config for mandate in mandates],
+        text,
+        default_url=default_url,
+        credentials={mandate.config.profile: mandate.credential for mandate in mandates if mandate.credential},
+        mandated=frozenset(mandate.config.profile for mandate in mandates),
+        in_process={
+            mandate.config.profile: held(organization_id, mandate.definition_id)
+            for mandate in mandates
+            if mandate.definition_id is not None
+        },
+    )
 
 
 def _stored_mode(value: str) -> Literal["block", "monitor"]:

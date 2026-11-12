@@ -1,5 +1,11 @@
 from gateway.services.memory._experiment import MIN_SESSIONS as EXPERIMENT_MIN_SESSIONS
 from gateway.services.memory._experiment import ArmSummary, Difference, ExperimentArm, SessionUsage
+from gateway.services.memory._guardrails import (
+    GuardrailOutcome,
+    GuardrailsUnavailableError,
+    MandatedGuardrails,
+    MemoryGuardrails,
+)
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._models import MEMORY_ENDPOINT_PREFIX, MemoryModels, ModelUse
 from gateway.services.memory._recall_vectors import RecallVectors
@@ -57,6 +63,10 @@ __all__ = [
     "ExperimentArm",
     "ExperimentReport",
     "FlagReason",
+    "GuardrailOutcome",
+    "GuardrailsUnavailableError",
+    "MandatedGuardrails",
+    "MemoryGuardrails",
     "MemoryCallUsage",
     "MemoryCaller",
     "MemoryMeter",

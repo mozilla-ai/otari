@@ -18,13 +18,19 @@ import time
 import uuid
 from typing import Any, Literal, cast
 
+import pytest
 from any_llm import LLMProvider
 
 from gateway.api.routes._pipeline import RequestContext, merge_guardrail_layers
 from gateway.core.config import GatewayConfig
 from gateway.models.guardrails import GuardrailConfig
+from gateway.services.guardrails import GuardrailVerdict, deployment_guardrails_url
 from gateway.services.routing import CompiledPlan
-from gateway.services.tenancy.organization_guardrail_service import ResolvedOrganizationGuardrail
+from gateway.services.tenancy import organization_guardrail_service
+from gateway.services.tenancy.organization_guardrail_service import (
+    ResolvedOrganizationGuardrail,
+    run_organization_guardrails,
+)
 from gateway.types.attempt import Attempt
 
 
@@ -306,3 +312,65 @@ def test_a_callers_credential_never_follows_a_policy_mandate_of_their_profile() 
     )
 
     assert merged.credentials == {}
+
+
+# -- The organization's layer alone, as memory's consolidator runs it --------------------------------------------
+
+
+async def _run_alone(
+    monkeypatch: pytest.MonkeyPatch, mandates: list[ResolvedOrganizationGuardrail], organization_id: uuid.UUID
+) -> tuple[dict[str, Any], list[tuple[uuid.UUID, uuid.UUID]]]:
+    """What ``run_organization_guardrails`` hands the runner, and which held guardrails it looked up."""
+    handed: dict[str, Any] = {}
+    looked_up: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    async def runner(guardrails: list[GuardrailConfig], text: str, **kwargs: Any) -> GuardrailVerdict:
+        handed.update(kwargs, guardrails=guardrails, text=text)
+        return GuardrailVerdict()
+
+    def held(organization: uuid.UUID, definition: uuid.UUID) -> Any:
+        looked_up.append((organization, definition))
+        return f"held-{definition}"
+
+    monkeypatch.setattr(organization_guardrail_service, "run_input_guardrails", runner)
+    await run_organization_guardrails(
+        mandates, "some text", organization_id=organization_id, default_url="http://guardrails:8000", held=held
+    )
+    return handed, looked_up
+
+
+@pytest.mark.asyncio
+async def test_the_organization_layer_alone_runs_as_the_merge_leaves_it_for_a_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What memory runs a proposal through is what a request from the workspace would run, and nothing else."""
+    organization_id, definition_id = uuid.uuid4(), uuid.uuid4()
+    mandates = [
+        _organization(_guardrail("pii", mode="monitor", url="https://org.example/guardrails"), credential="s3cret"),
+        _organization(_guardrail("prompt-injection"), definition_id=definition_id),
+        _organization(_guardrail("toxicity", on_unavailable="monitor")),
+    ]
+
+    handed, looked_up = await _run_alone(monkeypatch, mandates, organization_id)
+
+    merged = merge_guardrail_layers(_ctx(), None, mandates)
+    assert handed["guardrails"] == merged.configs
+    assert handed["credentials"] == merged.credentials == {"pii": "s3cret"}
+    assert handed["mandated"] == merged.mandated
+    assert handed["in_process"] == {"prompt-injection": f"held-{definition_id}"}
+    assert set(merged.in_process) == {"prompt-injection"}
+    assert looked_up == [(organization_id, definition_id)]
+    assert handed["default_url"] == "http://guardrails:8000" and handed["text"] == "some text"
+
+
+def test_the_deployment_guardrails_url_prefers_the_config_and_falls_back_to_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_GUARDRAILS_URL", "http://from-env:8000")
+
+    assert deployment_guardrails_url(GatewayConfig(guardrails_url="http://from-config:8000")) == (
+        "http://from-config:8000"
+    )
+    assert deployment_guardrails_url(None) == "http://from-env:8000"
+    monkeypatch.delenv("OTARI_GUARDRAILS_URL")
+    assert deployment_guardrails_url(None) is None

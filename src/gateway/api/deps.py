@@ -149,6 +149,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
+from gateway.services.guardrails import GuardrailsNotReachableError, deployment_guardrails_url
 from gateway.services.health_checks import HealthCheckService
 from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
@@ -168,6 +169,8 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.memory import (
     MEMORY_ENDPOINT_PREFIX,
     ExperimentArm,
+    GuardrailOutcome,
+    GuardrailsUnavailableError,
     MemoryCaller,
     MemoryCallUsage,
     MemoryModels,
@@ -217,7 +220,7 @@ from gateway.services.routing import (
     RoutingService,
     clear_router_backend_cache,
 )
-from gateway.services.secret_box import configured_secret_keys
+from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
@@ -234,7 +237,12 @@ from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyServ
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
-from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
+from gateway.services.tenancy.organization_guardrail_service import (
+    OrganizationGuardrailService,
+    ResolvedOrganizationGuardrail,
+    resolve_organization_guardrails,
+    run_organization_guardrails,
+)
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
@@ -2360,6 +2368,60 @@ class _MemoryLedger:
         return {row.endpoint: MemoryCallUsage(row.calls, row.input_tokens, row.output_tokens) for row in totals}
 
 
+class _MemoryMandate:
+    """The guardrails an organization mandates for one workspace, run over a proposal as over a request's input."""
+
+    def __init__(
+        self, config: GatewayConfig, organization_id: uuid.UUID, mandates: list[ResolvedOrganizationGuardrail]
+    ) -> None:
+        self._config = config
+        self._organization_id = organization_id
+        self._mandates = mandates
+
+    async def check(self, text: str) -> GuardrailOutcome:
+        try:
+            verdict = await run_organization_guardrails(
+                self._mandates,
+                text,
+                organization_id=self._organization_id,
+                default_url=deployment_guardrails_url(self._config),
+                held=organization_guardrail_runner.handle,
+            )
+        except GuardrailsNotReachableError as exc:
+            # The reason names the profile and the endpoint, for the operator, and never what was checked.
+            logger.warning("A mandated guardrail could not check a memory proposal: %s", exc)
+            raise GuardrailsUnavailableError from None
+        return GuardrailOutcome(
+            blocked=tuple(result.profile for result in verdict.flagged if result.mode == "block"),
+            monitored=tuple(result.profile for result in verdict.flagged if result.mode != "block"),
+            unchecked=tuple(result.profile for result in verdict.results if result.status != "evaluated"),
+        )
+
+
+class _MemoryGuardrails:
+    """The guardrails an organization mandates for a workspace, read as the request path reads them."""
+
+    def __init__(self, config: GatewayConfig) -> None:
+        self._config = config
+
+    async def mandated(self, organization_id: uuid.UUID, workspace_id: uuid.UUID) -> _MemoryMandate | None:
+        try:
+            # On a session of its own, closed before any check runs, so no transaction idles over one.
+            async with create_session() as session:
+                mandates = await resolve_organization_guardrails(
+                    session, organization_id=organization_id, workspace_id=workspace_id
+                )
+        except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
+            # As on a request, a mandate whose credential will not open is not run unauthenticated.
+            logger.error(
+                "Organization guardrail credential could not be decrypted for organization %s: %s",
+                organization_id,
+                exc,
+            )
+            raise GuardrailsUnavailableError from None
+        return _MemoryMandate(self._config, organization_id, mandates) if mandates else None
+
+
 class _MemoryManagers:
     """The management checks every workspace and organization policy uses, for memory's switches."""
 
@@ -2407,6 +2469,7 @@ def build_memory_service(
         managers,
         ledger=_MemoryLedger(uow, UsageLogRepository(uow)),
         recall_vectors=recall_vectors,
+        guardrails=_MemoryGuardrails(config),
     )
 
 

@@ -44,6 +44,7 @@ from gateway.services.memory._experiment import (
     compare,
     summarize,
 )
+from gateway.services.memory._guardrails import GuardrailsUnavailableError, MandatedGuardrails, MemoryGuardrails
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._models import (
     EMBEDDING_ENDPOINT,
@@ -72,7 +73,8 @@ NEIGHBOURS = 5
 COMPARE_FLOOR = 0.75
 # Without a consolidation model, a proposal this alike to an entry adds nothing.
 SAME_FLOOR = 0.95
-# Passes a proposal may fail on a model before it waits for an admin instead.
+# Passes a proposal may fail on a model, or on a mandated guardrail that could not run, before it waits for an
+# admin instead.
 MAX_ATTEMPTS = 5
 # Automatic recall: how alike an entry must be to a request's newest turn, and how many are handed over. How alike
 # is the embedding model's own scale: 0.65 suits nomic-embed-text, and another model may want another floor.
@@ -274,6 +276,7 @@ class _Switches:
     workspace_scope: bool
     hide_external: bool
     write_policy: MemoryWritePolicy
+    organization_id: uuid.UUID
 
 
 class MemoryService:
@@ -291,6 +294,7 @@ class MemoryService:
         *,
         ledger: UsageLedger | None = None,
         recall_vectors: RecallVectors | None = None,
+        guardrails: MemoryGuardrails | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._uow = uow
@@ -303,6 +307,8 @@ class MemoryService:
         self._ledger = ledger
         # The embeddings automatic recall opened, shared by every request of the process; None opens them each turn.
         self._recall_vectors = recall_vectors
+        # The guardrails the organization mandates, run over each proposal; None runs none.
+        self._guardrails = guardrails
         self._keys = keys
         self._now = now
 
@@ -774,25 +780,53 @@ class MemoryService:
     async def consolidate(self, workspace_id: uuid.UUID, *, limit: int) -> int:
         """Decide up to ``limit`` of the workspace's pending proposals; how many were decided.
 
-        A proposal whose model call fails is left for a later pass, and after
-        ``MAX_ATTEMPTS`` waits for an admin. A proposal another replica decided
-        first is skipped.
+        The guardrails the organization mandates for the workspace are read once, and run over each proposal
+        before anything else is. A proposal whose model call fails, or that a mandate failing closed could not
+        check, is left for a later pass, and after ``MAX_ATTEMPTS`` waits for an admin. A proposal another
+        replica decided first is skipped.
         """
         async with self._uow:
             switches = await self._switches_if_on(workspace_id)
             if switches is None:
                 return 0
             proposals = await self._store.pending_proposals(workspace_id, limit=limit)
+        if not proposals:
+            return 0
+        try:
+            mandated = (
+                await self._guardrails.mandated(switches.organization_id, workspace_id)
+                if self._guardrails is not None
+                else None
+            )
+        except GuardrailsUnavailableError:
+            # Nothing is decided unchecked: each proposal waits for a later pass, as on a failed model call.
+            for proposal in proposals:
+                await self._count_failed_pass(proposal, "guardrail_unavailable")
+            return 0
         decided = 0
         for proposal in proposals:
             try:
-                decided += await self._consolidate_one(proposal, switches)
+                decided += await self._consolidate_one(proposal, switches, mandated)
             except (MemoryModelUnavailableError, MemoryModelError):
-                await self._count_failed_pass(proposal)
+                await self._count_failed_pass(proposal, "model")
+            except GuardrailsUnavailableError:
+                logger.warning(
+                    "Memory proposal %s of workspace %s could not be checked by its mandated guardrails; "
+                    "it waits for a later pass",
+                    proposal.id,
+                    proposal.workspace_id,
+                )
+                await self._count_failed_pass(proposal, "guardrail_unavailable")
         return decided
 
-    async def _consolidate_one(self, proposal: OpenedProposal, switches: _Switches) -> int:
+    async def _consolidate_one(
+        self, proposal: OpenedProposal, switches: _Switches, mandated: MandatedGuardrails | None
+    ) -> int:
         workspace_id = proposal.workspace_id
+        if mandated is not None and not await self._passes_guardrails(proposal, mandated):
+            async with self._uow:
+                await self._repos.proposals.hold_for_review(workspace_id, proposal.id, "guardrail")
+            return 1
         if proposal.scope == "workspace" and switches.write_policy == "review" and proposal.trust != "reviewed":
             async with self._uow:
                 await self._repos.proposals.hold_for_review(workspace_id, proposal.id, "policy")
@@ -853,6 +887,36 @@ class MemoryService:
                 await self._repos.entries.set_status(workspace_id, target.id, "superseded")
         return 1
 
+    async def _passes_guardrails(self, proposal: OpenedProposal, mandated: MandatedGuardrails) -> bool:
+        """Whether no ``block`` mandate flags the proposal.
+
+        Run before it is embedded, so a refused text reaches no model. What flagged it is logged by profile,
+        never with the text.
+        """
+        outcome = await mandated.check(proposal.text)
+        if outcome.unchecked:
+            logger.info(
+                "Memory proposal %s of workspace %s went on unchecked by guardrails %s, which gave no verdict",
+                proposal.id,
+                proposal.workspace_id,
+                ", ".join(outcome.unchecked),
+            )
+        if outcome.monitored:
+            logger.info(
+                "Memory proposal %s of workspace %s was flagged by monitored guardrails %s",
+                proposal.id,
+                proposal.workspace_id,
+                ", ".join(outcome.monitored),
+            )
+        if outcome.blocked:
+            logger.info(
+                "Memory proposal %s of workspace %s was refused by guardrails %s; it waits for an admin",
+                proposal.id,
+                proposal.workspace_id,
+                ", ".join(outcome.blocked),
+            )
+        return not outcome.blocked
+
     async def _decide(self, proposal: OpenedProposal, nearest: list[tuple[float, OpenedEntry]]) -> Decision:
         if not nearest:
             return Decision("add")
@@ -875,11 +939,12 @@ class MemoryService:
             await self._repos.entries.set_status(workspace_id, oldest.id, "retired")
             logger.info("Memory of workspace %s is at its cap; retired its least used entry", workspace_id)
 
-    async def _count_failed_pass(self, proposal: OpenedProposal) -> None:
+    async def _count_failed_pass(self, proposal: OpenedProposal, reason: str) -> None:
+        """Count a pass that could not decide the proposal; at ``MAX_ATTEMPTS`` it waits for an admin for ``reason``."""
         async with self._uow:
             attempts = await self._repos.proposals.count_attempt(proposal.workspace_id, proposal.id)
             if attempts >= MAX_ATTEMPTS:
-                await self._repos.proposals.hold_for_review(proposal.workspace_id, proposal.id, "model")
+                await self._repos.proposals.hold_for_review(proposal.workspace_id, proposal.id, reason)
 
     # -- Shared steps -------------------------------------------------------
 
@@ -896,7 +961,9 @@ class MemoryService:
             return None
         if not await self._repos.organizations.enabled(settings.organization_id):
             return None
-        return _Switches(settings.workspace_scope_enabled, settings.hide_external, settings.write_policy)
+        return _Switches(
+            settings.workspace_scope_enabled, settings.hide_external, settings.write_policy, settings.organization_id
+        )
 
     async def _visible_entry(self, caller: MemoryCaller, switches: _Switches, entry_id: uuid.UUID) -> OpenedEntry:
         entry = await self._store.entry(caller.workspace_id, entry_id)

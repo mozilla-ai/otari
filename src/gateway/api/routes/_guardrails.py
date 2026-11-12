@@ -27,7 +27,6 @@ from fastapi import HTTPException, Response, status
 
 from gateway.api.routes._guardrail_targets import AnswerPart, RequestTarget
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
-from gateway.core.env import otari_env
 from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig, GuardrailDirection
@@ -40,6 +39,7 @@ from gateway.services.guardrails import (
     cached_result,
     check_guardrail_urls,
     check_identity,
+    deployment_guardrails_url,
     remember_result,
     run_input_guardrails,
     withheld_tool_result,
@@ -150,12 +150,7 @@ class RequestGuardrails:
         self._mandated = frozenset(mandated or ())
         self._in_process = in_process or {}
         self._trace = trace
-        # Effective guardrails URL: dashboard override / config / env, falling back to
-        # the env var when no config is threaded in (e.g. unit tests). A dashboard
-        # override mutates config, so it hot-applies on the next request.
-        self._default_url = (
-            (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
-        )
+        self._default_url = deployment_guardrails_url(config)
         self._unsafe: Mapping[str, UnsafeURLError] | None = None
         self._reported: list[GuardrailResult] = []
         self._withheld: dict[str, int] = {}

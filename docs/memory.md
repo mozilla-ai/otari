@@ -226,14 +226,30 @@ member scope is its owner's alone: no other member, and no admin, recalls it.
 1. **Screening.** A proposal carrying a credential, a private key, an email
    address or a card number is refused before anything is stored, and the agent
    is told which kind it carried, never the match.
-2. **Comparison.** The consolidator embeds the proposal and compares it with the
+2. **Organization guardrails.** The consolidator runs the guardrails the
+   organization mandates for the proposal's workspace over its text, before
+   anything else is done with it, as they run over a request's input: the
+   mandates for every workspace or for this one, if enabled, each with its own
+   endpoint, `mode` and `on_unavailable`. See
+   [Mandate a guardrail](configure-guardrails.md#mandate-a-guardrail).
+   - A `block` mandate that flags the proposal refuses it: it never becomes an
+     entry, is never embedded, and waits for an admin with the reason
+     `guardrail`.
+   - A `monitor` mandate that flags it is logged by profile, and the proposal
+     goes on.
+   - A mandate that fails closed and cannot be run, or gives no verdict, leaves
+     the proposal for a later pass; after five it waits for an admin with the
+     reason `guardrail_unavailable`. One set to `on_unavailable: monitor` lets
+     it go on unchecked, as it would a request.
+   - Where nothing is mandated for the workspace, no guardrail is called.
+3. **Comparison.** The consolidator embeds the proposal and compares it with the
    nearest entries of its scope.
-3. **Decision.** The consolidation model answers with one decision and nothing
+4. **Decision.** The consolidation model answers with one decision and nothing
    else: add, update (a new version of an entry), no change, or conflict. What
    is stored is the proposal's own text, so an instruction hidden in a proposal
    has nothing to write. Without a consolidation model, a proposal nearly the
    same as an entry is a no change, and anything else is added.
-4. **Review.** A conflict, a shared proposal under the `review` policy, an
+5. **Review.** A conflict, a shared proposal under the `review` policy, an
    update an agent proposed to an entry an admin reviewed, and a proposal whose
    model call failed five times wait for an admin instead.
 
@@ -270,9 +286,16 @@ entry three members flag leaves recall until an admin looks at it.
   erased it holds; other processes hold its embeddings until they expire, and
   hand over none of them. Off, every entry is opened on every turn: plaintext
   lives no longer than a request.
+- **Checked by the organization's guardrails.** What the organization mandates
+  on requests also checks every proposal before it is kept, so a prompt
+  injection its mandates refuse on a request is not handed to other members
+  through recall. The proposal's text is sent to each mandate's guardrails
+  service, or checked in the gateway for a guardrail the organization defined,
+  as a request's input is.
 - **Usage, no content.** Each embedding and consolidation call is recorded as
   usage of its workspace, outside any budget. Logs, traces and metrics carry ids
-  and counts, never what an agent wrote.
+  and counts, never what an agent wrote. A proposal a guardrail refused or flagged is
+  logged by its id and the guardrail's profile.
 
 ## Settings
 
