@@ -736,6 +736,8 @@ _INFERENCE_CORS_PATHS = frozenset(
     }
 )
 _INFERENCE_CORS_PREFIXES = (f"{API_ROOT}/audio/", f"{API_ROOT}/images/", f"{API_ROOT}/models/")
+# Under the model list's prefix but for the operator alone, so a page never needs them.
+_INFERENCE_CORS_OPERATOR_PATHS = frozenset({f"{API_ROOT}/models/discoverable", f"{API_ROOT}/models/metadata"})
 
 
 class ScopedCORSMiddleware:
@@ -782,11 +784,15 @@ class ScopedCORSMiddleware:
             else None
         )
         self.listed = frozenset(allow_origins) - {"*"}
+        # A wildcard deployment policy already answers every origin on every path,
+        # without credentials, so the narrower one would only take access away.
+        self.everyone = "*" in allow_origins
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         policy = self.deployment
         if (
             self.inference is not None
+            and not self.everyone
             and scope["type"] == "http"
             and _is_inference_path(scope["path"])
             and Headers(scope=scope).get("origin") not in self.listed
@@ -796,6 +802,8 @@ class ScopedCORSMiddleware:
 
 
 def _is_inference_path(path: str) -> bool:
+    if path in _INFERENCE_CORS_OPERATOR_PATHS:
+        return False
     return path in _INFERENCE_CORS_PATHS or path.startswith(_INFERENCE_CORS_PREFIXES)
 
 

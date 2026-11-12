@@ -573,17 +573,28 @@ def _default_database_url() -> str:
     return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 def _is_origin(value: str) -> bool:
-    """Whether ``value`` is an http(s) origin: a scheme and a host, an optional port, and nothing else."""
+    """Whether ``value`` is an http(s) origin as a browser sends it in ``Origin``.
+
+    That is a scheme and a lowercase ASCII host, a port only when it is not the
+    scheme's default, and nothing else: a browser never sends any other spelling,
+    so an entry written another way could never match.
+    """
     try:
         parts = urlsplit(value)
-        parts.port  # noqa: B018 - raises on a port that is not a number
+        port = parts.port
     except ValueError:
         return False
     return (
-        parts.scheme in ("http", "https")
+        parts.scheme in _DEFAULT_PORTS
         and bool(parts.hostname)
         and "@" not in parts.netloc
+        and value.isascii()
+        and parts.netloc == parts.netloc.lower()
+        and port != _DEFAULT_PORTS[parts.scheme]
         and value == f"{parts.scheme}://{parts.netloc}"
     )
 
@@ -2228,7 +2239,8 @@ class GatewayConfig(
             if origin != "*" and not _is_origin(origin):
                 msg = (
                     f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
-                    "with an optional port and nothing after it, such as https://app.example.com, or '*'"
+                    "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
+                    "such as https://app.example.com, or '*'"
                 )
                 raise ValueError(msg)
         return origins

@@ -323,12 +323,14 @@ with a small spend ceiling and only the models it needs. See
 [API keys](api-keys.md).
 
 Name origins instead of `*` to open the endpoints to those pages alone. Each
-entry is an origin as a browser sends it: a scheme and a host, with an optional
-port and nothing after it, such as `https://app.example.com` or
-`http://localhost:5173`. An entry that is not one is refused at startup.
+entry is an origin as a browser sends it: a scheme and a host in lowercase, with
+a port only when it is not the scheme's default, and nothing after it, such as
+`https://app.example.com` or `http://localhost:5173`. An entry that is not one,
+`https://app.example.com:443` for instance, is refused at startup.
 
 An origin listed in `cors_allow_origins` keeps that list's policy on every
-path, the model endpoints included.
+path, the model endpoints included. With `*` there, every origin does, and
+this setting changes nothing.
 
 ## Budgets and API keys in config
 
