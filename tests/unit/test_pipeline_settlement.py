@@ -3416,19 +3416,22 @@ async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_its_tokens_alon
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("reserved", "held"), [(False, False), (True, True)], ids=["holds nothing", "unledgered"])
-async def test_a_tool_loop_round_is_held_wherever_the_request_holds_something(
-    monkeypatch: pytest.MonkeyPatch, reserved: bool, held: bool
+@pytest.mark.parametrize(("reserved", "fits"), [(False, True), (True, False)], ids=["holds nothing", "unledgered"])
+async def test_a_tool_loop_round_grows_no_hold_without_a_ledger_row(
+    monkeypatch: pytest.MonkeyPatch, reserved: bool, fits: bool
 ) -> None:
-    """A request with nothing held takes no round hold; one whose hold has no ledger row still does."""
+    """A request that holds nothing is not gated; one whose hold has no ledger row ends its loop at that round.
+
+    A hold with no ledger row cannot be reclaimed if the request is abandoned, so it is not grown.
+    """
     hold = AsyncMock(return_value=Decimal("0.1"))
     ctx = _round_gate_ctx(monkeypatch, 10.0, hold)
     assert ctx.reservation is not None
     ctx.reservation.reservation_id = None
     ctx.reservation.reserved = reserved
 
-    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
-    assert hold.await_count == (1 if held else 0)
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is fits
+    hold.assert_not_awaited()
 
 
 @pytest.mark.asyncio

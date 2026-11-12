@@ -2642,10 +2642,7 @@ class ReservationRoundGate:
 
     @property
     def in_force(self) -> bool:
-        """Whether the request holds anything a round could grow; a loop is handed the gate only then.
-
-        A hold whose ledger row could not be written still grows and settles on the handle, so it counts too.
-        """
+        """Whether the request holds anything a round would grow; a loop is handed the gate only then."""
         handle = self._ctx.reservation
         return handle is not None and handle.counts_toward_budget and (handle.reserved or bool(handle.scoped_budgets))
 
@@ -2654,6 +2651,12 @@ class ReservationRoundGate:
         inputs, serving = ctx.estimate_inputs, ctx.serving
         if handle is None or not self.in_force or inputs is None or serving is None:
             return True
+        if handle.reservation_id is None:
+            # Its ledger row could not be written, so a growth nothing could reclaim is not taken.
+            logger.warning(
+                "Tool-loop round not held: the request's reservation has no ledger row; sending it as the last"
+            )
+            return False
         instance, model, deployment_paid = serving
         try:
             prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
