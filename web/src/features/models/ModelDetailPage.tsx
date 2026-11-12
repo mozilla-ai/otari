@@ -6,6 +6,7 @@ import type { SortDescriptor } from "react-aria-components"
 import { FiCheck, FiMinus } from "react-icons/fi"
 
 import type { CatalogOffering } from "@/client"
+import { Button as ActionButton } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -21,6 +22,7 @@ import {
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
+import { ModelDetailsDialog } from "@/features/models/ModelDetailsDialog"
 import { OfferingPriceRules } from "@/features/models/OfferingPriceRules"
 import {
   formatPricedRate,
@@ -35,7 +37,7 @@ import {
 } from "@/features/models/publicCatalog"
 import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage } from "@/features/organization/roles"
-import { useCatalogModel } from "@/shared/api/models"
+import { useCatalogModel, useSetModelOverride } from "@/shared/api/models"
 import {
   useDeploymentOperator,
   useOrganizationContext,
@@ -199,12 +201,16 @@ function compareOfferings(
 
 function offeringColumns({
   canOverride,
+  isOperator,
   withUsage,
   withSource,
+  onEditDetails,
 }: {
   canOverride: boolean
+  isOperator: boolean
   withUsage: boolean
   withSource: boolean
+  onEditDetails: (offering: CatalogOffering) => void
 }): DataTableColumn<OfferingRow>[] {
   // Lane order is what a laptop sees without scrolling: the provider and its
   // selector, then the prices the page exists to compare, then where each came
@@ -333,28 +339,44 @@ function offeringColumns({
         ),
     })
   }
-  if (canOverride) {
+  if (canOverride || isOperator) {
     // An organization admin cannot touch the deployment's price, but may set
     // what their own organization is billed for a model it supplies the key
     // for. An offering on one of the deployment's own instances is not one of
     // those: the deployment settles that upstream bill, and the gateway refuses
     // an override for it (otari#1164), so no link is offered rather than one
-    // that ends in a disabled dialog.
+    // that ends in a disabled dialog. The details follow the same line: the
+    // organization's for its own keys, the operator's for everything else.
     columns.push({
       id: "actions",
       header: "Actions",
-      cell: ({ offering: row }) =>
-        row.credential === "organization" ? (
-          <Link
-            to="/organization/provider-keys"
-            search={{ override: row.selector }}
-            className="text-link hover:text-link-hover"
-          >
-            Set your rate
-          </Link>
-        ) : (
-          <span className="text-caption text-subtle">Deployment priced</span>
-        ),
+      cell: ({ offering: row }) => {
+        const own = row.credential === "organization"
+        const editDetails = own ? canOverride : isOperator
+        return (
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {own && canOverride ? (
+              <Link
+                to="/organization/provider-keys"
+                search={{ override: row.selector }}
+                className="text-link hover:text-link-hover"
+              >
+                Set your rate
+              </Link>
+            ) : null}
+            {!own && canOverride ? (
+              <span className="text-caption text-subtle">
+                Deployment priced
+              </span>
+            ) : null}
+            {editDetails ? (
+              <ActionButton size="sm" onPress={() => onEditDetails(row)}>
+                Edit details
+              </ActionButton>
+            ) : null}
+          </span>
+        )
+      },
     })
   }
   return columns
@@ -405,6 +427,8 @@ export function ModelDetailView({
   )
   const [quantization, setQuantization] = useState("all")
   const [useModel, setUseModel] = useState(false)
+  const [editing, setEditing] = useState<CatalogOffering | undefined>(undefined)
+  const setOverride = useSetModelOverride()
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
     direction: "asc" | "desc"
@@ -646,8 +670,10 @@ export function ModelDetailView({
                 ariaLabel={`Offerings of ${model.name}`}
                 columns={offeringColumns({
                   canOverride,
+                  isOperator,
                   withUsage,
                   withSource: !publicView,
+                  onEditDetails: setEditing,
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}
@@ -673,6 +699,29 @@ export function ModelDetailView({
         </section>
         <OfferingPriceRules offerings={model.offerings} />
       </div>
+      {editing === undefined ? null : (
+        <ModelDetailsDialog
+          key={editing.selector}
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setEditing(undefined)
+          }}
+          selector={editing.selector}
+          current={editing.metadata_override ?? undefined}
+          onSubmit={(body) =>
+            setOverride
+              .mutateAsync({
+                owner:
+                  editing.credential === "organization"
+                    ? "organization"
+                    : "deployment",
+                selector: editing.selector,
+                body,
+              })
+              .then(() => setEditing(undefined))
+          }
+        />
+      )}
       {publicView ? null : (
         <UseModelDrawer
           model={model}

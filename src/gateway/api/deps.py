@@ -138,7 +138,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.catalog import served_context_window
+from gateway.services.catalog import ModelMetadataOverrideService, served_context_window
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
@@ -1113,6 +1113,13 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_model_metadata_override_service(uow: UnitOfWorkDep) -> ModelMetadataOverrideService:
+    return ModelMetadataOverrideService(uow)
+
+
+ModelMetadataOverrideServiceDep = Annotated[ModelMetadataOverrideService, Depends(get_model_metadata_override_service)]
 
 
 async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> bool:
@@ -3100,6 +3107,7 @@ __all__ = [
     "SearchToolServiceDep",
     "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
+    "ModelMetadataOverrideServiceDep",
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",

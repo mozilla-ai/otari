@@ -188,3 +188,30 @@ class CatalogPage(BaseModel):
     count: int
     models: list[CatalogModelSummary]
     facets: CatalogFacets | None = None
+
+
+ModelInputModality = Literal["text", "image", "audio", "video", "pdf"]
+
+_MAX_TOKENS = 2**31 - 1
+
+
+class ModelMetadataOverrideRequest(BaseModel):
+    """What to say about a model in place of its server and models.dev. A null field is not overridden."""
+
+    context_window: int | None = Field(default=None, gt=0, le=_MAX_TOKENS)
+    max_output_tokens: int | None = Field(default=None, gt=0, le=_MAX_TOKENS)
+    tool_call: bool | None = Field(default=None, description="Whether the model calls tools: `tools`, `tool_choice`.")
+    reasoning: bool | None = Field(default=None, description="Whether the model reasons: `reasoning`.")
+    structured_output: bool | None = Field(
+        default=None,
+        description="Whether the model takes `response_format`. Never offered where Otari cannot send it.",
+    )
+    input_modalities: list[ModelInputModality] | None = Field(
+        default=None, min_length=1, max_length=5, description="What the model reads; `text` unless it says otherwise."
+    )
+
+
+class ModelMetadataOverridePublic(ModelMetadataOverrideRequest):
+    """An override as stored, under the selector it describes."""
+
+    selector: str = Field(description="The `provider:model` the override describes.")

@@ -166,7 +166,8 @@ rate a pricing tier does not override is stored as absent, so neither surface
 sends it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
-from models.dev's entry for the model under the provider serving it:
+from models.dev's entry for the model under the provider serving it, unless an
+override sets them (see [Overriding a model's details](#overriding-a-models-details)):
 
 - A model a vLLM or SGLang server lists, through a configured instance, a
   hosted provider or an organization's own key, reports the context length
@@ -213,6 +214,22 @@ with a `reasoning` object (the efforts it accepts) adds `reasoning`.
 All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
+
+### Overriding a model's details
+
+Where a provider's server and models.dev say nothing about a model, or say it
+wrong, whoever holds the key that serves it can set its details on the model's
+page in the dashboard: **Edit details** on its row of offerings. The deployment
+operator sets them for the deployment's own providers, and an organization's
+owners and admins for the models its own provider keys serve, which only that
+organization's callers see.
+
+An override sets any of the context window, the maximum output tokens, whether
+the model calls tools, reasons or takes `response_format`, and what it reads.
+Each field it sets wins over the server and models.dev; a field it leaves blank
+keeps their word, and saving every field blank removes the override. It cannot
+add `response_format` where Otari cannot send it to the provider. An override
+changes what the listing says and nothing about how a request is served.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
 `transcription`, `rerank`, `moderation`, `video`, `decision`, `realtime`, or

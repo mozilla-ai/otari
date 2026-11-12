@@ -1,7 +1,8 @@
 """A catalog model's token limits and capabilities.
 
-From what the engine serving it says (``_served``), then the live models.dev
-catalog, then the pricing snapshot.
+From what an operator or organization set (``_overrides``), then what the
+engine serving it says (``_served``), then the live models.dev catalog, then
+the pricing snapshot.
 """
 
 import uuid
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from gateway.core.config import GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
 from gateway.services.catalog._model_type import model_type
+from gateway.services.catalog._overrides import MetadataOverride, metadata_override
 from gateway.services.catalog._served import ServedFacts, served_facts
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.pricing_service import model_context_window
@@ -66,6 +68,18 @@ def _served(config: GatewayConfig, model_key: str, organization_id: uuid.UUID | 
     return served_facts(instance, model_id)
 
 
+def _override(config: GatewayConfig, model_key: str, organization_id: uuid.UUID | None) -> MetadataOverride | None:
+    """The override of a ``provider:model`` key as the caller reaches it, in the order ``_served`` reads."""
+    instance, separator, model_id = model_key.partition(":")
+    if not separator:
+        return None
+    if organization_id is not None and instance not in config.providers:
+        own = metadata_override(instance, model_id, organization_id)
+        if own is not None:
+            return own
+    return metadata_override(instance, model_id)
+
+
 def _entry(
     config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str, served: ServedFacts | None
 ) -> ModelCatalogEntry | None:
@@ -103,36 +117,45 @@ def model_limits(
 ) -> ModelLimits:
     """The token limits of a ``provider:model`` (or bare) key, as a caller in ``organization_id`` reaches it.
 
-    The engine serving the model first, because it reports the context length
-    it actually runs the model at. Then the live models.dev catalog, because it
-    describes the model as that provider serves it, then the pricing snapshot
-    for the context window. The snapshot keeps no output limit, so without a
-    live entry there is none, and no output limit exceeds what the engine
-    serves. A bare key names no provider to look any up under.
+    An override first, then the engine serving the model, because it reports
+    the context length it actually runs the model at. Then the live models.dev
+    catalog, because it describes the model as that provider serves it, then
+    the pricing snapshot for the context window. The snapshot keeps no output
+    limit, so without a live entry there is none, and no output limit models.dev
+    gives exceeds the context window the override or the engine sets. A bare
+    key names no provider to look any up under.
     """
     instance, separator, model_id = model_key.partition(":")
     if not separator:
         return ModelLimits(model_context_window(None, model_key), None)
+    override = _override(config, model_key, organization_id) or MetadataOverride()
     served = _served(config, model_key, organization_id)
     metadata = _entry(config, models_dev, model_key, served)
-    served_window = served.context_window if served else None
+    window = override.context_window or (served.context_window if served else None)
     max_output = metadata.max_output_tokens if metadata else None
-    if max_output is not None and served_window is not None:
-        max_output = min(max_output, served_window)
+    if max_output is not None and window is not None:
+        max_output = min(max_output, window)
     return ModelLimits(
-        context_window=served_window
+        context_window=window
         or (metadata.context_window if metadata else None)
         or model_context_window(instance, model_id),
-        max_output_tokens=max_output,
+        max_output_tokens=override.max_output_tokens or max_output,
     )
 
 
 def served_context_window(provider: str | None, model: str, organization_id: uuid.UUID | None = None) -> int | None:
-    """A model's context window as its engine serves it, else as the pricing snapshot gives it.
+    """A model's context window as overridden, else as its engine serves it, else as the pricing snapshot gives it.
 
-    ``organization_id``'s own key is read first. Unlike a listing this needs no
-    configured instance check: a key's prefix never names one.
+    ``organization_id``'s own override and key are read first. Unlike a listing
+    this needs no configured instance check: a key's prefix never names one.
     """
+    override = None
+    if provider and organization_id is not None:
+        override = metadata_override(provider, model, organization_id)
+    if provider and override is None:
+        override = metadata_override(provider, model)
+    if override is not None and override.context_window is not None:
+        return override.context_window
     served = None
     if provider and organization_id is not None:
         served = served_facts(provider, model, organization_id)
@@ -149,7 +172,7 @@ def model_capabilities(
     model_key: str,
     organization_id: uuid.UUID | None = None,
 ) -> ModelCapabilities | None:
-    """A model's capabilities, or ``None`` when neither models.dev nor its engine describes it.
+    """A model's capabilities, or ``None`` when no override, models.dev entry or engine describes it.
 
     ``supported_parameters`` names only the request parameters models.dev records
     a flag for, so it is not the full set a model accepts: ``tools`` and
@@ -161,27 +184,45 @@ def model_capabilities(
     tools only with a tool-call parser, whatever the model can do, and a
     reasoning parser means the model reasons, as does a listing that describes
     its reasoning options. What it says it reads overrides models.dev's input
-    modalities, whether or not it named its parsers.
+    modalities, whether or not it named its parsers. An override's fields win
+    over all of them, except that it cannot offer ``response_format`` where
+    any-llm refuses it.
     """
+    override = _override(config, model_key, organization_id)
     served = _served(config, model_key, organization_id)
     metadata = _entry(config, models_dev, model_key, served)
     settings = served if served is not None and served.settings_reported else None
     served_modalities = served.input_modalities if served is not None else None
     served_reasoning = served is not None and served.reasoning
-    if metadata is None and settings is None and served_modalities is None and not served_reasoning:
+    if (
+        metadata is None
+        and settings is None
+        and served_modalities is None
+        and not served_reasoning
+        and override is None
+    ):
         return None
     tool_call = metadata.tool_call if metadata else None
     reasoning = (metadata.reasoning if metadata else None) or served_reasoning
     instance, _, model_id = model_key.partition(":")
     structured_output = metadata.structured_output if metadata else None
-    if not _sends_response_format(config.provider_instance_type(instance), model_id):
-        structured_output = False
     input_modalities = (
         list(served_modalities) if served_modalities else (metadata.input_modalities if metadata else ["text"])
     )
     if settings is not None:
         tool_call = settings.tool_call_parser is not None
         reasoning = reasoning or settings.reasoning_parser is not None
+    if override is not None:
+        if override.tool_call is not None:
+            tool_call = override.tool_call
+        if override.reasoning is not None:
+            reasoning = override.reasoning
+        if override.structured_output is not None:
+            structured_output = override.structured_output
+        if override.input_modalities is not None:
+            input_modalities = list(override.input_modalities)
+    if not _sends_response_format(config.provider_instance_type(instance), model_id):
+        structured_output = False
     flags = (
         (tool_call, ("tools", "tool_choice")),
         (structured_output, ("response_format",)),

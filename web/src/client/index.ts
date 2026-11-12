@@ -270,6 +270,10 @@ export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
+export type ModelMetadataOverride = Schemas["ModelMetadataOverrideRequest"]
+export type ModelInputModality = NonNullable<
+  ModelMetadataOverride["input_modalities"]
+>[number]
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">

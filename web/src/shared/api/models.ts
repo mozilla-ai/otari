@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
   CatalogQueryParams,
   CatalogResponse,
   DiscoverableModelsResponse,
   ModelListResponse,
+  ModelMetadataOverride,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
@@ -160,3 +161,35 @@ export function useDiscoverableModels(enabled = true) {
 //
 // `enabled` is the `useToolSettings` composition: the read is
 // deployment-operator-only, so a tenant-facing page declines to ask.
+
+// What a model's server and models.dev do not say, set by whoever holds the
+// key that serves it: the operator for the deployment's own providers, an
+// organization's owners and admins for its own keys. Saving every field empty
+// clears the override. Both the catalog and `/v1/models` read it.
+export type ModelOverrideOwner = "deployment" | "organization"
+
+const overridePath = (owner: ModelOverrideOwner, selector: string) =>
+  `${owner === "organization" ? "/organizations/me" : ""}/model-overrides/${encodeURIComponent(selector)}`
+
+export function useSetModelOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      owner,
+      selector,
+      body,
+    }: {
+      owner: ModelOverrideOwner
+      selector: string
+      body: ModelMetadataOverride
+    }) =>
+      apiFetch<ModelMetadataOverride>(overridePath(owner, selector), {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+    },
+  })
+}

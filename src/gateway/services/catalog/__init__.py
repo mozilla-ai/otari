@@ -12,6 +12,7 @@ from gateway.services.catalog._model_type import (
     offered_model_types,
     offering_model_type,
 )
+from gateway.services.catalog._overrides import MetadataOverride, ModelMetadataOverrideService
 from gateway.services.catalog._query import common_price_unit, query_catalog
 from gateway.services.catalog._selectors import (
     CatalogModel,
@@ -49,7 +50,9 @@ __all__ = [
     "EngineSettings",
     "Identities",
     "KeyOwner",
+    "MetadataOverride",
     "ModelArchitecture",
+    "ModelMetadataOverrideService",
     "ModelType",
     "OfferingRow",
     "OrganizationSelectors",

@@ -75,7 +75,13 @@ from gateway.schemas.providers import (
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
-from gateway.services.catalog import KeyOwner, offered_model_types, record_served_models
+from gateway.services.catalog import (
+    KeyOwner,
+    MetadataOverride,
+    ModelMetadataOverrideService,
+    offered_model_types,
+    record_served_models,
+)
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
@@ -324,6 +330,19 @@ class OrgProviderModelService:
             raise OrgProviderKeyNotFoundError(key_id)
         return key
 
+    async def _organization_serving(self, user: User, selector: str) -> uuid.UUID:
+        """The caller's organization, having checked they may administer it and it holds a live key under ``selector``.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+        """
+        organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+        prefix = selector.partition(":")[0]
+        if not any(key.selector_prefix == prefix for key in await self.keys.list_live_keys(organization.id)):
+            raise OrgProviderKeyNotFoundError(prefix)
+        return organization.id
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
@@ -472,6 +491,26 @@ class OrgProviderModelService:
             public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
         await self.refresh_overlay()
         return public
+
+    async def set_metadata_override(self, *, user: User, selector: str, override: MetadataOverride) -> MetadataOverride:
+        """Replace the organization's own override of a model one of its keys serves.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+            ValueError: ``selector`` is not in ``provider:model`` form.
+        """
+        organization_id = await self._organization_serving(user, selector)
+        return await ModelMetadataOverrideService(self.uow).set(selector, override, organization_id)
+
+    async def clear_metadata_override(self, *, user: User, selector: str) -> None:
+        """Drop the organization's own override of a model, leaving the server and models.dev to describe it.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+            ValueError: ``selector`` is not in ``provider:model`` form.
+        """
+        organization_id = await self._organization_serving(user, selector)
+        await ModelMetadataOverrideService(self.uow).clear(selector, organization_id)
 
     async def remove_model(self, *, user: User, key_id: uuid.UUID, model_id: uuid.UUID) -> None:
         """Stop offering one model. Its rate and its history stay.

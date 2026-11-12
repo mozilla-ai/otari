@@ -2823,6 +2823,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Model Override
+         * @description Replace the deployment's override of a model; every field null clears it.
+         */
+        put: operations["model-overrides-set_model_override"];
+        post?: never;
+        /**
+         * Clear Model Override
+         * @description Drop the deployment's override of a model.
+         */
+        delete: operations["model-overrides-clear_model_override"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models": {
         parameters: {
             query?: never;
@@ -3964,6 +3988,32 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Organization Model Override
+         * @description Replace the organization's override of a model one of its keys serves; every field null clears it.
+         *
+         *     Organization owners and admins only.
+         */
+        put: operations["model-overrides-set_organization_model_override"];
+        post?: never;
+        /**
+         * Clear Organization Model Override
+         * @description Drop the organization's override of a model. Organization owners and admins only.
+         */
+        delete: operations["model-overrides-clear_organization_model_override"];
         options?: never;
         head?: never;
         patch?: never;
@@ -10570,6 +10620,8 @@ export interface components {
             metadata_input_price_per_million?: number | null;
             /** Metadata Output Price Per Million */
             metadata_output_price_per_million?: number | null;
+            /** @description What whoever holds the serving key set in place of the server's and models.dev's word: the organization for an `organization` offering, the operator otherwise. Null when nothing is set. */
+            metadata_override?: components["schemas"]["ModelMetadataOverrideRequest"] | null;
             /**
              * Price Reference
              * @description For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.
@@ -14938,6 +14990,71 @@ export interface components {
              * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
              */
             type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+        };
+        /**
+         * ModelMetadataOverridePublic
+         * @description An override as stored, under the selector it describes.
+         */
+        ModelMetadataOverridePublic: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Selector
+             * @description The `provider:model` the override describes.
+             */
+            selector: string;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
+        };
+        /**
+         * ModelMetadataOverrideRequest
+         * @description What to say about a model in place of its server and models.dev. A null field is not overridden.
+         */
+        ModelMetadataOverrideRequest: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
         };
         /**
          * ModelMetadataResponse
@@ -27169,6 +27286,70 @@ export interface operations {
             };
         };
     };
+    "model-overrides-set_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "models-list_models": {
         parameters: {
             query?: {
@@ -29093,6 +29274,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-set_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

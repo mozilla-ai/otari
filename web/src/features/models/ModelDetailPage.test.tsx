@@ -857,6 +857,78 @@ describe("ModelDetailPage", () => {
     expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
   })
 
+  it("lets a deployment operator set the details of a deployment offering", async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApi({
+      detail: { ...GLM_DETAIL, offerings: [offering({})] },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit details" }),
+    )
+    await user.type(screen.getByLabelText("Context window"), "1048576")
+    await user.click(screen.getByRole("button", { name: "Save details" }))
+
+    await waitFor(() => {
+      const put = fetchSpy.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PUT",
+      )
+      expect(String(put?.[0])).toContain(
+        `${API_ROOT}/model-overrides/nebius%3Azai-org%2FGLM-5.3`,
+      )
+      const init = put?.[1] as RequestInit | undefined
+      expect(JSON.parse(String(init?.body))).toEqual({
+        context_window: 1048576,
+        max_output_tokens: null,
+        tool_call: null,
+        reasoning: null,
+        structured_output: null,
+        input_modalities: null,
+      })
+    })
+  })
+
+  it("lets an organization admin set the details of its own offering only", async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApi({
+      context: organizationContext({
+        role: "admin",
+        deployment_operator: false,
+      }),
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [
+          offering({ credential: "organization" }),
+          offering({
+            selector: "together:zai-org/GLM-5.3",
+            provider: "together",
+            credential: "deployment",
+          }),
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const edits = await screen.findAllByRole("button", { name: "Edit details" })
+    expect(edits).toHaveLength(1)
+    await user.click(edits[0])
+    await user.type(screen.getByLabelText("Max output tokens"), "65536")
+    await user.click(screen.getByRole("button", { name: "Save details" }))
+
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            (init as RequestInit | undefined)?.method === "PUT" &&
+            String(url).includes(
+              `${API_ROOT}/organizations/me/model-overrides/nebius%3Azai-org%2FGLM-5.3`,
+            ),
+        ),
+      ).toBe(true),
+    )
+  })
+
   it("shows what the organization was charged for an offering", async () => {
     mockApi()
     GLM_DETAIL.offerings[0] = offering({
