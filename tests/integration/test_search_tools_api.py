@@ -465,6 +465,7 @@ def test_search_catalog_serves_the_library_metadata(
         "perplexity",
         "searxng",
         "serply",
+        "specstream",
         "synthetic",
         "tavily",
         "youdotcom",
