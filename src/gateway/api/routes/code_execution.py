@@ -200,7 +200,13 @@ async def execute_code(
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)
         # The master key acts deployment-wide, so it reaches an upload in any workspace.
-        scope = FileScope(user_id, None if api_key is None else workspace_id)
+        scope = FileScope(
+            user_id,
+            None if api_key is None else workspace_id,
+            fallback_user_id=str(api_key.user_id)
+            if api_key is not None and names_end_user(api_key, request.user)
+            else None,
+        )
         for file_id in dict.fromkeys(request.file_ids):
             staged = await files.staged_upload(file_id, scope)
             if staged is None:

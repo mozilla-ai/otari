@@ -279,18 +279,19 @@ async def _resolve_from_ref(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
+    file_owner_id: str | None = None,
 ) -> _Resolved | None:
     """Resolve a ``{file_data|url|file_id, filename}`` descriptor to bytes.
 
     ``read_bytes=False`` resolves a ``file_id`` to its record without loading
     the blob, for a block that is only staged into the sandbox and never shown
-    to the model.
+    to the model. ``file_owner_id`` is the scope's fallback owner (see :class:`FileScope`).
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
     if file_id and files is not None:
         # A request with no resolved user owns no file, so it resolves nothing.
-        scope = None if user_id is None else FileScope(user_id, workspace_id)
+        scope = None if user_id is None else FileScope(user_id, workspace_id, fallback_user_id=file_owner_id)
         staged = None if scope is None else await files.staged_upload(str(file_id), scope)
         if staged is None:
             logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
@@ -315,6 +316,7 @@ async def _classify(
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
+    file_owner_id: str | None = None,
 ) -> _Source | None:
     """Identify an image/document/container block and resolve its bytes, or return None."""
     btype = block.get("type")
@@ -329,6 +331,7 @@ async def _classify(
             user_id=user_id,
             workspace_id=workspace_id,
             read_bytes=not sandbox_requested and not provider_container,
+            file_owner_id=file_owner_id,
         )
         return resolved.source(_CONTAINER) if resolved else None
 
@@ -342,7 +345,9 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, workspace_id=workspace_id, file_owner_id=file_owner_id
+                )
                 if resolved:
                     return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -350,7 +355,9 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(block, files=files, user_id=user_id, workspace_id=workspace_id)
+            resolved = await _resolve_from_ref(
+                block, files=files, user_id=user_id, workspace_id=workspace_id, file_owner_id=file_owner_id
+            )
             if resolved:
                 return resolved.source(_IMAGE)
         if isinstance(url, str):
@@ -370,12 +377,16 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, workspace_id=workspace_id, file_owner_id=file_owner_id
+                )
                 if resolved:
                     return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
+        resolved = await _resolve_from_ref(
+            ref, files=files, user_id=user_id, workspace_id=workspace_id, file_owner_id=file_owner_id
+        )
         if resolved:
             return resolved.attachment()
         return None
@@ -616,6 +627,7 @@ async def _normalize_block(
     sandbox_requested: bool = False,
     provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
+    file_owner_id: str | None = None,
 ) -> Any:
     if not isinstance(block, dict):
         return block
@@ -628,6 +640,7 @@ async def _normalize_block(
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
+            file_owner_id=file_owner_id,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
@@ -715,6 +728,7 @@ async def normalize_messages(
     files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
+    file_owner_id: str | None = None,
     upstream_user: str | None = None,
     client_country: str | None = None,
     sandbox_requested: bool = False,
@@ -772,6 +786,7 @@ async def normalize_messages(
             files=files,
             user_id=user_id,
             workspace_id=workspace_id,
+            file_owner_id=file_owner_id,
             upstream_user=upstream_user,
             client_country=client_country,
             sandbox_requested=sandbox_requested,

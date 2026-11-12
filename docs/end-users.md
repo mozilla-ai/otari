@@ -92,7 +92,9 @@ key that is not a service key, is refused with `400`
 (`end_user_budget_without_end_user`), since there is no end user for the budget
 to apply to. Other endpoints treat a service key as an ordinary key, so a
 `user` naming someone else there follows the key's
-[mismatched `user` field](api-keys.md#mismatched-user-fields) setting.
+[mismatched `user` field](api-keys.md#mismatched-user-fields) setting. That
+includes `/v1/files`, so a service key uploads as its own user, and a request it
+sends for an end user reads the key's uploads.
 
 ## 4. Manage end users
 

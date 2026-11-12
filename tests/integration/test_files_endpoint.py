@@ -312,6 +312,57 @@ def test_file_id_extracted_reaches_provider(
     assert "file_id" not in sent
 
 
+def test_a_service_keys_upload_reaches_the_requests_it_sends_for_its_end_users(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A service key uploads as its own user, the only owner it may name, so its end users' requests read that file."""
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "svc", "user_id": "svc", "is_service_key": True},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    service_key = {next(iter(api_key_header)): f"Bearer {created.json()['key']}"}
+    up = client.post(
+        f"{API_ROOT}/files", headers=service_key, files={"file": ("notes.txt", b"alice's notes", "text/plain")}
+    )
+    assert up.status_code == 200, up.text
+
+    captured: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "user": "alice",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Summarize the attached file."},
+                    {"type": "file", "file": {"file_id": up.json()["id"]}},
+                ],
+            }
+        ],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=service_key, json=body)
+
+    assert resp.status_code == 200, resp.text
+    assert "EXTRACTED::alice's notes" in json.dumps(captured["messages"])
+
+
 def test_budget_rejection_skips_normalization(
     client: TestClient,
     api_key_header: dict[str, str],
