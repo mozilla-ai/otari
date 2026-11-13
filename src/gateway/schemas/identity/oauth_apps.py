@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from gateway.types.key_scope import KeyScope
+
 OAuthClientId = Annotated[str, Field(min_length=1, max_length=128)]
 OAuthRedirectUri = Annotated[str, Field(max_length=2048)]
 OAuthState = Annotated[str, Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")]
@@ -35,9 +37,14 @@ class AppTokenRequest(BaseModel):
 
 
 class AppDetails(BaseModel):
+    """What the consent screen shows about an app before a person approves it."""
+
     name: str
     redirect_uri: str
     issuer: str
+    scopes: list[KeyScope] = Field(
+        description="The scopes each key this app is issued will hold, from its registration."
+    )
 
 
 class AppAuthorizationResponse(BaseModel):

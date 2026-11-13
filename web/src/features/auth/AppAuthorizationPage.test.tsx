@@ -40,6 +40,7 @@ function renderPage(
     return {
       name: "Thunderbolt",
       issuer: "https://auth.otari.example",
+      scopes: ["inference"],
       redirect_uri: "http://localhost:5199/oauth/otari",
     }
   })
@@ -243,6 +244,7 @@ it("keeps cancellation available if loading workspaces fails", async () => {
     return {
       name: "Thunderbolt",
       issuer: "https://auth.otari.example",
+      scopes: ["inference"],
       redirect_uri: "http://localhost:5199/oauth/otari",
     }
   })
@@ -340,6 +342,7 @@ it("searches beyond the first workspace page and retains the chosen workspace", 
     return {
       name: "Thunderbolt",
       issuer: "https://auth.otari.example",
+      scopes: ["inference"],
       redirect_uri: "http://localhost:5199/oauth/otari",
     }
   })
