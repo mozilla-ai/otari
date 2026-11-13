@@ -1361,6 +1361,7 @@ export interface paths {
          *     A workspace whose code execution policy is off lists none, and one that
          *     pins an environment lists that one alone. So does a gateway with no sandbox,
          *     or one that names no image, whose runs go to the backend's own default.
+         *     ``skip`` and ``limit`` page the list in the operator's order.
          */
         get: operations["code-execution-list_code_execution_environments"];
         put?: never;
@@ -24704,7 +24705,12 @@ export interface operations {
     };
     "code-execution-list_code_execution_environments": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of environments to skip */
+                skip?: number;
+                /** @description Maximum number of environments to return */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24718,6 +24724,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CodeExecutionEnvironmentList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

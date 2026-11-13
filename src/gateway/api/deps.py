@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -221,6 +221,7 @@ from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    CodeExecutionEnvironmentService,
     DirectCaller,
     DirectToolCall,
     DirectToolLedger,
@@ -1241,6 +1242,38 @@ async def get_workspace_code_execution_policies(
 
 WorkspaceCodeExecutionPoliciesDep = Annotated[
     WorkspaceCodeExecutionPolicies, Depends(get_workspace_code_execution_policies)
+]
+
+
+class _CodeExecutionEnvironmentPrices:
+    """The environment listing's scope and price lookups, on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
+        return await workspace_for_key_id(self._db, api_key_id)
+
+    async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
+        return await organization_for_key_id(self._db, api_key_id)
+
+    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
+        # The sandbox is the deployment's, so a run is deployment-paid and only the operator's rate counts.
+        rate = await resolve_tool_rate(self._db, rate_keys, deployment_paid=True, organization_id=organization_id)
+        return rate.unit_rate if rate is not None else None
+
+
+def get_code_execution_environment_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    policies: WorkspaceCodeExecutionPoliciesDep,
+) -> CodeExecutionEnvironmentService:
+    """Build the sandbox environment listing on the request's session."""
+    return CodeExecutionEnvironmentService(config=config, policies=policies, prices=_CodeExecutionEnvironmentPrices(db))
+
+
+CodeExecutionEnvironmentServiceDep = Annotated[
+    CodeExecutionEnvironmentService, Depends(get_code_execution_environment_service)
 ]
 
 

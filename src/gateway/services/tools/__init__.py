@@ -81,6 +81,10 @@ from gateway.services.tools._code_execution_declarations import (
     with_native_code_execution_tool,
     with_typed_code_execution_tool,
 )
+from gateway.services.tools._code_execution_environments import (
+    CodeExecutionEnvironmentPrices,
+    CodeExecutionEnvironmentService,
+)
 from gateway.services.tools._code_execution_policy import (
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyPublic,
@@ -246,6 +250,8 @@ __all__ = [
     "LegacySearchValues",
     "warn_about_legacy_search_settings",
     "MAX_TOOL_ITERATIONS_CAP",
+    "CodeExecutionEnvironmentPrices",
+    "CodeExecutionEnvironmentService",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
     "WorkspaceCodeExecutionPolicyService",
