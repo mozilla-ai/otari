@@ -213,7 +213,10 @@ key may hold the `end-users` scopes.
 
 A request whose key lacks the scope an endpoint needs is refused with `403`,
 and the message names the scope, except on the MCP routes, which answer every
-refusal with the same fixed `forbidden` error. A model call that declares a web,
+refusal with the same fixed `forbidden` error. The response also carries
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="<scope>"`
+([RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750#section-3.1)), so a
+client reads the scope it lacks without parsing the message. A model call that declares a web,
 code execution or MCP tool needs that tool's scope too, whoever ends up running
 it: naming a provider's own search or code keyword needs the scope as much as
 asking Otari to run one, because which of them runs it is the deployment's
