@@ -53,6 +53,19 @@ usable near the cap.
 The prompt side is an estimate, so a request can settle a little past its hold
 (and its budget past the cap) when the prompt tokenizes heavier than assumed.
 
+A request that runs Otari's tools is a loop of model calls, each billed, and each
+resending the whole conversation so far. The hold above covers the loop's first
+round and its output limit. Every later round grows the hold by its own prompt
+before it is sent: the whole request it carries (the conversation, a system
+prompt or instructions, and the tools), at the same four characters per token.
+Each round's own output is billed as output too, and only the one output limit
+admission holds covers it, so a long loop can settle somewhat past its hold. A
+round on a free or unpriced model holds its tokens alone. A round the budget
+cannot hold is sent as the loop's last: it offers none of Otari's tools and asks
+the model to answer from what it already has, and it may settle past the budget.
+The model can answer from those results; if it calls one of Otari's tools in
+that round anyway, the request fails as one past `max_tool_iterations` does.
+
 Holds are priced at the rules of the model's price the request meets before the
 call: estimated context, requested tier, image size, video resolution and start
 time. Settlement prices the call at the rules it actually met, including the

@@ -315,6 +315,99 @@ async def test_a_search_that_would_pass_the_budget_is_refused_instead_of_run(
 
 
 @pytest.mark.asyncio
+async def test_a_tool_loop_holds_each_round_and_answers_once_the_budget_cannot_hold_the_next(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    fake_search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    serve_search_on_fake: Callable[..., None],
+) -> None:
+    """Every round resends the transcript, so each one is held before it is sent.
+
+    Each search adds its page to the transcript, so each round costs more than the last. The round
+    the budget cannot hold is sent as the loop's last, without the search tool, so the request answers
+    and settles past its budget by that one round at most.
+    """
+    serve_search_on_fake({"hits": [{**_HIT_WITH_TEXT, "text": "otari " * 300}]})
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 10.0, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    key = _key_on_budget(client, master_key_header, "round-capped-user", 0.05)
+    sent: list[dict[str, Any]] = []
+
+    async def provider(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        # A round reports the prompt it was sent, so the bill grows with the transcript as a provider's does.
+        return _completion(tool_call=bool(kwargs.get("tools")), prompt_tokens=len(str(kwargs["messages"])) // 4)
+
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=provider)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+                "max_tool_iterations": 8,
+            },
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["choices"][0]["message"]["content"] == "done"
+    assert 2 < len(sent) < 8, f"the loop sent {len(sent)} rounds"
+    assert not sent[-1].get("tools"), "the round the budget could not hold was the last, sent without the tool"
+    last_round = Decimal(len(str(sent[-1]["messages"])) // 4 + 5) * Decimal(10) / Decimal(1_000_000)
+    assert Decimal(str(_spend(db_session_factory, "round-capped-user"))) - last_round <= Decimal("0.05")
+    user = client.get(f"{API_ROOT}/users/round-capped-user", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0), "the round holds were released at settlement"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_loop_far_under_its_budget_runs_every_round_whatever_its_output_limit(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    fake_search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    serve_search_on_fake: Callable[..., None],
+) -> None:
+    """Each round is held for its prompt, not for another whole output limit, so a large one cuts no loop short."""
+    serve_search_on_fake({"hits": [_HIT_WITH_TEXT]})
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 10.0, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    key = _key_on_budget(client, master_key_header, "roomy-user", 0.30)
+    sent: list[dict[str, Any]] = []
+
+    async def provider(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        return _completion(tool_call=bool(kwargs.get("tools")), prompt_tokens=len(str(kwargs["messages"])) // 4)
+
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=provider)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "max_tokens": 8000,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+                "max_tool_iterations": 8,
+            },
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(sent) == 8, f"the loop stopped at round {len(sent)} with most of its budget left"
+    assert _spend(db_session_factory, "roomy-user") < 0.30
+
+
+@pytest.mark.asyncio
 async def test_a_free_model_keeps_serving_past_the_budget_but_its_searches_stop_at_it(
     client: TestClient,
     master_key_header: dict[str, str],

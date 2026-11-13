@@ -46,6 +46,7 @@ from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
     MaxToolIterationsExceeded,
+    RoundGate,
     StreamAction,
     ToolBackend,
     log_tool_failure,
@@ -81,6 +82,7 @@ __all__ = [
     "PURPOSE_HINT_HEADER",
     "TOOL_ACTIVITY_FIELD",
     "MaxToolIterationsExceeded",
+    "RoundGate",
     "ToolBackend",
     "inject_purpose_hints",
     "mcp_tool_loop",
@@ -825,6 +827,7 @@ async def mcp_tool_loop_stream(
     native_tools: frozenset[str] = frozenset(),
     emit_activity: bool = False,
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -858,6 +861,7 @@ async def mcp_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for chunk in inner:
@@ -872,6 +876,7 @@ async def mcp_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    round_gate: RoundGate | None = None,
 ) -> ChatCompletion:
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
 
@@ -891,4 +896,5 @@ async def mcp_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         check_first_response=require_choices,
+        round_gate=round_gate,
     )

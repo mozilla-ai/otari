@@ -1424,15 +1424,17 @@ async def increase_reservation(
     if not handle.counts_toward_budget:
         return
     if additional > ZERO or grown_tokens > 0:
+        # A free model's growth adds no dollars, so the dollar axis is not asked, as at admission.
+        scoped_usd = None if model_is_free and additional <= ZERO else additional
         refused = await reserve_scoped(
-            db, handle.scoped_budgets, additional, tokens=grown_tokens, requests=0, new_request=False
+            db, handle.scoped_budgets, scoped_usd, tokens=grown_tokens, requests=0, new_request=False
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
             blocked = await blocked_axis(
                 db,
                 refused,
-                amount=additional,
+                amount=scoped_usd,
                 tokens=grown_tokens,
                 requests=0,
                 new_request=False,
@@ -1521,9 +1523,19 @@ async def increase_reservation(
 
 
 async def hold_tool_call(
-    db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str, calls: int = 1
+    db: AsyncSession,
+    handle: ReservationHandle,
+    amount: Decimal,
+    *,
+    strategy: str,
+    calls: int = 1,
+    tokens: int = 0,
+    model_is_free: bool = False,
 ) -> Decimal | None:
-    """Grow every leg of ``handle`` by ``amount`` for each of ``calls`` calls before they run, and commit.
+    """Grow every leg of ``handle`` by ``amount`` and ``tokens`` for each of ``calls`` calls, and commit.
+
+    A gateway tool call holds dollars; a tool loop's next model round holds its
+    prompt's tokens too, and on a ``model_is_free`` model only its tokens.
 
     One hold for all of them, all or nothing: the amount held, or ``None`` where
     a budget or a ceiling has no room for it, with the ceilings that had room
@@ -1537,6 +1549,7 @@ async def hold_tool_call(
             caller rolls ``db`` back.
     """
     held = max(to_usd(amount), ZERO) * calls
+    held_tokens = max(tokens, 0) * calls
     before = replace(handle)
     try:
         try:
@@ -1544,15 +1557,21 @@ async def hold_tool_call(
                 db,
                 handle,
                 estimate=max(handle.estimate, handle.scoped_estimate) + held,
-                model_is_free=False,
+                tokens=max(handle.token_estimate, handle.scoped_token_estimate) + held_tokens if held_tokens else 0,
+                model_is_free=model_is_free,
                 strategy=strategy,
             )
         except HTTPException:
             # The ceilings are grown before the per-user leg, so a refusal there leaves them grown.
             await release_scoped(
-                db, handle.scoped_budget_ids, handle.scoped_estimate - before.scoped_estimate, commit=False
+                db,
+                handle.scoped_budget_ids,
+                handle.scoped_estimate - before.scoped_estimate,
+                tokens=handle.scoped_token_estimate - before.scoped_token_estimate,
+                commit=False,
             )
             handle.scoped_estimate = before.scoped_estimate
+            handle.scoped_token_estimate = before.scoped_token_estimate
             await db.commit()
             return None
         await db.commit()

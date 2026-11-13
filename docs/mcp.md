@@ -21,8 +21,10 @@ When the model emits an MCP tool call, Otari:
 - calls the model again
 
 The loop stops when the model returns a normal assistant response. Its last
-allowed round (the one `max_tool_iterations` names) offers the model none of
-Otari's tools and tells it to answer from the results it already has. Your own
+allowed round (the one `max_tool_iterations` names, or an earlier one the
+request's budget cannot hold; see [Budget enforcement](budget-enforcement.md#holds-and-settlement))
+offers the model none of Otari's tools and tells it to answer from the results
+it already has. Your own
 tools stay on offer in that round. The request fails only if the model calls
 one of Otari's tools anyway.
 

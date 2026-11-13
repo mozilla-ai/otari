@@ -394,6 +394,9 @@ bounds the rounds of the whole request, and so does a workspace code policy's
 `max_tool_iterations` allows offers none of Otari's tools and tells the model to
 answer from the results it already has, so a model that keeps searching ends with
 an answer rather than a failed request ([MCP](mcp.md) says the same of its loop).
+A round the request's budget cannot hold ends the loop the same way, earlier
+([Budget enforcement](budget-enforcement.md#holds-and-settlement)); in either
+case, a model that still calls one of Otari's tools fails the request.
 
 A tool declared in a provider's own words is still [decided per
 attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the

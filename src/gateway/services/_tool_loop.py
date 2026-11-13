@@ -54,6 +54,20 @@ class ToolBackend(Protocol):
     def purpose_hints(self) -> list[tuple[str, str]]: ...
 
 
+class RoundGate(Protocol):
+    """Holds each tool-loop round after the first on the request's budgets before the round is sent.
+
+    The request's own hold covers its first round. Every later round resends the
+    whole transcript and is billed too, so it is held on its own; a round the
+    budgets cannot hold is sent as the loop's last, without the gateway's tools,
+    so the request still ends with an answer.
+    """
+
+    async def admit(self, prompt_chars: int) -> bool:
+        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets."""
+        ...
+
+
 def tool_failure_detail(pool: ToolBackend, name: str) -> str:
     """What the model and the caller are told when a call to ``name`` raised.
 
@@ -205,6 +219,27 @@ def _tool_name(entry: Any) -> str | None:
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
 
 
+async def _round_fits(gate: RoundGate | None, iteration: int, kwargs: dict[str, Any]) -> bool:
+    """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
+    return gate is None or iteration == 1 or await gate.admit(len(str(kwargs)))
+
+
+def _round_request(
+    transcript_key: str,
+    base: dict[str, Any],
+    merged_tools: list[dict[str, Any]],
+    user_tools: list[dict[str, Any]],
+    pool: ToolBackend,
+    transcript: list[Any],
+    *,
+    final: bool,
+) -> dict[str, Any]:
+    """What one round sends: its tool arguments and its transcript."""
+    kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=final)
+    kwargs[transcript_key] = _round_transcript(transcript, final=final)
+    return kwargs
+
+
 def _round_kwargs(
     base: dict[str, Any],
     merged_tools: list[dict[str, Any]],
@@ -265,6 +300,7 @@ async def run_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     check_first_response: Callable[[ResultT], ResultT] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> ResultT:
     """Non-streaming tool loop, generic over the wire format.
 
@@ -304,9 +340,17 @@ async def run_tool_loop(
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
 
+    final = False
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        if final:
+            break
+        final = iteration == max_iterations
+        kwargs = _round_request(strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, final=final)
+        if not await _round_fits(round_gate, iteration, kwargs):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, final=True
+            )
         kwargs["stream"] = False
 
         result = await strategy.call(kwargs)
@@ -346,6 +390,7 @@ async def run_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
@@ -386,9 +431,17 @@ async def run_tool_loop_stream(
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
 
+    final = False
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        if final:
+            break
+        final = iteration == max_iterations
+        kwargs = _round_request(strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, final=final)
+        if not await _round_fits(round_gate, iteration, kwargs):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, final=True
+            )
 
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()

@@ -67,7 +67,7 @@ from gateway.services.inference import (
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.mcp_loop import ToolBackend
+from gateway.services.mcp_loop import RoundGate, ToolBackend
 from gateway.services.mcp_loop_responses import (
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
@@ -350,6 +350,7 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ResponsesResponse:
         # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -357,6 +358,8 @@ class _ResponsesAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return await responses_tool_loop(
@@ -374,6 +377,7 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
@@ -381,6 +385,8 @@ class _ResponsesAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return responses_tool_loop_stream(

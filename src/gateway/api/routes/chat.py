@@ -74,6 +74,7 @@ from gateway.services.inference import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
+    RoundGate,
     ToolBackend,
     inject_purpose_hints,
     mcp_tool_loop,
@@ -374,6 +375,7 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ChatCompletion:
         # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
@@ -383,6 +385,8 @@ class _ChatAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return await mcp_tool_loop(
@@ -400,6 +404,7 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
@@ -407,6 +412,8 @@ class _ChatAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if reports_tool_activity(self.endpoint):
