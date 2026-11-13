@@ -8,6 +8,7 @@ transport is what proves a *templated message actually sends* without one.
 
 import ast
 import logging
+import smtplib
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -23,6 +24,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
     ConsoleTransport,
+    MailDeliveryError,
     MailEnvelope,
     Mailer,
     MailMessage,
@@ -280,6 +282,95 @@ async def test_a_failure_reason_never_carries_the_recipient_into_the_logs(
         await Mailer(config).send(to="ada@example.com", message=MESSAGE)
     assert "ada@example.com" not in gateway_logs.text
     assert "a***@example.com" in gateway_logs.text
+
+
+def _smtp_client_failing_with(exc: Exception) -> MagicMock:
+    client = MagicMock()
+    client.sendmail.side_effect = exc
+    return client
+
+
+@pytest.mark.asyncio
+async def test_a_refused_recipient_is_reported_without_the_address(gateway_logs: pytest.LogCaptureFixture) -> None:
+    recipient = "secret.invitee@elsewhere.test"
+    refusal = smtplib.SMTPRecipientsRefused({recipient: (550, b"5.1.1 no such user")})
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = _smtp_client_failing_with(refusal)
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert delivery.delivered is False
+    assert delivery.reason == "The email server refused the recipient (550)."
+    assert all(recipient not in record.getMessage() for record in gateway_logs.records)
+    assert "s***@elsewhere.test" in gateway_logs.text
+
+
+_SERVER_REPLY = b"5.7.1 <secret.invitee@elsewhere.test> is not accepted"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (
+            smtplib.SMTPAuthenticationError(535, _SERVER_REPLY),
+            "The email server refused the sign-in (535).",
+        ),
+        (
+            smtplib.SMTPConnectError(421, _SERVER_REPLY),
+            "The email server refused the connection (421).",
+        ),
+        (
+            smtplib.SMTPDataError(554, _SERVER_REPLY),
+            "The email server refused the message (554).",
+        ),
+        (
+            smtplib.SMTPHeloError(501, _SERVER_REPLY),
+            "The email server refused the greeting (501).",
+        ),
+        (
+            smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server."),
+            "The email server lacks a feature this send needs: STARTTLS extension not supported by server.",
+        ),
+        (
+            smtplib.SMTPResponseException(451, _SERVER_REPLY),
+            "The email server refused the request (451).",
+        ),
+        (
+            smtplib.SMTPSenderRefused(553, _SERVER_REPLY, "otari@example.com"),
+            "The email server refused the sender (553).",
+        ),
+        (
+            smtplib.SMTPServerDisconnected("Connection unexpectedly closed"),
+            "The email server closed the connection.",
+        ),
+        (
+            smtplib.SMTPException(_SERVER_REPLY.decode()),
+            "The email server could not complete the send.",
+        ),
+        (
+            TimeoutError("timed out"),
+            "The connection to the email server failed: timed out",
+        ),
+        (
+            TimeoutError(),
+            "The email server did not answer.",
+        ),
+        (
+            ValueError(_SERVER_REPLY.decode()),
+            "The message could not be prepared for sending.",
+        ),
+    ],
+)
+def test_a_failed_send_names_what_failed_and_no_address(failure: Exception, reason: str) -> None:
+    envelope = MailEnvelope(
+        to="secret.invitee@elsewhere.test", sender_email="otari@example.com", sender_name="Otari", message=MESSAGE
+    )
+    transport = SmtpTransport(host="smtp.example.com", port=587, use_tls=False, user=None, password=None)
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = _smtp_client_failing_with(failure)
+        with pytest.raises(MailDeliveryError) as raised:
+            transport.deliver(envelope)
+
+    assert str(raised.value) == reason
 
 
 @pytest.mark.asyncio

@@ -96,6 +96,35 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     return message
 
 
+_REFUSED_STEPS: tuple[tuple[type[smtplib.SMTPResponseException], str], ...] = (
+    (smtplib.SMTPAuthenticationError, "the sign-in"),
+    (smtplib.SMTPConnectError, "the connection"),
+    (smtplib.SMTPDataError, "the message"),
+    (smtplib.SMTPHeloError, "the greeting"),
+    (smtplib.SMTPSenderRefused, "the sender"),
+)
+
+
+def _failure_reason(exc: Exception) -> str:
+    """Say why a send failed, without an email address and without the email server's reply text."""
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        codes = sorted({code for code, _reply in exc.recipients.values()})
+        return f"The email server refused the recipient ({', '.join(map(str, codes))})."
+    if isinstance(exc, smtplib.SMTPResponseException):
+        step = next((step for kind, step in _REFUSED_STEPS if isinstance(exc, kind)), "the request")
+        return f"The email server refused {step} ({exc.smtp_code})."
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return f"The email server lacks a feature this send needs: {exc}"
+    if isinstance(exc, smtplib.SMTPServerDisconnected):
+        return "The email server closed the connection."
+    if isinstance(exc, smtplib.SMTPException):
+        return "The email server could not complete the send."
+    if isinstance(exc, OSError):
+        detail = str(exc)
+        return f"The connection to the email server failed: {detail}" if detail else "The email server did not answer."
+    return "The message could not be prepared for sending."
+
+
 class MailTransport(Protocol):
     """One way of delivering a message.
 
@@ -158,7 +187,7 @@ class SmtpTransport:
         # given the sanitizing above, which is exactly why it is caught rather
         # than relied upon to stay unreachable.
         except (OSError, smtplib.SMTPException, MessageError, UnicodeError, ValueError) as exc:
-            raise MailDeliveryError(f"{type(exc).__name__}: {exc}") from exc
+            raise MailDeliveryError(_failure_reason(exc)) from exc
 
 
 class ConsoleTransport:
