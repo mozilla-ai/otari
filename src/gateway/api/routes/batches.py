@@ -4,14 +4,15 @@ import json
 import os
 import tempfile
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
 from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, MissingApiKeyError
-from any_llm.types.batch import Batch
+from any_llm.types.batch import Batch, BatchResultError
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +41,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
-from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
+from gateway.core.metered_pricing import COST_QUANTUM, calculate_token_cost, quantize_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -88,6 +89,11 @@ from gateway.services.providers import (
     ensure_provider_country,
     serve_on_hosted_provider,
 )
+from gateway.services.upstream_redaction import (
+    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
+    redact_upstream_message,
+    redacted_upstream_detail,
+)
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -104,6 +110,45 @@ USAGE_ENDPOINT_RESULTS = "/v1/batches/results"
 # checked on retrieve/cancel/results. The gateway stores no batch table, so the
 # provider-side metadata is the ownership anchor.
 _OWNER_METADATA_KEY = "otari_user_id"
+
+
+@dataclass(frozen=True)
+class _BatchResultLine:
+    model: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    cache_read_tokens: int | None
+    has_usage: bool
+    error: dict[str, str] | None
+
+
+def _public_batch_error(error: BatchResultError) -> dict[str, str]:
+    code = redact_upstream_message(error.code or "") or "provider_error"
+    message = redacted_upstream_detail(error.message, PASSTHROUGH_PROVIDER_ERROR_DETAIL)
+    return {"code": code, "message": message}
+
+
+def _allocate_batch_costs(line_costs: list[Decimal | None]) -> tuple[Decimal | None, list[Decimal | None]]:
+    """Round one batch total and allocate its micro-dollars across priced lines."""
+    allocations: list[Decimal | None] = [None] * len(line_costs)
+    priced = [(index, cost) for index, cost in enumerate(line_costs) if cost is not None]
+    if not priced:
+        return None, allocations
+
+    total = quantize_cost(sum((cost for _, cost in priced), Decimal(0)))
+    rounded_down = {index: cost.quantize(COST_QUANTUM, rounding=ROUND_FLOOR) for index, cost in priced}
+    remaining = int((total - sum(rounded_down.values(), Decimal(0))) / COST_QUANTUM)
+    ranked = sorted(
+        priced,
+        key=lambda entry: (entry[1] - rounded_down[entry[0]], -entry[0]),
+        reverse=True,
+    )
+    for index, _ in ranked[:remaining]:
+        rounded_down[index] += COST_QUANTUM
+    for index, amount in rounded_down.items():
+        allocations[index] = amount
+    return total, allocations
 
 
 # ---------------------------------------------------------------------------
@@ -798,40 +843,52 @@ async def retrieve_batch_results(
         logger.error("Batch results retrieve failed for %s: %s", provider, e)
         raise provider_call_failure(e) from e
 
-    # Extract model from the first successful result if available
-    batch_model = "batch"
+    # Extract model from the first successful result if available. Recorded
+    # error-only batches still have the submitted model on their local record.
+    batch_model = record.model if record is not None else "batch"
     for item in result.results:
         if item.result is not None:
             batch_model = item.result.model
             break
 
-    # Sum per-request token usage so batch spend is visible in usage reporting.
-    # The per-line counts are kept as well as summed: the row reports the batch's
-    # totals, but pricing has to happen a line at a time (see below).
-    #
-    # A line's cached prompt tokens are carried too. A batch result is a
-    # ``ChatCompletion``, so it reports them the OpenAI way, inside
-    # ``prompt_tokens_details``; dropping them would bill cached input at the
-    # full input rate and settle a batch above what the identical request costs
-    # on the live path.
+    # Keep provider-reported usage on each item for the usage rows, while also
+    # summing it for batch-level pricing and spend reconciliation.
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
     cache_read_tokens = 0
-    line_tokens: list[tuple[int, int, int]] = []
+    result_lines: list[_BatchResultLine] = []
     for item in result.results:
         usage = item.result.usage if item.result is not None else None
         if usage is not None:
-            line_prompt = usage.prompt_tokens or 0
-            line_completion = usage.completion_tokens or 0
+            line_prompt = usage.prompt_tokens
+            line_completion = usage.completion_tokens
+            line_total = usage.total_tokens
             line_cache_read = cache_read_tokens_of(usage)
-            prompt_tokens += line_prompt
-            completion_tokens += line_completion
+            prompt_tokens += line_prompt or 0
+            completion_tokens += line_completion or 0
             cache_read_tokens += line_cache_read
-            total_tokens += usage.total_tokens or 0
-            line_tokens.append((line_prompt, line_completion, line_cache_read))
+            total_tokens += line_total or 0
+        else:
+            line_prompt = None
+            line_completion = None
+            line_total = None
+            line_cache_read = None
+
+        result_lines.append(
+            _BatchResultLine(
+                model=item.result.model if item.result is not None else batch_model,
+                prompt_tokens=line_prompt,
+                completion_tokens=line_completion,
+                total_tokens=line_total,
+                cache_read_tokens=line_cache_read,
+                has_usage=usage is not None,
+                error=_public_batch_error(item.error) if item.error is not None else None,
+            )
+        )
 
     cost: Decimal | None = None
+    line_costs: list[Decimal | None] = [None] * len(result_lines)
     if total_tokens:
         # Rates follow the batch's originating workspace (`origin_workspace_id`,
         # resolved above), for the same reason the budget exemption above and
@@ -873,22 +930,21 @@ async def retrieve_batch_results(
             # each one would round the row once per line, which on a batch of
             # many identical short requests is a systematic shortfall rather
             # than a wash.
-            cost = quantize_cost(
-                sum(
-                    (
-                        calculate_token_cost(
-                            apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
-                            input_tokens=line_prompt,
-                            output_tokens=line_completion,
-                            cache_read_tokens=line_cache_read,
-                            cache_tokens_included=True,
-                            quantize=False,
-                        )
-                        for line_prompt, line_completion, line_cache_read in line_tokens
-                    ),
-                    Decimal(0),
+            for index, line in enumerate(result_lines):
+                if not line.has_usage:
+                    continue
+                line_prompt = line.prompt_tokens or 0
+                line_completion = line.completion_tokens or 0
+                line_cache_read = line.cache_read_tokens or 0
+                line_costs[index] = calculate_token_cost(
+                    apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
+                    input_tokens=line_prompt,
+                    output_tokens=line_completion,
+                    cache_read_tokens=line_cache_read,
+                    cache_tokens_included=True,
+                    quantize=False,
                 )
-            )
+            cost, line_costs = _allocate_batch_costs(line_costs)
 
     # Recorded batches are accounted exactly once: the first completed retrieval
     # claims the accounting slot, logs usage, and folds the cost into the owner's
@@ -913,25 +969,46 @@ async def retrieve_batch_results(
         should_account = True
 
     if should_account:
-        await log_batch_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=batch_model,
-            provider=provider,
-            endpoint=USAGE_ENDPOINT_RESULTS,
-            user_id=user_id,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            cache_read_tokens=cache_read_tokens,
-            cost=cost,
-            counts_toward_budget=not batch_exempt,
-            # The creator's workspace, matching the user and the rates this row
-            # was priced at; see the note on ``log_batch_usage``.
-            workspace_id=origin_workspace_id,
-            deployment_paid=deployment_paid,
-        )
+        if result_lines:
+            for line, line_cost in zip(result_lines, line_costs, strict=True):
+                await log_batch_usage(
+                    db=db,
+                    log_writer=log_writer,
+                    api_key_id=api_key_id,
+                    model=line.model,
+                    provider=provider,
+                    endpoint=USAGE_ENDPOINT_RESULTS,
+                    user_id=user_id,
+                    error=line.error["message"] if line.error is not None else None,
+                    prompt_tokens=line.prompt_tokens,
+                    completion_tokens=line.completion_tokens,
+                    total_tokens=line.total_tokens,
+                    cache_read_tokens=line.cache_read_tokens,
+                    cost=line_cost,
+                    counts_toward_budget=not batch_exempt,
+                    workspace_id=origin_workspace_id,
+                    deployment_paid=deployment_paid,
+                )
+        else:
+            # Keep a successful row for a completed batch that returned no
+            # result lines; there is no item to account for individually.
+            await log_batch_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=batch_model,
+                provider=provider,
+                endpoint=USAGE_ENDPOINT_RESULTS,
+                user_id=user_id,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cost=cost,
+                counts_toward_budget=not batch_exempt,
+                workspace_id=origin_workspace_id,
+                deployment_paid=deployment_paid,
+            )
         # Charged once, with the claim that accounts a recorded batch once.
         if deployment_paid and record is not None and origin_organization_id is not None:
             charge = deferred_charge(
@@ -964,8 +1041,8 @@ async def retrieve_batch_results(
             {
                 "custom_id": item.custom_id,
                 "result": item.result.model_dump() if item.result else None,
-                "error": {"code": item.error.code, "message": item.error.message} if item.error else None,
+                "error": line.error,
             }
-            for item in result.results
+            for item, line in zip(result.results, result_lines, strict=True)
         ]
     }
