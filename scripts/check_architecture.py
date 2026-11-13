@@ -640,7 +640,6 @@ SAVEPOINT_BASELINE = (
     "gateway/repositories/catalog/served_model_repository.py",
     "gateway/repositories/identity/blocked_email_repository.py",
     "gateway/repositories/identity/oidc_connection_repository.py",
-    "gateway/repositories/mcp_catalog/mcp_catalog_server_repository.py",
     "gateway/repositories/mcp_catalog/mcp_catalog_sync_state_repository.py",
     "gateway/repositories/mcp_catalog/mcp_logo_repository.py",
     "gateway/repositories/providers/workspace_hosted_access_repository.py",

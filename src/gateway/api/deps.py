@@ -100,7 +100,6 @@ from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
-    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
@@ -238,6 +237,7 @@ from gateway.services.tools import (
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
+    WorkspaceMcpServerUrls,
     WorkspaceSearchKeys,
     web_search_configured,
 )
@@ -2281,7 +2281,7 @@ def build_mcp_catalog_service(
         McpCatalogSyncStateRepository(uow),
         workspaces,
         config,
-        workspace_servers=WorkspaceMcpServerRepository(uow),
+        workspace_servers=WorkspaceMcpServerUrls(uow),
     )
 
 

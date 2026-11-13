@@ -149,9 +149,10 @@ class LogoRef:
 
     def url(self, path: str) -> str | None:
         """``path`` versioned by the image it serves, bare while a look is due, or None when there is none."""
-        if self.etag is not None:
-            return f"{path}?v={self.etag}"
-        return path if self.pending else None
+        # A due look runs only when the logo is asked for, which a browser holding the immutable copy never does.
+        if self.pending:
+            return path
+        return f"{path}?v={self.etag}" if self.etag is not None else None
 
 
 def catalog_logo_path(name: str) -> str:
@@ -181,6 +182,10 @@ def _stored_logo(row: McpLogo | None) -> Logo | None:
 
 class _SyncStopped(Exception):
     """A sync reached one of its own bounds before the registry's last page."""
+
+
+class _CursorRepeated(Exception):
+    """The registry answered a page with the cursor it was asked for, so reading on would make no progress."""
 
 
 class _SyncTakenOver(Exception):
@@ -573,7 +578,15 @@ class McpCatalogService:
             )
             if not resumed:
                 state = await self._state.update(
-                    state, {"crawl_started_at": now, "cursor": None, "pages": 0, "fetched": 0, "kept": 0}
+                    state,
+                    {
+                        "crawl_started_at": now,
+                        "servers_at_start": await self._servers.count(),
+                        "cursor": None,
+                        "pages": 0,
+                        "fetched": 0,
+                        "kept": 0,
+                    },
                 )
             state = await self._state.update(state, {"removed": 0, "error": None})
             crawl_started_at, cursor, pages = state.crawl_started_at or now, state.cursor, state.pages
@@ -588,6 +601,8 @@ class McpCatalogService:
                 if self._clock() - now >= MAX_SYNC_DURATION:
                     raise _SyncStopped(f"stopped after {int(MAX_SYNC_DURATION.total_seconds() // 60)} minutes")
                 page = await fetch_page(cursor)
+                if cursor is not None and page.next_cursor == cursor:
+                    raise _CursorRepeated("the registry answered a page with the cursor it was asked for")
                 # One page can list a name twice; the last one wins.
                 entries: dict[str, McpCatalogEntry] = {}
                 for item in page.items:
@@ -597,7 +612,7 @@ class McpCatalogService:
                 cursor, pages = page.next_cursor, pages + 1
                 async with self._uow:
                     next_beat = await self._hold(beat)
-                    refused = await self._servers.upsert(list(entries.values()), seen_at=crawl_started_at)
+                    await self._servers.upsert(list(entries.values()), seen_at=crawl_started_at)
                     state = await self._state.get_or_create()
                     await self._state.update(
                         state,
@@ -605,20 +620,20 @@ class McpCatalogService:
                             "cursor": cursor,
                             "pages": pages,
                             "fetched": state.fetched + len(page.items),
-                            "kept": state.kept + len(entries) - refused,
+                            "kept": state.kept + len(entries),
                         },
                     )
                 beat = next_beat
                 stored_a_page = True
-                if refused:
-                    logger.warning("MCP catalog sync left out %s entries the database refused", refused)
                 if cursor is None:
                     break
         except _SyncTakenOver:
             return None
-        except (RegistryError, _SyncStopped) as exc:
-            # A resumed sync that stored nothing may be holding a cursor the registry no longer takes.
-            return await self._finish(beat, error=str(exc), start_over=resumed and not stored_a_page)
+        except (RegistryError, _SyncStopped, _CursorRepeated) as exc:
+            # A resumed sync that stored nothing may be holding a cursor the registry no longer takes, and a cursor
+            # that repeated would only repeat again.
+            start_over = (resumed and not stored_a_page) or isinstance(exc, _CursorRepeated)
+            return await self._finish(beat, error=str(exc), start_over=start_over)
         except DATABASE_ERRORS as exc:
             logger.warning("MCP catalog sync could not store a page: %s", describe_database_error(exc))
             return await self._finish(beat, error="a page could not be stored in the database")
@@ -665,7 +680,10 @@ class McpCatalogService:
                     outcome = OUTCOME_FAILED
                     error = "the registry listed no server Otari can connect to; the catalog was left as it was"
                 elif remove_unseen_before is not None and reached_the_end:
-                    total = await self._servers.count()
+                    # Measured against the catalog as the crawl found it: servers it added do not dilute the loss.
+                    total = state.servers_at_start
+                    if total is None:
+                        total = await self._servers.count()
                     unseen = await self._servers.count_unseen(remove_unseen_before)
                     if unseen * 2 > total:
                         # The same reasoning, one step down: a registry that lost most of its servers overnight

@@ -50,6 +50,7 @@ def upgrade() -> None:
         sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("next_sync_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("crawl_started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("servers_at_start", sa.Integer(), nullable=True),
         sa.Column("cursor", sa.String(), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_completed_at", sa.DateTime(timezone=True), nullable=True),

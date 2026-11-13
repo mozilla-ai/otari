@@ -10,8 +10,10 @@ type is read from the bytes, never from the response's headers. Nothing is
 logged about a failed candidate: the next one is tried.
 """
 
+import asyncio
 import re
 from collections.abc import Awaitable, Callable
+from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -80,9 +82,16 @@ class LogoFetcher:
         A site's root (``https://example.com/``) is a page, not an image: the icons its HTML
         declares are tried instead, at most ``MAX_DECLARED_ICONS`` of them, each fetched the same way.
         """
-        try:
-            if urlsplit(url).path == "/":
+        if urlsplit(url).path == "/":
+            try:
                 return await self._declared(url)
+            except _CANDIDATE_FAILURES:
+                return None
+        return await self._image(url)
+
+    async def _image(self, url: str) -> Logo | None:
+        """The image at ``url``, or None. Never read as a page, so a declared icon cannot start another search."""
+        try:
             body = await self._get(url, NetworkDeadline(FETCH_SECONDS), MAX_LOGO_BYTES, _IMAGE_HEADERS)
         except _CANDIDATE_FAILURES:
             return None
@@ -96,8 +105,10 @@ class LogoFetcher:
         if page is None:
             return None
         content, final_url = page
-        for icon_url in declared_icons(content.decode("utf-8", "replace"), final_url)[:MAX_DECLARED_ICONS]:
-            found = await self.fetch(icon_url)
+        # Off the event loop: the page is the site's to write, and half a megabyte of it takes a moment to read.
+        icons = await asyncio.to_thread(declared_icons, content.decode("utf-8", "replace"), final_url)
+        for icon_url in icons[:MAX_DECLARED_ICONS]:
+            found = await self._image(icon_url)
             if found is not None:
                 return found
         return None
@@ -136,18 +147,25 @@ class LogoFetcher:
             return body.content, str(target.url)
 
 
-_LINK = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
-_ATTRIBUTE = re.compile(r"""([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
+class _LinkTags(HTMLParser):
+    """The attributes of each ``<link>`` tag on a page, read in one pass, so no page can make the scan backtrack."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[dict[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "link":
+            self.links.append({name: value or "" for name, value in attrs})
 
 
 def declared_icons(html: str, base_url: str) -> list[str]:
     """The https icon URLs a page's ``<link rel=...icon...>`` tags name, touch icons first, then the larger."""
+    parser = _LinkTags()
+    parser.feed(html[:MAX_PAGE_BYTES])
+    parser.close()
     found: list[tuple[tuple[int, int], str]] = []
-    for tag in _LINK.findall(html[:MAX_PAGE_BYTES]):
-        attributes = {
-            match.group(1).lower(): match.group(2) or match.group(3) or match.group(4) or ""
-            for match in _ATTRIBUTE.finditer(tag)
-        }
+    for attributes in parser.links:
         rel = attributes.get("rel", "").lower().split()
         href = attributes.get("href", "").strip()
         if "icon" not in rel and "apple-touch-icon" not in rel or not href or href.startswith("data:"):

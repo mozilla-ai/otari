@@ -147,7 +147,9 @@ def _icon_url(server: dict[str, Any]) -> str | None:
             continue
         src = icon.get("src")
         mime = icon.get("mimeType")
-        if not isinstance(src, str) or len(src) > MAX_URL_LENGTH or (mime is not None and mime not in _ICON_TYPES):
+        if not isinstance(src, str) or len(src) > MAX_URL_LENGTH:
+            continue
+        if mime is not None and (not isinstance(mime, str) or mime not in _ICON_TYPES):
             continue
         src = src.strip()
         if not _storable(src) or _CONTROL_OR_SPACE.search(src):
@@ -300,8 +302,10 @@ def _parse_page(body: bytes) -> RegistryPage:
     if not isinstance(servers, list):
         raise RegistryError("the registry answered with an unexpected shape")
     metadata = payload.get("metadata")
-    cursor = metadata.get("nextCursor") if isinstance(metadata, dict) else None
-    return RegistryPage(
-        items=[item for item in servers if isinstance(item, dict)],
-        next_cursor=cursor if isinstance(cursor, str) and cursor else None,
-    )
+    if metadata is not None and not isinstance(metadata, dict):
+        raise RegistryError("the registry answered with an unexpected shape")
+    cursor = metadata.get("nextCursor") if metadata is not None else None
+    # Read as the last page, a cursor of the wrong shape would let the sync delete every server it had not reached.
+    if cursor is not None and not (isinstance(cursor, str) and cursor):
+        raise RegistryError("the registry answered with a cursor of an unexpected shape")
+    return RegistryPage(items=[item for item in servers if isinstance(item, dict)], next_cursor=cursor)
