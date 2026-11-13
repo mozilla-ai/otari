@@ -57,6 +57,7 @@ SELF_AUTHENTICATING = {
 # Read-only discovery a client needs before it can do anything, which every key may reach.
 OPEN_TO_EVERY_KEY = {
     ("GET", f"{API_ROOT}/catalog/models"),
+    ("GET", f"{API_ROOT}/code/environments"),
     ("GET", f"{API_ROOT}/catalog/models/{{model_id:path}}"),
     ("GET", f"{API_ROOT}/models"),
     ("GET", f"{API_ROOT}/models/{{model_id:path}}"),
@@ -66,6 +67,7 @@ OPEN_TO_EVERY_KEY = {
     ("GET", f"{API_ROOT}/pricing/{{model_key:path}}/history"),
     ("GET", f"{API_ROOT}/providers/catalog"),
     ("GET", f"{API_ROOT}/providers/catalog/{{provider_id}}"),
+    ("GET", f"{API_ROOT}/search-tools/catalog"),
     ("GET", f"{API_ROOT}/search-tools/providers"),
     ("GET", f"{API_ROOT}/tool-settings/guardrails/catalog"),
     ("GET", f"{API_ROOT}/tool-settings/guardrails/profiles"),
