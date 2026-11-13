@@ -170,6 +170,12 @@ def test_each_opened_path_is_a_route_the_gateway_serves(tmp_path: Path) -> None:
         "http://localhost:80",
         "https://App.Example.com",
         "https://bücher.example",
+        "https://*.example.com",
+        "https://app.example.com:",
+        "https://app.example.com:99999",
+        "https://app.example.com?page=1",
+        "ftp://app.example.com",
+        "https://",
     ],
 )
 def test_an_entry_that_is_not_an_origin_is_refused_at_load(tmp_path: Path, origin: str) -> None:

@@ -581,20 +581,25 @@ def _is_origin(value: str) -> bool:
 
     That is a scheme and a lowercase ASCII host, a port only when it is not the
     scheme's default, and nothing else: a browser never sends any other spelling,
-    so an entry written another way could never match.
+    so an entry written another way could never match. Origins are compared
+    whole, so a ``*`` inside a host is a literal that no page has.
     """
     try:
         parts = urlsplit(value)
         port = parts.port
     except ValueError:
         return False
+    host = parts.hostname
+    if not host or parts.scheme not in _DEFAULT_PORTS:
+        return False
+    if ":" in host:
+        host = f"[{host}]"
     return (
-        parts.scheme in _DEFAULT_PORTS
-        and bool(parts.hostname)
-        and "@" not in parts.netloc
-        and value.isascii()
-        and parts.netloc == parts.netloc.lower()
+        value.isascii()
+        and "*" not in host
         and port != _DEFAULT_PORTS[parts.scheme]
+        # urlsplit lowercases the host and drops userinfo and an empty port, so any of those leaves a difference.
+        and parts.netloc == (host if port is None else f"{host}:{port}")
         and value == f"{parts.scheme}://{parts.netloc}"
     )
 
@@ -2240,7 +2245,7 @@ class GatewayConfig(
                 msg = (
                     f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
                     "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
-                    "such as https://app.example.com, or '*'"
+                    "such as https://app.example.com, or '*' alone, since an origin is matched whole"
                 )
                 raise ValueError(msg)
         return origins

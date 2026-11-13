@@ -326,7 +326,9 @@ Name origins instead of `*` to open the endpoints to those pages alone. Each
 entry is an origin as a browser sends it: a scheme and a host in lowercase, with
 a port only when it is not the scheme's default, and nothing after it, such as
 `https://app.example.com` or `http://localhost:5173`. An entry that is not one,
-`https://app.example.com:443` for instance, is refused at startup.
+`https://app.example.com:443` for instance, is refused at startup. So is a
+wildcard inside an origin, such as `https://*.example.com`: an origin is matched
+whole, so list each subdomain, or use `*` alone.
 
 An origin listed in `cors_allow_origins` keeps that list's policy on every
 path, the model endpoints included. With `*` there, every origin does, and
