@@ -33,14 +33,15 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import WorkspaceMcpServerRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
 from gateway.services.mcp_catalog import Logo, McpCatalogService, RegistryError, RegistryPage
 from gateway.services.mcp_catalog import _extras as extras_list
 from gateway.services.mcp_catalog import _popular as popular_list
 from gateway.services.mcp_catalog import _service as catalog_service
+from gateway.services.mcp_catalog._registry import entry_from_registry_item
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tools import WorkspaceMcpServerUrls
 
 from .conftest import build_test_client
 
@@ -163,7 +164,7 @@ def _service(
         McpCatalogSyncStateRepository(uow),
         WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         config,
-        workspace_servers=WorkspaceMcpServerRepository(uow),
+        workspace_servers=WorkspaceMcpServerUrls(uow),
         fetcher=fetcher or _Fetcher(),
         look_budget=budget or catalog_service.LogoLookBudget(),
         clock=clock,
@@ -521,29 +522,73 @@ async def test_a_last_page_that_lists_a_fraction_of_the_catalog_removes_nothing(
 
 
 @pytest.mark.asyncio
-async def test_an_entry_the_database_refuses_is_left_out_and_the_page_stored(async_db: AsyncSession) -> None:
-    def entry(name: str, description: str) -> McpCatalogEntry:
-        return McpCatalogEntry(
-            name=name,
-            title=name,
-            description=description,
-            url="https://mcp.example.com/mcp",
-            requires_token=False,
-            website_url=None,
-            version=None,
-            source="registry",
-        )
+async def test_new_servers_on_the_last_page_do_not_hide_the_loss_of_the_old_ones(async_db: AsyncSession) -> None:
+    await _synced(async_db)
+    clock = _Clock()
+    clock.advance(hours=1)
+    service = _service(async_db, _config(), clock)
+    # One of the seven servers the catalog holds, beside eight it has never seen: six of seven are gone.
+    newcomers = [_item(f"com.new/server-{n}", f"New {n}", f"https://new{n}.example.com/mcp") for n in range(8)]
+    swapped = _Registry({None: RegistryPage(items=[_recorded("page_1").items[0], *newcomers], next_cursor=None)})
 
-    servers = McpCatalogServerRepository(async_db)
-    # The filter drops a NUL before it gets here; this is the store's own answer to one that slips through.
-    refused = await servers.upsert(
-        [entry("com.example/good", "fine"), entry("com.example/bad", "nul \x00 here"), entry("com.example/also", "ok")],
-        seen_at=datetime(2026, 11, 10, 9, 0, tzinfo=UTC),
-    )
-    await async_db.commit()
+    await _ask(service)
+    status = await service.sync_if_due(swapped.fetch_page)
 
-    assert refused == 1
-    assert await _names(async_db) == ["com.example/also", "com.example/good"]
+    assert status is not None
+    assert (status.outcome, status.removed, status.server_count) == ("partial", 0, 15)
+    assert status.error is not None and "1 of the 7 servers" in status.error
+    assert set(_KEPT) <= set(await _names(async_db))
+
+
+@pytest.mark.asyncio
+async def test_a_cursor_the_registry_repeats_stops_the_sync_and_the_next_one_starts_over(
+    async_db: AsyncSession,
+) -> None:
+    clock = _Clock()
+    service = _service(async_db, _config(), clock)
+    stuck = RegistryPage(items=_recorded("page_2").items, next_cursor=_PAGE_2_CURSOR)
+    registry = _Registry({None: _recorded("page_1"), _PAGE_2_CURSOR: stuck})
+
+    await _ask(service)
+    status = await service.sync_if_due(registry.fetch_page)
+
+    assert status is not None
+    assert status.outcome == "partial"
+    assert status.error == "the registry answered a page with the cursor it was asked for"
+    # The page that repeated its cursor is not stored.
+    assert (status.pages, status.removed) == (1, 0)
+    assert registry.asked == [None, _PAGE_2_CURSOR]
+
+    clock.advance(minutes=5)
+    registry.pages[_PAGE_2_CURSOR] = _recorded("page_2")
+    registry.asked.clear()
+    await _ask(service)
+    await service.sync_if_due(registry.fetch_page)
+
+    assert registry.asked == [None, _PAGE_2_CURSOR]
+
+
+@pytest.mark.asyncio
+async def test_a_page_the_database_refuses_fails_the_sync_and_stores_none_of_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def lets_a_nul_through(item: object) -> McpCatalogEntry | None:
+        entry = entry_from_registry_item(item)
+        if entry is not None and entry.name == "ac.snag/snag":
+            return entry.model_copy(update={"description": "nul \x00 here"})
+        return entry
+
+    # The filter drops a NUL before it gets here; this is the sync's answer to one that slips through.
+    monkeypatch.setattr(catalog_service, "entry_from_registry_item", lets_a_nul_through)
+    service = _service(async_db, _config(), _Clock())
+
+    await _ask(service)
+    status = await service.sync_if_due(_Registry().fetch_page)
+
+    assert status is not None
+    assert (status.outcome, status.error) == ("failed", "a page could not be stored in the database")
+    assert (status.pages, status.kept, status.running) == (0, 0, False)
+    assert await _names(async_db) == []
 
 
 @pytest.mark.asyncio
@@ -886,9 +931,14 @@ async def test_a_found_logo_is_kept_when_a_later_look_finds_nothing(async_db: As
 
     fetcher.images.clear()
     clock.advance(days=8)
+    # Due for another look: the bare URL, which no browser keeps for a week, so the next view starts it.
+    due = await service.logo_refs(["https://one.example.com/mcp"])
 
     assert first is not None
+    assert due["https://one.example.com/mcp"].url("/logo") == "/logo"
     assert await service.logo("com.example/one") == first
+    kept = await service.logo_refs(["https://one.example.com/mcp"])
+    assert kept["https://one.example.com/mcp"].url("/logo") == f"/logo?v={first.etag}"
 
 
 @pytest.mark.asyncio

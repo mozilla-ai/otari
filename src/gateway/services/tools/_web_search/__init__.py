@@ -11,6 +11,8 @@ from gateway.services.tools._web_search._default import (
 from gateway.services.tools._web_search._direct import (
     DirectSearch,
     DirectSearchResult,
+    direct_search_rate_key,
+    legacy_search_instance,
     organization_key_search_instance,
     pick_direct_search_instance,
     resolve_direct_search,
@@ -74,6 +76,8 @@ __all__ = [
     "pick_direct_fetch_instance",
     "refused_cost_tier",
     "organization_key_search_instance",
+    "direct_search_rate_key",
+    "legacy_search_instance",
     "pick_direct_search_instance",
     "resolve_direct_fetch",
     "resolve_direct_search",

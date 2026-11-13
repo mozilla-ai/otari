@@ -94,7 +94,8 @@ def _parse_svg(content: bytes) -> ElementTree.Element | None:
         return None
     try:
         root = ElementTree.fromstring(content)
-    except ElementTree.ParseError:
+    # An encoding the parser does not know, or a multi-byte one it does not take, is a LookupError or a ValueError.
+    except (ElementTree.ParseError, LookupError, ValueError):
         return None
     return root if root.tag.rsplit("}", 1)[-1] == "svg" else None
 

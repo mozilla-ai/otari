@@ -6456,7 +6456,8 @@ export interface paths {
          *     The tool is taken from ``search_tool_name``, which may be omitted when the
          *     deployment's ``web_search_default_tool`` names one, or when exactly one
          *     tool is configured. Such a call runs on the workspace's organization search
-         *     key when it has one.
+         *     key when it has one. A deployment with no search tool serves the backend its
+         *     legacy search settings describe, named after its provider.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.

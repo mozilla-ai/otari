@@ -67,8 +67,12 @@ from gateway.services.tools._search_tool_writes import (
     check_tool_write,
     default_to_pin,
 )
-from gateway.services.tools._web_search import servable_direct_search_instances, unnamed_direct_search_tool
-from gateway.types.tool_charges import InstanceRateKey, instance_rate_key
+from gateway.services.tools._web_search import (
+    direct_search_rate_key,
+    servable_direct_search_instances,
+    unnamed_direct_search_tool,
+)
+from gateway.types.tool_charges import RateKey, instance_rate_key
 
 # The runtime tool settings as stored, every valid one.
 ReadToolSettings = Callable[[], Awaitable[dict[str, SettingValue]]]
@@ -87,7 +91,7 @@ class ToolRateInForce(NamedTuple):
 
 # The rate in force for an instance's rate key, or None when no row prices it: the organization's override
 # when one is named and has one, else the deployment's price list.
-ReadToolRate = Callable[[InstanceRateKey, uuid.UUID | None], Awaitable[ToolRateInForce | None]]
+ReadToolRate = Callable[[RateKey, uuid.UUID | None], Awaitable[ToolRateInForce | None]]
 
 
 class SearchCatalogCaller(Protocol):
@@ -227,8 +231,7 @@ class SearchToolService:
         entries: list[SearchToolCatalogEntry] = []
         async with self.uow:
             for instance in servable[skip : skip + limit]:
-                rate_key = instance_rate_key("search", instance.name, instance.provider)
-                rate = await self.read_rate(rate_key, organization_id)
+                rate = await self.read_rate(direct_search_rate_key(self.config, instance.name), organization_id)
                 entries.append(
                     SearchToolCatalogEntry(
                         id=instance.name,

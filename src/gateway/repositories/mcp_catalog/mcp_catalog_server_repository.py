@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Never
 
 from sqlalchemy import case, delete, func, or_, select
-from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.sql import LIKE_ESCAPE, contains_pattern
@@ -13,11 +12,6 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.mcp_catalog import McpCatalogServer
 from gateway.repositories.base_repository import BaseRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
-
-
-def _is_outage(exc: Exception) -> bool:
-    """Whether ``exc`` is the database being unreachable, as opposed to it refusing a row."""
-    return isinstance(exc, OperationalError | InterfaceError | TimeoutError)
 
 
 class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntry, Never]):
@@ -79,36 +73,13 @@ class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntr
         )
         return list(result.scalars().all())
 
-    async def upsert(self, entries: Sequence[McpCatalogEntry], *, seen_at: datetime) -> int:
+    async def upsert(self, entries: Sequence[McpCatalogEntry], *, seen_at: datetime) -> None:
         """Store ``entries`` by name, each marked as seen by the sync that began at ``seen_at``.
 
-        Returns how many the database refused. The entries are read from a public
-        listing, so one the database will not take (a value its encoding cannot
-        hold) is left out and the rest are stored: the page is tried whole in a
-        SAVEPOINT, then entry by entry. A failure to reach the database is raised.
+        The sync leaves out what the database cannot hold before it gets here, so a refusal is raised.
         """
         if not entries:
-            return 0
-        try:
-            async with self.db.begin_nested():
-                await self._upsert(entries, seen_at)
-        except (SQLAlchemyError, ValueError) as exc:
-            if _is_outage(exc):
-                raise
-        else:
-            return 0
-        refused = 0
-        for entry in entries:
-            try:
-                async with self.db.begin_nested():
-                    await self._upsert([entry], seen_at)
-            except (SQLAlchemyError, ValueError) as exc:
-                if _is_outage(exc):
-                    raise
-                refused += 1
-        return refused
-
-    async def _upsert(self, entries: Sequence[McpCatalogEntry], seen_at: datetime) -> None:
+            return
         names = [entry.name for entry in entries]
         existing = {
             row.name: row
