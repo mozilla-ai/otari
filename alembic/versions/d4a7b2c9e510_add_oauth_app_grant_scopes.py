@@ -2,7 +2,7 @@
 
 The exchange read the scopes from the app's live registration, so widening that
 registration between the approval and the redemption minted a key beyond what
-the person saw. The grant now carries them.
+the registration held when the person approved it. The grant now carries them.
 
 In-flight grants are deleted rather than backfilled. A grant lives two minutes
 and holds no credential, so the worst a caller sees is one refused redemption

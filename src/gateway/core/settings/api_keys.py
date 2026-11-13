@@ -91,7 +91,7 @@ class ApiKeyConfig(BaseModel):
         min_length=1,
         description=(
             "The endpoint groups the key may reach. Unset gives every scope that existed when scopes were "
-            "introduced, the end_users scopes only to a service key, and never a scope added since."
+            "introduced, the end-users scopes only to a service key, and never a scope added since."
         ),
     )
 

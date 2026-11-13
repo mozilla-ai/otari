@@ -103,22 +103,26 @@ export function AppAuthorizationPage() {
               />
               <div className="flex flex-col gap-1">
                 <p className="text-emphasis">
-                  {app.data.scopes.length === 1
-                    ? "One thing, with the access you have in this workspace"
-                    : `${app.data.scopes.length} things, with the access you have in this workspace`}
+                  This app will be able to, with the access you have in this
+                  workspace:
                 </p>
                 <ul className="flex flex-col gap-1">
-                  {app.data.scopes.map((scope) => (
-                    <li key={scope} className="text-caption">
-                      {SCOPE_INFO[scope].label}
-                      {SCOPE_INFO[scope].risk ? (
-                        <span className="text-warning">
-                          {" "}
-                          &middot; {SCOPE_INFO[scope].risk}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
+                  {app.data.scopes.map((scope) => {
+                    // A gateway newer than this bundle can name a scope it has
+                    // no description for, which is still worth showing raw.
+                    const info = SCOPE_INFO[scope]
+                    return (
+                      <li key={scope} className="text-caption">
+                        {info?.label ?? scope}
+                        {info?.risk ? (
+                          <span className="text-warning">
+                            {" "}
+                            &middot; {info.risk}
+                          </span>
+                        ) : null}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             </div>

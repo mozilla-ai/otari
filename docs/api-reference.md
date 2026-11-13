@@ -75,6 +75,9 @@ with a fixed `forbidden` error that names none):
 - for a [service key](end-users.md), the end-user routes (the `end-users`
   scopes).
 
+A model call that declares a web, code execution or MCP tool needs that tool's
+scope as well as `inference:run`, whichever of Otari and the provider runs it.
+
 Every key, whatever its scopes, reaches the catalog reads: `GET /api/v1/models`,
 `/pricing`, `/tools`, `/providers/catalog`, `/tool-settings/guardrails/catalog`,
 `/tool-settings/guardrails/profiles`, `/search-tools/providers` and

@@ -31,7 +31,9 @@ from gateway.api.key_scopes import KEY_SCOPE_EXTENSION, UndeclaredKeyScope, decl
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.main import create_app
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tools import BUILTIN_TOOLS, WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, BuiltinTool
 from gateway.types.key_scope import KeyScope
 
 _KEY_GATES: tuple[Callable[..., Any], ...] = (
@@ -158,3 +160,19 @@ def test_the_openapi_document_publishes_each_declaration(app: FastAPI) -> None:
             continue
         published = paths[path.replace(":path", "")][method.lower()]
         assert published[KEY_SCOPE_EXTENSION] == ([] if declared is None else [declared.value]), (method, path)
+
+
+# The direct endpoint that runs each built-in tool, which is where its scope is published.
+_TOOL_ENDPOINTS = {
+    WEB_SEARCH_TOOL_NAME: ("POST", f"{API_ROOT}/search"),
+    WEB_FETCH_TOOL_NAME: ("POST", f"{API_ROOT}/fetch"),
+    CODE_EXECUTION_TOOL_NAME: ("POST", f"{API_ROOT}/code/execute"),
+}
+
+
+@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
+def test_each_tool_needs_the_scope_its_own_endpoint_needs(app: FastAPI, tool: BuiltinTool) -> None:
+    """Declaring a tool in a completion asks for what its endpoint asks for, so the two must not drift."""
+    declared = {operation: declared_key_scope(route) for operation, route in _routes(app)}
+
+    assert declared[_TOOL_ENDPOINTS[tool.name]] == tool.key_scope

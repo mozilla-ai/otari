@@ -129,7 +129,8 @@ class OAuthAppService:
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
             held = known_scopes(grant.scopes)
             if not held:
-                # A grant written by a newer worker naming scopes this one does not know.
+                # A grant written by a newer worker naming only scopes this one
+                # does not know. A partial overlap narrows to the known ones.
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
             user = await self.organizations.hold_delegated_workspace_access(
                 user_id=grant.user_id, workspace_id=grant.workspace_id

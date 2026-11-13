@@ -243,7 +243,8 @@ class OAuthAppGrant(Base):
     challenge: Mapped[str] = mapped_column(String(43))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
-    # The scopes the person approved. No default, so a grant cannot be written
-    # without them and redeem to a key that reaches nothing.
+    # The scopes the app's registration held when the person approved it. No
+    # default, so a grant cannot be written without them and redeem to a key
+    # that reaches nothing.
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
