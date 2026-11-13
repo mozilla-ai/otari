@@ -1446,7 +1446,6 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/services/files/": ("run_file_sweeper",),
     "gateway/services/health_checks/": (
         "list_hosted_offerings",
-        "refusal_switches_off",
         "run_health_check_worker",
     ),
     "gateway/services/identity/": ("exchange_sso_code",),

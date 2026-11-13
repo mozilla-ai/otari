@@ -35,6 +35,7 @@ if "gateway" in sys.modules:
 
 from gateway.api.deps import (
     build_hosted_provider_service,
+    build_unavailable_model_reporter,
     get_membership_listener,
     set_config,
 )
@@ -444,6 +445,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         membership_listener=get_membership_listener,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
+    app.state.unavailable_model_reporter = build_unavailable_model_reporter(config)
     install_rate_limits(app, config)
 
 

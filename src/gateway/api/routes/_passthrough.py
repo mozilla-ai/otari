@@ -48,6 +48,7 @@ from gateway.api.deps import (
     get_config,
     get_db,
     get_log_writer,
+    get_unavailable_model_reporter,
     model_provider_port_on,
 )
 from gateway.api.request_id import set_request_id
@@ -67,7 +68,6 @@ from gateway.api.routes._pipeline import (
     request_started,
     throttle_early_rejection,
 )
-from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
@@ -437,6 +437,7 @@ async def run_passthrough(
     # `request_group_id`, as the completion pipeline does.
     request_id = str(uuid.uuid4())
     set_request_id(raw_request, response, request_id)
+    unavailable_model_reporter = get_unavailable_model_reporter(raw_request)
     # Anchor request latency at the earliest point in the scaffold (monotonic,
     # so it is immune to wall-clock steps); recorded on the usage log below.
     started_at = time.monotonic()
@@ -1065,8 +1066,11 @@ async def run_passthrough(
         raise
     except Exception as e:
         if hosted_instance is not None:
-            note_unavailable_model(
-                config, hosted_instance, resolved.model, e, deployment_paid=deployment_charge is not None
+            unavailable_model_reporter.report(
+                e,
+                instance=hosted_instance,
+                model=resolved.model,
+                uses_deployment_credential=deployment_charge is not None,
             )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
         failure = UpstreamFailure(e, request_params=caller_params)

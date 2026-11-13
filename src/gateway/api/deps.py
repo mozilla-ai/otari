@@ -144,12 +144,13 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
-from gateway.services.health_checks import HealthCheckService
+from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
 from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
     InferenceService,
+    UnavailableModelReporter,
     VideoJobService,
     VideoRateLookup,
     WorkspaceFunding,
@@ -2265,6 +2266,17 @@ def get_health_check_service(
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 
 
+def build_unavailable_model_reporter(config: GatewayConfig) -> UnavailableModelReporter:
+    """Build the app's reporter of models their providers refuse to serve, with the health checks listening."""
+    return UnavailableModelReporter(UnavailableModelListener(lambda uow: build_health_check_service(uow, config)))
+
+
+def get_unavailable_model_reporter(request: Request) -> UnavailableModelReporter:
+    """Return the reporter the app was built with."""
+    reporter: UnavailableModelReporter = request.app.state.unavailable_model_reporter
+    return reporter
+
+
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
     """Build the update check service on a request's Unit of Work, or the worker's own."""
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
@@ -3215,6 +3227,8 @@ __all__ = [
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",
+    "build_unavailable_model_reporter",
+    "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",
     "build_update_check_service",
     "RequestSessionModelProviderPortDep",

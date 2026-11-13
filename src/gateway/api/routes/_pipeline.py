@@ -80,6 +80,7 @@ from gateway.api.deps import (
     get_automatic_router,
     get_budget_service,
     get_request_prices,
+    get_unavailable_model_reporter,
     routed_trace_content,
     verify_api_key_or_master_key,
 )
@@ -112,7 +113,6 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _resolve_web_search_purpose_hint,
 )
-from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -262,6 +262,7 @@ from gateway.services.inference import (
     KeyReused,
     Replay,
     StillInFlight,
+    UnavailableModelReporter,
     UnidentifiedEndUserError,
     UnknownCaller,
     UpstreamFailure,
@@ -721,6 +722,7 @@ class RequestContext:
         db: AsyncSession,
         uow: UnitOfWork,
         log_writer: LogWriter,
+        unavailable_model_reporter: UnavailableModelReporter,
         api_key_id: str | None,
         user_id: str | None,
         rate_limit_info: RateLimitInfo | None,
@@ -760,6 +762,7 @@ class RequestContext:
         # The Unit of Work the route resolved, over the session the route holds.
         self.uow = uow
         self.log_writer = log_writer
+        self.unavailable_model_reporter = unavailable_model_reporter
         self.api_key_id = api_key_id
         # The organization whose rate overrides price this request, resolved once
         # in the preamble rather than at each pricing lookup. Resolving per lookup
@@ -2359,6 +2362,7 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
+    unavailable_model_reporter = get_unavailable_model_reporter(raw_request)
     # One instant for every estimate, top-up and settlement, so a clock rule prices them alike.
     if price_facts.at is None:
         price_facts = replace(price_facts, at=datetime.now(UTC))
@@ -3087,6 +3091,7 @@ async def resolve_request_context(
         db=db,
         uow=uow,
         log_writer=log_writer,
+        unavailable_model_reporter=unavailable_model_reporter,
         code_execution_policy=code_execution_policy,
         code_execution_policy_loaded=code_execution_policy_loaded,
         api_key_id=api_key_id,
@@ -5618,6 +5623,7 @@ def build_streaming_response(
     config: GatewayConfig,
     db: AsyncSession,
     log_writer: LogWriter,
+    unavailable_model_reporter: UnavailableModelReporter,
     api_key_id: str | None,
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
@@ -5883,7 +5889,9 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
-        note_unavailable_model(config, provider, model, exc, deployment_paid=deployment_paid)
+        unavailable_model_reporter.report(
+            exc, instance=provider, model=model, uses_deployment_credential=deployment_paid
+        )
         if automatic_observation is not None:
             automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
         if isinstance(exc, IncompleteStreamError):
@@ -6400,7 +6408,9 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
-        note_unavailable_model(ctx.config, provider, model, exc, deployment_paid=ctx.deployment_paid)
+        ctx.unavailable_model_reporter.report(
+            exc, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid
+        )
         failure = UpstreamFailure(exc)
         await _log_failure_and_refund(
             ctx,
@@ -6441,6 +6451,7 @@ async def run_single_attempt_stream(
             | served_by
         ),
         log_writer=ctx.log_writer,
+        unavailable_model_reporter=ctx.unavailable_model_reporter,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         rate_limit_info=ctx.rate_limit_info,
@@ -6539,8 +6550,11 @@ async def log_exhausted_plan(
         return
     last = stopped_on or ctx.plan.attempts[-1]
     if stopped_on is not None and exc.__cause__ is not None:
-        note_unavailable_model(
-            ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
+        ctx.unavailable_model_reporter.report(
+            exc.__cause__,
+            instance=stopped_on.instance,
+            model=stopped_on.model,
+            uses_deployment_credential=stopped_on.deployment_paid,
         )
     logged = await record_usage(
         request_facts=ctx.price_facts,
@@ -6595,7 +6609,9 @@ async def log_absorbed_attempt(
     on the row that settles the request's reservation, so this row carries the
     attempt's tokens and none of the tool ledger. See :func:`log_usage`.
     """
-    note_unavailable_model(ctx.config, attempt.instance, attempt.model, exc, deployment_paid=attempt.deployment_paid)
+    ctx.unavailable_model_reporter.report(
+        exc, instance=attempt.instance, model=attempt.model, uses_deployment_credential=attempt.deployment_paid
+    )
     failure = UpstreamFailure(exc)
     await _log_absorbed_row(ctx, adapter, attempt, failure.logged_message, failure.logged_status)
 
@@ -6922,7 +6938,9 @@ async def run_non_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
-        note_unavailable_model(ctx.config, provider, model, e, deployment_paid=ctx.deployment_paid)
+        ctx.unavailable_model_reporter.report(
+            e, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid
+        )
         failure = UpstreamFailure(e)
         await _log_failure_and_refund(
             ctx,

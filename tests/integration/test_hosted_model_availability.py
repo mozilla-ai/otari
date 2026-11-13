@@ -19,7 +19,7 @@ from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import ModelCache, ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import shared_test_config
+from .conftest import app_for, shared_test_config
 
 
 @pytest.fixture(scope="module")
@@ -263,3 +263,9 @@ def test_the_model_list_says_what_kind_each_model_is(
 
     assert models["embedder"]["type"] == "embedding"
     assert models["openai/gpt-4o"]["type"] == "chat"
+
+
+def test_an_app_reused_for_another_test_reports_with_that_tests_config(test_config: GatewayConfig) -> None:
+    earlier = app_for(test_config).state.unavailable_model_reporter
+
+    assert app_for(test_config.model_copy(deep=True)).state.unavailable_model_reporter is not earlier

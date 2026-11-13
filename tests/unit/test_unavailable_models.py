@@ -1,11 +1,15 @@
 """Which provider refusals switch a hosted model off, and which never do."""
 
 import asyncio
+from unittest.mock import patch
 
 import pytest
 
 from _unavailable_model_support import RecordingListener, background_tasks_done
+from gateway.api.deps import build_unavailable_model_reporter
+from gateway.core.config import GatewayConfig
 from gateway.models.providers import HostedProviderModel
+from gateway.services.health_checks import UnavailableModelListener
 from gateway.services.health_checks._probe import capped_error
 from gateway.services.inference import (
     UnavailableModel,
@@ -191,6 +195,17 @@ async def test_a_listener_that_is_canceled_is_told_of_the_next_refusal() -> None
 
     assert telling.cancelled()
     assert listener.models == [UnavailableModel("together", "m", NOT_SERVERLESS, True)]
+
+
+@pytest.mark.asyncio
+async def test_the_app_reports_unavailable_models_to_the_health_checks() -> None:
+    reporter = build_unavailable_model_reporter(GatewayConfig())
+
+    with patch.object(UnavailableModelListener, "model_unavailable") as model_unavailable:
+        reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+        await background_tasks_done()
+
+    model_unavailable.assert_awaited_once_with(UnavailableModel("together", "m", NOT_SERVERLESS, True))
 
 
 def test_the_refusal_mailed_to_operators_is_redacted_and_capped() -> None:
