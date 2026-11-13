@@ -18485,10 +18485,10 @@ export interface components {
          *     when no row was priced. ``tool_cost_usd`` is the part of it that is per-call
          *     tool charges, in the same format, for a completion (Chat Completions,
          *     Messages, Responses); it is null where ``cost_usd`` is, for any other kind
-         *     of request, and where a row does not record it (written before the gateway
-         *     did, or whose tool calls could not be priced). ``status`` is ``error`` if any row is an error, and
-         *     ``incomplete`` for a stream the client abandoned before the provider reported
-         *     any usage.
+         *     of request, and where a priced row does not record it (written before the
+         *     gateway did, or where looking up its tools' prices failed). ``status`` is
+         *     ``error`` if any row is an error, and ``incomplete`` for a stream the client
+         *     abandoned before the provider reported any usage.
          */
         RequestSettlement: {
             /** Completion Tokens */

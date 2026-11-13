@@ -5094,7 +5094,7 @@ class LoggedUsage(NamedTuple):
 
     ``tool_cost`` is the part of ``cost`` that is per-call tool charges, zero
     where no tool was charged, and ``None`` where ``cost`` is or where the
-    tool calls could not be priced.
+    lookup of the tools' prices failed.
     """
 
     cost: Decimal | None
@@ -5450,7 +5450,7 @@ def inline_settlement(logged: LoggedUsage) -> SettledCost | None:
     """The inline cost a response carries for ``logged``, if any.
 
     A priced result carries ``cost_usd`` and ``pricing_source``, and
-    ``tool_cost_usd`` unless its tool calls could not be priced; anything else
+    ``tool_cost_usd`` unless looking up its tools' prices failed; anything else
     (unpriced model, fixed-amount estimate, no usage) carries none of them.
     """
     if logged.cost is None or logged.pricing_source is None:

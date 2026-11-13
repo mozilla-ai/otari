@@ -841,7 +841,7 @@ async def test_a_pricing_lookup_that_times_out_keeps_the_counts_on_the_row(async
     [row] = writer.logs
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE] == {"web_search": {"billed": 1, "errors": 0}}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
-    # The calls ran but could not be priced, so how much of the cost is tools is not known.
+    # The price lookup failed, so how much of the cost is tools is not known.
     assert row.tool_cost is None
 
 
