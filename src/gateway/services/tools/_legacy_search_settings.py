@@ -113,7 +113,6 @@ def legacy_search_settings_warnings(
     if stored.url:
         conversion, refused = _stored_url_conversion(
             stored,
-            inherited,
             configured_tools,
             stored_tools,
             other_tool_names,
@@ -219,7 +218,6 @@ def file_value_warnings(
 
 def _stored_url_conversion(
     stored: LegacySearchValues,
-    inherited: LegacySearchValues,
     configured_tools: Mapping[str, Mapping[str, Any]],
     stored_tools: Mapping[str, Mapping[str, Any]],
     other_tool_names: Collection[str],
