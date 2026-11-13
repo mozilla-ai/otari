@@ -36,6 +36,7 @@ from gateway.services.mcp_stateless import (
     catalog_of,
     closed_with,
     failure_class,
+    refuse_rejected_token,
     refused_token,
 )
 from gateway.services.model_access import is_mcp_tool_allowed
@@ -101,7 +102,7 @@ def _origin_bound_http_client(
         headers=headers,
         timeout=timeout if timeout is not None else httpx2.Timeout(30.0, read=300.0),
         auth=auth,
-        event_hooks={"request": [enforce_origin]},
+        event_hooks={"request": [enforce_origin], "response": [refuse_rejected_token]},
     )
 
 
