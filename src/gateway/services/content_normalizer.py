@@ -45,6 +45,7 @@ from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.providers import CountryNotServedError
 from gateway.services.vision import describe_image
+from gateway.types.country_gate import CountryGate
 from gateway.types.provider_account import ResolvedCredential
 
 WireFormat = Literal["openai", "anthropic", "responses"]
@@ -454,7 +455,7 @@ async def _extract_to_text(
     config: GatewayConfig,
     stats: NormalizationStats,
     upstream_user: str | None,
-    client_country: str | None,
+    country_gate: CountryGate | None,
 ) -> str | None:
     """Produce a text rendering of a non-text block for a text-only model."""
     if src.data is None:
@@ -468,12 +469,12 @@ async def _extract_to_text(
             return f"[Attached file: {label}]\n{result.text}\n[End of {label}]"
         # Scanned/image-only PDF → rasterize and describe pages.
         if src.mime.split(";", 1)[0] == "application/pdf":
-            return await _describe_pdf_pages(src, config, stats, upstream_user, client_country)
+            return await _describe_pdf_pages(src, config, stats, upstream_user, country_gate)
         stats.details.append(f"document extract failed: {result.detail}")
         return None
 
     # image
-    return await _render_image(src, config, stats, upstream_user, client_country)
+    return await _render_image(src, config, stats, upstream_user, country_gate)
 
 
 async def _render_image(
@@ -481,13 +482,16 @@ async def _render_image(
     config: GatewayConfig,
     stats: NormalizationStats,
     upstream_user: str | None,
-    client_country: str | None,
+    country_gate: CountryGate | None,
 ) -> str | None:
     assert src.data is not None
     strategy = config.vision_strategy
     if strategy == "describe":
         described, usage = await describe_image(
-            config, _to_data_url(src.data, src.mime), upstream_user=upstream_user, client_country=client_country
+            config,
+            _to_data_url(src.data, src.mime),
+            upstream_user=upstream_user,
+            country_gate=country_gate,
         )
         if usage is not None:
             stats.vision_prompt_tokens += usage.prompt_tokens or 0
@@ -508,7 +512,7 @@ async def _describe_pdf_pages(
     config: GatewayConfig,
     stats: NormalizationStats,
     upstream_user: str | None,
-    client_country: str | None,
+    country_gate: CountryGate | None,
 ) -> str | None:
     assert src.data is not None
     pages = await rasterize_pdf(src.data)
@@ -518,7 +522,7 @@ async def _describe_pdf_pages(
     descriptions: list[str] = []
     for index, page_png in enumerate(pages, start=1):
         page_src = _Source(_IMAGE, page_png, "image/png", None, None)
-        rendered = await _render_image(page_src, config, stats, upstream_user, client_country)
+        rendered = await _render_image(page_src, config, stats, upstream_user, country_gate)
         if rendered:
             descriptions.append(f"-- Page {index} --\n{rendered}")
     if not descriptions:
@@ -612,7 +616,7 @@ async def _normalize_block(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     upstream_user: str | None,
-    client_country: str | None = None,
+    country_gate: CountryGate | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
@@ -671,7 +675,7 @@ async def _normalize_block(
         return _inline_passthrough(block, fmt, src) if src.needs_inline else block
 
     try:
-        text = await _extract_to_text(src, config, stats, upstream_user, client_country)
+        text = await _extract_to_text(src, config, stats, upstream_user, country_gate)
     except Exception as exc:  # noqa: BLE001
         logger.warning("content normalizer: extraction failed for %s: %s", src.kind, exc)
         return block
@@ -716,7 +720,7 @@ async def normalize_messages(
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
-    client_country: str | None = None,
+    country_gate: CountryGate | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
@@ -728,9 +732,9 @@ async def normalize_messages(
     which is what a master-key request gets: the operator acting deployment-wide.
 
     ``upstream_user`` is the request's end-user identifier, which an image
-    describe side-call carries as the main call does. ``client_country`` is the
-    country the request comes from, which keeps that side-call within
-    ``provider_supported_countries`` as the main call is.
+    describe side-call carries as the main call does. ``country_gate`` is the
+    request's, which keeps that side-call within ``provider_supported_countries``
+    as the main call is.
 
     ``sandbox_requested`` says the request runs the gateway's code-execution
     sandbox. Every stored upload the messages reference is then also recorded on
@@ -773,7 +777,7 @@ async def normalize_messages(
             user_id=user_id,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
-            client_country=client_country,
+            country_gate=country_gate,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
             inline_limit=inline_limit,

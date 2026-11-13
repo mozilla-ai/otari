@@ -146,3 +146,15 @@ class ModelProviderPort(Protocol):
         it is answered from the build's own store and never dials an upstream.
         """
         ...
+
+    async def limits_countries(self) -> bool:
+        """Whether a credential this build answers may serve only some countries.
+
+        Asked on every request an account could be refused on, before that
+        account's country is looked up, so it is answered from memory and never
+        from an upstream. ``False`` promises that no credential
+        :meth:`resolve_hosted_credential` returns carries ``supported_countries``,
+        and the lookup is skipped. ``True`` costs that lookup, and a build that
+        does not track its lists may answer it always.
+        """
+        ...

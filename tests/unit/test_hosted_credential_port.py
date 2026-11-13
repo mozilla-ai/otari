@@ -126,6 +126,9 @@ class RecordingPort:
             raise self.error
         return self.credential
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         if isinstance(self.roster, BaseException):
             raise self.roster

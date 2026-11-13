@@ -3057,10 +3057,12 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(
+        config, raw_request, db, organization_id, api_key=api_key, session=session_principal is not None
+    )
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
@@ -3541,7 +3543,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
-                    client_country=country_gate.country,
+                    country_gate=country_gate,
                 )
             )
             # Bill the vision describe side-call before the reservation

@@ -38,7 +38,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
 from gateway.services.model_access import is_model_allowed, organization_key_refusal
 from gateway.services.provider_kwargs import resolve_catalog_fallback, resolve_provider_selector
-from gateway.services.providers import CountryGate
+from gateway.services.providers import CountryGate, CountryNotServedError, ensure_provider_country
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -91,9 +91,8 @@ class NoEligibleCandidatesError(Exception):
         super().__init__(self.operator_detail)
 
 
-def _country_fragment(gate: CountryGate) -> str:
-    origin = f"country '{gate.country}'" if gate.country is not None else "an unknown country"
-    return f"is on a provider provider_supported_countries closes to {origin}"
+def _country_fragment(closed: str) -> str:
+    return f"is on a provider provider_supported_countries closes to {closed}"
 
 
 @dataclass(frozen=True)
@@ -466,8 +465,10 @@ def _resolve_candidates(
         if refusal is not None:
             dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
             continue
-        if country_gate is not None and country_gate.refuses(config, resolved.instance):
-            dropped.append(DroppedCandidate(selector, "country_not_supported", _country_fragment(country_gate)))
+        try:
+            ensure_provider_country(config, country_gate, resolved.instance)
+        except CountryNotServedError as exc:
+            dropped.append(DroppedCandidate(selector, "country_not_supported", _country_fragment(exc.closed)))
             continue
         seen.add(canonical)
         attempts.append(

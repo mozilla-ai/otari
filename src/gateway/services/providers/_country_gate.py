@@ -1,10 +1,10 @@
-"""Which providers the country a request comes from may reach (``provider_supported_countries``)."""
+"""Which providers the country a request comes from, and the country its account is in, may reach."""
 
 from collections.abc import Collection
-from dataclasses import dataclass
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
 from gateway.services.providers._hosted_name_index import hosted_implementation
+from gateway.types.country_gate import CountryGate
 
 
 def provider_vendor(config: GatewayConfig, instance: str) -> str | None:
@@ -23,51 +23,51 @@ def provider_vendor(config: GatewayConfig, instance: str) -> str | None:
     return hosted_implementation(instance) or instance
 
 
-@dataclass(frozen=True)
-class CountryGate:
-    """The country a request comes from, None when no source knows it, as the gate reads it."""
+def provider_countries(config: GatewayConfig, instance: str) -> Collection[str] | None:
+    """The countries ``provider_supported_countries`` lets reach ``instance``, or None for every country."""
+    vendor = provider_vendor(config, instance)
+    return config.provider_supported_countries.get(vendor) if vendor is not None else None
 
-    country: str | None
 
-    def refuses(self, config: GatewayConfig, instance: str) -> bool:
-        """Whether ``instance``'s provider type lists countries and this request's is not one of them."""
-        vendor = provider_vendor(config, instance)
-        allowed = config.provider_supported_countries.get(vendor) if vendor is not None else None
-        return allowed is not None and self.country not in allowed
-
-    def excludes(self, countries: Collection[str] | None) -> bool:
-        """Whether a hosted provider's own ``countries`` leave this request's out; None serves every country."""
-        return countries is not None and self.country not in countries
-
-    def refusal_detail(self, selector: str, *, noun: str = "Model") -> str:
-        """The caller-facing reason ``selector`` is refused; ``noun`` says what it names."""
-        origin = f"from country '{self.country}'" if self.country is not None else "from an unknown country"
-        return f"{noun} '{selector}' is not available to requests {origin}."
+def closed_provider(config: GatewayConfig, gate: CountryGate, instance: str) -> str | None:
+    """What ``instance``'s provider type's list leaves out of this request, for an operator, or None when served."""
+    return gate.closed_to(provider_countries(config, instance))
 
 
 class CountryNotServedError(Exception):
-    """The provider that would serve a request does not serve its country, as ``gate`` reads it."""
+    """The provider that would serve a request does not serve its country, as ``gate`` reads it.
 
-    def __init__(self, gate: CountryGate) -> None:
-        super().__init__(gate.country)
+    ``closed`` names the half that decided, for an operator, as ``CountryGate.closed_to`` words it; a caller is
+    answered with ``gate.refusal_detail``.
+    """
+
+    def __init__(self, gate: CountryGate, closed: str, *, under: str) -> None:
+        super().__init__(f"{under} closes to {closed}")
         self.gate = gate
+        self.closed = closed
 
 
 def ensure_hosted_country(gate: CountryGate | None, countries: Collection[str] | None) -> None:
     """Refuse a request a hosted provider's own ``countries`` leave out.
 
     Raises:
-        CountryNotServedError: ``countries`` does not hold the request's country.
+        CountryNotServedError: ``countries`` does not hold the request's country or its account's.
     """
-    if gate is not None and gate.excludes(countries):
-        raise CountryNotServedError(gate)
+    if gate is None:
+        return
+    closed = gate.closed_to(countries)
+    if closed is not None:
+        raise CountryNotServedError(gate, closed, under="the provider's supported_countries")
 
 
 def ensure_provider_country(config: GatewayConfig, gate: CountryGate | None, instance: str) -> None:
     """Refuse a request ``instance``'s provider type does not serve under ``provider_supported_countries``.
 
     Raises:
-        CountryNotServedError: the type lists countries and the request's is not one of them.
+        CountryNotServedError: the type lists countries and the request's or its account's is not one of them.
     """
-    if gate is not None and gate.refuses(config, instance):
-        raise CountryNotServedError(gate)
+    if gate is None:
+        return
+    closed = closed_provider(config, gate, instance)
+    if closed is not None:
+        raise CountryNotServedError(gate, closed, under=f"provider_supported_countries for {instance}")

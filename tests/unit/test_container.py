@@ -338,7 +338,10 @@ def register(container):
 """,
     )
 
-    with pytest.raises(PortShapeError, match="StaleModelProvider, bound to ModelProviderPort, lacks get_hosted_models"):
+    with pytest.raises(
+        PortShapeError,
+        match="StaleModelProvider, bound to ModelProviderPort, lacks get_hosted_models, limits_countries",
+    ):
         build_container("stale_bootstrap:register")
 
 

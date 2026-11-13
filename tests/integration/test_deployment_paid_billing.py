@@ -87,6 +87,9 @@ class Fleet:
             return None
         return HostedCredential(api_key="fleet-key", api_base=None, response_provider="openai")
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id):
         return {"openai": None}
 

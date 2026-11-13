@@ -300,7 +300,7 @@ async def _retrieve(
         record.provider,
         port=model_provider_port_on(raw_request, db),
         organization_id=organization_id,
-        country_gate=country_gate_for(config, raw_request),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
         workspace_id=workspace_id,
     )
     # The provider call can outlast a completion, and the billing after it

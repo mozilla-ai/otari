@@ -259,10 +259,24 @@ def client_country(
     return None
 
 
-def request_country_gate(config: "GatewayConfig", headers: Mapping[str, str], client_host: str | None) -> CountryGate:
-    """The country gate for one request: ``provider_supported_countries``, and a hosted provider's own list."""
+def request_country_gate(
+    config: "GatewayConfig",
+    headers: Mapping[str, str],
+    client_host: str | None,
+    *,
+    account_country: str | None = None,
+    account_unresolved: bool = False,
+) -> CountryGate:
+    """The country gate for one request: ``provider_supported_countries``, and a hosted provider's own list.
+
+    ``account_country`` is what ``AccountCountryPort`` answered for the request's
+    organization, where a value that is no country code counts as unknown, and
+    ``account_unresolved`` that it could not answer.
+    """
     return CountryGate(
         client_country(
             headers, client_host, header=config.client_country_header, database=config.client_country_database
-        )
+        ),
+        account_country=_country_code(account_country),
+        account_unresolved=account_unresolved,
     )

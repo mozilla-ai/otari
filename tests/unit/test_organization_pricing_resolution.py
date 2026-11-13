@@ -1476,6 +1476,9 @@ class _RecordingPort:
             return None
         return HostedCredential(api_key="sk-hosted", api_base=None, response_provider=provider)
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         return {}
 

@@ -58,6 +58,9 @@ class FleetModelProviderAdapter:
             response_provider="together",
         )
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id):
         return {"openai": None}
 

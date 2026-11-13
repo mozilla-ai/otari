@@ -9,7 +9,6 @@ domain's migration reaches them (`DOMAINS.md`).
 """
 
 from gateway.services.providers._country_gate import (
-    CountryGate,
     CountryNotServedError,
     ensure_hosted_country,
     ensure_provider_country,
@@ -80,6 +79,7 @@ from gateway.services.providers._workspace_hosted_access import (
     workspace_may_use_hosted,
     workspace_requires_zero_data_retention,
 )
+from gateway.types.country_gate import CountryGate
 
 __all__ = [
     "CountryGate",

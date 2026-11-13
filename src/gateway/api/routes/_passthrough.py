@@ -493,6 +493,10 @@ async def run_passthrough(
         raise
 
     rate_limit_info = await check_rate_limit(raw_request, user_id)
+    # After the user and rate-limit checks, so a refused or throttled request
+    # pays no adapter read, and before anything is reserved, so a failure or
+    # cancellation in that read leaves no hold behind.
+    country_gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
 
     async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a gateway-side rejection of this request.
@@ -662,7 +666,7 @@ async def run_passthrough(
             resolved,
             organization_id=organization_id,
             workspace_id=workspace_id,
-            country_gate=country_gate_for(config, raw_request),
+            country_gate=country_gate,
         )
         if served is None:
             return None
@@ -863,7 +867,6 @@ async def run_passthrough(
             headers=error_headers(refusal.code),
         )
 
-    country_gate = country_gate_for(config, raw_request)
     try:
         ensure_provider_country(config, country_gate, resolved.instance)
     except CountryNotServedError as exc:
@@ -1432,7 +1435,8 @@ async def run_decision(
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
     try:
-        ensure_provider_country(config, country_gate_for(config, raw_request), quote.served_by or provider_name)
+        gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
+        ensure_provider_country(config, gate, quote.served_by or provider_name)
     except CountryNotServedError as exc:
         refused = country_not_supported(exc.gate, quoted)
         await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)

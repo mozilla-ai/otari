@@ -100,6 +100,8 @@ from gateway.services.providers._hosted_credentials import (
 )
 from gateway.services.providers._hosted_name_index import (
     forget_hosted_name,
+    hosted_country_lists_exist,
+    remember_hosted_country_limit,
     remember_hosted_name,
     remember_hosted_zero_data_retention,
 )
@@ -272,6 +274,7 @@ class HostedProviderService:
             )
         remember_hosted_name(name, implementation)
         remember_hosted_zero_data_retention(name, row.zero_data_retention)
+        remember_hosted_country_limit(name, row.supported_countries is not None)
         return public
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
@@ -341,6 +344,7 @@ class HostedProviderService:
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
+        remember_hosted_country_limit(row.name, row.supported_countries is not None)
         # The cached listing was made on what this request may just have changed.
         get_model_cache().clear(row.name)
         return public
@@ -366,11 +370,13 @@ class HostedProviderService:
             self.metadata_overrides.forget_provider(name)
         forget_hosted_name(name)
         remember_hosted_zero_data_retention(name, False)
+        remember_hosted_country_limit(name, False)
         if source.shadows_config:
             # The configuration entry of the same name serves again, as its own implementation.
             entry = self.sources.entries()[name]
             remember_hosted_name(name, entry.provider)
             remember_hosted_zero_data_retention(name, entry.zero_data_retention)
+            remember_hosted_country_limit(name, entry.supported_countries is not None)
         get_model_cache().clear(name)
 
     async def list_models(
@@ -830,6 +836,15 @@ class HostedProviderService:
                 else functools.partial(self._dial, name, implementation, credential, declared)
             )
         return dials
+
+    @staticmethod
+    def country_lists_exist() -> bool:
+        """Whether any hosted provider has a ``supported_countries`` list, from this worker's name index.
+
+        Answered from memory, for the request path: a request's account
+        country is looked up only where some list could refuse it.
+        """
+        return hosted_country_lists_exist()
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""
