@@ -16,6 +16,7 @@ import pytest
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.account_country_adapter import NullAccountCountryAdapter
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
@@ -37,6 +38,7 @@ from gateway.container import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
@@ -105,6 +107,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     container = build_container(membership_listener=_no_membership_listener)
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
+    assert isinstance(container.resolve(AccountCountryPort, NO_SESSION), NullAccountCountryAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
     assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), HostedProviderModelProviderAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
@@ -123,6 +126,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
     for port in (
+        AccountCountryPort,
         BillingPort,
         EntitlementPort,
         GrowthSignalPort,
