@@ -199,9 +199,11 @@ server's page and in the form that adds one; the server's row under
   every request from the workspace, so they cost input tokens even when the model
   uses none of them, and Otari connects to the server to list its tools each
   time. The list is not cached, because each request needs its own live session
-  to call a tool and a per-user server's list is per user; the definitions are
-  sent in the same order every time, so a provider's prompt cache absorbs most of
-  the token cost. Use `allowed_tools` to send only the tools people need.
+  to call a tool and a per-user server's list is per user. The definitions go out
+  in the order the server lists them, so while that order holds, a provider that
+  caches prompts may absorb part of the token cost; how much depends on the
+  provider and the rest of the request. Use `allowed_tools` to send only the tools
+  people need.
 - **Only API keys.** The Playground names the servers it uses, and the master key
   belongs to no workspace, so neither gets attached servers.
 
@@ -476,6 +478,10 @@ trust to describe its own tools.
   server with `sign_in_required: true` and a `sign_in_url`, a completion that
   reaches it hands the model that link through a stand-in tool, and discovery
   and execution answer `403 mcp_sign_in_required` with the same `sign_in_url`.
+  The link is left out when Otari cannot make one: no `public_base_url` or
+  `OTARI_SECRET_KEY`, a key with no user, or a sign-in that ended while a call
+  was renewing its token. A caller that gets no link tells the user to connect
+  the server from the dashboard, then tries again.
   See [Signing in from the conversation](#signing-in-from-the-conversation).
 - **A tool outside the key's rule is never offered to the model.** On
   `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
