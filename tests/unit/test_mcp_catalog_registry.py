@@ -329,12 +329,25 @@ async def test_a_refusal_and_a_redirect_are_not_retried(status: int) -> None:
         b"[]",
         b'{"servers": {}}',
         b'{"metadata": {}}',
+        b'{"servers": []}',
+        b'{"servers": [], "metadata": null}',
         b'{"servers": [], "metadata": []}',
         b'{"servers": [], "metadata": {"nextCursor": 7}}',
         b'{"servers": [], "metadata": {"nextCursor": {}}}',
         b'{"servers": [], "metadata": {"nextCursor": ""}}',
     ],
-    ids=["not json", "a list", "no list", "absent", "metadata list", "number cursor", "object cursor", "empty cursor"],
+    ids=[
+        "not json",
+        "a list",
+        "no list",
+        "absent",
+        "no metadata",
+        "null metadata",
+        "metadata list",
+        "number cursor",
+        "object cursor",
+        "empty cursor",
+    ],
 )
 async def test_an_answer_of_the_wrong_shape_is_refused(body: bytes) -> None:
     registry = _Registry(httpx.Response(200, content=body))

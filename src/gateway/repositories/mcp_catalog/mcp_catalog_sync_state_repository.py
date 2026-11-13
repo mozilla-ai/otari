@@ -64,6 +64,31 @@ class McpCatalogSyncStateRepository(BaseRepository[McpCatalogSyncState, Never, N
         )
         return result.scalar_one_or_none() is not None
 
+    async def request(self, *, finished_at: datetime | None, stale_before: datetime) -> bool:
+        """Ask for a sync if none is running or asked for and none ended since the caller read ``finished_at``.
+
+        Answers whether the row matched. One statement, so a claim or a finish between the caller's read
+        and this write leaves the row alone rather than queueing a second crawl.
+        """
+        not_running = or_(
+            McpCatalogSyncState.running.is_(False),
+            McpCatalogSyncState.heartbeat_at.is_(None),
+            McpCatalogSyncState.heartbeat_at < stale_before,
+        )
+        result = await self.db.execute(
+            update(McpCatalogSyncState)
+            .where(
+                McpCatalogSyncState.id == SYNC_STATE_ROW_ID,
+                not_running,
+                McpCatalogSyncState.sync_requested.is_(False),
+                McpCatalogSyncState.finished_at.is_not_distinct_from(finished_at),
+            )
+            .values(sync_requested=True)
+            .returning(McpCatalogSyncState.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def hold(self, beat: datetime, now: datetime) -> bool:
         """Move a running sync's heartbeat from ``beat`` to ``now``, answering whether the caller still owns it.
 

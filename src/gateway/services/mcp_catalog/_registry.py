@@ -301,10 +301,11 @@ def _parse_page(body: bytes) -> RegistryPage:
     servers = payload.get("servers") if isinstance(payload, dict) else None
     if not isinstance(servers, list):
         raise RegistryError("the registry answered with an unexpected shape")
+    # The registry's schema requires ``metadata`` on every page, so a page without it is not read as the last one.
     metadata = payload.get("metadata")
-    if metadata is not None and not isinstance(metadata, dict):
+    if not isinstance(metadata, dict):
         raise RegistryError("the registry answered with an unexpected shape")
-    cursor = metadata.get("nextCursor") if metadata is not None else None
+    cursor = metadata.get("nextCursor")
     # Read as the last page, a cursor of the wrong shape would let the sync delete every server it had not reached.
     if cursor is not None and not (isinstance(cursor, str) and cursor):
         raise RegistryError("the registry answered with a cursor of an unexpected shape")
