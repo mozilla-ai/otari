@@ -661,3 +661,22 @@ def test_a_gateway_with_no_sandbox_lists_no_environment(
 
 def test_the_listing_needs_a_key(client: TestClient, port: _FakePort) -> None:
     assert client.get(_ENVIRONMENTS).status_code == 401
+
+
+def test_the_listing_pages_in_the_operators_order(
+    client: TestClient, port: _FakePort, environments: None, api_key_header: dict[str, str]
+) -> None:
+    first = client.get(_ENVIRONMENTS, params={"limit": 1}, headers=api_key_header).json()["data"]
+    second = client.get(_ENVIRONMENTS, params={"skip": 1, "limit": 1}, headers=api_key_header).json()["data"]
+    past = client.get(_ENVIRONMENTS, params={"skip": 2}, headers=api_key_header).json()["data"]
+
+    assert [env["name"] for env in first] == ["python"]
+    assert [(env["name"], env["default"]) for env in second] == [("python-data", False)]
+    assert past == []
+
+
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 1001}, {"skip": -1}])
+def test_the_listing_refuses_a_page_out_of_range(
+    client: TestClient, port: _FakePort, environments: None, api_key_header: dict[str, str], params: dict[str, int]
+) -> None:
+    assert client.get(_ENVIRONMENTS, params=params, headers=api_key_header).status_code == 422

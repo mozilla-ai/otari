@@ -1012,6 +1012,9 @@ environment's own price else `otari:code_execution`'s, and null when neither is
 set. The list is empty where no sandbox is configured, the deployment names no
 image, or the workspace's code execution policy is off.
 
+`skip` (default `0`) and `limit` (default `100`, at most `1000`) page the list
+in the operator's order; a value out of range is a `422`.
+
 ## Decisions
 
 `POST /api/v1/decisions` answers typed questions about a piece of content with

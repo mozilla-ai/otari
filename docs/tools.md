@@ -493,7 +493,7 @@ one's `name`, a `label` and `description`, its `price_per_run` for the caller's
 organization (null when unpriced), and whether it is the `default`. A workspace
 whose policy is off lists none, and one that pins an image lists that one alone.
 A deployment that names no image lists none either: its runs go to the backend's
-own default.
+own default. `skip` and `limit` (at most `1000`, default `100`) page the list.
 
 A direct run names one in `environment`. One the deployment does not offer is a
 `400`, and one other than the workspace's pin a `403`. A held sandbox keeps the

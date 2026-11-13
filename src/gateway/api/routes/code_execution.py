@@ -28,11 +28,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     BillingPortDep,
+    CodeExecutionEnvironmentServiceDep,
     CodeExecutionPortDep,
     OptionalFileServiceDep,
     UnitOfWorkDep,
@@ -74,7 +75,6 @@ from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_li
 from gateway.schemas.tools import (
     CodeExecuteRequest,
     CodeExecuteResponse,
-    CodeExecutionEnvironment,
     CodeExecutionEnvironmentList,
     CodeExecutionOutputFile,
 )
@@ -95,7 +95,6 @@ from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     DEFAULT_EXEC_TIMEOUT_S,
-    SERVED_TOOL_NAMES,
     SandboxBackend,
     code_execution_rate_keys,
 )
@@ -451,9 +450,9 @@ async def execute_code(
 @router.get("/environments")
 async def list_code_execution_environments(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    policies: WorkspaceCodeExecutionPoliciesDep,
+    environments: CodeExecutionEnvironmentServiceDep,
+    skip: Annotated[int, Query(ge=0, description="Number of environments to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of environments to return")] = 100,
 ) -> CodeExecutionEnvironmentList:
     """List the sandbox environments the caller's workspace may run code in, with their prices.
 
@@ -464,38 +463,10 @@ async def list_code_execution_environments(
     A workspace whose code execution policy is off lists none, and one that
     pins an environment lists that one alone. So does a gateway with no sandbox,
     or one that names no image, whose runs go to the backend's own default.
+    ``skip`` and ``limit`` page the list in the operator's order.
     """
     api_key, _ = auth_result
-    api_key_id = api_key.id if api_key else None
-    if not config.sandbox_configured():
-        return CodeExecutionEnvironmentList(data=[])
-    workspace_id = await workspace_for_key_id(db, api_key_id)
-    policy = await policies.for_request(workspace_id)
-    offered = config.pinnable_sandbox_images()
-    default = config.effective_sandbox_image()
-    if policy is not None:
-        if not policy.enabled or (policy.tools is not None and not set(policy.tools) & set(SERVED_TOOL_NAMES)):
-            offered = ()
-        elif policy.image is not None:
-            offered = (policy.image,) if policy.image in offered else ()
-            default = policy.image
-    organization_id = await organization_for_key_id(db, api_key_id)
-    environments: list[CodeExecutionEnvironment] = []
-    for image in offered:
-        described = config.sandbox_environments.get(image)
-        rate = await resolve_tool_rate(
-            db, code_execution_rate_keys(image), deployment_paid=True, organization_id=organization_id
-        )
-        environments.append(
-            CodeExecutionEnvironment(
-                name=image,
-                label=(described.label if described is not None else None) or image,
-                description=described.description if described is not None else None,
-                price_per_run=float(rate.unit_rate) if rate is not None else None,
-                default=image == default,
-            )
-        )
-    return CodeExecutionEnvironmentList(data=environments)
+    return await environments.list_offered(api_key.id if api_key else None, skip=skip, limit=limit)
 
 
 def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) -> dict[str, Any]:
