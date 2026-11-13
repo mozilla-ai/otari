@@ -1057,7 +1057,9 @@ Brave key localizes results to the request's `country`; Tavily takes a country b
 its full name, so a Tavily key does not.
 
 `GET /api/v1/search-tools/catalog` lists the tools a direct search may name,
-with each one's price for the caller's organization and which is the default,
+with each one's configured rate for the caller's organization (what a call is
+charged when its provider reports no cost; `null` when no rate row prices it)
+and which is the default,
 and any API key may read it, as it reads `GET /api/v1/models`. An API key sees
 only the tools its `allowed_tools` grants, and nothing when its workspace has
 web access off. It never returns a tool's key, endpoint or options.

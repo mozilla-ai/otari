@@ -797,12 +797,15 @@ see [Provider failures](#provider-failures).
 **Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools the
 calling key may name, as `GET /api/v1/models` lists the models it may call: a
 tool its `allowed_tools` does not grant is left out. Each entry carries the
-tool's name as `id`, its `provider`, a display `label`, its `price_per_call` in
-USD for the caller's organization (its override, else the deployment's price
-list; `null` when nothing prices it), and `default`, true for the deployment's
-default tool. A call that names no tool runs on the default, unless the
-workspace has an organization search key, which then serves it; a call that
-names the default tool runs on that tool's own key and price. A tool a direct
+tool's name as `id`, its `provider`, a display `label`, its `price_per_call`,
+and `default`, true for the deployment's default tool. `price_per_call` is the
+configured rate in USD for the caller's organization (its override, else the
+deployment's price list), not what a call is charged: a provider that reports a
+search's cost, such as Exa, is charged that cost, and the rate prices only a
+call whose provider reports none. It is `null` when no rate row prices the
+tool, which says nothing of whether its provider reports a cost. A call that
+names no tool runs on the default, unless the workspace has an organization
+search key, which then serves it; a call that names the default tool runs on that tool's own key and price. A tool a direct
 search cannot run on is left out, and no key, endpoint or option is returned.
 An API key whose workspace has web access off gets an empty list;
 `GET /api/v1/tools` says why. The list takes `skip` and `limit` (at most 1000,
