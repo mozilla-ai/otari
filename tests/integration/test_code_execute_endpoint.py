@@ -58,6 +58,7 @@ class _FakeSession:
 
 class _FakePort:
     label = "fake-provider"
+    runtime = None
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []

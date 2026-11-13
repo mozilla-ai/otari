@@ -37,6 +37,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tools import SandboxProvider
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import (
@@ -1171,7 +1172,8 @@ def get_workspace_code_execution_policy_service(
 
     ``sandbox_configured`` is the check ``GET /api/v1/tools`` makes before it advertises code
     execution, so the page and discovery agree. ``default_enabled`` is what the request path gives a
-    workspace with no policy. ``allowed_images`` is the operator's curated list. All are properties
+    workspace with no policy. ``allowed_images`` is the operator's curated list, and ``runs_images`` is
+    false on Monty, which runs none. All are properties
     of the running gateway, handed in rather than read by the service.
     """
     return WorkspaceCodeExecutionPolicyService(
@@ -1181,6 +1183,7 @@ def get_workspace_code_execution_policy_service(
         sandbox_configured=config.sandbox_configured(),
         default_enabled=config.code_execution_workspace_default,
         allowed_images=config.pinnable_sandbox_images(),
+        runs_images=config.effective_sandbox_provider() is not SandboxProvider.MONTY,
     )
 
 

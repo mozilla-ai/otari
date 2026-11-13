@@ -1,6 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
-import type { ToolServiceName, ToolSettingField } from "@/client"
+import type {
+  ToolServiceName,
+  ToolSettingField,
+  ToolSettingsResponse,
+} from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -40,7 +44,7 @@ import { docsSourceHref } from "@/shared/helpers/docs"
 const FIELD_COPY: Record<string, SettingCopy> = {
   sandbox_url: {
     label: "Sandbox URL",
-    help: "A sandbox you run that speaks the code-execution protocol. While unset, otari_code_execution requests are rejected with 400.",
+    help: "A sandbox you run that speaks the code-execution protocol. While unset, otari_code_execution requests are rejected with 400, unless Monty runs them.",
     placeholder: "http://sandbox:8080",
     isMachineReadable: true,
   },
@@ -73,9 +77,6 @@ const TENANT_UNAVAILABLE = "Not available on this deployment."
 
 const EXECUTOR_NEEDS_SANDBOX =
   "Takes effect once a sandbox is configured. Until then provider code tools are always forwarded."
-
-// Fields only the `protocol` provider reads; E2B ignores both.
-const PROTOCOL_ONLY_KEYS = new Set(["sandbox_url", "sandbox_session_image"])
 
 interface ManagedToolSpec {
   toolId: string
@@ -210,22 +211,39 @@ const SERVICES: ServiceSpec[] = [
 
 const toolsDocs = (anchor?: string) => docsSourceHref("tools.md", anchor)
 
+type SandboxProvider = NonNullable<ToolSettingsResponse["sandbox_provider"]>
+
+// `ignores` are the fields a provider never reads, so the page leaves them out.
+const SANDBOX_PROVIDERS: Record<
+  SandboxProvider,
+  { name: string; help: string; ignores: ReadonlySet<string> }
+> = {
+  protocol: {
+    name: "Self-hosted",
+    help: "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and restart.",
+    ignores: new Set(),
+  },
+  e2b: {
+    name: "E2B",
+    help: "E2B runs the code. Set with sandbox_provider at startup.",
+    ignores: new Set(["sandbox_url", "sandbox_session_image"]),
+  },
+  monty: {
+    name: "Monty",
+    help: "Monty runs the code in this gateway, with part of the standard library. To use a sandbox you run, set sandbox_provider: protocol and a sandbox URL, then restart.",
+    ignores: new Set(["sandbox_session_image"]),
+  },
+}
+
 /** Which sandbox runs the code. Chosen at startup, so it is stated, not edited. */
-function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
+function SandboxProviderRow({ provider }: { provider: SandboxProvider }) {
+  const { name, help } = SANDBOX_PROVIDERS[provider]
   return (
     <SettingRow
       label="Provider"
       configKey="sandbox_provider"
-      help={
-        provider === "e2b"
-          ? "E2B runs the code. Set with sandbox_provider at startup."
-          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and restart."
-      }
-      control={
-        <span className="text-caption text-foreground">
-          {provider === "e2b" ? "E2B" : "Self-hosted"}
-        </span>
-      }
+      help={help}
+      control={<span className="text-caption text-foreground">{name}</span>}
     />
   )
 }
@@ -301,7 +319,8 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
     (data?.fields ?? [])
       .filter(
         (field) =>
-          sandboxProvider !== "e2b" || !PROTOCOL_ONLY_KEYS.has(field.key),
+          !sandboxProvider ||
+          !SANDBOX_PROVIDERS[sandboxProvider].ignores.has(field.key),
       )
       .map((field) => [field.key, field]),
   )
@@ -375,6 +394,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               note={
                 field.key === "code_execution_executor" &&
                 sandboxProvider !== "e2b" &&
+                sandboxProvider !== "monty" &&
                 !urlField?.value
                   ? EXECUTOR_NEEDS_SANDBOX
                   : undefined

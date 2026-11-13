@@ -1389,6 +1389,9 @@ kms = [
 metrics = [
     { name = "prometheus-client" },
 ]
+monty = [
+    { name = "pydantic-monty" },
+]
 ocr = [
     { name = "numpy" },
     { name = "rapidocr-onnxruntime" },
@@ -1410,6 +1413,7 @@ dev = [
     { name = "packaging" },
     { name = "pre-commit" },
     { name = "prometheus-client" },
+    { name = "pydantic-monty" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1460,6 +1464,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=13.0.0" },
     { name = "prometheus-client", marker = "extra == 'metrics'", specifier = ">=0.20.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
+    { name = "pydantic-monty", marker = "extra == 'monty'", specifier = ">=1.4.0" },
     { name = "pydantic-settings", specifier = ">=2.16.1" },
     { name = "pypdfium2", specifier = ">=4.30.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
@@ -1473,7 +1478,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3", "kms", "fsspec", "e2b", "redis", "metrics", "geoip"]
+provides-extras = ["ocr", "s3", "kms", "fsspec", "e2b", "monty", "redis", "metrics", "geoip"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1485,6 +1490,7 @@ dev = [
     { name = "packaging", specifier = ">=24.0" },
     { name = "pre-commit", specifier = ">=4.7.0" },
     { name = "prometheus-client", specifier = ">=0.20.0" },
+    { name = "pydantic-monty", specifier = ">=1.4.0" },
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-cov", specifier = ">=6.2.1,<8" },
@@ -3480,6 +3486,98 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/52/a8/0f1449e3e1b20941c9372faa18e7b6a092e30cdfa841902473f7989532ac/pydantic_core-2.50.1-cp315-cp315t-musllinux_1_1_aarch64.whl", hash = "sha256:1a9006395dece0e32e704c315eff8a00bede494f6108546cfc5539c89fef4f9a", size = 2294031, upload-time = "2026-10-11T18:34:52.876Z" },
     { url = "https://files.pythonhosted.org/packages/d1/d0/1031f492857de70355fb16524bbb03efce5fd34c93ed4a1ec60be07e0d4b/pydantic_core-2.50.1-cp315-cp315t-musllinux_1_1_armv7l.whl", hash = "sha256:d2d82aa62521c55ddfb000ae70f88cdd8de974078f6024e821dfe5addd0c818f", size = 2468423, upload-time = "2026-10-11T18:34:54.995Z" },
     { url = "https://files.pythonhosted.org/packages/46/52/269ffffa645b8e47906395a39cf9db1151ae9fa4bcd7f47b960bc31baf37/pydantic_core-2.50.1-cp315-cp315t-musllinux_1_1_x86_64.whl", hash = "sha256:009634b83993777ddcd69cad0ffcace43dabde692109528e35f0fde91e386a8b", size = 2512598, upload-time = "2026-10-11T18:34:57.149Z" },
+]
+
+[[package]]
+name = "pydantic-monty"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic-monty-client" },
+    { name = "pydantic-monty-runtime" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/31/2e/3f07bf276f71049d23b530c97e629839bc04db96396de156e29ea5db1723/pydantic_monty-1.6.0.tar.gz", hash = "sha256:f5401dfd0352840befb3f49d7a56be7dae3f66d7f87b0e619098f745c7d16edb", size = 8020, upload-time = "2026-11-11T17:15:44.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/41/c0/d4c79976e0d4271ee0da8566dc6057fba8329c71bd81897b4dcdaec3b81b/pydantic_monty-1.6.0-py3-none-any.whl", hash = "sha256:cf968bc9eccc93cf9806842a2513b815019fd5b10cb559821bfd1bedd5ae37d6", size = 7547, upload-time = "2026-11-11T17:12:21.5Z" },
+]
+
+[[package]]
+name = "pydantic-monty-client"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/31/6b/dbae3ac4772fc668f672ba16f07b545590661516422917fd604db1bea4fe/pydantic_monty_client-1.6.0.tar.gz", hash = "sha256:55661e14c9ba023bacd6473449bf5dfb89bb7eef506f2bcbd088b8efead82122", size = 3248128, upload-time = "2026-11-11T17:15:45.978Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/d3/61524e7a9be55978fa3e422a066ffae73a42c3ac74e17908132561afa372/pydantic_monty_client-1.6.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:a67519c57ab2685cc9d430262cac19d87a666bdb1068271970a3e5c783f02abc", size = 4781980, upload-time = "2026-11-11T17:13:26.41Z" },
+    { url = "https://files.pythonhosted.org/packages/32/05/4d82e32ee0cdf344c00e1e7ac86cea3df487acbe1d223350e62dc1c0e737/pydantic_monty_client-1.6.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:f844192a344624eaa692192ab468481ca6190fff9994eb9da37201f646a17cbc", size = 4475888, upload-time = "2026-11-11T17:13:27.993Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/6f/2f4fe6399641a6d81f6cf389422fb9b51ccb751031ff4b684be59b29d941/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:0361cdd82de50412aad00483206d170332e365abe4c7647add66d2d7aae71b08", size = 4618012, upload-time = "2026-11-11T17:13:29.567Z" },
+    { url = "https://files.pythonhosted.org/packages/90/2f/18aea89f78f587568a5ada89ae4479586cfa9a5c88395b100d162a010a5e/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_armv7l.whl", hash = "sha256:b3302d66fb6052ac02e1010e7865df7bc25e5d13b4dd71b780114dd79c3b6bf8", size = 4299206, upload-time = "2026-11-11T17:13:31.083Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/b2/d643848e45c32d183a5c1e9070a2a8f62128c97ace76429e53d62e585c07/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_i686.whl", hash = "sha256:7967f859235115ed8953d6bd9daa5bb817183ee94af9e822047a44c9d5593bd7", size = 4576388, upload-time = "2026-11-11T17:13:32.792Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/a2/0e8d68d33e4ab5575b2b6938cc5749d6ef75edcb32087fe6eb00a1658a0d/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_ppc64le.whl", hash = "sha256:17b6a2f5f6ce0600c3b4be334f4e422e5a93272fb1c53619ecfc859605601369", size = 4829837, upload-time = "2026-11-11T17:13:34.296Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/4f/ca6f39040510195ddb9c5bf584bed3ba8172b6557159fd18f64e087078ff/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_s390x.whl", hash = "sha256:1be285abc1493d2b53ae56b2a680cb250c3d6802ee57256b707ec05930f49f7c", size = 4680787, upload-time = "2026-11-11T17:13:35.808Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/b1/0c4d74c74f27743eef9db68758707d072d99b5ef6cd46ab9f6f99a1a851c/pydantic_monty_client-1.6.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:e7624944528bdd462fded093a78641e7f7fdc6acee1223c6110ab00263b2d6ef", size = 4934366, upload-time = "2026-11-11T17:13:37.363Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/fd/04def3f05edd966ef23c2f5f175906e75f1eaafc351d025e6bb69591d561/pydantic_monty_client-1.6.0-cp313-cp313-musllinux_1_1_aarch64.whl", hash = "sha256:df1c2a3e810f50ad14661c6adca8f501dc5c9ef704703dcc3e2ea54febb72181", size = 4786561, upload-time = "2026-11-11T17:13:38.909Z" },
+    { url = "https://files.pythonhosted.org/packages/59/b5/3f40818a46c1feaff83c90914e7d4c123fc670cbb012d5e71519b7658c53/pydantic_monty_client-1.6.0-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:a4c63717455cd7ab80339ed399410fb9620f0dbaff42c620ec7a6fd344f91d92", size = 5133022, upload-time = "2026-11-11T17:13:40.693Z" },
+    { url = "https://files.pythonhosted.org/packages/78/cc/6bcdb57822a85b8e46fb211bb0c2218412a1ce985b998f5984251f2dfcbc/pydantic_monty_client-1.6.0-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:5c880ddc4e75a9e43fd712f0732db1a307694812d987c8d49a76602933b23f9a", size = 4782591, upload-time = "2026-11-11T17:13:45.465Z" },
+    { url = "https://files.pythonhosted.org/packages/78/31/bb06c58d1fe124992dd9a4429e39298da1230f161d80fe2669417c1f2e2f/pydantic_monty_client-1.6.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:5289fa97d8b437ddc3d1e66f372d1ddcb0e5274bce3cec20a3d01d0be7355e0f", size = 4477113, upload-time = "2026-11-11T17:13:46.924Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/44/edb63a9cd5329699f0a073902f4d34387171e0748eb40c320e2cdcd980d1/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:9994274d92df4323adfaa1c09fc7ba0e8971b783bfb233a43bcfff0760f8c643", size = 4618526, upload-time = "2026-11-11T17:13:49.033Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/4e/665d0301474fe55d1b54e266c4fe00c51605d305df1c4326f678ee197bb3/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_armv7l.whl", hash = "sha256:4e3d60914b2ffae3ebad5b83f398620a4969d10f9a308f62ccdbbd2051d091cd", size = 4299364, upload-time = "2026-11-11T17:13:51.487Z" },
+    { url = "https://files.pythonhosted.org/packages/08/78/33699ae35f9c73d2c370aa55d70dd94028d4eb98774dd437a37d9a39d7f8/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_i686.whl", hash = "sha256:119859bfd53f89262ed1418b299231abc49810ef1ce8ee52ffac2e24dc4df48a", size = 4578115, upload-time = "2026-11-11T17:13:53.42Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/94/ee0a5988d426bdef6835cdf5cf639556219f14eb3a20b0cec3d3406c2a44/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_ppc64le.whl", hash = "sha256:e57de8ebd49bcfcdd6e4b7dfc6a0c99b987cada157a3b8c1cb57592305820e74", size = 4830900, upload-time = "2026-11-11T17:13:55.019Z" },
+    { url = "https://files.pythonhosted.org/packages/60/6e/24d25633b50fe181857291fa0207b60ccb2b198faf2c30c84962c01d103e/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_s390x.whl", hash = "sha256:23b1e89a04fd53e4160ff19477933f7a8a02c2ac4e30daa0e57ffc61e86ec530", size = 4683272, upload-time = "2026-11-11T17:13:56.686Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/04/7b3447d161ce4a65088e0af3a3318bbbef72f4dccc03dd0fe73250c1215b/pydantic_monty_client-1.6.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:08ebc0c694fb60e28475dd14f076dd19ab922fb5bd3e8ff350001cce4a785517", size = 4935134, upload-time = "2026-11-11T17:13:58.165Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/3c/a06632f0789438ecb71c315512f93641dc02342ce47908b4c16973f569fc/pydantic_monty_client-1.6.0-cp314-cp314-musllinux_1_1_aarch64.whl", hash = "sha256:db957ae6c3af4c67bc6a0212bdfd26fa9228edfb300f7529fd4407dbbf55af4d", size = 4787456, upload-time = "2026-11-11T17:13:59.718Z" },
+    { url = "https://files.pythonhosted.org/packages/98/a1/bf4cec627ad74905ff9b3c0b524a9e89a8109a0e76b1d997325fcec2e20f/pydantic_monty_client-1.6.0-cp314-cp314-musllinux_1_1_x86_64.whl", hash = "sha256:2287065f8527954e86f12099b197c00699ef2d858e3343fd657bf61f11313a31", size = 5133541, upload-time = "2026-11-11T17:14:01.423Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/58/2bbbe675309466fbe29833aaa4a19cd2a68cb84610779bec424238612a19/pydantic_monty_client-1.6.0-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:4701cd841f0d1bcf32c4c906470c9a1e4a31ffc0f162a59529d8935573152424", size = 4773248, upload-time = "2026-11-11T17:14:06.066Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/44/68d724b2ee3827271ea62cae8e62f15b7d43c1b2e81de5327cacca7ae360/pydantic_monty_client-1.6.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:6416130226dc74696eb33bef5348662137a073d85b5c5d17a0a0166c46ada792", size = 4467129, upload-time = "2026-11-11T17:14:07.803Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/26/86aff044b8ca713c6c678f0c8f62b1ab39d83b18cf9d5a2fc815805bb06c/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:f65cc5f3f52db420ead615c1e20d142cdb5151bf2981ea86881665775fa59f01", size = 4612237, upload-time = "2026-11-11T17:14:09.876Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/54/646486c33d91233f8b82d92f35d0fa9259341af6a63ff4a0140cab3f1c2a/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_armv7l.whl", hash = "sha256:8bd8f8412ae3ecdd0cb578a3b49e04de06ee76652e2bb28bb5b83a1cfef736ea", size = 4289405, upload-time = "2026-11-11T17:14:11.557Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/22/35c0bca973578fd68862e7654d42abcbfd4886baf8bfde1decd2bfdacd11/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_i686.whl", hash = "sha256:589479338ae51f87c92a1f859779564959100c96cb20d14776ea4cb9ecf93a31", size = 4568693, upload-time = "2026-11-11T17:14:13.082Z" },
+    { url = "https://files.pythonhosted.org/packages/62/c8/7770ba5163f1d97c5c408ea65eb27f82a6aca7dddd826e385e73ad1b6d81/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_ppc64le.whl", hash = "sha256:3d69fe3148b8b1773e0eeb30ad40aea87042b340b0b121db3628dd085e0af5de", size = 4819982, upload-time = "2026-11-11T17:14:14.816Z" },
+    { url = "https://files.pythonhosted.org/packages/26/f5/344f7b6f82865863eb76784102f23392c30a340ba48f78cae5e8ef664bc5/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_s390x.whl", hash = "sha256:f9aef8a8fed93894070e4e87528748dee9e54d7ebfe14124ef07ab698f20b50e", size = 4672810, upload-time = "2026-11-11T17:14:16.325Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/e7/8c125d5e5a7b4a4fd96437fa65df11b3d5d3cf7d61e37922d20c4e5e8bca/pydantic_monty_client-1.6.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:cef101ee78aeb257ec47ead50ef51b3beb5daf39a54f575b519c6fb9ffd7733c", size = 4930912, upload-time = "2026-11-11T17:14:18.237Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/ad/d4da3591ae4c409c6765700d3353679e9843e8eca0bb435b561184bbc83c/pydantic_monty_client-1.6.0-cp314-cp314t-musllinux_1_1_aarch64.whl", hash = "sha256:40d7a5964359e981a4b768e8a0fc851ac027536acefd649d36f9062d8bd562ef", size = 4780827, upload-time = "2026-11-11T17:14:20.103Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/e3/a99039fc39e34dfe25cdefbff0eda422417de1f3e2ab8cf73f2e84cecd97/pydantic_monty_client-1.6.0-cp314-cp314t-musllinux_1_1_x86_64.whl", hash = "sha256:5f60f557fdb1bc795e9cce1515d1e081ee5552df76be7d2ee9639b397ba50163", size = 5127005, upload-time = "2026-11-11T17:14:21.983Z" },
+    { url = "https://files.pythonhosted.org/packages/88/d0/c08023bbdd46ef3011466fd5020c8b330449d8cfe1621b2b43f5cc594b0a/pydantic_monty_client-1.6.0-cp315-cp315-macosx_10_12_x86_64.whl", hash = "sha256:59a8659189e6556f1d792171541956846e7b96dfa2c96f94b7a1cc30667ce97b", size = 4782620, upload-time = "2026-11-11T17:14:27.661Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/d8/523f4a0c803a8024a79ae52a89daeb692f9118ec09569bafc194e2303b00/pydantic_monty_client-1.6.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:f7fbbee3e5888edbdd3ccd87eb29e6934dc134bd1ea505828db78ade45023aee", size = 4476721, upload-time = "2026-11-11T17:14:29.513Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/35/180e4770ca40e4b9c741f236843d3d2b0e5763fd22da40da92bde68acaef/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:83f1e7b152021520b4b2c6755702d328b032b59ca52995b4592629b5ffcb3644", size = 4618575, upload-time = "2026-11-11T17:14:31.342Z" },
+    { url = "https://files.pythonhosted.org/packages/46/c5/d87ca5a8b8949b29922b5fc429351eb4936958370d1c9730b23132fc1e55/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_armv7l.whl", hash = "sha256:a374045211e63b49284b2b33e0ae1e0ab49611c2b2ea001770248744e3789225", size = 4299678, upload-time = "2026-11-11T17:14:33.433Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/d6/886772c53b3c1ea21ad7282a705144328663e0f2183ef2863fb8c45f2ab7/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_i686.whl", hash = "sha256:8145bcac3cbaab08bb29cb7291b779e5f0a89fab157c903c12062345538425fa", size = 4578477, upload-time = "2026-11-11T17:14:35.088Z" },
+    { url = "https://files.pythonhosted.org/packages/13/a3/19c6d883a4e1d8e79c64000c28ad5300d10b888c8cff15597c34de6eea38/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_ppc64le.whl", hash = "sha256:f48ffbc7ecffb5d1eb83a6a40f4fa7471db23ba0dfcbacce98f2becebbaac269", size = 4831033, upload-time = "2026-11-11T17:14:37.213Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/4e/3c9fac5e52174f4e6c5258f6749cfdc0a688ad81bceb6aeaca4adda80ade/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_s390x.whl", hash = "sha256:5ed303b23bfac37a6cdc528a33682c4e103df2475be07510c8d94f61e29dc311", size = 4684079, upload-time = "2026-11-11T17:14:38.957Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/39/b9038a0ea401dd32cbb774060e2ab539654a8441da2a74cd9ad65f5c89bf/pydantic_monty_client-1.6.0-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:f645de3fc48daddfa4f70cc7d897d9d570435069f79298f6318bc19db1bf9c10", size = 4935124, upload-time = "2026-11-11T17:14:40.879Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/74/67335230207e81db19ad96a504b96e6acb92fe63c79e6727fcef83fcf7be/pydantic_monty_client-1.6.0-cp315-cp315-musllinux_1_1_aarch64.whl", hash = "sha256:739e726a18f47a614342d41e87270e29a0006d0b5163976386e63e92e2152c4a", size = 4787451, upload-time = "2026-11-11T17:14:42.465Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/49/3bc024b6f41861ffba8875dbb211ad36318e423f1186802e1502722ab613/pydantic_monty_client-1.6.0-cp315-cp315-musllinux_1_1_x86_64.whl", hash = "sha256:a6f2f2259f0d85657b88db5ab0cd33857839706d1bace1464c61aa5c7eb55d8c", size = 5133813, upload-time = "2026-11-11T17:14:44.066Z" },
+    { url = "https://files.pythonhosted.org/packages/60/99/2fed76308691326388de13609cca9649012306811e4efd94a2623c00d4ed/pydantic_monty_client-1.6.0-cp315-cp315t-macosx_10_12_x86_64.whl", hash = "sha256:87125023b4c037decf553c14674bed43ac35016f70005576db93f61d72bc19a6", size = 4773269, upload-time = "2026-11-11T17:14:48.8Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/61/b7dfb0fcf0dfe97308a706893f687434da446e9e84628de1c48d0a082792/pydantic_monty_client-1.6.0-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:50385e7ff94de67d8e9fcbc1d3870ca2fe227f6625bb062525ce1a0823599d81", size = 4467524, upload-time = "2026-11-11T17:14:50.646Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/2f/e990c426eeed9691d4c62fe549c7ec5efae9849b0d020ae6203b69c76248/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_aarch64.whl", hash = "sha256:d9e8c232b771d3378038c440555462eff2e950d950f340f9ed0461dabed76701", size = 4612184, upload-time = "2026-11-11T17:14:52.773Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/39/39bba66c09bc6c9af33558304b2356585f06b6ca24a5cf3c4c8ccdc2c01b/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_armv7l.whl", hash = "sha256:99111c0e4ea5b473cc1748b53bc7f875a6929e0cacb84677bf426a5dc65211cb", size = 4289507, upload-time = "2026-11-11T17:14:54.561Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/10/9f9204f5ef8aeb74b44f1badd2434a070bbe67b9f9e75576b08d1455fbbc/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_i686.whl", hash = "sha256:ad74299ce4bf0a80875fcdf422f2ec9262f86c4c91cb5c3caabbbbaf6dbf3c62", size = 4569312, upload-time = "2026-11-11T17:14:56.114Z" },
+    { url = "https://files.pythonhosted.org/packages/83/45/c80a965818e0b6d701237dd3c8713336672bdb17c9d2862cce8f2c36c0d0/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_ppc64le.whl", hash = "sha256:6bcca3990c27d92dcb433c969d8535ddd52d52a2192ffaec919dd0887b6b4d86", size = 4820911, upload-time = "2026-11-11T17:14:57.93Z" },
+    { url = "https://files.pythonhosted.org/packages/90/90/f10f544f0669857b09a98b3bfff75e7d70af8d9f6283dcce214a0a60f0dd/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_s390x.whl", hash = "sha256:c534b03b5624d30c7e18cd632b87f131523e3680abe5134da2bd5bf4a4814b05", size = 4673274, upload-time = "2026-11-11T17:14:59.924Z" },
+    { url = "https://files.pythonhosted.org/packages/de/09/cef8e536a6cb4e920e897441d695d8c3d57657c792bb721bba20fd139e9c/pydantic_monty_client-1.6.0-cp315-cp315t-manylinux_2_28_x86_64.whl", hash = "sha256:6f05d0c159e3160b5b2ea443aaec158ed21371e23dbd7fa64102462d7ad4457d", size = 4930761, upload-time = "2026-11-11T17:15:01.429Z" },
+    { url = "https://files.pythonhosted.org/packages/17/2a/ea78d24f3ae58255e5c78298b3b8b2efccf01491baa8d6e9738727d24e75/pydantic_monty_client-1.6.0-cp315-cp315t-musllinux_1_1_aarch64.whl", hash = "sha256:b33dbead102af29fbb97261c9235ee83ad205faa78eff74cc23d93da02adeaed", size = 4780956, upload-time = "2026-11-11T17:15:02.971Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/8a/4e0796f873078b7b3b698641d13c153aa84e0e982096fa8dbd97955be92f/pydantic_monty_client-1.6.0-cp315-cp315t-musllinux_1_1_x86_64.whl", hash = "sha256:6e1df714ec8be0b6e63619be237a14f118014a63a9271388194499bc45cb89f7", size = 5127567, upload-time = "2026-11-11T17:15:04.757Z" },
+]
+
+[[package]]
+name = "pydantic-monty-runtime"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/8e/d27281f56ac0de551f111e2cea33dca7b9cbe4a0708d815d2939202fbcb7/pydantic_monty_runtime-1.6.0.tar.gz", hash = "sha256:6fab4c1da3bd96c5761c53f62ffec46ac7b22b797042e4711084adf564e8d32d", size = 2811971, upload-time = "2026-11-11T17:15:47.369Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/03/fc521336c215cf7cd3e59b1631a3e2946993c75bb734eee5dacebda9b6ce/pydantic_monty_runtime-1.6.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:a1a34bdb1fb9b9226786deb0d6b6015fdd60e5badd8da74bab76b3272c5fb22e", size = 12961699, upload-time = "2026-11-11T17:15:10.041Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/a6/a0a765dddefce0f9ee14ef22de4b721a7b20922d232663f466851892fb2d/pydantic_monty_runtime-1.6.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a2a1b385236aef0ff4165490eabc1d2764bf2cb5389076e0b8be52aa438c14c8", size = 14132559, upload-time = "2026-11-11T17:15:13.604Z" },
+    { url = "https://files.pythonhosted.org/packages/83/30/6ef32977bcde87b84417e9a0e765f50064ed4cfd4ec3863f6efd224aef01/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:3b5ed9340a7c7a1d1e62ab4218f792fb7439d47f680551453cf7935207ec7abb", size = 14575252, upload-time = "2026-11-11T17:15:16.799Z" },
+    { url = "https://files.pythonhosted.org/packages/24/34/1d88e84830ab32ecf6259a8deeaa775ced10f1afac04e4da21657b829899/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_armv7l.whl", hash = "sha256:0d3d1dd323cf25cf7293877a5b32eec7155dd0648e2b786c22066421bd6f7fae", size = 13630935, upload-time = "2026-11-11T17:15:19.65Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/26/4b00ea62fcda2973358333bc13ac16676475250f29e3a0410ae7b8d141d9/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_i686.whl", hash = "sha256:1515d68870adbe75aa57c9f3408854f7e281ab39c69df0fd5608ae8e42e26674", size = 13838710, upload-time = "2026-11-11T17:15:22.643Z" },
+    { url = "https://files.pythonhosted.org/packages/07/4d/e18b3b60ee6f3f614f6e80632915bd6084afb9a71d1ee2a72cf347f5b2d4/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_ppc64le.whl", hash = "sha256:5c853dcdc7a14a3470e78a42ef26886d9311a51051ecc947434b8265c356ee8c", size = 14214216, upload-time = "2026-11-11T17:15:25.865Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/0a/8fb6608262c294002be6d8d2c099266e5546380f61f672f7839d3eaac0c5/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_s390x.whl", hash = "sha256:f8a24f888938d597e16329fc9642e453d1e513a2d6addc71371d39040c56b850", size = 15365818, upload-time = "2026-11-11T17:15:29.031Z" },
+    { url = "https://files.pythonhosted.org/packages/31/b0/ffccc75e32638e35f251baf45bc05357e8fdf69ee07cf1e0c7469b857b7f/pydantic_monty_runtime-1.6.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:f0d7d9eacbd94c7be6912fc30fbd60283fe407e4428562fa535dbb3e6ae47461", size = 15123262, upload-time = "2026-11-11T17:15:32.125Z" },
+    { url = "https://files.pythonhosted.org/packages/21/7b/ce7e59c657381c05f8deafe3eea0b8e41090e36d821906fa7bc7d90280ab/pydantic_monty_runtime-1.6.0-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:96c759090ce31880d11b2e97c5c5fc5a04c4916dea50165203d844e9ea0f4cb9", size = 12640058, upload-time = "2026-11-11T17:15:34.748Z" },
+    { url = "https://files.pythonhosted.org/packages/32/27/53a6a1fd664503630f4926a1b97342d8d4f7d06ab2cadf915ee86c44ef9e/pydantic_monty_runtime-1.6.0-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:68cb6309aa39843f19648f65cf563451212f7f5dc3f6df0b27112d07a5e77ec8", size = 13382427, upload-time = "2026-11-11T17:15:37.498Z" },
 ]
 
 [[package]]

@@ -322,6 +322,7 @@ class WorkspaceCodeExecutionPolicyService:
         sandbox_configured: bool,
         default_enabled: bool,
         allowed_images: tuple[str, ...] = (),
+        runs_images: bool = True,
     ):
         self._uow = uow
         self._policies = policies
@@ -333,6 +334,7 @@ class WorkspaceCodeExecutionPolicyService:
         self.sandbox_configured = sandbox_configured
         self.default_enabled = default_enabled
         self.allowed_images = allowed_images
+        self._runs_images = runs_images
 
     async def get_policy(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceCodeExecutionPolicyPublic:
         """The workspace's policy. Reading it takes the same role as setting it."""
@@ -377,6 +379,10 @@ class WorkspaceCodeExecutionPolicyService:
         candidate = _blank_to_none(image)
         if candidate is None or candidate in self.allowed_images:
             return
+        if not self._runs_images:
+            raise SandboxImageNotAllowedError(
+                "This deployment runs code on Monty, which runs no sandbox images, so a workspace cannot pin one."
+            )
         if not self.allowed_images:
             raise SandboxImageNotAllowedError(
                 "This deployment has curated no sandbox images, so a workspace cannot pin one. "

@@ -131,7 +131,8 @@ async def execute_code(
     each file the code writes comes back with a ``file_id``. ``container: "auto"``
     holds the sandbox after the run and names it in ``Otari-Container-Id``;
     sending that id back runs in the same sandbox, with its files and
-    interpreter state.
+    interpreter state. A sandbox that cannot hold a session, such as Monty,
+    names no id, so each run starts fresh.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.

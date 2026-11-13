@@ -112,13 +112,13 @@ _CALLS_PER_ROUND_ALLOWANCE = 4
 # sandbox, and a plan's ceiling is a refused creation rather than a shorter
 # lease, so a generous estimate is clamped rather than sent.
 _MAX_SESSION_TTL_S = 3600.0
+_REFERENCE_RUNTIME = "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed."
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
-    "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
-    "user attached are in the working directory under their own names. A file "
-    "you write there comes back with a file_id; give the user that file_id so "
-    "they can download it."
+    "{runtime} Files the user attached are in the working directory under "
+    "their own names. A file you write there comes back with a file_id; give "
+    "the user that file_id so they can download it."
 )
 
 
@@ -164,23 +164,26 @@ EMPTY_CODE_TEXT = (
 )
 
 
-def code_execution_tool_definition() -> dict[str, Any]:
+def code_execution_tool_definition(runtime: str | None = None) -> dict[str, Any]:
     """The OpenAI-shaped function definition the model is given for code execution.
 
     Module-level, and returning a fresh dict per call, so the ``/v1/tools``
     discovery endpoint can advertise the same schema the tool loop injects without
     constructing a backend. Mirrors
     :func:`gateway.services.web_retrieval_backend.web_search_tool_definition`.
+    ``runtime`` is the bound adapter's :attr:`CodeExecutionPort.runtime`, which
+    the description carries where there is one, so a purpose hint cannot hide it.
     """
+    description = (
+        "Execute Python code in a sandboxed REPL. Returns stdout, "
+        "stderr, and any rich result blocks. State persists across "
+        "calls within the same request."
+    )
     return {
         "type": "function",
         "function": {
             "name": CODE_EXECUTION_TOOL_NAME,
-            "description": (
-                "Execute Python code in a sandboxed REPL. Returns stdout, "
-                "stderr, and any rich result blocks. State persists across "
-                "calls within the same request."
-            ),
+            "description": f"{description} {runtime}" if runtime else description,
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -266,6 +269,7 @@ class SandboxBackend:
         containers: SandboxContainers | None = None,
         on_lease: Callable[[ContainerLease], None] | None = None,
     ) -> None:
+        """Run one request's code on ``port``, resuming ``container`` when given and keeping it in ``containers``."""
         self._port = port
         # The lease this request resumes, or None for a fresh sandbox, and the
         # registry that holds the session past this request. Both None where
@@ -289,7 +293,7 @@ class SandboxBackend:
         # The request's trace, which records each run. None outside a request.
         self._trace = trace
         self._spans = ToolSpans(trace, "otari_code_execution", CODE_EXECUTION_TOOL_NAME)
-        self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
+        self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT.format(runtime=port.runtime or _REFERENCE_RUNTIME)
         self._timeout_s = timeout_s
         # How long the lease has to last, as against what one call may spend.
         # A request runs code at least once per tool-loop round, so a provider
@@ -513,7 +517,8 @@ class SandboxBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [code_execution_tool_definition()] if self._serves_code_execution else []
+        """The code execution tool, described with the bound sandbox's runtime, or none when it is not served."""
+        return [code_execution_tool_definition(self._port.runtime)] if self._serves_code_execution else []
 
     def owns_tool(self, name: str) -> bool:
         return name == CODE_EXECUTION_TOOL_NAME and self._serves_code_execution
