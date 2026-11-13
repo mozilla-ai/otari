@@ -2129,6 +2129,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/inference/video_job_repository.py",
         "baseline": (),
     },
+    "gateway.models.organizations.OrganizationInvitation": {
+        "repository": "gateway/repositories/organizations/organization_invitation_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.organizations.OrganizationMembershipOrigin": {
+        "repository": "gateway/repositories/organizations/membership_origin_repository.py",
+        "baseline": (),
+    },
     "gateway.models.platform.RuntimeSetting": {
         "repository": None,
         "baseline": (
