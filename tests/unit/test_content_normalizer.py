@@ -14,6 +14,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.files_exceptions import (
     AttachedFileUnavailableError,
     InlineAttachmentsTooLargeError,
@@ -773,3 +774,36 @@ async def test_an_attachment_that_cannot_be_moved_refuses_the_request(upload: An
 
     with pytest.raises(InlineAttachmentsTooLargeError):
         await _normalize_within(msgs, cn.InlineLimit(max_bytes=100, upload=upload))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("block", "refused"),
+    [
+        ({"type": "file", "file": {"file_id": "file_1"}}, True),
+        ({"type": "image_url", "file_id": "file_1"}, True),
+        ({"type": "image", "source": {"type": "file", "file_id": "file_1"}}, True),
+        ({"type": "text", "text": "a file_id lives in my prose"}, False),
+        ({"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}, False),
+    ],
+)
+async def test_a_caller_that_may_not_read_files_is_refused_only_for_one_it_named(
+    block: dict[str, Any], refused: bool
+) -> None:
+    """The refusal is the enforcement point for files:read on an attachment, so it must not fire on anything else."""
+    messages = [{"role": "user", "content": [block]}]
+    call = normalize_messages(
+        messages,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="anthropic" if block.get("type") == "image" else "openai",
+        files=_FakeFiles(),
+        user_id="u",
+        may_read_files=False,
+    )
+
+    if refused:
+        with pytest.raises(KeyScopeMissingError, match="files:read"):
+            await call
+    else:
+        await call

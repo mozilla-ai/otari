@@ -112,6 +112,7 @@ async function approveOriginalRequest() {
   expect(JSON.parse(String(request?.[1]?.body))).toEqual({
     ...Object.fromEntries(params),
     workspace_id: "workspace",
+    scopes: ["inference:run"],
   })
 }
 

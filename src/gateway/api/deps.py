@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
+from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope, insufficient_scope_challenge
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import (
@@ -585,7 +585,9 @@ def _require_route_scope(request: Request, api_key: APIKey) -> None:
             "Refused API key %s on %s: it lacks the %s scope", api_key.id, getattr(route, "path", "?"), required
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=KeyScopeMissingError(required.value, "this endpoint").message
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=KeyScopeMissingError(required.value, "this endpoint").message,
+            headers=insufficient_scope_challenge(required),
         )
 
 

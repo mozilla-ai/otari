@@ -80,8 +80,8 @@ scope as well as `inference:run`, whichever of Otari and the provider runs it.
 
 Every key, whatever its scopes, reaches the catalog reads: `GET /api/v1/models`,
 `/pricing`, `/tools`, `/providers/catalog`, `/tool-settings/guardrails/catalog`,
-`/tool-settings/guardrails/profiles`, `/search-tools/providers` and
-`/search-tools/catalog`.
+`/tool-settings/guardrails/profiles`, `/search-tools/providers`,
+`/search-tools/catalog` and `/code/environments`.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
 and everything under `/api/v1/organizations/me`, takes the master key or a

@@ -9534,6 +9534,11 @@ export interface components {
              * @constant
              */
             response_type: "code";
+            /**
+             * Scopes
+             * @description The scopes the consent screen showed. A registration that no longer names these is refused.
+             */
+            scopes: components["schemas"]["KeyScope"][];
             /** State */
             state: string;
             /**

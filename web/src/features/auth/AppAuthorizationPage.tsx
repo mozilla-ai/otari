@@ -27,7 +27,7 @@ export function AppAuthorizationPage() {
     search,
     Boolean(app.data) && !app.error,
   )
-  const approval = useAuthorizeOAuthApp(params)
+  const approval = useAuthorizeOAuthApp(params, app.data?.scopes ?? [])
   const choices = workspaces.data?.data ?? []
   const soleWorkspace =
     !search && !workspaces.isPlaceholderData && workspaces.data?.count === 1
