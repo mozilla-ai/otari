@@ -117,6 +117,7 @@ describe("hasProviderMark", () => {
     expect(hasProviderMark("mistral")).toBe(true)
     expect(hasProviderMark("otari")).toBe(true)
     expect(hasProviderMark("mzai")).toBe(true)
+    expect(hasProviderMark("otari-ai")).toBe(true)
     expect(hasProviderMark("my-local-llm")).toBe(false)
   })
 

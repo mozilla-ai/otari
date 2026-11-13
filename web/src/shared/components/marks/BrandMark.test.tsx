@@ -81,10 +81,11 @@ describe("ProviderMark", () => {
   })
 
   it("gives our own provider ids the Otari mark, not a tile", () => {
-    // Both ids this deployment serves its own models under. Showing ourselves a
+    // The ids this deployment serves its own models under, and the platform
+    // instance. Showing ourselves a
     // lettermark while every third party got a logo is the bug this feature
     // exists to fix, pointed at us.
-    for (const id of ["mzai", "otari"]) {
+    for (const id of ["mzai", "otari", "otari-ai"]) {
       const { container } = render(<ProviderMark providerId={id} />)
 
       expect(container.querySelector("svg")?.getAttribute("viewBox")).toBe(
