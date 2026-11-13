@@ -136,7 +136,7 @@ class UsageLog(Base):
     # The part of ``cost`` that is per-call tool charges (gateway-run tools and
     # searches the model's provider ran), so a caller can split a request's bill
     # into tokens and tools. Zero where no tool was charged; null where ``cost``
-    # is, where the tool calls could not be priced, and on every row written
+    # is, where looking up the tools' prices failed, and on every row written
     # before the column existed.
     tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 

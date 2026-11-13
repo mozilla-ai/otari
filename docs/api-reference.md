@@ -187,9 +187,9 @@ that is per-call tool charges. That is every gateway-run tool call
 (`otari_web_search`, `otari_web_fetch`, `otari_code_execution`, MCP tools) plus
 the searches the model's own provider ran and billed per search, so
 `cost_usd` less `tool_cost_usd` is what the model's tokens cost. It is
-`"0.000000"` when no tool was charged, and left out when the tool calls ran but
-could not be priced, since the gateway then cannot say how much of the cost
-they are.
+`"0.000000"` when no tool was charged (a tool with no price is not charged), and
+left out when looking up the tools' prices failed during settlement, since the
+gateway then cannot say how much of the cost they are.
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
@@ -428,7 +428,7 @@ looked up by its `Otari-Request-ID`:
 |---|---|
 | Totals | The sum of every usage row the request wrote. A request routed through a policy writes one per attempt, all sharing the id as their `request_group_id`, so the total covers the attempts it fell over from as well as the one that served. |
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
-| `tool_cost_usd` | The part of `cost_usd` that is tool charges, as `usage.tool_cost_usd` reports it, summed over the rows. `null` when `cost_usd` is, for a request that is not a completion, and when any priced row does not record it: one written before the gateway recorded it, or whose tool calls could not be priced. |
+| `tool_cost_usd` | The part of `cost_usd` that is tool charges, as `usage.tool_cost_usd` reports it, summed over the rows. `null` when `cost_usd` is, for a request that is not a completion, and when any priced row does not record it: one written before the gateway recorded it, or one where looking up the tools' prices failed. |
 | `status` | `error` if any row is an error, `incomplete` for a stream the client abandoned before the provider reported any usage (billed on an estimate), otherwise `success`. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
