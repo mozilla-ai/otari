@@ -1663,6 +1663,11 @@ async def _serve_from_hosted_credential(
             provider=resolved.instance,
             model=resolved.model,
         )
+        country_gate = ctx.country_gate
+        if country_gate is not None and credential is not None:
+            # Read here, so a failed read of the account's country releases the reservation as a failed lookup does.
+            for candidate in credential.candidates():
+                country_gate = await country_gate.for_list(candidate.supported_countries)
     except HostedAccessDeniedError as exc:
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
@@ -1749,7 +1754,7 @@ async def _serve_from_hosted_credential(
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
-        credential = ensure_hosted_country(ctx.country_gate, credential)
+        credential = await ensure_hosted_country(country_gate, credential)
     except CountryNotServedError as exc:
         detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
@@ -2651,10 +2656,12 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(
+        config, raw_request, db, organization_id, api_key=api_key, session=session_principal is not None
+    )
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
@@ -3114,7 +3121,7 @@ async def resolve_request_context(
             if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.
-            hosted = ensure_hosted_country(country_gate, hosted)
+            hosted = await ensure_hosted_country(country_gate, hosted)
             if hosted.api_key is None:
                 return None
             return ResolvedCredential(
@@ -3143,7 +3150,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
-                    client_country=country_gate.country,
+                    country_gate=country_gate,
                 )
             )
             # Bill the vision describe side-call before the reservation
