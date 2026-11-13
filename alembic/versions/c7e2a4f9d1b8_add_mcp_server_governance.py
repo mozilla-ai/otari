@@ -2,10 +2,14 @@
 
 On ``workspace_mcp_servers``: ``credential_mode`` defaults to ``shared``, so every
 stored server keeps sending its one workspace token; ``attach_by_default`` defaults
-to off; and ``read_tools`` becomes nullable, null meaning no manager has edited the
-labels, so they follow the tools the server marks read-only. A row with no labels is
-read as never edited, since the screen that set them offered no way to mean "none on
-purpose" that anyone relied on.
+to off; ``oauth_client_issuer`` starts empty, and is filled by the first sign-in through
+the server's OAuth client; and ``read_tools`` becomes nullable, null meaning no manager
+has edited the labels, so they follow the tools the server marks read-only.
+
+A row with no labels becomes null only where no access rule uses ``@read``: neither the
+server's ``everyone_tools`` nor any of its grants' ``tools`` holds it. Where one does, an
+empty list admits no tool through ``@read`` today, and null would admit every tool the
+server marks read-only, so the upgrade keeps the empty list and widens nobody's access.
 
 The new tables all start empty: each user's own tokens for a per-user server, the one
 account a manager signed in to for a shared server, the sign-ins that have started and
@@ -29,6 +33,9 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _SERVERS = "workspace_mcp_servers"
+_GRANTS = "workspace_mcp_server_grants"
+# An access rule's tool patterns hold '@read' as one JSON string, quotes included.
+_NAMES_READ = "'%\"@read\"%'"
 _PENDING = sa.text("status = 'pending'")
 
 
@@ -53,11 +60,19 @@ def upgrade() -> None:
     with op.batch_alter_table(_SERVERS) as batch:
         batch.add_column(sa.Column("credential_mode", sa.String(), nullable=False, server_default="shared"))
         batch.add_column(sa.Column("oauth_client", sa.JSON(), nullable=True))
+        batch.add_column(sa.Column("oauth_client_issuer", sa.Text(), nullable=True))
         batch.add_column(sa.Column("attach_by_default", sa.Boolean(), nullable=False, server_default=sa.false()))
         batch.alter_column(
             "read_tools", existing_type=sa.JSON(), nullable=True, existing_server_default="[]", server_default=None
         )
-    op.execute(sa.text(f"UPDATE {_SERVERS} SET read_tools = NULL WHERE CAST(read_tools AS TEXT) IN ('[]', 'null')"))
+    op.execute(
+        sa.text(
+            f"UPDATE {_SERVERS} SET read_tools = NULL"
+            " WHERE CAST(read_tools AS TEXT) IN ('[]', 'null')"
+            f" AND CAST(everyone_tools AS TEXT) NOT LIKE {_NAMES_READ}"
+            f" AND id NOT IN (SELECT server_id FROM {_GRANTS} WHERE CAST(tools AS TEXT) LIKE {_NAMES_READ})"
+        )
+    )
 
     op.create_table(
         "workspace_mcp_server_logos",
@@ -188,5 +203,6 @@ def downgrade() -> None:
     with op.batch_alter_table(_SERVERS) as batch:
         batch.alter_column("read_tools", existing_type=sa.JSON(), nullable=False, server_default="[]")
         batch.drop_column("attach_by_default")
+        batch.drop_column("oauth_client_issuer")
         batch.drop_column("oauth_client")
         batch.drop_column("credential_mode")

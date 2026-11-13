@@ -34,6 +34,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpConnectionUpstreamError,
+    McpOAuthIssuerChangedError,
     McpSignInLinkOtherUserError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
@@ -658,6 +659,52 @@ async def test_the_public_shape_never_carries_a_secret(async_db: AsyncSession, c
     dumped = server.model_dump_json() + mine.model_dump_json() + theirs.model_dump_json()
     for secret in ("my-secret", "access-1", "refresh-1"):
         assert secret not in dumped
+
+
+async def test_a_managers_client_is_never_sent_to_another_authorization_server_until_it_is_saved_again(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
+
+    # The server now names another authorization server, which would be sent the secret.
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    with pytest.raises(McpOAuthIssuerChangedError) as refused:
+        await service.start_connection(user=world.owner, return_to=None, **ids)
+    assert refused.value.error_code == "mcp_oauth_issuer_changed"
+    assert "save the OAuth client again" in str(refused.value)
+    assert len(wire.exchanges) == 1
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
+
+    # Saving the client again, even unchanged, approves the server the next sign-in finds.
+    await service.update_server(
+        user=world.owner, request=WorkspaceMcpServerUpdate(oauth_client_secret="my-secret"), **ids
+    )
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer is None
+    await _sign_in(async_db, config, world, world.owner)
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == moved
+    assert wire.registrations == []
+
+
+async def test_a_client_otari_registered_is_registered_again_with_a_new_authorization_server(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+
+    await _sign_in(async_db, config, world, world.owner)
+
+    row = await _row(async_db, world.server.id)
+    assert len(wire.registrations) == 2
+    assert row.oauth_client_issuer == moved
+    assert row.oauth_client is not None and row.oauth_client["client_id"] == "dynamic-2"
+    assert wire.exchanges[-1]["client"].client_id == "dynamic-2"  # type: ignore[attr-defined]
 
 
 async def test_a_managers_own_client_is_used_and_none_is_registered(

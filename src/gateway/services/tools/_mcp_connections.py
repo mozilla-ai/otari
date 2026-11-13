@@ -44,6 +44,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpConnectionUpstreamError,
+    McpOAuthIssuerChangedError,
     McpSignInLinkOtherUserError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
@@ -128,6 +129,31 @@ class StoredMcpOAuthClient(BaseModel):
 def stored_oauth_client(server: WorkspaceMcpServer) -> StoredMcpOAuthClient | None:
     """A server's stored OAuth client, if it has one."""
     return StoredMcpOAuthClient.model_validate(server.oauth_client) if server.oauth_client else None
+
+
+def _same_issuer(pinned: str | None, issuer: str | None) -> bool:
+    """Whether a discovered issuer is the one a server's client is pinned to; an unpinned client takes any."""
+    return pinned is None or (issuer is not None and pinned.rstrip("/") == issuer.rstrip("/"))
+
+
+def _pin_issuer(server: WorkspaceMcpServer, client: StoredMcpOAuthClient, issuer: str | None) -> None:
+    """Pin the server's client to ``issuer`` the first time, and refuse another one after that.
+
+    A client a manager saved is refused on another issuer, so its secret is never sent there. A client
+    Otari registered is replaced instead (see :meth:`McpConnectionService._client`), and reaching it
+    here means a concurrent sign-in moved it: that one starts again.
+
+    Raises:
+        McpOAuthIssuerChangedError: a manager's client, and another issuer than the one it was used with.
+        McpConnectionFlowError: a registered client, pinned to another issuer meanwhile.
+    """
+    if server.oauth_client_issuer is None:
+        server.oauth_client_issuer = issuer
+    elif not _same_issuer(server.oauth_client_issuer, issuer):
+        if not client.dynamic:
+            logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server.id)
+            raise McpOAuthIssuerChangedError
+        raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
 
 
 def checked_return_to(return_to: str | None) -> str | None:
@@ -663,6 +689,8 @@ class McpConnectionService:
             McpConnectionSetupError: ``public_base_url`` is unset, ``return_to`` is not a dashboard
                 path, the user is the shared ``default`` one, or the authorization server registers
                 no client and the server holds none.
+            McpOAuthIssuerChangedError: the server names another authorization server than the one
+                its saved OAuth client was first used with.
             McpConnectionUpstreamError: the server's authorization setup could not be discovered.
         """
         if user_id == DEFAULT_USER_ID:
@@ -674,9 +702,16 @@ class McpConnectionService:
         return_to = checked_return_to(return_to)
         async with self._uow:
             server = await self._server_in_mode(server_id, mode)
-            url, stored = server.url, stored_oauth_client(server)
+            url, stored, pinned = server.url, stored_oauth_client(server), server.oauth_client_issuer
         try:
             metadata = await _mcp_oauth.discover(url)
+            if stored is not None and not _same_issuer(pinned, metadata.issuer):
+                if not stored.dynamic:
+                    # Before anything is sent through the client: its secret was saved for the other server.
+                    logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server_id)
+                    raise McpOAuthIssuerChangedError
+                # A client Otari registered with the other server means nothing to this one: register anew.
+                stored = None
             client = await self._client(server_id, mode, url, stored, metadata, redirect_uri)
         except McpOAuthRegistrationError as exc:
             raise McpConnectionSetupError(_registration_refusal(exc)) from None
@@ -694,6 +729,7 @@ class McpConnectionService:
             current = stored_oauth_client(server)
             if server.url != url or current is None or current.client_id != client.client_id:
                 raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
+            _pin_issuer(server, current, metadata.issuer)
             await self._flows.purge_expired(now)
             if identity_id is None:
                 # A link opened again replaces the sign-in it started before, so opening one
@@ -829,7 +865,11 @@ class McpConnectionService:
             if server.url != url:
                 raise McpConnectionUpstreamError("The server's URL changed during the sign-in; start it again")
             current = stored_oauth_client(server)
-            if current is not None and current.serves(redirect_uri, datetime.now(UTC)):
+            if (
+                current is not None
+                and current.serves(redirect_uri, datetime.now(UTC))
+                and (not current.dynamic or _same_issuer(server.oauth_client_issuer, metadata.issuer))
+            ):
                 secret = decrypt_secret(current.encrypted_secret) if current.encrypted_secret else None
                 return McpOAuthClient(
                     client_id=current.client_id,
@@ -844,6 +884,7 @@ class McpConnectionService:
                 redirect_uri=redirect_uri,
                 secret_expires_at=registered.secret_expires_at,
             ).model_dump()
+            server.oauth_client_issuer = metadata.issuer
         logger.info("MCP OAuth client registered server_id=%s", server_id)
         return registered
 
@@ -1098,6 +1139,7 @@ class McpConnectionService:
             stored = stored_oauth_client(server) if server is not None else None
             if server is not None and stored is not None and stored.dynamic and stored.client_id == client_id:
                 server.oauth_client = None
+                server.oauth_client_issuer = None
                 logger.info("MCP OAuth client dropped server_id=%s reason=refused", server_id)
 
     async def disconnect(self, *, server_id: uuid.UUID, user_id: str) -> None:
@@ -1358,6 +1400,7 @@ class McpUserTokens:
                 held = stored_oauth_client(row) if row is not None else None
                 if row is not None and held is not None and held.dynamic and held.client_id == client_id:
                     row.oauth_client = None
+                    row.oauth_client_issuer = None
                     logger.info("MCP OAuth client dropped server_id=%s reason=refused", server_id)
         except DATABASE_ERRORS as exc:
             logger.warning(
