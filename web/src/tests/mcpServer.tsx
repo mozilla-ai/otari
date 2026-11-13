@@ -82,7 +82,7 @@ export function mockMcpServerApi({
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ url, method, body })
-    if (url.endsWith("/mcp-servers/logos")) {
+    if (url.includes("/mcp-servers/logos")) {
       return Response.json({ data: [] })
     }
     if (url.includes("/access")) {

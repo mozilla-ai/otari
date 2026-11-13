@@ -42,6 +42,7 @@ function group(
       requester("Ada", { note: "Triage production errors" }),
       requester("Grace"),
     ],
+    requester_count: 2,
     first_requested_at: "2026-11-10T09:00:00+00:00",
     ...overrides,
   }
@@ -186,6 +187,8 @@ describe("McpServerRequestsBlock", () => {
     expect(whoAsked(people.slice(0, 2))).toBe("Ada and Grace")
     expect(whoAsked(people.slice(0, 3))).toBe("Ada, Grace and 1 other")
     expect(whoAsked(people)).toBe("Ada, Grace and 2 others")
+    // The gateway lists the first few of a server's requesters, and counts them all.
+    expect(whoAsked(people, 9)).toBe("Ada, Grace and 7 others")
     expect(
       whoAsked([requester("x", { full_name: null, email: "x@example.com" })]),
     ).toBe("x@example.com")

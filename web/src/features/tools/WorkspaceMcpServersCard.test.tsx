@@ -1187,6 +1187,7 @@ describe("WorkspaceMcpServersCard", () => {
               requested_at: "2026-11-10T09:00:00+00:00",
             },
           ],
+          requester_count: 1,
           first_requested_at: "2026-11-10T09:00:00+00:00",
         },
       ],

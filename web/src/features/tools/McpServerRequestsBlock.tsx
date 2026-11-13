@@ -26,11 +26,17 @@ function nameOf(requester: McpServerRequester): string {
   return requester.full_name ?? requester.email ?? "A member"
 }
 
-/** "Ada", "Ada and Grace", "Ada, Grace and 2 others". */
-export function whoAsked(requesters: readonly McpServerRequester[]): string {
+/**
+ * "Ada", "Ada and Grace", "Ada, Grace and 2 others". `total` counts everyone who
+ * asked, the gateway listing only the first few of a server's requesters.
+ */
+export function whoAsked(
+  requesters: readonly McpServerRequester[],
+  total = requesters.length,
+): string {
   const names = requesters.map(nameOf)
-  if (names.length <= 2) return names.join(" and ")
-  const others = names.length - 2
+  if (total <= 2) return names.join(" and ")
+  const others = total - 2
   return `${names[0]}, ${names[1]} and ${others} ${others === 1 ? "other" : "others"}`
 }
 
@@ -114,7 +120,7 @@ export function McpServerRequestsBlock({
                       {group.url}
                     </code>
                     <span className="text-sm break-words">
-                      {`Asked by ${whoAsked(group.requesters)} on ${formatDate(group.first_requested_at)}`}
+                      {`Asked by ${whoAsked(group.requesters, group.requester_count)} on ${formatDate(group.first_requested_at)}`}
                     </span>
                     {notes.length > 0 ? (
                       <ul className="flex flex-col gap-1 text-caption">
@@ -164,7 +170,7 @@ export function McpServerRequestsBlock({
         title={declining ? `Decline ${declining.title}` : "Decline"}
         description={
           declining
-            ? `${whoAsked(declining.requesters)} will see that the request was declined.`
+            ? `${whoAsked(declining.requesters, declining.requester_count)} will see that the request was declined.`
             : undefined
         }
         submitLabel="Decline"

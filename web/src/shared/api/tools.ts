@@ -548,7 +548,8 @@ export function useWorkspaceMcpServer(
 
 /**
  * The logo of each of a workspace's servers, by server id: what each one shows
- * and whether it needs a tile. Under the servers' key, so a write that refreshes
+ * and whether it needs a tile. One page at the servers list's own size, so it
+ * covers every server that list shows. Under the servers' key, so a write that refreshes
  * the list (a new server, a changed URL) refreshes this too. Reading it makes
  * the gateway fetch nothing; an image URL without a version does, once.
  */
@@ -558,7 +559,7 @@ export function useWorkspaceMcpServerLogos(workspaceId: string | null) {
     meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServerLogos>(
-        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers/logos`,
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers/logos?limit=${MCP_SERVERS_PAGE_SIZE}`,
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
