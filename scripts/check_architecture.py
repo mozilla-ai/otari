@@ -1483,7 +1483,6 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
         "image_usage",
         "is_chat_stream_cost_carrier",
         "is_empty_completion",
-        "is_model_unavailable_error",
         "is_provider_billing_error",
         "is_provider_credential_rejection",
         "is_provider_cut",

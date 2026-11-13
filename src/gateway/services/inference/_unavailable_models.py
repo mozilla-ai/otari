@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
@@ -21,6 +21,16 @@ class UnavailableModel:
     model: str
     refusal: str
     uses_deployment_credential: bool
+
+    @classmethod
+    def from_failure(
+        cls, exc: BaseException, *, instance: str, model: str, uses_deployment_credential: bool
+    ) -> Self | None:
+        """The model ``exc`` says its provider refused to serve, or ``None`` when ``exc`` is any other failure."""
+        if not is_model_unavailable_error(exc):
+            return None
+        refusal = upstream_error_message(exc) or type(exc).__name__
+        return cls(instance, model, refusal, uses_deployment_credential)
 
 
 class ProviderRefusalListener(Protocol):
@@ -48,10 +58,14 @@ class UnavailableModelReporter:
         Any other failure is ignored, and so is a refusal the listener is still being told of.
         """
         key = (instance, model, uses_deployment_credential)
-        if key in self._pending or not is_model_unavailable_error(exc):
+        if key in self._pending:
             return
-        refusal = upstream_error_message(exc) or type(exc).__name__
-        task = asyncio.create_task(self._tell(UnavailableModel(instance, model, refusal, uses_deployment_credential)))
+        unavailable_model = UnavailableModel.from_failure(
+            exc, instance=instance, model=model, uses_deployment_credential=uses_deployment_credential
+        )
+        if unavailable_model is None:
+            return
+        task = asyncio.create_task(self._tell(unavailable_model))
         self._pending[key] = task
         task.add_done_callback(lambda _done: self._pending.pop(key, None))
 

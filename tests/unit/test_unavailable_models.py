@@ -11,11 +11,8 @@ from gateway.core.config import GatewayConfig
 from gateway.models.providers import HostedProviderModel
 from gateway.services.health_checks import UnavailableModelListener
 from gateway.services.health_checks._probe import capped_error
-from gateway.services.inference import (
-    UnavailableModel,
-    UnavailableModelReporter,
-    is_model_unavailable_error,
-)
+from gateway.services.inference import UnavailableModel, UnavailableModelReporter
+from gateway.services.inference._upstream_errors import is_model_unavailable_error
 from gateway.services.providers._hosted_offers import _hold_for_a_price, _release_price_hold
 from gateway.services.upstream_redaction import redact_upstream_message
 
