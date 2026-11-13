@@ -30,6 +30,7 @@ from typing import Any, TypeVar, cast, get_protocol_members
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.account_country_adapter import NullAccountCountryAdapter
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
@@ -49,6 +50,7 @@ from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
@@ -231,6 +233,11 @@ def _verify_port_shape(container: Container, port: type[Any]) -> None:
 def _api_key_format_adapter(session: AsyncSession | None) -> ApiKeyFormatPort:
     """Build the core ``ApiKeyFormatPort`` adapter for one request."""
     return DefaultApiKeyFormatAdapter(session)
+
+
+def _account_country_adapter(session: AsyncSession | None) -> AccountCountryPort:
+    """Build the core ``AccountCountryPort`` adapter for one request."""
+    return NullAccountCountryAdapter(session)
 
 
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
@@ -513,6 +520,9 @@ def build_container(
     # Billing has no core implementation, so the default is the Null Object:
     # this deployment runs billing-free, holding and charging nothing.
     container.bind(BillingPort, _billing_adapter)
+    # Where an account is: the base keeps no record, so the provider country
+    # gate reads the request's country alone.
+    container.bind(AccountCountryPort, _account_country_adapter)
     # Entitlement: the base grants the capability set it ships, which is
     # currently empty, and reports every overlay-only capability as absent.
     container.bind(EntitlementPort, _entitlement_adapter)
