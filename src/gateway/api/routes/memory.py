@@ -38,10 +38,13 @@ from gateway.ports.content_key_port import ContentKeyPort
 from gateway.schemas.memory import (
     ArmSummaryPublic,
     DifferencePublic,
+    HeldProposalPublic,
     MemoryCallsPublic,
     MemoryExperimentPublic,
+    MemoryReviewQueuePublic,
     OrganizationMemoryPublic,
     OrganizationMemoryUpdate,
+    ReviewedEntryPublic,
     WorkspaceMemoryErased,
     WorkspaceMemoryPublic,
     WorkspaceMemoryUpdate,
@@ -51,6 +54,7 @@ from gateway.services.memory import (
     MEMORY_INSTRUCTIONS,
     ArmSummary,
     Difference,
+    HeldProposal,
     MemoryCaller,
     MemoryService,
     SwitchChange,
@@ -151,7 +155,8 @@ async def memory_mcp_stream() -> Response:
     return Response(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, headers={"Allow": "POST"})
 
 
-# The dashboard's and the operator's: a workspace's managers turn memory on and off, and erase it.
+# The dashboard's and the operator's: a workspace's managers turn memory on and off, review what waits for them,
+# and erase it.
 workspace_router = APIRouter(
     prefix="/workspaces/{workspace_id}/memory", tags=["memory"], dependencies=[Depends(verify_master_key)]
 )
@@ -180,6 +185,7 @@ def _workspace_public(memory: WorkspaceMemory, config: GatewayConfig) -> Workspa
         experiment_ended_at=memory.experiment_ended_at,
         entries=memory.entries,
         proposals_waiting=memory.proposals_waiting,
+        proposals_held=memory.proposals_held,
     )
 
 
@@ -279,6 +285,70 @@ async def erase_workspace_memory(
         reads=erased.reads,
         keys=erased.keys,
     )
+
+
+def _held_public(held: HeldProposal) -> HeldProposalPublic:
+    proposal, entry = held.proposal, held.entry
+    return HeldProposalPublic(
+        id=proposal.id,
+        text=proposal.text,
+        kind=proposal.kind,
+        trust=proposal.trust,
+        reason=proposal.review_reason,
+        author_user_id=proposal.provenance.author_user_id,
+        session_id=proposal.provenance.session_id,
+        model=proposal.provenance.model,
+        created_at=proposal.created_at,
+        expires_at=held.expires_at,
+        entry=(
+            ReviewedEntryPublic(id=entry.id, text=entry.text, version=entry.version, trust=entry.trust)
+            if entry is not None
+            else None
+        ),
+    )
+
+
+@workspace_router.get("/review")
+async def get_memory_review_queue(
+    service: MemoryServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+) -> MemoryReviewQueuePublic:
+    """The workspace's shared proposals the consolidator held for an admin, oldest first, opened.
+
+    The same managers as the switches. A member's own proposals are never listed, nor held.
+    """
+    held = await service.review_queue(current_identity, workspace_id)
+    return MemoryReviewQueuePublic(data=[_held_public(proposal) for proposal in held], count=len(held))
+
+
+@workspace_router.post(
+    "/review/{proposal_id}/approve",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"description": "The workspace has no shared proposal waiting for review by that id."},
+        422: {"description": "It carries what memory never keeps, which no approval lets in."},
+    },
+)
+async def approve_memory_proposal(
+    service: MemoryServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID, proposal_id: uuid.UUID
+) -> None:
+    """Vouch for a held proposal: the consolidator's next pass applies it as reviewed.
+
+    Neither the review policy nor a mandated guardrail holds it again. One held over an entry, a conflict or a
+    change to a reviewed entry, replaces that entry as its next version.
+    """
+    await service.approve(current_identity, workspace_id, proposal_id)
+
+
+@workspace_router.post(
+    "/review/{proposal_id}/discard",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"description": "The workspace has no shared proposal waiting for review by that id."}},
+)
+async def discard_memory_proposal(
+    service: MemoryServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID, proposal_id: uuid.UUID
+) -> None:
+    """Delete a held proposal. It cannot be undone."""
+    await service.discard(current_identity, workspace_id, proposal_id)
 
 
 # The caller's active organization: its owners and admins turn memory on or off for every workspace of it.

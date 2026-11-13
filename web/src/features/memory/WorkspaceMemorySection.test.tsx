@@ -38,14 +38,28 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     experiment_ended_at: null,
     entries: { active: 3, quarantined: 1 },
     proposals_waiting: 2,
+    proposals_held: 1,
     ...overrides,
   }
+}
+
+function json(answer: unknown): Response {
+  return new Response(JSON.stringify(answer), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  })
 }
 
 function mockApi(served: WorkspaceMemory): Sent[] {
   const sent: Sent[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const method = (init?.method ?? "GET").toUpperCase()
+    // The review queue and the roster that names its authors; the queue's own
+    // cases are in MemoryReviewQueue.test.tsx.
+    if (String(input) === `${URL}/review`) return json({ data: [], count: 0 })
+    if (String(input).startsWith(`${API_ROOT}/organizations/me/members`)) {
+      return json({ data: [], count: 0 })
+    }
     expect(String(input)).toBe(URL)
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     if (method !== "GET") sent.push({ method, body })
@@ -122,7 +136,7 @@ describe("WorkspaceMemorySection", () => {
     ).toBeChecked()
     expect(
       screen.getByText(
-        "3 entries in recall, 2 proposals not decided yet, 1 flagged out of recall.",
+        "3 entries in recall, 2 proposals not decided yet, 1 waiting for review, 1 flagged out of recall.",
       ),
     ).toBeInTheDocument()
     expect(

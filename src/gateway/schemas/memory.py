@@ -11,7 +11,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gateway.models.memory import MemoryKind, MemoryScope, MemoryStatus, MemoryTrust, MemoryWritePolicy
+from gateway.models.memory import (
+    MemoryKind,
+    MemoryReviewReason,
+    MemoryScope,
+    MemoryStatus,
+    MemoryTrust,
+    MemoryWritePolicy,
+)
 
 QUERY_MAX_LENGTH = 2_000
 # The schema's own bound; the service holds a proposal to ``memory_entry_max_length``.
@@ -126,7 +133,10 @@ class WorkspaceMemoryPublic(BaseModel):
     experiment_started_at: datetime | None = Field(description="When the last savings experiment began.")
     experiment_ended_at: datetime | None = Field(description="When it stopped; null while it runs.")
     entries: dict[str, int] = Field(description="Entry versions the workspace holds, by status.")
-    proposals_waiting: int = Field(description="Proposals the consolidator has not decided yet.")
+    proposals_waiting: int = Field(
+        description="Proposals the consolidator has not decided yet, those an admin approved included."
+    )
+    proposals_held: int = Field(description="Shared proposals waiting for an admin's review.")
 
 
 class WorkspaceMemoryUpdate(BaseModel):
@@ -203,6 +213,45 @@ class MemoryExperimentPublic(BaseModel):
     recalls: int = Field(description="Turns automatic recall searched for.")
     recalls_with_results: int = Field(description="Turns it added something to.")
     searches: int = Field(description="Searches agents ran with memory's tool.")
+
+
+class ReviewedEntryPublic(BaseModel):
+    """The entry a held proposal would change, as it reads now."""
+
+    id: uuid.UUID
+    text: str
+    version: int
+    trust: MemoryTrust
+
+
+class HeldProposalPublic(BaseModel):
+    """A shared proposal waiting for an admin, what held it, and where it came from."""
+
+    id: uuid.UUID
+    text: str
+    kind: MemoryKind
+    trust: MemoryTrust
+    reason: MemoryReviewReason | None = Field(
+        description="policy: the workspace reviews every shared proposal; conflict: it contradicts an entry; "
+        "higher_trust: an agent's change to an entry an admin reviewed; guardrail: a block mandate flagged it; "
+        "guardrail_unavailable and model: a mandated guardrail, or the consolidation model, could not run."
+    )
+    author_user_id: uuid.UUID | None = Field(description="The member whose agent proposed it.")
+    session_id: str | None
+    model: str | None = Field(description="The model the proposing agent ran on.")
+    created_at: datetime
+    expires_at: datetime = Field(description="When it is deleted if nobody decides on it.")
+    entry: ReviewedEntryPublic | None = Field(
+        description="The entry it would change: the one it contradicts, or the reviewed one it would replace. "
+        "Approving it replaces this entry with it as a new version."
+    )
+
+
+class MemoryReviewQueuePublic(BaseModel):
+    """A workspace's shared proposals waiting for an admin, oldest first. A member's own are never listed."""
+
+    data: list[HeldProposalPublic]
+    count: int
 
 
 class WorkspaceMemoryErased(BaseModel):

@@ -15,9 +15,11 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.memory_exceptions import (
+    MemoryApprovalRefusedError,
     MemoryEntryNotFoundError,
     MemoryModelUnavailableError,
     MemoryOffError,
+    MemoryProposalNotFoundError,
     MemoryReadOnlyError,
     MemoryRefusedError,
     MemoryTooLongError,
@@ -27,6 +29,7 @@ from gateway.exceptions.memory_exceptions import (
 from gateway.log_config import logger
 from gateway.models.memory import (
     MemoryKind,
+    MemoryReviewReason,
     MemoryScope,
     MemoryStatus,
     MemoryTrust,
@@ -50,6 +53,7 @@ from gateway.services.memory._models import (
     EMBEDDING_ENDPOINT,
     RECALL_ENDPOINT,
     Decision,
+    DecisionAction,
     MemoryModelError,
     MemoryModels,
     ModelUse,
@@ -230,7 +234,23 @@ class WorkspaceMemory:
     experiment_started_at: datetime | None
     experiment_ended_at: datetime | None
     entries: dict[str, int]
+    # Proposals the consolidator has yet to decide, those an admin approved included; and the shared ones it held
+    # for an admin, which the review queue lists.
     proposals_waiting: int
+    proposals_held: int
+
+
+@dataclass(frozen=True)
+class HeldProposal:
+    """A shared proposal waiting for an admin, opened, with when it is deleted undecided and the entry it would change.
+
+    ``entry`` is the entry the consolidator named: the one it contradicts, or the reviewed one it would replace.
+    None where it named none, or that entry is gone.
+    """
+
+    proposal: OpenedProposal
+    expires_at: datetime
+    entry: OpenedEntry | None
 
 
 @dataclass(frozen=True)
@@ -697,6 +717,70 @@ class MemoryService:
         logger.info("Memory of workspace %s was erased by a manager", workspace_id)
         return Swept(entries, proposals, reads, len(keys))
 
+    # -- The review queue ---------------------------------------------------
+
+    async def review_queue(self, user: User, workspace_id: uuid.UUID) -> list[HeldProposal]:
+        """The workspace's shared proposals waiting for an admin, oldest first, with the entries they would change.
+
+        A member's own proposals are never listed: no admin reads a member's memory, so none is held for one.
+        """
+        await self._managers_or_fail().require_manager(user, workspace_id)
+        async with self._uow:
+            held = await self._store.held_proposals(workspace_id)
+            entries = await self._store.opened(
+                workspace_id, [proposal.review_entry_id for proposal in held if proposal.review_entry_id is not None]
+            )
+        max_age = timedelta(hours=self._config.memory_proposal_max_age_hours)
+        return [
+            HeldProposal(
+                proposal=proposal,
+                expires_at=proposal.created_at + max_age,
+                entry=entries.get(proposal.review_entry_id) if proposal.review_entry_id is not None else None,
+            )
+            for proposal in held
+        ]
+
+    async def approve(self, user: User, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> None:
+        """Vouch for a held shared proposal: it goes back to the consolidator as ``reviewed``.
+
+        Neither the review policy nor a mandated guardrail holds it again, and it outranks what agents wrote. One
+        held over an entry (a conflict, or a change to a reviewed entry) replaces that entry as its next version.
+        What memory never keeps is still refused, whoever vouches for it.
+
+        Raises:
+            MemoryProposalNotFoundError: the workspace has no shared proposal waiting for review by that id.
+            MemoryApprovalRefusedError: the text carries a credential or personal data.
+        """
+        await self._managers_or_fail().require_manager(user, workspace_id)
+        async with self._uow:
+            proposal = await self._store.held_proposal(workspace_id, proposal_id)
+            if proposal is None:
+                raise MemoryProposalNotFoundError
+            finding = screen(proposal.text)
+            if finding is not None:
+                raise MemoryApprovalRefusedError(finding)
+            if not await self._repos.proposals.approve(workspace_id, proposal_id):
+                raise MemoryProposalNotFoundError
+        logger.info(
+            "Memory proposal %s of workspace %s held for %s was approved by %s",
+            proposal_id,
+            workspace_id,
+            proposal.review_reason,
+            user.id,
+        )
+
+    async def discard(self, user: User, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> None:
+        """Delete a held shared proposal. Nothing of it is kept.
+
+        Raises:
+            MemoryProposalNotFoundError: the workspace has no shared proposal waiting for review by that id.
+        """
+        await self._managers_or_fail().require_manager(user, workspace_id)
+        async with self._uow:
+            if not await self._repos.proposals.remove_held(workspace_id, proposal_id, scope="workspace"):
+                raise MemoryProposalNotFoundError
+        logger.info("Memory proposal %s of workspace %s was discarded by %s", proposal_id, workspace_id, user.id)
+
     def _managers_or_fail(self) -> WorkspaceManagers:
         if self._managers is None:
             msg = "this memory service was built without workspace management checks"
@@ -732,6 +816,7 @@ class MemoryService:
             experiment_ended_at=settings.experiment_ended_at if settings is not None else None,
             entries=await self._repos.entries.count_by_status(workspace_id),
             proposals_waiting=await self._repos.proposals.count_pending(workspace_id),
+            proposals_held=await self._repos.proposals.count_held(workspace_id, scope="workspace"),
         )
 
     # -- Retention ----------------------------------------------------------
@@ -784,8 +869,8 @@ class MemoryService:
 
         The guardrails the organization mandates for the workspace are read once, and run over each proposal
         before anything else is. A proposal whose model call fails, or that a mandate failing closed could not
-        check, is left for a later pass, and after ``MAX_ATTEMPTS`` waits for an admin. A proposal another
-        replica decided first is skipped.
+        check, is left for a later pass, and after ``MAX_ATTEMPTS`` waits for an admin; a member's own is
+        discarded instead. A proposal another replica decided first is skipped.
         """
         async with self._uow:
             switches = await self._switches_if_on(workspace_id)
@@ -801,10 +886,13 @@ class MemoryService:
                 else None
             )
         except GuardrailsUnavailableError:
-            # Nothing is decided unchecked: each proposal waits for a later pass, as on a failed model call.
+            # Nothing is decided unchecked: each proposal waits for a later pass, as on a failed model call. One an
+            # admin approved is not checked, so it goes on.
             for proposal in proposals:
-                await self._count_failed_pass(proposal, "guardrail_unavailable")
-            return 0
+                if proposal.trust != "reviewed":
+                    await self._count_failed_pass(proposal, "guardrail_unavailable")
+            proposals = [proposal for proposal in proposals if proposal.trust == "reviewed"]
+            mandated = None
         decided = 0
         for proposal in proposals:
             try:
@@ -824,14 +912,21 @@ class MemoryService:
     async def _consolidate_one(
         self, proposal: OpenedProposal, switches: _Switches, mandated: MandatedGuardrails | None
     ) -> int:
+        """Decide one proposal: keep it, apply it over an entry, or leave it for an admin.
+
+        One an admin approved (``reviewed``) is held neither by the review policy nor by a mandate again; held over
+        an entry the admin saw, it replaces that entry without the model being asked, while it is still active.
+        A member's own proposal never waits for an admin, who may not read it: see :meth:`_hold`.
+        """
         workspace_id = proposal.workspace_id
-        if mandated is not None and not await self._passes_guardrails(proposal, mandated):
+        approved = proposal.trust == "reviewed"
+        if mandated is not None and not approved and not await self._passes_guardrails(proposal, mandated):
             async with self._uow:
-                await self._repos.proposals.hold_for_review(workspace_id, proposal.id, "guardrail")
+                await self._hold(proposal, "guardrail")
             return 1
-        if proposal.scope == "workspace" and switches.write_policy == "review" and proposal.trust != "reviewed":
+        if proposal.scope == "workspace" and switches.write_policy == "review" and not approved:
             async with self._uow:
-                await self._repos.proposals.hold_for_review(workspace_id, proposal.id, "policy")
+                await self._hold(proposal, "policy")
             return 1
         [vector] = await self._embed([proposal.text], workspace_id, proposal.provenance.api_key_id)
         model = self._models.embedding_model or ""
@@ -839,35 +934,55 @@ class MemoryService:
             candidates = await self._store.comparable(
                 workspace_id, scope=proposal.scope, owner_user_id=proposal.owner_user_id, embedding_model=model
             )
-        nearest = sorted(
-            (
-                (cosine(vector, entry.embedding), entry)
-                for entry in candidates
-                if entry.embedding is not None and cosine(vector, entry.embedding) >= COMPARE_FLOOR
-            ),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )[:NEIGHBOURS]
-        decision = await self._decide(proposal, nearest)
-        target = nearest[decision.target][1] if decision.target is not None else None
-        if decision.action == "conflict" or (
-            decision.action == "update"
-            and target is not None
-            and _TRUST_RANK[target.trust] > _TRUST_RANK[proposal.trust]
-        ):
-            async with self._uow:
-                await self._repos.proposals.hold_for_review(
-                    workspace_id, proposal.id, "conflict" if decision.action == "conflict" else "higher_trust"
-                )
-            return 1
+        approved_over = (
+            next((entry for entry in candidates if entry.id == proposal.review_entry_id), None) if approved else None
+        )
+        if approved_over is not None:
+            action: DecisionAction = "update"
+            target: OpenedEntry | None = approved_over
+        else:
+            nearest = sorted(
+                (
+                    (cosine(vector, entry.embedding), entry)
+                    for entry in candidates
+                    if entry.embedding is not None and cosine(vector, entry.embedding) >= COMPARE_FLOOR
+                ),
+                key=lambda pair: pair[0],
+                reverse=True,
+            )[:NEIGHBOURS]
+            decision = await self._decide(proposal, nearest)
+            action = decision.action
+            target = nearest[decision.target][1] if decision.target is not None else None
+            outranked = (
+                action == "update" and target is not None and _TRUST_RANK[target.trust] > _TRUST_RANK[proposal.trust]
+            )
+            if action == "conflict" or outranked:
+                if proposal.scope == "member":
+                    # A member's own memory has no admin to settle it, and the member is its authority: their newer
+                    # word replaces what it contradicts, where the model named an entry alike enough to replace.
+                    # One resting on less trusted ground than the entry it would change is kept beside it instead.
+                    alike = nearest[decision.target][0] if decision.target is not None else 0.0
+                    replaces = action == "conflict" and target is not None and alike >= REPLACE_FLOOR
+                    action, target = ("update", target) if replaces else ("add", None)
+                elif approved and action == "conflict" and target is None:
+                    # An admin vouched for it, and the model named nothing it would replace: it is kept beside.
+                    action = "add"
+                else:
+                    async with self._uow:
+                        await self._hold(
+                            proposal,
+                            "conflict" if action == "conflict" else "higher_trust",
+                            entry_id=target.id if target is not None else None,
+                        )
+                    return 1
         async with self._uow:
             # Removed first, in the block that applies it: a replica that finds it gone applies nothing.
             if not await self._repos.proposals.remove(workspace_id, proposal.id):
                 return 0
-            if decision.action == "no_change" and target is not None:
+            if action == "no_change" and target is not None:
                 await self._repos.entries.touch(workspace_id, [target.id], self._now())
                 return 1
-            if decision.action == "add":
+            if action == "add":
                 await self._make_room(workspace_id)
             await self._store.write_entry(
                 EntryDraft(
@@ -912,7 +1027,7 @@ class MemoryService:
             )
         if outcome.blocked:
             logger.info(
-                "Memory proposal %s of workspace %s was refused by guardrails %s; it waits for an admin",
+                "Memory proposal %s of workspace %s was refused by guardrails %s",
                 proposal.id,
                 proposal.workspace_id,
                 ", ".join(outcome.blocked),
@@ -949,12 +1064,31 @@ class MemoryService:
             await self._repos.entries.set_status(workspace_id, oldest.id, "retired")
             logger.info("Memory of workspace %s is at its cap; retired its least used entry", workspace_id)
 
-    async def _count_failed_pass(self, proposal: OpenedProposal, reason: str) -> None:
+    async def _count_failed_pass(self, proposal: OpenedProposal, reason: MemoryReviewReason) -> None:
         """Count a pass that could not decide the proposal; at ``MAX_ATTEMPTS`` it waits for an admin for ``reason``."""
         async with self._uow:
             attempts = await self._repos.proposals.count_attempt(proposal.workspace_id, proposal.id)
             if attempts >= MAX_ATTEMPTS:
-                await self._repos.proposals.hold_for_review(proposal.workspace_id, proposal.id, reason)
+                await self._hold(proposal, reason)
+
+    async def _hold(
+        self, proposal: OpenedProposal, reason: MemoryReviewReason, *, entry_id: uuid.UUID | None = None
+    ) -> None:
+        """Leave a shared proposal for an admin, in the open block; a member's own is discarded instead.
+
+        No admin reads a member's memory, so a member's proposal held for one would only wait to be swept: one a
+        mandate refused, or that a model or mandate could not decide pass after pass, is deleted, and logged by id.
+        """
+        if proposal.scope == "member":
+            await self._repos.proposals.remove(proposal.workspace_id, proposal.id)
+            logger.info(
+                "Memory proposal %s of workspace %s is a member's own, which no admin reviews; it was discarded (%s)",
+                proposal.id,
+                proposal.workspace_id,
+                reason,
+            )
+            return
+        await self._repos.proposals.hold_for_review(proposal.workspace_id, proposal.id, reason, entry_id=entry_id)
 
     # -- Shared steps -------------------------------------------------------
 

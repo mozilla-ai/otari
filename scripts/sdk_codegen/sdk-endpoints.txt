@@ -530,12 +530,16 @@ POST /api/v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 PUT /api/v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/code-execution-policy               # dashboard-only
-# A workspace's memory switches, and erasing what it holds, are its managers' to
-# set from the dashboard; agents reach memory itself through its MCP endpoint.
+# A workspace's memory switches, the proposals held for review, and erasing what
+# it holds, are its managers' to set from the dashboard; agents reach memory
+# itself through its MCP endpoint.
 GET /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
 PUT /api/v1/workspaces/{workspace_id}/memory                                 # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/memory                              # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/memory/experiment                      # dashboard-only
+GET /api/v1/workspaces/{workspace_id}/memory/review                          # dashboard-only
+POST /api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/approve   # dashboard-only
+POST /api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/discard   # dashboard-only
 GET /api/v1/organizations/me/memory                                          # dashboard-only
 PUT /api/v1/organizations/me/memory                                          # dashboard-only
 # Which hosted providers, and which of their models, a workspace keeps: the same

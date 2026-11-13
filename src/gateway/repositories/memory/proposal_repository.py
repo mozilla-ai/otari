@@ -8,8 +8,37 @@ from datetime import datetime
 from sqlalchemy import delete, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.memory import MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
+from gateway.models.memory import (
+    MEMORY_REVIEW_REASONS,
+    MemoryKind,
+    MemoryProposal,
+    MemoryReviewReason,
+    MemoryScope,
+    MemoryTrust,
+)
 from gateway.repositories.memory.fenced_repository import FencedRepository
+
+# Between a held proposal's reason code and the entry it would change, in ``review_reason``. An entry id fits beside
+# the longest code within the column's 64 characters, so recording it took no migration.
+_ENTRY_SEPARATOR = ":"
+
+
+def review_reason(reason: MemoryReviewReason, entry_id: uuid.UUID | None) -> str:
+    """What ``review_reason`` holds for ``reason``, naming the entry the proposal would change where there is one."""
+    return reason if entry_id is None else f"{reason}{_ENTRY_SEPARATOR}{entry_id}"
+
+
+def parse_review_reason(value: str | None) -> tuple[MemoryReviewReason | None, uuid.UUID | None]:
+    """The reason code and entry id a ``review_reason`` holds; None for either it does not hold."""
+    if value is None:
+        return None, None
+    code, _, entry = value.partition(_ENTRY_SEPARATOR)
+    reason = next((known for known in MEMORY_REVIEW_REASONS if known == code), None)
+    try:
+        entry_id = uuid.UUID(entry) if entry else None
+    except ValueError:
+        entry_id = None
+    return reason, entry_id
 
 
 @dataclass(frozen=True)
@@ -98,15 +127,85 @@ class ProposalRepository(FencedRepository[MemoryProposal]):
         )
         return result.scalar_one()
 
-    async def hold_for_review(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID, reason: str) -> None:
-        """Leave one proposal for an admin, with the reason code it waits for."""
+    async def hold_for_review(
+        self,
+        workspace_id: uuid.UUID,
+        proposal_id: uuid.UUID,
+        reason: MemoryReviewReason,
+        *,
+        entry_id: uuid.UUID | None = None,
+    ) -> None:
+        """Leave one proposal for an admin, with the reason code it waits for and the entry it would change, if any."""
         await self._fence(workspace_id)
         await self.db.execute(
             update(MemoryProposal)
             .where(MemoryProposal.workspace_id == workspace_id, MemoryProposal.id == proposal_id)
-            .values(state="review", review_reason=reason)
+            .values(state="review", review_reason=review_reason(reason, entry_id))
             .execution_options(synchronize_session=False)
         )
+
+    async def held(self, workspace_id: uuid.UUID, *, scope: MemoryScope) -> Sequence[MemoryProposal]:
+        """The workspace's proposals of ``scope`` waiting for an admin, oldest first."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(MemoryProposal)
+            .where(
+                MemoryProposal.workspace_id == workspace_id,
+                MemoryProposal.state == "review",
+                MemoryProposal.scope == scope,
+            )
+            .order_by(MemoryProposal.created_at, MemoryProposal.id)
+        )
+        return result.scalars().all()
+
+    async def count_held(self, workspace_id: uuid.UUID, *, scope: MemoryScope) -> int:
+        """How many proposals of ``scope`` wait for an admin."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(MemoryProposal)
+            .where(
+                MemoryProposal.workspace_id == workspace_id,
+                MemoryProposal.state == "review",
+                MemoryProposal.scope == scope,
+            )
+        )
+        return result.scalar_one()
+
+    async def approve(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> bool:
+        """Send one held proposal back to the consolidator as an admin's word; whether it was still held.
+
+        It goes back as ``reviewed``, with its failed passes forgotten and its reason kept, so the consolidator
+        knows the entry the admin saw it beside.
+        """
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            update(MemoryProposal)
+            .where(
+                MemoryProposal.workspace_id == workspace_id,
+                MemoryProposal.id == proposal_id,
+                MemoryProposal.state == "review",
+            )
+            .values(state="pending", trust="reviewed", attempts=0)
+            .returning(MemoryProposal.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def remove_held(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID, *, scope: MemoryScope) -> bool:
+        """Delete one proposal of ``scope`` waiting for an admin; whether the workspace had it."""
+        await self._fence(workspace_id)
+        result = await self.db.execute(
+            delete(MemoryProposal)
+            .where(
+                MemoryProposal.workspace_id == workspace_id,
+                MemoryProposal.id == proposal_id,
+                MemoryProposal.state == "review",
+                MemoryProposal.scope == scope,
+            )
+            .returning(MemoryProposal.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def count_attempt(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> int:
         """Count one failed pass over a proposal; how many it has had."""

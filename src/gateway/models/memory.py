@@ -40,6 +40,10 @@ MemoryTrust = Literal["reviewed", "agent", "external"]
 MemorySignalKind = Literal["confirm", "flag"]
 MemoryWritePolicy = Literal["auto", "review"]
 MemoryProposalState = Literal["pending", "review"]
+# Why the consolidator left a proposal for an admin: the workspace's review policy, a contradiction with an entry,
+# an agent's change to an entry an admin reviewed, a block mandate that flagged it, or a model or a mandate that
+# could not run, pass after pass.
+MemoryReviewReason = Literal["policy", "conflict", "higher_trust", "guardrail", "model", "guardrail_unavailable"]
 
 MEMORY_SCOPES: Final = get_args(MemoryScope)
 MEMORY_KINDS: Final = get_args(MemoryKind)
@@ -48,6 +52,7 @@ MEMORY_TRUST_LEVELS: Final = get_args(MemoryTrust)
 MEMORY_SIGNAL_KINDS: Final = get_args(MemorySignalKind)
 MEMORY_WRITE_POLICIES: Final = get_args(MemoryWritePolicy)
 MEMORY_PROPOSAL_STATES: Final = get_args(MemoryProposalState)
+MEMORY_REVIEW_REASONS: Final = get_args(MemoryReviewReason)
 
 # Who wrote a row and how: kept as it was, so provenance outlives the key and the session.
 SOURCE_MAX_LENGTH: Final = 255
@@ -186,7 +191,9 @@ class MemoryProposal(Base):
     state: Mapped[MemoryProposalState] = mapped_column(String(16), default="pending", server_default="pending")
     key_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("memory_keys.id", ondelete="RESTRICT"), index=True)
     content_sealed: Mapped[str] = mapped_column(Text)
-    # Why a proposal waits for an admin, in the consolidator's words: a reason code, never content.
+    # Why a proposal waits for an admin, in the consolidator's words: a reason code and, after a colon, the id of the
+    # entry it would change where the consolidator names one (``conflict:<entry id>``); never content. Kept once an
+    # admin approves it, so the consolidator applies it over the entry the admin saw.
     review_reason: Mapped[str | None] = mapped_column(String(64))
     source_api_key_id: Mapped[str | None] = mapped_column(String(SOURCE_MAX_LENGTH))
     source_session_id: Mapped[str | None] = mapped_column(String(SOURCE_MAX_LENGTH))

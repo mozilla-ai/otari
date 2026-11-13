@@ -11,10 +11,12 @@ MEMORY_OFF = (
 )
 WORKSPACE_SCOPE_OFF = "Shared workspace memory is off for this workspace. Use the member scope instead."
 ENTRY_NOT_FOUND = "No memory entry with that id."
+PROPOSAL_NOT_FOUND = "No proposal waiting for review with that id."
 READ_ONLY = "Workspace viewers can search memory but not change it."
 NOT_YOURS = "Only the entry's author, its owner or a workspace admin can forget it."
 TOO_LONG = "That is longer than memory keeps. Shorten it to {limit} characters."
 REFUSED = "Memory does not keep {what}. Remove it and propose again."
+APPROVAL_REFUSED = "Memory does not keep {what}, so this proposal cannot be approved. Discard it instead."
 
 _WHAT = {
     "credential": "credentials or secrets",
@@ -63,6 +65,13 @@ class MemoryEntryNotFoundError(TenancyNotFoundError):
         super().__init__(ENTRY_NOT_FOUND)
 
 
+class MemoryProposalNotFoundError(TenancyNotFoundError):
+    """No shared proposal waiting for review with that id: another workspace's, or a member's own, reads the same."""
+
+    def __init__(self) -> None:
+        super().__init__(PROPOSAL_NOT_FOUND)
+
+
 class MemoryReadOnlyError(TenancyForbiddenError):
     """A workspace viewer may recall but not propose, confirm, flag or forget."""
 
@@ -93,6 +102,16 @@ class MemoryRefusedError(TenancyValidationError):
 
     def __init__(self, finding: str) -> None:
         super().__init__(REFUSED.format(what=_WHAT.get(finding, "that")))
+        self.finding = finding
+
+
+class MemoryApprovalRefusedError(TenancyValidationError):
+    """A held proposal carrying something memory does not keep, which no admin's word lets in. Names its kind only."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def __init__(self, finding: str) -> None:
+        super().__init__(APPROVAL_REFUSED.format(what=_WHAT.get(finding, "that")))
         self.finding = finding
 
 

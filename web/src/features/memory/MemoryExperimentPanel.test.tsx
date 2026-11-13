@@ -33,6 +33,7 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     experiment_ended_at: null,
     entries: {},
     proposals_waiting: 0,
+    proposals_held: 0,
     ...overrides,
   }
 }

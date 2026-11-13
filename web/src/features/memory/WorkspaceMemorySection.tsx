@@ -17,6 +17,7 @@ import {
   useWorkspaceMemory,
 } from "@/shared/api/memory"
 import { MemoryExperimentPanel } from "./MemoryExperimentPanel"
+import { MemoryReviewQueue } from "./MemoryReviewQueue"
 
 const MEMORY_LABEL = "Agent memory"
 const SHARED_LABEL = "Shared workspace memory"
@@ -79,6 +80,8 @@ function holdings(memory: WorkspaceMemory): string {
     `${active} ${active === 1 ? "entry" : "entries"} in recall`,
     `${memory.proposals_waiting} ${memory.proposals_waiting === 1 ? "proposal" : "proposals"} not decided yet`,
   ]
+  if (memory.proposals_held > 0)
+    parts.push(`${memory.proposals_held} waiting for review`)
   if (waiting > 0) parts.push(`${waiting} flagged out of recall`)
   return `${parts.join(", ")}.`
 }
@@ -348,6 +351,7 @@ export function WorkspaceMemorySection({
         </div>
       </SettingsGroup>
       <p className="text-caption">{holdings(current)}</p>
+      <MemoryReviewQueue workspaceId={workspaceId} canManage={canManage} />
       <MemoryExperimentPanel
         workspaceId={workspaceId}
         memory={current}

@@ -702,6 +702,10 @@ export type WorkspaceMemoryErased = Schemas["WorkspaceMemoryErased"]
 export type MemoryExperiment = Schemas["MemoryExperimentPublic"]
 export type MemoryExperimentArm = Schemas["ArmSummaryPublic"]
 export type MemoryExperimentDifference = Schemas["DifferencePublic"]
+// The shared proposals the consolidator held for an admin, and the entry each would change.
+export type MemoryReviewQueue = Schemas["MemoryReviewQueuePublic"]
+export type HeldMemoryProposal = Schemas["HeldProposalPublic"]
+export type MemoryReviewReason = NonNullable<HeldMemoryProposal["reason"]>
 
 // The per-workspace web-search configuration over the deployment-wide backend;
 // see `src/gateway/services/tenancy/workspace_web_search_service.py`.

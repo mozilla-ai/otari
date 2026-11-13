@@ -10547,6 +10547,131 @@
         "title": "HealthCheckStatus",
         "type": "object"
       },
+      "HeldProposalPublic": {
+        "description": "A shared proposal waiting for an admin, what held it, and where it came from.",
+        "properties": {
+          "author_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member whose agent proposed it.",
+            "title": "Author User Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "entry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewedEntryPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The entry it would change: the one it contradicts, or the reviewed one it would replace. Approving it replaces this entry with it as a new version."
+          },
+          "expires_at": {
+            "description": "When it is deleted if nobody decides on it.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "decision",
+              "procedure"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the proposing agent ran on.",
+            "title": "Model"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "policy",
+                  "conflict",
+                  "higher_trust",
+                  "guardrail",
+                  "model",
+                  "guardrail_unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "policy: the workspace reviews every shared proposal; conflict: it contradicts an entry; higher_trust: an agent's change to an entry an admin reviewed; guardrail: a block mandate flagged it; guardrail_unavailable and model: a mandated guardrail, or the consolidation model, could not run.",
+            "title": "Reason"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trust": {
+            "enum": [
+              "reviewed",
+              "agent",
+              "external"
+            ],
+            "title": "Trust",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "kind",
+          "trust",
+          "reason",
+          "author_user_id",
+          "session_id",
+          "model",
+          "created_at",
+          "expires_at",
+          "entry"
+        ],
+        "title": "HeldProposalPublic",
+        "type": "object"
+      },
       "HostedAvailableModelsPublic": {
         "description": "What the provider says it serves on the stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render a plain text box when\nthe list cannot be fetched.",
         "properties": {
@@ -13715,6 +13840,28 @@
         "title": "MemoryExperimentPublic",
         "type": "object"
       },
+      "MemoryReviewQueuePublic": {
+        "description": "A workspace's shared proposals waiting for an admin, oldest first. A member's own are never listed.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HeldProposalPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "MemoryReviewQueuePublic",
+        "type": "object"
+      },
       "Message": {
         "description": "A human-readable acknowledgment for an operation with nothing to return.",
         "properties": {
@@ -16804,6 +16951,12 @@
             "title": "Applies To All Workspaces",
             "type": "boolean"
           },
+          "applies_to_memory": {
+            "default": true,
+            "description": "True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only",
+            "title": "Applies To Memory",
+            "type": "boolean"
+          },
           "credential": {
             "anyOf": [
               {
@@ -16966,12 +17119,6 @@
         ],
         "title": "OrganizationGuardrailDefinitionCreate",
         "type": "object"
-          "applies_to_memory": {
-            "default": true,
-            "description": "True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only",
-            "title": "Applies To Memory",
-            "type": "boolean"
-          },
       },
       "OrganizationGuardrailDefinitionPublic": {
         "description": "The API-facing shape. Carries the names of the stored secrets and none of their values.",
@@ -17189,6 +17336,10 @@
             "title": "Applies To All Workspaces",
             "type": "boolean"
           },
+          "applies_to_memory": {
+            "title": "Applies To Memory",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -17299,6 +17450,7 @@
           "enabled",
           "applies_to_all_workspaces",
           "workspace_ids",
+          "applies_to_memory",
           "created_at",
           "updated_at"
         ],
@@ -17350,10 +17502,6 @@
                 "type": "number"
               },
               {
-          "applies_to_memory": {
-            "title": "Applies To Memory",
-            "type": "boolean"
-          },
                 "type": "null"
               }
             ],
@@ -17391,6 +17539,10 @@
         "properties": {
           "applies_to_all_workspaces": {
             "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "applies_to_memory": {
+            "title": "Applies To Memory",
             "type": "boolean"
           },
           "credential": {
@@ -17464,7 +17616,6 @@
                 "maxLength": 2048,
                 "type": "string"
               },
-          "applies_to_memory",
               {
                 "type": "null"
               }
@@ -17555,10 +17706,6 @@
             "default": false,
             "title": "Provider Key Encryption Available",
             "type": "boolean"
-          "applies_to_memory": {
-            "title": "Applies To Memory",
-            "type": "boolean"
-          },
           },
           "role": {
             "title": "Role",
@@ -22377,6 +22524,41 @@
           "input"
         ],
         "title": "ResponsesRequest",
+        "type": "object"
+      },
+      "ReviewedEntryPublic": {
+        "description": "The entry a held proposal would change, as it reads now.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trust": {
+            "enum": [
+              "reviewed",
+              "agent",
+              "external"
+            ],
+            "title": "Trust",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "version",
+          "trust"
+        ],
+        "title": "ReviewedEntryPublic",
         "type": "object"
       },
       "RotateMasterKeyResponse": {
@@ -30762,8 +30944,13 @@
             "title": "Organization Enabled",
             "type": "boolean"
           },
+          "proposals_held": {
+            "description": "Shared proposals waiting for an admin's review.",
+            "title": "Proposals Held",
+            "type": "integer"
+          },
           "proposals_waiting": {
-            "description": "Proposals the consolidator has not decided yet.",
+            "description": "Proposals the consolidator has not decided yet, those an admin approved included.",
             "title": "Proposals Waiting",
             "type": "integer"
           },
@@ -30845,7 +31032,8 @@
           "experiment_started_at",
           "experiment_ended_at",
           "entries",
-          "proposals_waiting"
+          "proposals_waiting",
+          "proposals_held"
         ],
         "title": "WorkspaceMemoryPublic",
         "type": "object"
@@ -61055,6 +61243,167 @@
           }
         ],
         "summary": "Get Memory Experiment",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/memory/review": {
+      "get": {
+        "description": "The workspace's shared proposals the consolidator held for an admin, oldest first, opened.\n\nThe same managers as the switches. A member's own proposals are never listed, nor held.",
+        "operationId": "memory-get_memory_review_queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryReviewQueuePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Memory Review Queue",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/approve": {
+      "post": {
+        "description": "Vouch for a held proposal: the consolidator's next pass applies it as reviewed.\n\nNeither the review policy nor a mandated guardrail holds it again. One held over an entry, a conflict or a\nchange to a reviewed entry, replaces that entry as its next version.",
+        "operationId": "memory-approve_memory_proposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "The workspace has no shared proposal waiting for review by that id."
+          },
+          "422": {
+            "description": "It carries what memory never keeps, which no approval lets in."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Approve Memory Proposal",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/discard": {
+      "post": {
+        "description": "Delete a held proposal. It cannot be undone.",
+        "operationId": "memory-discard_memory_proposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "The workspace has no shared proposal waiting for review by that id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Discard Memory Proposal",
         "tags": [
           "memory"
         ]

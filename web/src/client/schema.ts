@@ -8346,6 +8346,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/memory/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory Review Queue
+         * @description The workspace's shared proposals the consolidator held for an admin, oldest first, opened.
+         *
+         *     The same managers as the switches. A member's own proposals are never listed, nor held.
+         */
+        get: operations["memory-get_memory_review_queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Memory Proposal
+         * @description Vouch for a held proposal: the consolidator's next pass applies it as reviewed.
+         *
+         *     Neither the review policy nor a mandated guardrail holds it again. One held over an entry, a conflict or a
+         *     change to a reviewed entry, replaces that entry as its next version.
+         */
+        post: operations["memory-approve_memory_proposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard Memory Proposal
+         * @description Delete a held proposal. It cannot be undone.
+         */
+        post: operations["memory-discard_memory_proposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/provider-keys": {
         parameters: {
             query?: never;
@@ -13618,6 +13683,59 @@ export interface components {
             settings: components["schemas"]["HealthCheckSettingsPublic"];
         };
         /**
+         * HeldProposalPublic
+         * @description A shared proposal waiting for an admin, what held it, and where it came from.
+         */
+        HeldProposalPublic: {
+            /**
+             * Author User Id
+             * @description The member whose agent proposed it.
+             */
+            author_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** @description The entry it would change: the one it contradicts, or the reviewed one it would replace. Approving it replaces this entry with it as a new version. */
+            entry: components["schemas"]["ReviewedEntryPublic"] | null;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When it is deleted if nobody decides on it.
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "fact" | "decision" | "procedure";
+            /**
+             * Model
+             * @description The model the proposing agent ran on.
+             */
+            model: string | null;
+            /**
+             * Reason
+             * @description policy: the workspace reviews every shared proposal; conflict: it contradicts an entry; higher_trust: an agent's change to an entry an admin reviewed; guardrail: a block mandate flagged it; guardrail_unavailable and model: a mandated guardrail, or the consolidation model, could not run.
+             */
+            reason: ("policy" | "conflict" | "higher_trust" | "guardrail" | "model" | "guardrail_unavailable") | null;
+            /** Session Id */
+            session_id: string | null;
+            /** Text */
+            text: string;
+            /**
+             * Trust
+             * @enum {string}
+             */
+            trust: "reviewed" | "agent" | "external";
+        };
+        /**
          * HostedAvailableModelsPublic
          * @description What the provider says it serves on the stored credential.
          *
@@ -15123,6 +15241,16 @@ export interface components {
             workspace_id: string;
         };
         /**
+         * MemoryReviewQueuePublic
+         * @description A workspace's shared proposals waiting for an admin, oldest first. A member's own are never listed.
+         */
+        MemoryReviewQueuePublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["HeldProposalPublic"][];
+        };
+        /**
          * Message
          * @description A human-readable acknowledgment for an operation with nothing to return.
          */
@@ -16483,6 +16611,12 @@ export interface components {
              */
             applies_to_all_workspaces: boolean;
             /**
+             * Applies To Memory
+             * @description True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only
+             * @default true
+             */
+            applies_to_memory: boolean;
+            /**
              * Credential
              * @description Bearer credential for this entry's endpoint. Requires url to be set, and https: an entry with no endpoint of its own falls back to the deployment's guardrails_url, which is commonly a same-host http sidecar. Encrypted at rest, never returned
              */
@@ -16615,12 +16749,6 @@ export interface components {
             created_at: string;
             /** Enabled */
             enabled: boolean;
-            /**
-             * Applies To Memory
-             * @description True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only
-             * @default true
-             */
-            applies_to_memory: boolean;
             /** Guardrail Name */
             guardrail_name: string;
             /**
@@ -16741,6 +16869,8 @@ export interface components {
         OrganizationGuardrailPublic: {
             /** Applies To All Workspaces */
             applies_to_all_workspaces: boolean;
+            /** Applies To Memory */
+            applies_to_memory: boolean;
             /** Created At */
             created_at: string;
             /** Definition Id */
@@ -16848,6 +16978,8 @@ export interface components {
         OrganizationGuardrailUpdate: {
             /** Applies To All Workspaces */
             applies_to_all_workspaces?: boolean;
+            /** Applies To Memory */
+            applies_to_memory?: boolean;
             /** Credential */
             credential?: string | null;
             /**
@@ -16873,8 +17005,6 @@ export interface components {
             profile?: string;
             /** Url */
             url?: string | null;
-            /** Applies To Memory */
-            applies_to_memory: boolean;
             /**
              * Validate Kwargs
              * @description Replaces the stored kwargs whole. A parameter sent as *** keeps the value stored under that name, which is how a credential-shaped one survives an edit of the rest of the entry
@@ -16980,8 +17110,6 @@ export interface components {
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
-            /** Applies To Memory */
-            applies_to_memory?: boolean;
              */
             kind?: ("model" | "search" | "fetch") | null;
             /**
@@ -19201,6 +19329,26 @@ export interface components {
             user?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ReviewedEntryPublic
+         * @description The entry a held proposal would change, as it reads now.
+         */
+        ReviewedEntryPublic: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Text */
+            text: string;
+            /**
+             * Trust
+             * @enum {string}
+             */
+            trust: "reviewed" | "agent" | "external";
+            /** Version */
+            version: number;
         };
         /**
          * RotateMasterKeyResponse
@@ -22734,8 +22882,13 @@ export interface components {
              */
             organization_enabled: boolean;
             /**
+             * Proposals Held
+             * @description Shared proposals waiting for an admin's review.
+             */
+            proposals_held: number;
+            /**
              * Proposals Waiting
-             * @description Proposals the consolidator has not decided yet.
+             * @description Proposals the consolidator has not decided yet, those an admin approved included.
              */
             proposals_waiting: number;
             /**
@@ -37498,6 +37651,109 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemoryExperimentPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-get_memory_review_queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryReviewQueuePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "memory-approve_memory_proposal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workspace has no shared proposal waiting for review by that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description It carries what memory never keeps, which no approval lets in. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "memory-discard_memory_proposal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workspace has no shared proposal waiting for review by that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

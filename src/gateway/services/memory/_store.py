@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryScope, MemoryTrust
-from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal
+from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryReviewReason, MemoryScope, MemoryTrust
+from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal, parse_review_reason
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._sealing import (
@@ -85,7 +85,11 @@ class ProposalDraft:
 
 @dataclass(frozen=True)
 class OpenedProposal:
-    """One pending proposal, opened for the consolidator."""
+    """One proposal, opened for the consolidator or an admin.
+
+    ``review_reason`` is why it waits, or waited, for an admin, and ``review_entry_id`` the entry it would change
+    that the admin saw beside it; both None for one never held.
+    """
 
     id: uuid.UUID
     workspace_id: uuid.UUID
@@ -95,6 +99,9 @@ class OpenedProposal:
     trust: MemoryTrust
     text: str
     provenance: Provenance
+    created_at: datetime
+    review_reason: MemoryReviewReason | None = None
+    review_entry_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -286,12 +293,31 @@ class EntryStore:
 
     async def pending_proposals(self, workspace_id: uuid.UUID, *, limit: int) -> list[OpenedProposal]:
         """The workspace's oldest pending proposals, opened and locked until the block ends."""
-        rows = await self._repos.proposals.pending(workspace_id, limit=limit)
+        return await self._open_proposals(workspace_id, await self._repos.proposals.pending(workspace_id, limit=limit))
+
+    async def held_proposals(self, workspace_id: uuid.UUID) -> list[OpenedProposal]:
+        """The workspace's shared proposals waiting for an admin, oldest first, opened.
+
+        A member's own proposals are never listed: no admin reads a member's memory.
+        """
+        return await self._open_proposals(
+            workspace_id, await self._repos.proposals.held(workspace_id, scope="workspace")
+        )
+
+    async def held_proposal(self, workspace_id: uuid.UUID, proposal_id: uuid.UUID) -> OpenedProposal | None:
+        """One shared proposal of the workspace waiting for an admin, opened; None when it has none by that id."""
+        row = await self._repos.proposals.in_workspace(workspace_id, proposal_id)
+        if row is None or row.state != "review" or row.scope != "workspace":
+            return None
+        opened = await self._open_proposals(workspace_id, [row])
+        return opened[0] if opened else None
+
+    async def _open_proposals(self, workspace_id: uuid.UUID, rows: Sequence[MemoryProposal]) -> list[OpenedProposal]:
         keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
         opened: list[OpenedProposal] = []
         for row in rows:
             key = keys.get(row.key_id)
-            proposal = _open_proposal(row, key) if key is not None else None
+            proposal = _open_proposal(row, key) if key is not None and row.workspace_id == workspace_id else None
             if proposal is None:
                 UNOPENED_ROWS.labels(table="memory_proposals").inc()
                 continue
@@ -387,6 +413,7 @@ def _open_proposal(row: MemoryProposal, key: bytes) -> OpenedProposal | None:
         text = open_sealed(key, row.content_sealed, aad).decode()
     except (SealedValueError, UnicodeDecodeError):
         return None
+    reason, entry_id = parse_review_reason(row.review_reason)
     return OpenedProposal(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -401,4 +428,7 @@ def _open_proposal(row: MemoryProposal, key: bytes) -> OpenedProposal | None:
             session_id=row.source_session_id,
             model=row.source_model,
         ),
+        created_at=row.created_at,
+        review_reason=reason,
+        review_entry_id=entry_id,
     )

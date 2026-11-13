@@ -14,6 +14,7 @@ from gateway.services.memory._service import (
     EntryWithHistory,
     ExperimentReport,
     FlagReason,
+    HeldProposal,
     MemoryCaller,
     MemoryCallUsage,
     MemoryMeter,
@@ -28,7 +29,7 @@ from gateway.services.memory._service import (
     WorkspaceManagers,
     WorkspaceMemory,
 )
-from gateway.services.memory._store import EntryDraft, OpenedEntry, ProposalDraft, Provenance
+from gateway.services.memory._store import EntryDraft, OpenedEntry, OpenedProposal, ProposalDraft, Provenance
 from gateway.services.memory._tool_backend import MemoryToolBackend, RunMemoryTool
 from gateway.services.memory._tools import INSTRUCTIONS as MEMORY_INSTRUCTIONS
 from gateway.services.memory._tools import (
@@ -65,6 +66,7 @@ __all__ = [
     "FlagReason",
     "GuardrailOutcome",
     "GuardrailsUnavailableError",
+    "HeldProposal",
     "MandatedGuardrails",
     "MemoryGuardrails",
     "MemoryCallUsage",
@@ -76,6 +78,7 @@ __all__ = [
     "MemoryService",
     "ModelUse",
     "OpenedEntry",
+    "OpenedProposal",
     "OrganizationMemory",
     "ProposalDraft",
     "Provenance",

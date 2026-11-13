@@ -238,7 +238,8 @@ member scope is its owner's alone: no other member, and no admin, recalls it.
      such as "notify Lucía before acting" for an instruction to the model.
    - A `block` mandate that flags the proposal refuses it: it never becomes an
      entry, is never embedded, and waits for an admin with the reason
-     `guardrail`.
+     `guardrail`; a member's own proposal is discarded instead (see
+     [Review](#review)).
    - A `monitor` mandate that flags it is logged by profile, and the proposal
      goes on.
    - A mandate that fails closed and cannot be run, or gives no verdict, leaves
@@ -261,9 +262,59 @@ member scope is its owner's alone: no other member, and no admin, recalls it.
      small one most, takes two notes that share a name or a place for one:
      adding the proposal costs a little room, while replacing or dropping what
      should have stayed apart loses it from recall.
-5. **Review.** A conflict, a shared proposal under the `review` policy, an
-   update an agent proposed to an entry an admin reviewed, and a proposal whose
-   model call failed five times wait for an admin instead.
+5. **Review.** Some shared proposals wait for an admin instead; see
+   [Review](#review).
+
+### Review
+
+A shared proposal waits for an admin, with a reason, when:
+
+| Reason | Why it waits |
+| --- | --- |
+| `policy` | The workspace's `write_policy` is `review`, which holds every shared proposal. |
+| `conflict` | The consolidation model found it contradicts an entry. |
+| `higher_trust` | An agent's update to an entry an admin reviewed. |
+| `guardrail` | A `block` mandate of the organization flagged it. |
+| `guardrail_unavailable` | A mandate that fails closed could not run, five passes running. |
+| `model` | The embedding or consolidation model failed, five passes running. |
+
+The workspace's **Memory** tab lists what waits under **Waiting for review**,
+oldest first: the proposal's text, why it waits, who proposed it and when, and,
+for a conflict or a change to a reviewed entry, the entry it would change beside
+it. Its organization's owners and admins, and the workspace's, settle it, the
+same people who change its switches:
+
+- **Approve** vouches for it. It goes back to the consolidator as `reviewed`,
+  and the next pass keeps it without holding it again for the review policy or
+  a guardrail. It is still screened for credentials and personal data, which no
+  approval lets in. Approving a conflict, or a change to a reviewed entry, means
+  the proposal wins: it replaces the entry shown beside it as its next version,
+  the old one kept in its history, without the model being asked again. Where
+  that entry changed meanwhile, the proposal is decided afresh, and a new
+  conflict waits again.
+- **Discard** deletes it. It cannot be undone; an agent can propose it again.
+
+A proposal nobody settles is deleted with the rest, after
+`memory_proposal_max_age_hours`. Over the API, with a dashboard session or the
+master key:
+
+```
+GET  /api/v1/workspaces/{workspace_id}/memory/review
+POST /api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/approve
+POST /api/v1/workspaces/{workspace_id}/memory/review/{proposal_id}/discard
+```
+
+**A member's own memory never waits for an admin**, since no admin reads it.
+The consolidator settles a member-scope proposal itself:
+
+- One a `block` mandate flags, or that a model or a mandate could not decide in
+  five passes, is discarded.
+- One that contradicts an entry of the same member replaces it as its next
+  version, where the two are alike enough to replace (0.85): the member is the
+  authority over their own memory, and their newer word wins. Less alike, it is
+  added beside it.
+- One resting on less trusted ground than the entry it would change, an
+  outside source updating what the member's agent wrote, is added beside it.
 
 ### Choosing a consolidation model
 

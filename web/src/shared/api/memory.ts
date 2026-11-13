@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   MemoryExperiment,
+  MemoryReviewQueue,
   OrganizationMemory,
   UpdateOrganizationMemoryRequest,
   UpdateWorkspaceMemoryRequest,
@@ -20,6 +21,14 @@ function workspaceMemoryKey(workspaceId: string) {
 
 function memoryExperimentKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "memory-experiment"]
+}
+
+function memoryReviewKey(workspaceId: string) {
+  return [WORKSPACES, workspaceId, "memory-review"]
+}
+
+function reviewUrl(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/memory/review`
 }
 
 // The caller's organization's switch. Read only by its owners and admins, which
@@ -100,6 +109,46 @@ export function useMemoryExperiment(workspaceId: string, enabled: boolean) {
   })
 }
 
+// The shared proposals the consolidator held for an admin. Read only by the
+// workspace's managers, who are the ones the route answers.
+export function useMemoryReviewQueue(workspaceId: string) {
+  return useQuery({
+    queryKey: memoryReviewKey(workspaceId),
+    meta: workspaceMeta(workspaceId),
+    queryFn: () => apiFetch<MemoryReviewQueue>(reviewUrl(workspaceId)),
+    staleTime: 30_000,
+  })
+}
+
+// Approving sends a proposal back to the consolidator as reviewed; discarding
+// deletes it. Either changes the queue and what the workspace's memory counts.
+export function useSettleMemoryProposal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      proposalId,
+      action,
+    }: {
+      workspaceId: string
+      proposalId: string
+      action: "approve" | "discard"
+    }) =>
+      apiFetch<void>(
+        `${reviewUrl(workspaceId)}/${encodeURIComponent(proposalId)}/${action}`,
+        { method: "POST" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: memoryReviewKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: workspaceMemoryKey(workspaceId),
+      })
+    },
+  })
+}
+
 export function useEraseWorkspaceMemory() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -111,6 +160,9 @@ export function useEraseWorkspaceMemory() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: workspaceMemoryKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: memoryReviewKey(workspaceId),
       })
     },
   })
