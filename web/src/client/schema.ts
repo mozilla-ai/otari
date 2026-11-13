@@ -18482,7 +18482,11 @@ export interface components {
          *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
          *     their ``request_group_id``, so this is the request's whole bill rather than one
          *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
-         *     when no row was priced. ``status`` is ``error`` if any row is an error, and
+         *     when no row was priced. ``tool_cost_usd`` is the part of it that is per-call
+         *     tool charges, in the same format, for a completion (Chat Completions,
+         *     Messages, Responses); it is null where ``cost_usd`` is, for any other kind
+         *     of request, and where a row does not record it (written before the gateway
+         *     did, or whose tool calls could not be priced). ``status`` is ``error`` if any row is an error, and
          *     ``incomplete`` for a stream the client abandoned before the provider reported
          *     any usage.
          */
@@ -18502,6 +18506,8 @@ export interface components {
              * @enum {string}
              */
             status: "success" | "error" | "incomplete";
+            /** Tool Cost Usd */
+            tool_cost_usd: string | null;
             /** Total Tokens */
             total_tokens: number;
         };

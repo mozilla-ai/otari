@@ -1511,7 +1511,7 @@ async def test_a_charge_openrouter_states_settles_in_place_of_a_rate_nobody_chos
     row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
 
     assert row.cost == Decimal("0.000010")
-    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None)
+    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None, tool_cost=Decimal(0))
     assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == ("reported", None, None)
     assert (row.billing_meters, row.pricing_breakdown) == (None, None)
     assert row.calculated_at == row.timestamp

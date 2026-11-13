@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from any_fetch.providers.fake import FakeProvider as FakeFetchProvider
 from gateway.api.routes.chat import log_usage
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.settings.pricing import PricingConfig
 from gateway.core.settings.tools import BUILTIN_FETCH
 from gateway.core.usage import GatewayUsage
@@ -841,6 +841,8 @@ async def test_a_pricing_lookup_that_times_out_keeps_the_counts_on_the_row(async
     [row] = writer.logs
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE] == {"web_search": {"billed": 1, "errors": 0}}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
+    # The calls ran but could not be priced, so how much of the cost is tools is not known.
+    assert row.tool_cost is None
 
 
 @pytest.mark.asyncio
@@ -885,6 +887,48 @@ async def test_fetch_call_is_metered_priced_and_spent(
     assert line["cost"] == pytest.approx(_SEARCH_UNIT_COST)
     after = _spend(db_session_factory, user_id)
     assert after - before == pytest.approx(float(row.cost or 0), rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_the_response_and_its_settlement_say_how_much_of_the_cost_is_tool_charges(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """``usage.tool_cost_usd`` is the fetch fee, so ``cost_usd`` less it is the tokens' cost."""
+    _serve_fetch_on_fake(monkeypatch, test_config)
+    responses = [
+        _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
+        _completion(tool_call=False),
+    ]
+
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    usage = response.json()["usage"]
+    assert usage["tool_cost_usd"] == "0.010000"
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    assert row.tool_cost == Decimal("0.010000")
+    assert Decimal(usage["cost_usd"]) == row.cost
+    assert Decimal(usage["cost_usd"]) > Decimal(usage["tool_cost_usd"])
+
+    settled = client.get(f"{API_ROOT}/usage/requests/{response.headers[REQUEST_ID_HEADER]}", headers=api_key_header)
+    assert settled.status_code == 200, settled.text
+    assert (settled.json()["cost_usd"], settled.json()["tool_cost_usd"]) == (usage["cost_usd"], "0.010000")
 
 
 def _fetch_once(client: TestClient, headers: dict[str, str]) -> None:
@@ -1251,6 +1295,8 @@ async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: 
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 2
     assert row.cost is not None
     assert row.cost >= Decimal("0.02")
+    # The provider's searches are per-call charges too, so they are the row's tool cost.
+    assert row.tool_cost == Decimal("0.02")
 
 
 @pytest.mark.asyncio

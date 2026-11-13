@@ -5091,12 +5091,17 @@ class LoggedUsage(NamedTuple):
     deployment's account ran, whoever paid for the model call. ``None`` where
     neither part has a cost. ``deployment_paid_tools`` is that cost's gateway-run
     tool calls, per tool's pricing name.
+
+    ``tool_cost`` is the part of ``cost`` that is per-call tool charges, zero
+    where no tool was charged, and ``None`` where ``cost`` is or where the
+    tool calls could not be priced.
     """
 
     cost: Decimal | None
     pricing_source: SettledSource | None
     deployment_paid_cost: Decimal | None = None
     deployment_paid_tools: Mapping[str, ToolUse] = NO_TOOLS
+    tool_cost: Decimal | None = None
 
 
 async def record_usage(
@@ -5367,6 +5372,8 @@ async def record_usage(
     )
     if usage_log.cost is not None:
         usage_log.calculated_at = usage_log.timestamp
+    else:
+        usage_log.tool_cost = None
     deployment_paid_cost = (
         None if model_cost is None and tool_cost is None else (model_cost or Decimal(0)) + (tool_cost or Decimal(0))
     )
@@ -5392,7 +5399,7 @@ async def record_usage(
         )
 
     await log_writer.put(usage_log)
-    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost, paid_tools)
+    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost, paid_tools, usage_log.tool_cost)
 
 
 async def bills_per_request(
@@ -5442,12 +5449,17 @@ log_usage = _cost_only(record_usage)
 def inline_settlement(logged: LoggedUsage) -> SettledCost | None:
     """The inline cost a response carries for ``logged``, if any.
 
-    A priced result carries both fields, anything else (unpriced model,
-    fixed-amount estimate, no usage) carries neither.
+    A priced result carries ``cost_usd`` and ``pricing_source``, and
+    ``tool_cost_usd`` unless its tool calls could not be priced; anything else
+    (unpriced model, fixed-amount estimate, no usage) carries none of them.
     """
     if logged.cost is None or logged.pricing_source is None:
         return None
-    return SettledCost(cost_usd=f"{quantize_cost(logged.cost):.6f}", pricing_source=logged.pricing_source)
+    return SettledCost(
+        cost_usd=f"{quantize_cost(logged.cost):.6f}",
+        pricing_source=logged.pricing_source,
+        tool_cost_usd=None if logged.tool_cost is None else f"{quantize_cost(logged.tool_cost):.6f}",
+    )
 
 
 def _attach_settled_cost(adapter: FormatAdapter[ResultT, Any], result: ResultT, logged: LoggedUsage) -> None:
@@ -5473,7 +5485,8 @@ async def _apply_tool_charges(
     """Fold a request's gateway-run tool calls onto its usage row, returning the part the deployment's account ran.
 
     Writes the counts under the reserved ``tools`` meter namespace, appends one
-    charge line per tool and label, and adds their cost to the row's total.
+    charge line per tool and label, and adds their cost to the row's total and
+    records it as the row's ``tool_cost`` (zero where nothing was charged).
     ``None`` where the deployment's account ran nothing with a cost, beside that
     part's calls and cost per gateway-run tool. ``model_search_rate`` prices the
     searches the model's provider ran where the operator priced no row for them.
@@ -5484,6 +5497,7 @@ async def _apply_tool_charges(
     it could not be priced.
     """
     if tally is None or tally.is_empty():
+        usage_log.tool_cost = Decimal(0)
         return None, NO_TOOLS
 
     tool_meters = tally.meters()
@@ -5502,6 +5516,7 @@ async def _apply_tool_charges(
     calls = tally.label_calls()
     if not calls:
         commit_meters()
+        usage_log.tool_cost = Decimal(0)
         return None, NO_TOOLS
     try:
         charges = await price_tool_calls(
@@ -5528,6 +5543,7 @@ async def _apply_tool_charges(
 
     if charges.lines:
         usage_log.pricing_breakdown = list(usage_log.pricing_breakdown or []) + charges.lines
+    usage_log.tool_cost = charges.total
     if charges.total:
         usage_log.cost = (usage_log.cost or Decimal(0)) + charges.total
     for unpriced in charges.unpriced:

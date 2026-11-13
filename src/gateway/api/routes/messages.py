@@ -829,12 +829,7 @@ class _MessagesAdapter:
             return False
         if usage is None:
             return False
-        updated = usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        updated = usage.model_copy(update=settlement.usage_fields())
         value.usage = updated
         return True
 

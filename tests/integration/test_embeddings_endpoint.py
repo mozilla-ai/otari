@@ -761,6 +761,8 @@ def test_embeddings_response_carries_a_request_id_its_cost_can_be_looked_up_by(
         "request_id": request_id,
         "status": "success",
         "cost_usd": resp.json()["usage"]["cost_usd"],
+        # Only a completion splits its cost into tokens and tool charges.
+        "tool_cost_usd": None,
         "prompt_tokens": 1_000,
         "completion_tokens": 0,
         "total_tokens": 1_000,

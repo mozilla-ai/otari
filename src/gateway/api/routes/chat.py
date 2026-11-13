@@ -347,12 +347,7 @@ class _ChatAdapter:
     ) -> bool:
         if value.usage is None:
             return False
-        value.usage = value.usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        value.usage = value.usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
