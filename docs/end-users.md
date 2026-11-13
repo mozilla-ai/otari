@@ -36,9 +36,9 @@ cannot be deleted.
    names in the `Otari-End-User-Budget` header instead.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
-7. To manage end users with the key (step 4), set **Access** to **Service with
-   end users**. Left on **Call models**, the key makes model calls for its end
-   users but cannot list, change or delete them.
+7. To manage end users with the key (step 4), check what it needs under
+   **Access**, **End users**. With only **Call models** checked, the key makes
+   model calls for its end users but cannot list, change or delete them.
 8. Click **Create key** and copy the key.
 
 The key belongs to the organization, not to you:

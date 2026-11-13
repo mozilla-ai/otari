@@ -18,10 +18,11 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
 4. Click **Create key**, then copy the key. It is shown once, so store it
    before you close the dialog.
 
-**Access** sets what the key may call. It starts on **Call models**, which
-holds the `inference` scope alone. **Coding agent** adds what the Claude Code
-plugin's hooks, routing and telemetry need, **Usage import** holds what
-reporting usage from elsewhere needs, and **Custom** lists every scope; see
+**Access** sets what the key may call: one checkbox per scope, grouped by
+area (Models, Files, Batches, Tools, Coding agents, Usage, and End users on a
+service key). A group's own box checks or clears the whole group. A new key
+starts with **Call models** alone, the `inference` scope; the Claude Code
+plugin's hooks, routing and telemetry need the **Coding agents** group too. See
 [Scopes](#scopes). Edit a key to change its access later.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
