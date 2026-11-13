@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/4a0bd3f2e315602b8577e3da7031ffe30ae3765a/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/6322ef628ae4bcc2c338f30f1d41d75aba8b07a3/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -181,6 +181,16 @@ accepted models.dev snapshot), or `reported` (the charge the provider stated,
 which settles a completion in place of a rate nobody set; see
 [Configuration](https://docs.otari.ai/self-hosting/configuration#keeping-the-defaults-current)).
 
+A completion (Chat Completions, Messages, Responses) also carries
+`usage.tool_cost_usd` beside them, in the same format: the part of `cost_usd`
+that is per-call tool charges. That is every gateway-run tool call
+(`otari_web_search`, `otari_web_fetch`, `otari_code_execution`, MCP tools) plus
+the searches the model's own provider ran and billed per search, so
+`cost_usd` less `tool_cost_usd` is what the model's tokens cost. It is
+`"0.000000"` when no tool was charged (a tool with no price is not charged), and
+left out when looking up the tools' prices failed during settlement, since the
+gateway then cannot say how much of the cost they are.
+
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
 model, is recorded, debited and reported as `"0.000000"`. The usage row and
@@ -199,6 +209,14 @@ A speech model with no rate is refused with `402` `pricing_required` under
 `require_pricing`; see
 [Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit) for
 which rates price it.
+
+The direct [search](#search), [fetch](#fetch) and
+[code execution](#code-execution) endpoints return no `usage` object, so a
+served call carries its settled cost in `Otari-Cost-USD` and
+`Otari-Pricing-Source` too, under the same rule. `Otari-Pricing-Source` is
+`reported` when the provider stated what the call cost, which is what it
+settled at, and otherwise names the rate. A refused or failed call is not
+charged and carries neither.
 
 ### Who runs a built-in tool
 
@@ -406,6 +424,7 @@ looked up by its `Otari-Request-ID`:
   "request_id": "5f0c…",
   "status": "error",
   "cost_usd": "0.012400",
+  "tool_cost_usd": "0.000000",
   "prompt_tokens": 4100,
   "completion_tokens": 0,
   "total_tokens": 4100,
@@ -417,6 +436,7 @@ looked up by its `Otari-Request-ID`:
 |---|---|
 | Totals | The sum of every usage row the request wrote. A request routed through a policy writes one per attempt, all sharing the id as their `request_group_id`, so the total covers the attempts it fell over from as well as the one that served. |
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
+| `tool_cost_usd` | The part of `cost_usd` that is tool charges, as `usage.tool_cost_usd` reports it, summed over the rows. `null` when `cost_usd` is, for a request that is not a completion, and when any priced row does not record it: one written before the gateway recorded it, or one where looking up the tools' prices failed. |
 | `status` | `error` if any row is an error, `incomplete` for a stream the client abandoned before the provider reported any usage (billed on an estimate), otherwise `success`. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
@@ -728,6 +748,8 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 `search` or `fetch` override). A row written under the old
 `<provider>:<tool>` key is read after it, until a later release. See
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
+A served search carries what it settled at in `Otari-Cost-USD` and
+`Otari-Pricing-Source` ([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -747,6 +769,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
 | `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
 | A rate limit is full | 429 | `rate_limited` |
 | The workspace's organization search key cannot be used as it is | 502 | |
 | The provider failed the search, or could not be reached | 502 | |
@@ -848,7 +871,9 @@ provider's, or `max_chars` cut it. `raw` appears only when the request set
 price row of kind `fetch` keyed by the tool's name, `builtin_fetch` included.
 A fetch the workspace's organization fetch key served is priced under
 `otari:web_fetch` instead. See
-[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool). A served
+fetch carries what it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -917,7 +942,9 @@ Code that fails is still a `200`, and is billed: its `return_code` is nonzero,
 or its `stderr` carries the error. `files` lists each file the code wrote,
 stored in the Files API, so `GET /api/v1/files/{file_id}/content` downloads it;
 it is empty where the Files API is off. A held sandbox is named in
-`Otari-Container-Id` and `Otari-Container-Expires-At`.
+`Otari-Container-Id` and `Otari-Container-Expires-At`. A priced run carries what
+it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)); an unpriced one carries neither.
 
 **Errors.**
 
