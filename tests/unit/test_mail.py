@@ -26,6 +26,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
     ConsoleTransport,
+    MailDelivery,
     MailDeliveryError,
     MailEnvelope,
     Mailer,
@@ -404,36 +405,83 @@ async def test_send_never_raises_even_on_a_malformed_header() -> None:
     assert delivery.delivered is False
 
 
+_NOT_PLAIN = [
+    "grace@example.test(x.y)",
+    "x<grace@example.test>",
+    "<grace@example.test>",
+    "grace@example.test, ada@example.test",
+    "grace@example.test\r\nRCPT TO:<ada@example.test>",
+    "grace@example.test\n",
+    " grace@example.test",
+    "grace hopper@example.test",
+    '"grace\nhopper"@example.test',
+    "grace@example.test\x00",
+    "grace\u200b@example.test",
+    "grace@example.test\x1f",
+    "\x1cgrace@example.test",
+    ":" * 2000,
+]
+
+
 @pytest.mark.asyncio
-async def test_send_never_raises_on_a_crlf_in_an_address() -> None:
-    """smtplib puts the envelope addresses on the wire itself, so sanitizing the header is not enough.
-
-    ``build_mime`` sanitized the ``To`` header while ``sendmail`` received the
-    raw value, so a CR/LF in a recipient left the message clean and the wire
-    dirty: smtplib refused it with ``ValueError``, which was outside this
-    transport's except clause and propagated out of ``Mailer.send`` into the
-    caller's request. That is the never-raises contract broken, and it was
-    reachable by any caller that had not validated its address first (both of
-    today's had, which is precisely why nothing caught it).
-    """
-    config = _ready()
-    injected = "ada@example.com>\r\nRCPT TO:<attacker@evil.example"
-
+@pytest.mark.parametrize("recipient", ["", *_NOT_PLAIN])
+async def test_a_recipient_that_is_not_a_plain_address_is_never_handed_to_smtp(recipient: str) -> None:
     with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
         client = MagicMock()
         mock_smtp.return_value.__enter__.return_value = client
-        delivery = await Mailer(config).send(to=injected, message=MESSAGE)
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
 
-    # Did not raise, which is the contract.
-    assert delivery.transport == "smtp"
-    # And the addresses smtplib was handed carry no newline, which is why it
-    # cannot raise: asserting on the call rather than on the delivery outcome,
-    # because a mocked server would accept anything and prove nothing.
-    sender, recipients, _body = client.sendmail.call_args.args
-    assert "\r" not in sender and "\n" not in sender
-    for recipient in recipients:
-        assert "\r" not in recipient, recipient
-        assert "\n" not in recipient, recipient
+    assert delivery == MailDelivery(
+        delivered=False, transport="smtp", reason="The recipient is not a plain email address."
+    )
+    mock_smtp.assert_not_called()
+    client.sendmail.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", _NOT_PLAIN)
+async def test_a_recipient_that_is_not_a_plain_address_is_not_in_the_log(
+    recipient: str, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert "Failed to send mail to *** via smtp" in gateway_logs.text
+    assert "example.test" not in gateway_logs.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", ["grace", "grace@localhost", '"grace"@example.test', "grace\\x@example.test"])
+async def test_a_recipient_that_is_not_an_email_address_is_never_handed_to_smtp(recipient: str) -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert delivery.delivered is False
+    mock_smtp.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply_to", _NOT_PLAIN)
+async def test_a_reply_address_that_is_not_a_plain_address_is_never_handed_to_smtp(reply_to: str) -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        delivery = await Mailer(_ready()).send(to="support@example.com", message=MESSAGE, reply_to=reply_to)
+
+    assert delivery == MailDelivery(
+        delivered=False, transport="smtp", reason="The reply address is not a plain email address."
+    )
+    mock_smtp.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_envelope_recipient_is_exactly_the_address_given() -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        delivery = await Mailer(_ready()).send(to="Grace+Otari@Mail.Example.test", message=MESSAGE)
+
+    assert delivery.delivered is True
+    _sender, recipients, body = client.sendmail.call_args.args
+    assert recipients == ["Grace+Otari@Mail.Example.test"]
+    assert "\nTo: Grace+Otari@Mail.Example.test\n" in body
 
 
 def test_build_mime_puts_no_newline_in_any_header() -> None:
