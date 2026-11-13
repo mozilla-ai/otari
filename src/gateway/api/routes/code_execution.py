@@ -462,7 +462,7 @@ async def execute_code(
     )
 
 
-@catalog_router.get("/environments")
+@catalog_router.get("/environments", openapi_extra=key_scope(None))
 async def list_code_execution_environments(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     environments: CodeExecutionEnvironmentServiceDep,

@@ -35132,7 +35132,8 @@
         "summary": "List Code Execution Environments",
         "tags": [
           "code-execution"
-        ]
+        ],
+        "x-otari-key-scopes": []
       }
     },
     "/api/v1/code/execute": {
@@ -53456,7 +53457,8 @@
         "summary": "List Search Tool Catalog",
         "tags": [
           "search-tools"
-        ]
+        ],
+        "x-otari-key-scopes": []
       }
     },
     "/api/v1/search-tools/providers": {

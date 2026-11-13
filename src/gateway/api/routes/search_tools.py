@@ -112,7 +112,7 @@ async def list_search_providers(
     return search_provider_catalog(config, kind, operates=operates)
 
 
-@catalog_router.get("/catalog")
+@catalog_router.get("/catalog", openapi_extra=key_scope(None))
 async def list_search_tool_catalog(
     service: SearchToolServiceDep,
     organization_id: Annotated[uuid.UUID | None, Depends(catalog_reader_organization)],
