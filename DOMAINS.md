@@ -112,6 +112,11 @@ It also owns `models/users.py`, `repositories/users_repository.py` and
 
 The deployment's and the members' API keys, and which models a key may reach.
 
+A key's scopes say which endpoint groups it may call. They are a closed
+vocabulary several layers read, so the enum and its rules live in
+`types/key_scope.py` and the model imports them, as pricing does with
+`types/price_unit.py`.
+
 It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 
 ### budgets
