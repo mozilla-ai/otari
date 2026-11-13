@@ -303,6 +303,22 @@ class ApiKeyService:
         """
         if api_key is None:
             return None
+        allowed, owner = await self._tool_access(config, api_key)
+        if is_tool_allowed(allowed, tool):
+            return None
+        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
+        legacy_models: list[list[str]] = []
+        if api_key.allowed_tools is None and owner.tools is None:
+            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
+
+    async def tool_allowlist(self, config: GatewayConfig, api_key: APIKey) -> list[str] | None:
+        """The search and fetch tools ``api_key`` may run, as :meth:`tool_refusal` decides; ``None`` for all."""
+        allowed, _owner = await self._tool_access(config, api_key)
+        return allowed
+
+    async def _tool_access(self, config: GatewayConfig, api_key: APIKey) -> tuple[list[str] | None, AccessLists]:
+        """The key's tool allow-list and its owner's lists, read only when the key has no ``allowed_tools``."""
         owner = AccessLists(None, None)
         if api_key.allowed_tools is None and api_key.user_id is not None:
             async with self._uow:
@@ -314,13 +330,7 @@ class ApiKeyService:
             user_tools=owner.tools,
             user_models=owner.models,
         )
-        if is_tool_allowed(allowed, tool):
-            return None
-        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
-        legacy_models: list[list[str]] = []
-        if api_key.allowed_tools is None and owner.tools is None:
-            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
-        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
+        return allowed, owner
 
     async def pin_before_user_grant(
         self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None

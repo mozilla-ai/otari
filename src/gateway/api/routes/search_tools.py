@@ -38,10 +38,10 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from gateway.api.deps import (
+    SearchCatalogCallerDep,
     SearchToolServiceDep,
     SearchToolTesterDep,
     WebProviderClientDep,
-    WorkspaceWebSearchPoliciesDep,
     catalog_reader_operates_deployment,
     catalog_reader_organization,
     get_config,
@@ -53,7 +53,6 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings.tools import ToolInstance, ToolKind
 from gateway.inflight import track_request
-from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import (
     CreatedSearchToolSchema,
     CreateSearchToolRequest,
@@ -115,9 +114,10 @@ async def list_search_providers(
 @catalog_router.get("/catalog")
 async def list_search_tool_catalog(
     service: SearchToolServiceDep,
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     organization_id: Annotated[uuid.UUID | None, Depends(catalog_reader_organization)],
-    web_policies: WorkspaceWebSearchPoliciesDep,
+    caller: SearchCatalogCallerDep,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> SearchToolCatalogResponse:
     """List the search tools a direct search may name, with what one search costs the caller.
 
@@ -127,17 +127,13 @@ async def list_search_tool_catalog(
     search cannot run on are left out, and no key, endpoint or option is
     returned.
 
-    Called with an API key whose workspace does not allow web search, the list
-    is empty; ``GET /api/v1/tools`` says why. A master key or a dashboard
-    session gets the deployment's list.
+    Called with an API key, a tool the key's ``allowed_tools`` does not grant is
+    left out, and the list is empty when its workspace does not allow web
+    search; ``GET /api/v1/tools`` says why. A master key or a dashboard session
+    gets the deployment's list.
     """
-    api_key, _ = auth
-    if api_key is not None:
-        allowed, _policy = await web_policies.access(api_key.workspace_id)
-        if not allowed:
-            return SearchToolCatalogResponse(data=[])
     try:
-        return await service.catalog(organization_id)
+        return await service.catalog(organization_id, caller, skip=skip, limit=limit)
     except DATABASE_ERRORS as exc:
         raise database_error("list the search tool catalog", exc) from None
 

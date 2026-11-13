@@ -6387,9 +6387,10 @@ export interface paths {
          *     search cannot run on are left out, and no key, endpoint or option is
          *     returned.
          *
-         *     Called with an API key whose workspace does not allow web search, the list
-         *     is empty; ``GET /api/v1/tools`` says why. A master key or a dashboard
-         *     session gets the deployment's list.
+         *     Called with an API key, a tool the key's ``allowed_tools`` does not grant is
+         *     left out, and the list is empty when its workspace does not allow web
+         *     search; ``GET /api/v1/tools`` says why. A master key or a dashboard session
+         *     gets the deployment's list.
          */
         get: operations["search-tools-list_search_tool_catalog"];
         put?: never;
@@ -33617,7 +33618,12 @@ export interface operations {
     };
     "search-tools-list_search_tool_catalog": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -33631,6 +33637,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchToolCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

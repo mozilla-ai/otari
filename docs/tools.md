@@ -272,7 +272,9 @@ funds paid in, and so is a direct search on one of the deployment's tools. The
 deployment pays for, and `GET /api/v1/tools` lists the tool as unavailable with
 the same reason. A direct search, fetch or code run that reached its provider on
 the deployment's account is recorded as deployment-paid on its usage row, as a
-model call on a deployment-paid credential is.
+model call on a deployment-paid credential is. A call from a workspace with no
+organization is admitted with nothing to charge, so its usage row is not marked
+deployment-paid.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
@@ -1056,9 +1058,9 @@ its full name, so a Tavily key does not.
 
 `GET /api/v1/search-tools/catalog` lists the tools a direct search may name,
 with each one's price for the caller's organization and which is the default,
-and any API key may read it, as it reads `GET /api/v1/models`. It never returns
-a tool's key, endpoint or options, and an API key whose workspace has web access
-off gets an empty list.
+and any API key may read it, as it reads `GET /api/v1/models`. An API key sees
+only the tools its `allowed_tools` grants, and nothing when its workspace has
+web access off. It never returns a tool's key, endpoint or options.
 
 The request, the response and the errors are in the
 [API reference](api-reference.md#search).
