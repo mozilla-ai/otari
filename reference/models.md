@@ -200,7 +200,8 @@ uses:
   a reasoning model. It names only the parameters models.dev records a flag
   for, not every parameter the model takes. `response_format` is left out where
   Otari cannot send it to the provider, as on Bedrock for every model but
-  Anthropic's.
+  Anthropic's, or on MiniMax, Z.ai, Inception, SageMaker and llamafile for any
+  model.
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
