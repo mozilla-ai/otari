@@ -2232,7 +2232,7 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(patch?.[1]?.body)).exclude_from_budget).toBe(true)
   })
 
-  it("creates a key that calls models alone unless a preset says more", async () => {
+  it("creates a key with the scopes checked in the form", async () => {
     const fetchMock = mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -2243,7 +2243,9 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await pickOption(user, "Access", "Coding agent")
+    await user.click(
+      screen.getByRole("checkbox", { name: "All coding agents scopes" }),
+    )
     await submitTheCreateDialog(user)
 
     const post = fetchMock.mock.calls.find(

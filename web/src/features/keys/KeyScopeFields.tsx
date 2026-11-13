@@ -1,8 +1,5 @@
-import { useState } from "react"
-
 import type { KeyScope } from "@/client"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { Select } from "@/design-system/forms/Select"
 
 type ScopeInfo = {
   scope: KeyScope
@@ -55,55 +52,38 @@ const SCOPES: readonly ScopeInfo[] = Object.entries(SCOPE_INFO).map(
   ([scope, info]) => ({ scope: scope as KeyScope, ...info }),
 )
 
-const END_USER_SCOPES: ReadonlySet<KeyScope> = new Set([
-  "end_users:read",
-  "end_users:write",
-  "end_users:delete",
-])
-
-/** What a new key holds unless the form says otherwise, as the gateway's default does. */
-export const DEFAULT_KEY_SCOPES: readonly KeyScope[] = ["inference"]
-
-type Preset = {
-  id: string
+type ScopeGroup = {
   label: string
-  description: string
   scopes: readonly KeyScope[]
   serviceKeyOnly?: boolean
 }
 
-const PRESETS: readonly Preset[] = [
+/** How the form lays the scopes out. Each scope belongs to exactly one group. */
+const GROUPS: readonly ScopeGroup[] = [
+  { label: "Models", scopes: ["inference"] },
+  { label: "Files", scopes: ["files:read", "files:write"] },
+  { label: "Batches", scopes: ["batches:read", "batches:write"] },
   {
-    id: "models",
-    label: "Call models",
-    description: "Model calls alone. Enough for an app or an SDK.",
-    scopes: DEFAULT_KEY_SCOPES,
+    label: "Tools",
+    scopes: ["web", "code:execute", "mcp:read", "mcp:execute"],
   },
+  { label: "Coding agents", scopes: ["agents", "telemetry:write"] },
+  { label: "Usage", scopes: ["usage:read", "usage:write"] },
   {
-    id: "coding-agent",
-    label: "Coding agent",
-    description:
-      "Model calls, plus the Claude Code plugin's hooks, routing and telemetry.",
-    scopes: ["inference", "telemetry:write", "agents"],
-  },
-  {
-    id: "usage-import",
-    label: "Usage import",
-    description:
-      "Reports usage and telemetry from elsewhere, and calls no model.",
-    scopes: ["telemetry:write", "usage:write"],
-  },
-  {
-    id: "service",
-    label: "Service with end users",
-    description:
-      "Model calls, plus listing and managing its end users. Deleting them is not included.",
-    scopes: ["inference", "end_users:read", "end_users:write"],
+    label: "End users",
+    scopes: ["end_users:read", "end_users:write", "end_users:delete"],
     serviceKeyOnly: true,
   },
 ]
 
-const CUSTOM = "custom"
+const END_USER_SCOPES: ReadonlySet<KeyScope> = new Set(
+  GROUPS.filter((group) => group.serviceKeyOnly).flatMap(
+    (group) => group.scopes,
+  ),
+)
+
+/** What a new key holds unless the form says otherwise, as the gateway's default does. */
+export const DEFAULT_KEY_SCOPES: readonly KeyScope[] = ["inference"]
 
 /** The scopes once each, in the gateway's order, so two lists compare equal when they hold the same. */
 const ordered = (scopes: readonly KeyScope[]): KeyScope[] =>
@@ -119,22 +99,7 @@ export const heldScopes = (
 ): KeyScope[] =>
   ordered(scopes).filter((scope) => isServiceKey || !END_USER_SCOPES.has(scope))
 
-const presetFor = (
-  scopes: readonly KeyScope[],
-  isServiceKey: boolean,
-): Preset | undefined => {
-  const held = heldScopes(scopes, isServiceKey).join()
-  return PRESETS.find(
-    (preset) =>
-      (isServiceKey || !preset.serviceKeyOnly) &&
-      ordered(preset.scopes).join() === held,
-  )
-}
-
-/**
- * Which endpoint groups the key may call. A preset covers the common uses, and
- * "Custom" lists every scope, so a key can hold the least it needs.
- */
+/** Which endpoint groups the key may call. */
 export function KeyScopeFields({
   value,
   onChange,
@@ -145,77 +110,82 @@ export function KeyScopeFields({
   /** Whether the key is a service key, which alone may hold the end-user scopes. */
   isServiceKey: boolean
 }) {
-  // Custom stays open once chosen, even when the boxes happen to match a preset.
-  const [isCustom, setIsCustom] = useState(
-    () => presetFor(value, isServiceKey) === undefined,
-  )
-  const preset = isCustom ? undefined : presetFor(value, isServiceKey)
-  const showsList = isCustom || preset === undefined
   const held = heldScopes(value, isServiceKey)
-  const offered = SCOPES.filter(
-    (info) => isServiceKey || !END_USER_SCOPES.has(info.scope),
-  )
+  const groups = GROUPS.filter((group) => isServiceKey || !group.serviceKeyOnly)
 
-  const toggle = (scope: KeyScope, isSelected: boolean) =>
+  const set = (scopes: readonly KeyScope[], isSelected: boolean) =>
     onChange(
       ordered(
         isSelected
-          ? [...value, scope]
-          : value.filter((listed) => listed !== scope),
+          ? [...value, ...scopes]
+          : value.filter((listed) => !scopes.includes(listed)),
       ),
     )
 
   return (
-    <div className="flex flex-col gap-3 border border-control-border p-3">
-      <Select
-        label="Access"
-        value={preset?.id ?? CUSTOM}
-        onChange={(id) => {
-          const picked = PRESETS.find((candidate) => candidate.id === id)
-          setIsCustom(picked === undefined)
-          if (picked) onChange([...picked.scopes])
-        }}
-        options={[
-          ...PRESETS.filter(
-            (candidate) => isServiceKey || !candidate.serviceKeyOnly,
-          ).map((candidate) => ({
-            value: candidate.id,
-            label: candidate.label,
-          })),
-          { value: CUSTOM, label: "Custom" },
-        ]}
-        description={
-          preset
-            ? preset.description
-            : "What this key may call. A leaked key can do only this, whatever its owner can do."
-        }
-        isInvalid={held.length === 0}
-        errorMessage={held.length === 0 ? "Choose at least one" : undefined}
-      />
-      {showsList ? (
-        <fieldset className="flex flex-col gap-1">
-          <legend className="sr-only">Scopes</legend>
-          {offered.map((info) => (
-            <Checkbox
-              key={info.scope}
-              isSelected={held.includes(info.scope)}
-              onChange={(isSelected) => toggle(info.scope, isSelected)}
-              hasTouchTarget
-            >
-              <span className="flex flex-col">
-                <span>
-                  <span className="text-foreground">{info.label}</span>{" "}
-                  <code className="text-caption">{info.scope}</code>
+    <fieldset className="flex flex-col gap-3 border border-control-border p-3">
+      <legend className="px-1 text-sm font-medium text-foreground">
+        Access
+      </legend>
+      <p className="text-caption">
+        What this key may call. Grant only what it needs.
+      </p>
+      <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        {groups.map((group) => {
+          const count = group.scopes.filter((scope) =>
+            held.includes(scope),
+          ).length
+          return (
+            <div key={group.label} className="flex flex-col">
+              {group.scopes.length > 1 ? (
+                <Checkbox
+                  isSelected={count === group.scopes.length}
+                  isIndeterminate={count > 0 && count < group.scopes.length}
+                  onChange={(isSelected) => set(group.scopes, isSelected)}
+                  ariaLabel={`All ${group.label.toLowerCase()} scopes`}
+                >
+                  <span className="font-medium text-foreground">
+                    {group.label}
+                  </span>
+                </Checkbox>
+              ) : (
+                <span className="font-medium text-body text-foreground">
+                  {group.label}
                 </span>
-                {info.risk ? (
-                  <span className="text-caption text-warning">{info.risk}</span>
-                ) : null}
-              </span>
-            </Checkbox>
-          ))}
-        </fieldset>
+              )}
+              <div
+                className={`mt-1 flex flex-col gap-1.5${group.scopes.length > 1 ? " pl-6" : ""}`}
+              >
+                {group.scopes.map((scope) => {
+                  const info = SCOPE_INFO[scope]
+                  return (
+                    <Checkbox
+                      key={scope}
+                      isSelected={held.includes(scope)}
+                      onChange={(isSelected) => set([scope], isSelected)}
+                    >
+                      <span className="flex flex-col">
+                        <span className="text-foreground">{info.label}</span>
+                        <code className="text-caption">{scope}</code>
+                        {info.risk ? (
+                          <span className="text-caption text-warning">
+                            {info.risk}
+                          </span>
+                        ) : null}
+                      </span>
+                    </Checkbox>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {held.length === 0 ? (
+        <p role="alert" className="text-caption text-danger">
+          Choose at least one
+        </p>
       ) : null}
-      <p className="text-caption">No scope lets a key create or manage keys.</p>
-    </div>
+    </fieldset>
   )
 }
