@@ -60,11 +60,23 @@ A client ID and secret belong to one host. If you later change the server's
 **URL** to another host, saving clears them, and you enter the new host's
 client or leave it blank for Otari to register itself.
 
-A saved client also stays with the sign-in server it was first used with. If
-the MCP server later sends sign-ins to a different one, Otari refuses them
-before your client's secret goes there, and the message asks a workspace admin
-to save the OAuth client again. Enter the **Client secret** again and click
-**Save** to approve the new sign-in server.
+A saved client also stays with the sign-in server it was first used with: the
+server's address and the address Otari sends the client secret to. If the MCP
+server later sends sign-ins to a different one, or moves that second address,
+Otari refuses them before your client's secret goes there, and the message asks
+a workspace admin to save the OAuth client again.
+
+Saving it again approves whatever sign-in server the next sign-in finds, and
+the client secret is then sent there. Before you save, confirm with the
+provider that the new sign-in server is theirs and expected. Then enter the
+**Client secret** again and click **Save**.
+
+A client with no secret has nothing to enter again, and the settings form does
+not save an unchanged client ID. Approve the new sign-in server through the API
+instead: send the same client ID again,
+`PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}` with
+`{"oauth_client_id": "<the client ID>"}`. Members stay connected, since it is
+the same client.
 
 ## Connect your account
 

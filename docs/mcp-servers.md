@@ -91,7 +91,8 @@ A member who cannot add servers can ask for one from the catalog; see
 [Ask for a server](connect-your-account-to-an-mcp-server.md#ask-for-a-server).
 While anyone is waiting, **Requests** appears above the list, with the number
 of requests in its heading. Each entry is one server: its logo and name, who
-asked and when, and the note each person left.
+asked and when, and the note each person left. A server many people asked for
+names how many asked in all and shows the notes of the first five.
 
 - **Add** opens the catalog's confirm step for that server, where you choose
   **Shared account** or **Personal accounts** and its **Availability** as in

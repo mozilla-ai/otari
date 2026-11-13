@@ -222,7 +222,8 @@ On a server's page, an admin clicks the logo to open **Logo for** the server.
 It shows the logo on the light and the dark theme side by side. From there:
 
 - **Choose a PNG or SVG** to upload one. The browser crops it to a square and
-  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again.
+  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again
+  and that its whole image decodes, so a damaged file is refused.
 - **Tile behind the logo**: **Auto** adds a tile only on the theme where the
   logo would fade out, **Always** adds one on both, **Never** on neither.
 - **Remove uploaded logo** goes back to the server's own logo.
@@ -244,8 +245,9 @@ curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&workspace_id
 # The Popular servers the catalog holds.
 curl "https://otari.example.com/api/v1/mcp-catalog/popular" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
-# The logo of each of a workspace's servers, and whether it needs a tile.
-curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+# The logo of each of a workspace's servers, and whether it needs a tile. Pages as the
+# server list does: skip and limit, 100 by default, at most 1000.
+curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos?limit=100" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
 # An admin's own logo for a server, and the tile choice (auto, always or never).
 curl -X PUT "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/<server-id>/logo" \

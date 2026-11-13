@@ -143,11 +143,15 @@ an owner/admin of that workspace.
   `/api/v1/workspaces/{workspace_id}/mcp-server-requests`: `POST` asks, `GET
   /mine` lists the caller's own waiting requests and the answers they have not
   acknowledged, `POST /{request_id}/acknowledge` records that the caller has
-  seen an answer, `DELETE /{request_id}` withdraws one, and for a manager `GET` lists everyone waiting and `POST /decline` declines. Storing
-  a server at a requested URL approves the requests for it. Both lists take
-  `skip` and `limit`: `GET /mine` pages the caller's requests (50 by default,
-  at most 100), and `GET` pages the servers asked for (500 by default and at
-  most, with at most 500 requests on a page; `count` says how many wait in all). See
+  seen an answer, `DELETE /{request_id}` withdraws one, and for a manager `GET`
+  lists everyone waiting, `GET /requesters` lists everyone waiting for one
+  server, and `POST /decline` declines. Storing a server at a requested URL
+  approves the requests for it. Every list takes `skip` and `limit`: `GET
+  /mine` pages the caller's requests (50 by default, at most 100); `GET` pages
+  the servers asked for (100 by default and at most), naming the first five
+  requesters of each with `requester_count` for how many asked, and `count` for
+  how many wait in all; and `GET /requesters?catalog_name=...` pages one
+  server's requesters (100 by default and at most). See
   [Answer members' requests](mcp-servers.md#answer-members-requests).
 - `attach_by_default` (default `false`) adds the server to every model request
   from the workspace's keys; see [Attached to every request](#attached-to-every-request).
@@ -284,18 +288,29 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   each of these, Otari also asks the authorization server to revoke the
   tokens, best effort and only after the removal has committed; a removal
   that rolls back revokes nothing.
-- **Moving the server to another host drops its OAuth client.** A client ID
-  and secret a manager entered were issued for the old host, so a URL change
-  to another scheme or host clears them, unless the same change names a new
-  client. A change of path on the same host keeps them.
+- **Moving the server to another origin drops its OAuth client.** A client ID
+  and secret a manager entered were issued for the old origin, so a URL change
+  of scheme, host or port (`https://example.com` to `https://example.com:8443`
+  counts) clears them, unless the same change names a new client. A change of
+  path on the same origin keeps them.
 - **A saved OAuth client stays with its sign-in server.** The first sign-in
-  through a client a manager saved records the authorization server (its
-  issuer) the MCP server named. If the MCP server later names another one,
-  sign-in is refused with `mcp_oauth_issuer_changed` (`400`) before the
-  client's secret is sent anywhere, until a manager saves the client again:
-  a `PATCH` that sends `oauth_client_id` or `oauth_client_secret` clears the
-  record, and the next sign-in records the new server. A client Otari
-  registered itself is registered again with the new server instead.
+  through a client a manager saved records the authorization server the MCP
+  server named: its issuer and its token endpoint, where the client's secret
+  is sent. If the MCP server later names another issuer, or the same issuer
+  with another token endpoint, sign-in is refused with
+  `mcp_oauth_issuer_changed` (`400`) before the client's secret is sent
+  anywhere, until a manager saves the client again: a `PATCH` that sends
+  `oauth_client_id` or `oauth_client_secret` clears the record, and the next
+  sign-in records the new server. A sign-in already under way when the client
+  is saved again is not finished, and a renewal never sends the secret to a
+  token endpoint other than the recorded one. A client Otari registered
+  itself is registered again with the new server instead.
+- **A token goes only to the URL it was signed in for.** Each connection, and
+  a shared server's account, records the server URL its sign-in was made for.
+  A request that resolved the server before a URL edit, and reads a token a
+  sign-in made after it, does not send that token to the old URL: it is
+  answered as a token that could not be renewed (`503
+  mcp_credentials_unavailable` on discovery and execution), and can try again.
 - **The access list still comes first.** A key the ACL denies is told the
   server does not exist, whether or not its user has signed in.
 
@@ -470,7 +485,10 @@ Until a manager edits them, the labels follow the server: `read_tools` is the
 tools the server marks with MCP's `readOnlyHint`, as its last recorded tool
 listing reported them in `health.read_only_hinted_tools`, and
 `read_tools_from_server` is `true`. A server whose tools are not known yet has
-none, so `@read` allows nothing until a check or a request lists them.
+none, so `@read` allows nothing until a manager's check, or a request from a
+caller whose grant reaches the server, lists them. A caller whose only grant is
+`@read` cannot list them with its own request: resolution leaves the server
+out, or refuses it, before connecting.
 
 On upgrade, a server stored with no labels starts following the server too,
 unless its default policy or one of its grants already used `@read`. That one
@@ -497,11 +515,16 @@ trust to describe its own tools.
   server with `sign_in_required: true` and a `sign_in_url`, a completion that
   reaches it hands the model that link through a stand-in tool, and discovery
   and execution answer `403 mcp_sign_in_required` with the same `sign_in_url`.
-  The link is left out when Otari cannot make one: no `public_base_url` or
-  `OTARI_SECRET_KEY`, a key with no user, or a sign-in that ended while a call
-  was renewing its token. A caller that gets no link tells the user to connect
-  the server from the dashboard, then tries again.
+  The same holds for a sign-in that ended while a call was renewing its
+  token. The link is left out only when Otari cannot make one, with no
+  `public_base_url` or `OTARI_SECRET_KEY`; a caller that gets no link tells
+  the user to connect the server from the dashboard, then tries again.
   See [Signing in from the conversation](#signing-in-from-the-conversation).
+- **A key with no user cannot use a per-user server.** Nobody can sign in for
+  it, so no link is made: `GET /api/v1/mcp/servers` leaves the server out, and
+  discovery and execution answer `404 mcp_server_not_found`. Connecting the
+  server from the dashboard does not change this; use a key that belongs to a
+  user.
 - **A tool outside the key's rule is never offered to the model.** On
   `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
 - **In a completion, the model is told what it may not use.** The server's line in
