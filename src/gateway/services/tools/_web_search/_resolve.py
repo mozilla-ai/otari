@@ -60,7 +60,6 @@ from gateway.core.settings.tools import (
     ToolSettings,
     configured_fetch_default,
     default_api_base,
-    direct_search_fallback,
     effective_fetch_instances,
     effective_search_instances,
     inherits_web_search_engines,
@@ -82,7 +81,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search._cost_tier import refused_cost_tier
-from gateway.services.tools._web_search._default import in_loop_default
+from gateway.services.tools._web_search._default import direct_search_fallback, in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
     ORGANIZATION_KEY_LABEL_PREFIX,
