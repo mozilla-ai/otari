@@ -1159,12 +1159,16 @@ async def viewer_organization(
 
 
 def viewer_reads_usage(caller: tuple[APIKey | None, bool] | None) -> bool:
-    """Whether this viewer may read its organization's usage beside the catalog.
+    """Whether this viewer reads usage at all, before the organization it would read is known.
 
-    An API key needs ``usage:read``, the scope the usage routes require, so a key
-    that only calls models learns nothing about what its organization spends.
+    A visitor the public catalog admits reads none. An API key needs
+    ``usage:read``, the scope the usage routes require, so a key that only calls
+    models learns nothing about what its organization spends. The master key and
+    a dashboard session read. Which organization is the caller's own question.
     """
-    api_key = caller[0] if caller is not None else None
+    if caller is None:
+        return False
+    api_key, _ = caller
     return api_key is None or api_key.holds_scope(KeyScope.USAGE_READ)
 
 
