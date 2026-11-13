@@ -8,6 +8,7 @@ the pricing snapshot.
 import uuid
 from typing import TYPE_CHECKING, NamedTuple
 
+from any_llm import AnyLLM
 from pydantic import BaseModel, Field
 
 from gateway.core.config import GatewayConfig
@@ -103,10 +104,15 @@ def _entry(
 def _sends_response_format(provider_type: str, model_id: str) -> bool:
     """Whether any-llm passes ``response_format`` to this provider's model rather than refusing it.
 
-    Its Bedrock provider sends it only to Anthropic models, as a forced tool
-    call, whatever models.dev says the model can do.
+    any-llm answers per model (Bedrock takes it only for Claude), whatever
+    models.dev says the model can do. A provider any-llm cannot resolve answers
+    yes, so the listing keeps models.dev's flag rather than dropping it on a guess.
     """
-    return provider_type != "bedrock" or "anthropic." in model_id
+    try:
+        provider_class = AnyLLM.get_provider_class(provider_type)
+    except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
+        return True
+    return provider_class.supports_completion_response_format(model_id)
 
 
 def model_limits(
