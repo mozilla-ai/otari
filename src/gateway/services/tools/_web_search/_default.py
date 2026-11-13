@@ -23,6 +23,19 @@ from gateway.log_config import logger
 from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 
 
+def direct_search_fallback(settings: ToolSettings) -> SynthesizedSearchInstance | None:
+    """The legacy backend the direct endpoint serves, or ``None``: only a deployment with no search instance has one.
+
+    None either where a fetch instance has its name, which an ``allowed_tools`` entry would then grant both.
+    """
+    if effective_search_instances(settings):
+        return None
+    fallback = synthesized_search_instance(settings)
+    if fallback is None or fallback.name in effective_fetch_instances(settings):
+        return None
+    return fallback
+
+
 def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchInstance | None:
     """The search backend the in-loop tool uses when no credential applies.
 

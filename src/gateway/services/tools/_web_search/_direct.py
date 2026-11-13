@@ -42,7 +42,6 @@ from gateway.core.settings.tools import (
     ToolKind,
     ToolSettings,
     configured_search_default,
-    direct_search_fallback,
     effective_search_instances,
 )
 from gateway.exceptions.tools_exceptions import (
@@ -55,6 +54,7 @@ from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
 from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
+from gateway.services.tools._web_search._default import direct_search_fallback
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
     direct_count,

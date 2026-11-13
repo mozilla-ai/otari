@@ -36,8 +36,8 @@ from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT
 from gateway.core.settings.tools import (
     ALL_SEARCH_TOOLS,
     ToolKind,
-    direct_search_fallback,
     effective_fetch_instances,
+    synthesized_search_instance,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
@@ -251,8 +251,8 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
     """Validate a write of ``allowed_tools``. ``None`` and ``[]`` pass through as-is.
 
     An entry is a search or fetch tool's name, configured or stored,
-    ``builtin_fetch`` included, the legacy search backend's on a deployment
-    with no search tool, or ``*``. Raises ``ValueError`` (a 400 at the
+    ``builtin_fetch`` included, the legacy search backend's, which a
+    deployment with no search tool serves under it, or ``*``. Raises ``ValueError`` (a 400 at the
     caller) on any other; duplicates are collapsed.
     """
     if entries is None:
@@ -261,7 +261,7 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
         raise ValueError("allowed_tools must be a list of strings, [] to deny all, or null to inherit")
     names: list[str] = []
     fetch_tools = effective_fetch_instances(config)
-    legacy = direct_search_fallback(config)
+    legacy = synthesized_search_instance(config)
     known = {*config.search_tools, *fetch_tools, *([legacy.name] if legacy is not None else [])}
     for entry in entries:
         if not isinstance(entry, str):

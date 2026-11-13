@@ -2379,3 +2379,23 @@ def test_a_deployment_with_a_search_tool_ignores_the_legacy_settings_for_direct_
         assert unnamed.status_code == 200, unnamed.text
         assert unnamed.json()["search_tool"] == "fake-search"
         assert seen == []
+
+
+def test_a_fetch_tool_named_like_the_legacy_engine_keeps_it_from_direct_search(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key granted the fetch tool by name would otherwise run a deployment-paid search under the same grant."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    shared_name = {**_LEGACY_TAVILY, "fetch_tools": {"tavily": {"provider": "fake"}}}
+    for client in _client_on(test_config, **shared_name):
+        headers = _keyed(client, master_key_header, "legacy-fetch-name")
+        seen = _provider_answers(client, _TAVILY_ANSWER)
+
+        named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+        unnamed = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+        catalog = client.get(f"{API_ROOT}/search-tools/catalog", headers=headers)
+
+        assert [named.status_code, unnamed.status_code] == [400, 400]
+        assert named.json()["detail"].startswith("No search tools are configured.")
+        assert catalog.json()["data"] == []
+        assert seen == []
