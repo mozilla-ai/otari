@@ -3872,10 +3872,7 @@ async def _declare_claims(
     *,
     beside_sandbox: bool,
 ) -> _DeclaredClaims | _ToolRefusal:
-    """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be.
-
-    A tool Otari runs needs the same scope on the request's key as the endpoint that runs it directly.
-    """
+    """What a candidate is sent where Otari runs the provider keywords in ``claimed``, or why it cannot be."""
     try:
         admitted = await code.admit(claimed=CODE_EXECUTION_TOOL_NAME in claimed, beside_sandbox=beside_sandbox)
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
@@ -3930,14 +3927,10 @@ def _declares_mcp(declared: DeclaredTools) -> bool:
 def _require_declared_tool_scopes(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
 ) -> None:
-    """Hold the request's key to a scope for each tool it declared.
-
-    A scope says what the caller may ask for. Which candidate ends up running the
-    tool is this deployment's answer, settled per attempt from headers and policy,
-    so a key that may not search the web may not ask for a search at all.
+    """Hold the request's key to a scope for each tool it declared, whoever would run it.
 
     Raises:
-        TenancyError: the key lacks the scope one of the declared tools needs.
+        HTTPException: the key lacks the scope one of the declared tools needs.
     """
     for tool in BUILTIN_TOOLS:
         if tool.declares(declared.tools) and (missing := _missing_scope(ctx, tool.key_scope, f"the {tool.name} tool")):

@@ -178,9 +178,9 @@ owner can do.
 | `files:write` | Upload and delete files |
 | `batches:read` | List batches and read their results |
 | `batches:write` | Create and cancel batches |
-| `web:search` | Search the web, directly or as a tool Otari runs during a model call |
-| `web:fetch` | Fetch a web page, directly or as a tool Otari runs during a model call |
-| `code:execute` | Run code, directly or as a tool Otari runs during a model call |
+| `web:search` | Search the web, directly or by declaring a search in a model call |
+| `web:fetch` | Fetch a web page, directly or by declaring a fetch in a model call |
+| `code:execute` | Run code, directly or by declaring a code run in a model call |
 | `mcp:read` | List MCP servers and their tools |
 | `mcp:execute` | Call MCP tools, directly or during a model call |
 | `telemetry:write` | Send OpenTelemetry traces, logs and metrics |
@@ -213,9 +213,12 @@ key may hold the `end-users` scopes.
 
 A request whose key lacks the scope an endpoint needs is refused with `403`,
 and the message names the scope, except on the MCP routes, which answer every
-refusal with the same fixed `forbidden` error. A model call that asks Otari to run a web,
-code execution or MCP tool needs that tool's scope too, and one that attaches a
-stored file by its `file_id` needs `files:read`. The master key holds
+refusal with the same fixed `forbidden` error. A model call that declares a web,
+code execution or MCP tool needs that tool's scope too, whoever ends up running
+it: naming a provider's own search or code keyword needs the scope as much as
+asking Otari to run one, because which of them runs it is the deployment's
+answer rather than the caller's. A call that attaches a stored file by its
+`file_id` needs `files:read`. The master key holds
 every scope. Each operation in the [OpenAPI specification](public/openapi.json)
 lists the scopes it needs in `x-otari-key-scopes`, empty where every key may
 call it.
