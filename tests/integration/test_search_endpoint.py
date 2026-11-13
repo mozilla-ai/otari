@@ -32,7 +32,15 @@ from gateway.api.deps import (
     get_web_provider_client,
     get_workspace_web_search_policies,
 )
-from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    REQUEST_ID_HEADER,
+    GatewayConfig,
+    RateLimitRule,
+)
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import (
     SearchToolNotFoundError,
@@ -136,6 +144,8 @@ def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str])
         headers=api_key_header,
     )
     assert resp.status_code == 200
+    # The fake reports what the call cost, which is what it settles at.
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.007000", "reported")
     data = resp.json()
     assert data["object"] == "search"
     assert data["search_tool"] == "fake-search"
@@ -270,6 +280,7 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
         named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.005000", "deployment")
     assert resp.json()["search_tool"] == "web_search"
     assert resp.json()["results"][0]["snippet"] == "From the old client."
     credential = keyed.call_args.args[0]
@@ -451,6 +462,7 @@ def test_search_provider_error_is_502(client: TestClient, api_key_header: dict[s
     payload = {**SEARCH_PAYLOAD, "provider_options": {"error": "INVALID_API_KEY", "error_status": 401}}
     resp = client.post(f"{API_ROOT}/search/fake-search", json=payload, headers=api_key_header)
     assert resp.status_code == 502
+    assert COST_USD_HEADER not in resp.headers, "a failed call is refunded, so it names no cost"
     detail = resp.json()["detail"]
     assert "INVALID_API_KEY" not in detail
     assert "provider" in detail.lower()

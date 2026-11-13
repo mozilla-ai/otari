@@ -210,6 +210,14 @@ A speech model with no rate is refused with `402` `pricing_required` under
 [Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit) for
 which rates price it.
 
+The direct [search](#search), [fetch](#fetch) and
+[code execution](#code-execution) endpoints return no `usage` object, so a
+served call carries its settled cost in `Otari-Cost-USD` and
+`Otari-Pricing-Source` too, under the same rule. `Otari-Pricing-Source` is
+`reported` when the provider stated what the call cost, which is what it
+settled at, and otherwise names the rate. A refused or failed call is not
+charged and carries neither.
+
 ### Who runs a built-in tool
 
 The `Otari-Code-Execution`, `Otari-Web-Search` and `Otari-Web-Fetch` request
@@ -740,6 +748,8 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 `search` or `fetch` override). A row written under the old
 `<provider>:<tool>` key is read after it, until a later release. See
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
+A served search carries what it settled at in `Otari-Cost-USD` and
+`Otari-Pricing-Source` ([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -759,6 +769,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
 | `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
 | A rate limit is full | 429 | `rate_limited` |
 | The workspace's organization search key cannot be used as it is | 502 | |
 | The provider failed the search, or could not be reached | 502 | |
@@ -860,7 +871,9 @@ provider's, or `max_chars` cut it. `raw` appears only when the request set
 price row of kind `fetch` keyed by the tool's name, `builtin_fetch` included.
 A fetch the workspace's organization fetch key served is priced under
 `otari:web_fetch` instead. See
-[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool). A served
+fetch carries what it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -929,7 +942,9 @@ Code that fails is still a `200`, and is billed: its `return_code` is nonzero,
 or its `stderr` carries the error. `files` lists each file the code wrote,
 stored in the Files API, so `GET /api/v1/files/{file_id}/content` downloads it;
 it is empty where the Files API is off. A held sandbox is named in
-`Otari-Container-Id` and `Otari-Container-Expires-At`.
+`Otari-Container-Id` and `Otari-Container-Expires-At`. A priced run carries what
+it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)); an unpriced one carries neither.
 
 **Errors.**
 

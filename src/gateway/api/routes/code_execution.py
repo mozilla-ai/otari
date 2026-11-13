@@ -45,6 +45,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
+from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS
 from gateway.api.routes._passthrough import resolve_passthrough_user_id
 from gateway.api.routes._pipeline import (
     SANDBOX_UNAVAILABLE_DETAIL,
@@ -52,7 +53,7 @@ from gateway.api.routes._pipeline import (
     _elapsed_ms,
     log_gateway_rejection,
 )
-from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
+from gateway.core.config import COST_USD_HEADER, END_USER_BUDGET_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
@@ -106,7 +107,7 @@ _DECLARATION: list[dict[str, Any]] = [{"type": "otari_code_execution"}]
 _PRICING_KEY = gateway_tool_pricing_key(CODE_EXECUTION_TOOL_NAME)
 
 
-@router.post("/execute")
+@router.post("/execute", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
 async def execute_code(
     raw_request: Request,
     response: Response,
@@ -131,7 +132,8 @@ async def execute_code(
     each file the code writes comes back with a ``file_id``. ``container: "auto"``
     holds the sandbox after the run and names it in ``Otari-Container-Id``;
     sending that id back runs in the same sandbox, with its files and
-    interpreter state.
+    interpreter state. A priced run answers with its settled cost in
+    ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
@@ -408,6 +410,9 @@ async def execute_code(
         )
     await reconcile_reservation(db, reservation, cost)
 
+    if rate is not None:
+        response.headers[COST_USD_HEADER] = f"{cost:.6f}"
+        response.headers[PRICING_SOURCE_HEADER] = rate.source
     if backend.lease is not None:
         response.headers["Otari-Container-Id"] = backend.lease.container_id
         response.headers["Otari-Container-Expires-At"] = backend.lease.expires_at.isoformat()

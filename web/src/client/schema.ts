@@ -1363,7 +1363,8 @@ export interface paths {
          *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
          *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
          *     sending that id back runs in the same sandbox, with its files and
-         *     interpreter state.
+         *     interpreter state. A priced run answers with its settled cost in
+         *     ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -24549,6 +24550,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -25033,6 +25038,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -25069,6 +25078,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -33435,6 +33448,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -33720,6 +33737,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
