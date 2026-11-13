@@ -77,6 +77,7 @@ const TITLE = "Welcome to Otari"
 
 describe("WelcomeDialog", () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     localStorage.clear()
   })
@@ -178,6 +179,7 @@ describe("WelcomeDialog", () => {
   })
 
   it("closes and opens the Overview once the connection is approved", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     mockApi({
       statuses: [
         { status: "idle" },
@@ -191,19 +193,51 @@ describe("WelcomeDialog", () => {
       location: { replace: vi.fn() },
     }
     vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await renderDialog()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Connect otari.ai" }),
+    )
+    expect(await screen.findByText("WXYZ-1234")).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(3_000)
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    expect(await screen.findByText("OVERVIEW")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+    expect(localStorage.getItem(WELCOME_ANSWERED_KEY)).not.toBeNull()
+  })
+
+  it("closes the blank approval tab when dismissed before the gateway answers", async () => {
+    mockApi()
+    vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input, init) => {
+      const path = String(input)
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (path === "/organizations/me") return organizationContext()
+      if (path.startsWith("/hosted-providers")) return { data: [] }
+      if (path === "/platform/connect" && method === "POST") {
+        return new Promise(() => {})
+      }
+      return { status: "idle" }
+    })
+    const tab = {
+      opener: window as Window | null,
+      close: vi.fn(),
+      location: { replace: vi.fn() },
+    }
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window)
     const user = userEvent.setup()
     await renderDialog()
 
     await user.click(
       await screen.findByRole("button", { name: "Connect otari.ai" }),
     )
-
-    expect(
-      await screen.findByText("OVERVIEW", {}, { timeout: 8000 }),
-    ).toBeInTheDocument()
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    await user.click(
+      screen.getByRole("button", { name: "Skip, I’ll use my own keys" }),
     )
-    expect(localStorage.getItem(WELCOME_ANSWERED_KEY)).not.toBeNull()
-  }, 15000)
+
+    await waitFor(() => expect(tab.close).toHaveBeenCalled())
+  })
 })

@@ -56,13 +56,20 @@ export function usePlatformConnectFlow(
     }
   }, [state, onConnected])
 
+  // The blank tab while the gateway has not answered. The per-call callbacks
+  // below do not run once the caller unmounts, so the tab is closed here then.
+  const waitingTab = useRef<Window | null>(null)
+  useEffect(() => () => waitingTab.current?.close(), [])
+
   const connect = () => {
     // Opened while the press is still the active gesture: a tab opened after
     // the gateway answers is one a browser blocks. The link stays on the page
     // for a browser that blocks this one too.
     const tab = window.open("", "_blank")
+    waitingTab.current = tab
     start.mutate(undefined, {
       onSuccess: (started) => {
+        waitingTab.current = null
         const link = approvalLink({ status: "pending", ...started })
         if (!tab) return
         if (!link) {
@@ -72,7 +79,10 @@ export function usePlatformConnectFlow(
         tab.opener = null
         tab.location.replace(link)
       },
-      onError: () => tab?.close(),
+      onError: () => {
+        waitingTab.current = null
+        tab?.close()
+      },
     })
   }
 
