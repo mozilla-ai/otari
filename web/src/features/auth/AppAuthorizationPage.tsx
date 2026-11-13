@@ -6,6 +6,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { ProductMark } from "@/design-system/ProductMark"
+import { SCOPE_INFO } from "@/features/keys/scopes"
 import {
   useAuthorizeOAuthApp,
   useOAuthApp,
@@ -101,11 +102,24 @@ export function AppAuthorizationPage() {
                 className="mt-0.5 size-4 shrink-0 text-muted"
               />
               <div className="flex flex-col gap-1">
-                <p className="text-emphasis">Use your models and tools</p>
-                <p className="text-caption">
-                  The app can send AI requests using the access you have in this
-                  workspace.
+                <p className="text-emphasis">
+                  {app.data.scopes.length === 1
+                    ? "One thing, with the access you have in this workspace"
+                    : `${app.data.scopes.length} things, with the access you have in this workspace`}
                 </p>
+                <ul className="flex flex-col gap-1">
+                  {app.data.scopes.map((scope) => (
+                    <li key={scope} className="text-caption">
+                      {SCOPE_INFO[scope].label}
+                      {SCOPE_INFO[scope].risk ? (
+                        <span className="text-warning">
+                          {" "}
+                          &middot; {SCOPE_INFO[scope].risk}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
             <div className="flex items-start gap-3">

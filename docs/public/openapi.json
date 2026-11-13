@@ -2114,6 +2114,7 @@
         "type": "object"
       },
       "AppDetails": {
+        "description": "What the consent screen shows about an app before a person approves it.",
         "properties": {
           "issuer": {
             "title": "Issuer",
@@ -2126,12 +2127,21 @@
           "redirect_uri": {
             "title": "Redirect Uri",
             "type": "string"
+          },
+          "scopes": {
+            "description": "The scopes each key this app is issued will hold, from its registration.",
+            "items": {
+              "$ref": "#/components/schemas/KeyScope"
+            },
+            "title": "Scopes",
+            "type": "array"
           }
         },
         "required": [
           "name",
           "redirect_uri",
-          "issuer"
+          "issuer",
+          "scopes"
         ],
         "title": "AppDetails",
         "type": "object"

@@ -9547,7 +9547,10 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppDetails */
+        /**
+         * AppDetails
+         * @description What the consent screen shows about an app before a person approves it.
+         */
         AppDetails: {
             /** Issuer */
             issuer: string;
@@ -9555,6 +9558,11 @@ export interface components {
             name: string;
             /** Redirect Uri */
             redirect_uri: string;
+            /**
+             * Scopes
+             * @description The scopes each key this app is issued will hold, from its registration.
+             */
+            scopes: components["schemas"]["KeyScope"][];
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {

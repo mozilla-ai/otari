@@ -65,7 +65,12 @@ def test_client_metadata_accepts_registered_ids_with_slashes(client: TestClient,
     test_config.oauth_apps[client_id] = OAuthAppConfig(name="Team app", redirect_uris=[REDIRECT])
     response = client.get(f"{API_ROOT}/oauth/apps/clients", params={"client_id": client_id, "redirect_uri": REDIRECT})
     assert response.status_code == 200, response.text
-    assert response.json() == {"name": "Team app", "redirect_uri": REDIRECT, "issuer": "http://testserver"}
+    assert response.json() == {
+        "name": "Team app",
+        "redirect_uri": REDIRECT,
+        "issuer": "http://testserver",
+        "scopes": ["inference:run"],
+    }
 
 
 def test_base64_state_survives_both_authorization_steps(client: TestClient, world: _World) -> None:
