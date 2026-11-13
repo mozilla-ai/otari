@@ -322,10 +322,10 @@ def test_a_declared_key_holds_its_scopes_and_a_change_to_them_is_written_back(te
         (key,) = _declared_keys(client)
         assert key["scopes"] == unscoped_key_scopes(is_service_key=True)
 
-    with _boot(_config(test_config, mlpa=_key(scopes=["inference", "end_users:read"]))) as client:
+    with _boot(_config(test_config, mlpa=_key(scopes=["inference:run", "end-users:read"]))) as client:
         assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["scopes"] == [
-            "inference",
-            "end_users:read",
+            "inference:run",
+            "end-users:read",
         ]
         refused = client.delete(f"{API_ROOT}/end-users/alice", headers={API_KEY_HEADER: f"Bearer {SECRET}"})
         assert refused.status_code == 403, refused.text

@@ -111,12 +111,12 @@ def _organization_service_key() -> ColumnElement[bool]:
 
 # The ``scopes`` field's description on every surface that writes a key.
 CREATE_SCOPES_DESCRIPTION = (
-    "The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and "
-    "nothing else. The end_users scopes are a service key's alone."
+    "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and "
+    "nothing else. The end-users scopes are a service key's alone."
 )
 UPDATE_SCOPES_DESCRIPTION = (
     "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. "
-    "Takes effect on the key's next request. The end_users scopes are a service key's alone."
+    "Takes effect on the key's next request. The end-users scopes are a service key's alone."
 )
 
 

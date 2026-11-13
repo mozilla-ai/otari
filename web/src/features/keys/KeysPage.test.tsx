@@ -2251,9 +2251,9 @@ describe("KeysPage", () => {
         (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body)).scopes).toEqual([
-      "inference",
+      "inference:run",
       "telemetry:write",
-      "agents",
+      "agents:write",
     ])
   })
 
@@ -2275,7 +2275,9 @@ describe("KeysPage", () => {
         String(u).endsWith(`${API_ROOT}/keys`) &&
         (init?.method ?? "") === "POST",
     )
-    expect(JSON.parse(String(post?.[1]?.body)).scopes).toEqual(["inference"])
+    expect(JSON.parse(String(post?.[1]?.body)).scopes).toEqual([
+      "inference:run",
+    ])
   })
 
   it("narrows an existing key's scopes via PATCH", async () => {
@@ -2284,7 +2286,7 @@ describe("KeysPage", () => {
         apiKey({
           id: "key-1",
           key_name: "ci-bot",
-          scopes: ["inference", "usage:read"],
+          scopes: ["inference:run", "usage:read"],
         }),
       ],
     })
@@ -2304,12 +2306,16 @@ describe("KeysPage", () => {
         String(u).includes(`${API_ROOT}/keys/key-1`) &&
         (init?.method ?? "") === "PATCH",
     )
-    expect(JSON.parse(String(patch?.[1]?.body)).scopes).toEqual(["inference"])
+    expect(JSON.parse(String(patch?.[1]?.body)).scopes).toEqual([
+      "inference:run",
+    ])
   })
 
   it("will not save a key with no scope", async () => {
     mockApi({
-      keys: [apiKey({ id: "key-1", key_name: "ci-bot", scopes: ["web"] })],
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", scopes: ["web:search"] }),
+      ],
     })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -2317,7 +2323,7 @@ describe("KeysPage", () => {
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await chooseAction(user, row, "Edit")
     await user.click(
-      await screen.findByRole("checkbox", { name: /Search and fetch the web/ }),
+      await screen.findByRole("checkbox", { name: /Search the web/ }),
     )
 
     expect(screen.getByText("Choose at least one")).toBeInTheDocument()

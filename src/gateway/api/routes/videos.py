@@ -114,7 +114,7 @@ def job_response(job: VideoJob, *, provider: str) -> VideoJobResponse:
     )
 
 
-@router.post("", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_video(
     raw_request: Request,
     response: Response,
@@ -348,7 +348,7 @@ async def _retrieve(
     return record, job, provider, kwargs
 
 
-@router.get("/{video_id}", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.get("/{video_id}", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def retrieve_video(
     video_id: str,
     raw_request: Request,
@@ -379,7 +379,7 @@ async def retrieve_video(
         status.HTTP_409_CONFLICT: {"description": "The job has not completed"},
         status.HTTP_502_BAD_GATEWAY: {"description": "LLM provider error"},
     },
-    openapi_extra=key_scope(KeyScope.INFERENCE),
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def retrieve_video_content(
     video_id: str,
@@ -419,7 +419,7 @@ async def retrieve_video_content(
     return Response(content=content, media_type=output.mime_type)
 
 
-@router.get("", response_model=VideoJobList, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.get("", response_model=VideoJobList, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def list_videos(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     jobs: VideoJobServiceDep,

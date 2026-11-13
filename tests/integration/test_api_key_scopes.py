@@ -44,7 +44,7 @@ def test_a_key_created_without_scopes_calls_models_and_nothing_else(
     key = _create(client, master_key_header)
     headers = _header(key)
 
-    assert key["scopes"] == ["inference"]
+    assert key["scopes"] == ["inference:run"]
     assert "'usage:read'" in _refusal(client.get(f"{API_ROOT}/key/budget", headers=headers))
     # The MCP routes answer every refusal with one fixed message per code, so this one names no scope.
     mcp = client.get(f"{API_ROOT}/mcp/servers", headers=headers)
@@ -60,12 +60,12 @@ def test_a_key_reaches_only_the_groups_it_holds(client: TestClient, master_key_h
     chat = {"model": "openai:gpt-4o-mini", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}
 
     assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_200_OK
-    assert "'inference'" in _refusal(client.post(f"{API_ROOT}/chat/completions", json=chat, headers=headers))
-    assert "'inference'" in _refusal(client.post(f"{API_ROOT}/messages", json=chat, headers=headers))
-    assert "'inference'" in _refusal(client.post(f"{API_ROOT}/embeddings", json={}, headers=headers))
-    assert "'web'" in _refusal(client.post(f"{API_ROOT}/search", json={"query": "q"}, headers=headers))
+    assert "'inference:run'" in _refusal(client.post(f"{API_ROOT}/chat/completions", json=chat, headers=headers))
+    assert "'inference:run'" in _refusal(client.post(f"{API_ROOT}/messages", json=chat, headers=headers))
+    assert "'inference:run'" in _refusal(client.post(f"{API_ROOT}/embeddings", json={}, headers=headers))
+    assert "'web:search'" in _refusal(client.post(f"{API_ROOT}/search", json={"query": "q"}, headers=headers))
     assert "'code:execute'" in _refusal(client.post(f"{API_ROOT}/code/execute", json={}, headers=headers))
-    assert "'agents'" in _refusal(client.post(f"{API_ROOT}/hooks/check", json={}, headers=headers))
+    assert "'agents:write'" in _refusal(client.post(f"{API_ROOT}/hooks/check", json={}, headers=headers))
 
 
 def test_the_catalog_reads_are_open_to_every_key(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -82,11 +82,11 @@ def test_the_master_key_holds_every_scope(client: TestClient, master_key_header:
 
 
 def test_scopes_are_stored_once_each_in_one_order(client: TestClient, master_key_header: dict[str, str]) -> None:
-    key = _create(client, master_key_header, scopes=["usage:read", "inference", "usage:read"])
+    key = _create(client, master_key_header, scopes=["usage:read", "inference:run", "usage:read"])
 
-    assert key["scopes"] == ["inference", "usage:read"]
+    assert key["scopes"] == ["inference:run", "usage:read"]
     listed = client.get(f"{_KEYS}/{key['id']}", headers=master_key_header).json()
-    assert listed["scopes"] == ["inference", "usage:read"]
+    assert listed["scopes"] == ["inference:run", "usage:read"]
 
 
 @pytest.mark.parametrize(
@@ -94,7 +94,7 @@ def test_scopes_are_stored_once_each_in_one_order(client: TestClient, master_key
     [
         ({"scopes": []}, status.HTTP_422_UNPROCESSABLE_CONTENT),
         ({"scopes": ["keys:write"]}, status.HTTP_422_UNPROCESSABLE_CONTENT),
-        ({"scopes": ["inference", "end_users:read"]}, status.HTTP_400_BAD_REQUEST),
+        ({"scopes": ["inference:run", "end-users:read"]}, status.HTTP_400_BAD_REQUEST),
     ],
     ids=["none", "unknown", "end-users-on-a-plain-key"],
 )
@@ -109,14 +109,14 @@ def test_a_key_cannot_be_created_with_scopes_it_cannot_hold(
 def test_narrowing_a_key_takes_effect_on_its_next_request(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    key = _create(client, master_key_header, scopes=["inference", "usage:read"])
+    key = _create(client, master_key_header, scopes=["inference:run", "usage:read"])
     headers = _header(key)
     assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_200_OK
 
-    narrowed = client.patch(f"{_KEYS}/{key['id']}", json={"scopes": ["inference"]}, headers=master_key_header)
+    narrowed = client.patch(f"{_KEYS}/{key['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header)
 
     assert narrowed.status_code == status.HTTP_200_OK, narrowed.text
-    assert narrowed.json()["scopes"] == ["inference"]
+    assert narrowed.json()["scopes"] == ["inference:run"]
     assert "'usage:read'" in _refusal(client.get(f"{API_ROOT}/key/budget", headers=headers))
 
     widened = client.patch(f"{_KEYS}/{key['id']}", json={"scopes": ["usage:read"]}, headers=master_key_header)
@@ -128,12 +128,12 @@ def test_narrowing_a_key_takes_effect_on_its_next_request(
 def test_an_update_that_names_no_scopes_leaves_them(
     client: TestClient, master_key_header: dict[str, str], body: dict[str, Any]
 ) -> None:
-    key = _create(client, master_key_header, scopes=["inference", "usage:read"])
+    key = _create(client, master_key_header, scopes=["inference:run", "usage:read"])
 
     updated = client.patch(f"{_KEYS}/{key['id']}", json=body, headers=master_key_header)
 
     assert updated.status_code == status.HTTP_200_OK, updated.text
-    assert updated.json()["scopes"] == ["inference", "usage:read"]
+    assert updated.json()["scopes"] == ["inference:run", "usage:read"]
 
 
 def test_an_update_cannot_give_a_plain_key_an_end_user_scope(
@@ -141,7 +141,7 @@ def test_an_update_cannot_give_a_plain_key_an_end_user_scope(
 ) -> None:
     key = _create(client, master_key_header)
 
-    refused = client.patch(f"{_KEYS}/{key['id']}", json={"scopes": ["end_users:read"]}, headers=master_key_header)
+    refused = client.patch(f"{_KEYS}/{key['id']}", json={"scopes": ["end-users:read"]}, headers=master_key_header)
 
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
     assert "Only a service key" in refused.json()["detail"]
@@ -152,13 +152,13 @@ def test_a_service_key_deletes_end_users_only_with_the_delete_scope(
 ) -> None:
     """Deleting erases an end user's records, so a key that manages end users does not get it by default."""
     key = _create(
-        client, master_key_header, user_id="svc", is_service_key=True, scopes=["end_users:read", "end_users:write"]
+        client, master_key_header, user_id="svc", is_service_key=True, scopes=["end-users:read", "end-users:write"]
     )
     headers = _header(key)
 
     assert client.get(f"{API_ROOT}/end-users", headers=headers).status_code == status.HTTP_200_OK
-    assert "'end_users:delete'" in _refusal(client.delete(f"{API_ROOT}/end-users/alice", headers=headers))
-    assert "'end_users:delete'" in _refusal(
+    assert "'end-users:delete'" in _refusal(client.delete(f"{API_ROOT}/end-users/alice", headers=headers))
+    assert "'end-users:delete'" in _refusal(
         client.delete(f"{API_ROOT}/end-users?created_before=2999-01-01T00:00:00Z", headers=headers)
     )
 
@@ -191,12 +191,12 @@ def test_one_update_makes_a_key_a_service_key_and_grants_it_the_end_user_scopes(
 
     updated = client.patch(
         f"{_KEYS}/{key['id']}",
-        json={"is_service_key": True, "scopes": ["inference", "end_users:read"]},
+        json={"is_service_key": True, "scopes": ["inference:run", "end-users:read"]},
         headers=master_key_header,
     )
 
     assert updated.status_code == status.HTTP_200_OK, updated.text
-    assert updated.json()["scopes"] == ["inference", "end_users:read"]
+    assert updated.json()["scopes"] == ["inference:run", "end-users:read"]
     assert client.get(f"{API_ROOT}/end-users", headers=_header(key)).status_code == status.HTTP_200_OK
 
 
@@ -208,14 +208,14 @@ def test_a_key_that_stops_being_a_service_key_loses_its_end_user_scopes(
     updated = client.patch(f"{_KEYS}/{key['id']}", json={"is_service_key": False}, headers=master_key_header)
 
     assert updated.status_code == status.HTTP_200_OK, updated.text
-    assert not any(scope.startswith("end_users:") for scope in updated.json()["scopes"])
+    assert not any(scope.startswith("end-users:") for scope in updated.json()["scopes"])
 
 
 def test_rotating_a_key_keeps_its_scopes(client: TestClient, master_key_header: dict[str, str]) -> None:
-    key = _create(client, master_key_header, scopes=["inference", "usage:read"])
+    key = _create(client, master_key_header, scopes=["inference:run", "usage:read"])
 
     rotated = client.post(f"{_KEYS}/{key['id']}/rotate", headers=master_key_header)
 
     assert rotated.status_code == status.HTTP_200_OK, rotated.text
-    assert rotated.json()["scopes"] == ["inference", "usage:read"]
+    assert rotated.json()["scopes"] == ["inference:run", "usage:read"]
     assert client.get(f"{API_ROOT}/key/budget", headers=_header(rotated.json())).status_code == status.HTTP_200_OK

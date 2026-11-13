@@ -487,7 +487,7 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
-@router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def chat_completions(
     raw_request: Request,
     response: Response,

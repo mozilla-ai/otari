@@ -60,8 +60,8 @@ Through the API, a service key is created with `is_service_key`,
 
 A service key created without naming scopes can make model calls for its end
 users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
-the `end_users` [scopes](api-keys.md#scopes). Give the key only those it uses.
-Most services need `end_users:read` and `end_users:write`; `end_users:delete`
+the `end-users` [scopes](api-keys.md#scopes). Give the key only those it uses.
+Most services need `end-users:read` and `end-users:write`; `end-users:delete`
 also erases an end user's records, so leave it off a key that never deletes.
 
 ## 3. Name the end user on each request
@@ -186,13 +186,13 @@ The cap holds across replicas.
 
 ## End-user routes
 
-All of these take only the service key, holding the `end_users` scope each
+All of these take only the service key, holding the `end-users` scope each
 route names below. Another API key, the master key and a dashboard session are
 refused, and so is a service key whose own user is blocked or deleted.
 
-- `GET` routes need `end_users:read`.
-- `PUT` and `PATCH` routes need `end_users:write`.
-- `DELETE` routes need `end_users:delete`.
+- `GET` routes need `end-users:read`.
+- `PUT` and `PATCH` routes need `end-users:write`.
+- `DELETE` routes need `end-users:delete`.
 
 | Request | Does |
 |---|---|

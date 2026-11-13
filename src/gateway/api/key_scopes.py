@@ -15,6 +15,10 @@ from starlette.routing import BaseRoute
 
 from gateway.types.key_scope import KeyScope
 
+# NOTE: The x- prefix is OAS's rather than ours. RFC 6648 deprecated it for
+# protocol parameters, which is why Otari's own headers are Otari-*, but an
+# OpenAPI specification extension is a different namespace and OAS still
+# requires ^x- as of 3.2.1.
 KEY_SCOPE_EXTENSION = "x-otari-key-scopes"
 
 

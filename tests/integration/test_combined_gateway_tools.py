@@ -909,8 +909,8 @@ def test_responses_stream_runs_all_four_and_announces_the_builtins(
 # ---------- Key scopes ----------
 
 _TOOL_SCOPES = {
-    "search": ([_SEARCH], False, "web"),
-    "fetch": ([_FETCH], False, "web"),
+    "search": ([_SEARCH], False, "web:search"),
+    "fetch": ([_FETCH], False, "web:fetch"),
     "code": ([_CODE], False, "code:execute"),
     "MCP": ([], True, "mcp:execute"),
 }
@@ -941,7 +941,7 @@ def test_a_key_without_a_tools_scope_cannot_run_it_through_a_completion(
 
 
 _CHAT_TOOL_SCOPES = {
-    "search": ({"tools": [{"type": "otari_web_search"}]}, "web"),
+    "search": ({"tools": [{"type": "otari_web_search"}]}, "web:search"),
     "MCP": ({"mcp_servers": [_MCP_SERVER]}, "mcp:execute"),
 }
 

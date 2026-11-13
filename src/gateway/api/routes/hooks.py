@@ -221,7 +221,7 @@ class PolicyCheckResponse(BaseModel):
     blocked: bool
 
 
-@router.post("/check", openapi_extra=key_scope(KeyScope.AGENTS))
+@router.post("/check", openapi_extra=key_scope(KeyScope.AGENTS_WRITE))
 async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     """Evaluate a submitted policy against submitted evidence.
 

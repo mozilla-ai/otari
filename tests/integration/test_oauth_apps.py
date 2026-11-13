@@ -98,7 +98,7 @@ def test_approved_key_is_owned_budget_enforced_and_single_use(
         assert key.self_service and not key.exclude_from_budget and not key.is_service_key
         assert key.metadata_["oauth_client_id"] == "thunderbolt"
         # The registration names no scopes, so the key calls models and nothing else.
-        assert key.scopes == ["inference"]
+        assert key.scopes == ["inference:run"]
         assert db.scalars(select(OAuthAppGrant)).first() is None
     assert redeem(client, code).status_code == 400
     headers = {"Authorization": f"Bearer {result.json()['access_token']}"}
@@ -263,13 +263,13 @@ def test_widening_a_registration_does_not_widen_an_approval_already_given(
     """The grant carries the scopes the person approved, so the exchange cannot read newer ones."""
     code = code_from(approve(client, world))
     test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
-        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE, KeyScope.FILES_WRITE]
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN, KeyScope.FILES_WRITE]
     )
 
     assert redeem(client, code).status_code == 200
     with db_session_factory() as db:
         key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
-        assert key.scopes == ["inference"]
+        assert key.scopes == ["inference:run"]
 
 
 def test_expired_approvals_are_pruned_without_creating_keys(

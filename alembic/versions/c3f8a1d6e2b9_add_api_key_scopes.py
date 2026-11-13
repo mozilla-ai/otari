@@ -25,21 +25,22 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _KEY_SCOPES = [
-    "inference",
+    "inference:run",
     "files:read",
     "files:write",
     "batches:read",
     "batches:write",
-    "web",
+    "web:search",
+    "web:fetch",
     "code:execute",
     "mcp:read",
     "mcp:execute",
     "telemetry:write",
-    "agents",
+    "agents:write",
     "usage:read",
     "usage:write",
 ]
-_SERVICE_KEY_SCOPES = [*_KEY_SCOPES, "end_users:read", "end_users:write", "end_users:delete"]
+_SERVICE_KEY_SCOPES = [*_KEY_SCOPES, "end-users:read", "end-users:write", "end-users:delete"]
 
 
 def upgrade() -> None:

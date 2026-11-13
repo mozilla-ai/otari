@@ -11492,7 +11492,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -11629,7 +11629,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -14450,10 +14450,14 @@ export interface components {
         };
         /**
          * KeyScope
-         * @description One group of endpoints an API key may be granted.
+         * @description One group of endpoints an API key may be granted, named ``resource:action``.
+         *
+         *     Ordered by resource, not A-Z: the order is what a stored list is normalized
+         *     to and what the dashboard renders, and the end-user scopes come last because
+         *     only a service key may hold them.
          * @enum {string}
          */
-        KeyScope: "inference" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents" | "usage:read" | "usage:write" | "end_users:read" | "end_users:write" | "end_users:delete";
+        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -20755,7 +20759,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][] | null;
         };
@@ -20810,7 +20814,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][] | null;
         };

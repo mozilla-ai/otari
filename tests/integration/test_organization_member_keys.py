@@ -1366,35 +1366,37 @@ def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
 def test_a_member_key_calls_models_alone_unless_it_names_more(client: TestClient, world: _World) -> None:
     code, plain = _create(client, world, "alpha_member", {"key_name": "plain"})
     assert code == status.HTTP_200_OK, plain
-    code, wider = _create(client, world, "alpha_member", {"key_name": "wider", "scopes": ["usage:read", "inference"]})
+    code, wider = _create(
+        client, world, "alpha_member", {"key_name": "wider", "scopes": ["usage:read", "inference:run"]}
+    )
     assert code == status.HTTP_200_OK, wider
 
-    assert plain["scopes"] == ["inference"]
-    assert wider["scopes"] == ["inference", "usage:read"]
+    assert plain["scopes"] == ["inference:run"]
+    assert wider["scopes"] == ["inference:run", "usage:read"]
 
 
 def test_a_member_narrows_their_own_key(client: TestClient, world: _World) -> None:
-    code, created = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["inference", "usage:read"]})
+    code, created = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["inference:run", "usage:read"]})
     assert code == status.HTTP_200_OK, created
     headers = {API_KEY_HEADER: f"Bearer {created['key']}"}
     assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_200_OK
 
     code, updated = _request(
-        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["inference"]}
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["inference:run"]}
     )
 
     assert code == status.HTTP_200_OK, updated
-    assert updated["scopes"] == ["inference"]
+    assert updated["scopes"] == ["inference:run"]
     assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_403_FORBIDDEN
 
 
 def test_a_member_cannot_give_a_plain_key_an_end_user_scope(client: TestClient, world: _World) -> None:
-    code, refused = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["end_users:delete"]})
+    code, refused = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["end-users:delete"]})
     assert code == status.HTTP_400_BAD_REQUEST, refused
 
     code, created = _create(client, world, "alpha_member", {"key_name": "k"})
     assert code == status.HTTP_200_OK, created
     code, refused = _request(
-        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["end_users:read"]}
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["end-users:read"]}
     )
     assert code == status.HTTP_400_BAD_REQUEST, refused

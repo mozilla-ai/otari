@@ -937,7 +937,10 @@ def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
 
 
 @router.post(
-    "/messages", response_model=None, responses=_ANTHROPIC_ERROR_RESPONSES, openapi_extra=key_scope(KeyScope.INFERENCE)
+    "/messages",
+    response_model=None,
+    responses=_ANTHROPIC_ERROR_RESPONSES,
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def create_message(
     raw_request: Request,
@@ -1225,7 +1228,7 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
 
 
 @router.post(
-    "/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES, openapi_extra=key_scope(KeyScope.INFERENCE)
+    "/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES, openapi_extra=key_scope(KeyScope.INFERENCE_RUN)
 )
 async def count_message_tokens(
     raw_request: Request,

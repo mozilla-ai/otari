@@ -24,7 +24,7 @@ export type ScopeInfo = {
  * its next save, or offered under no heading.
  */
 export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
-  inference: { label: "Call models", group: "models" },
+  "inference:run": { label: "Call models", group: "models" },
   "files:read": { label: "List and download files", group: "files" },
   "files:write": {
     label: "Upload and delete files",
@@ -40,7 +40,8 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
     group: "batches",
     risk: "Can queue spend that runs after the key is revoked",
   },
-  web: { label: "Search and fetch the web", group: "tools" },
+  "web:search": { label: "Search the web", group: "tools" },
+  "web:fetch": { label: "Fetch a web page", group: "tools" },
   "code:execute": {
     label: "Run code in the sandbox",
     group: "tools",
@@ -53,18 +54,18 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
     risk: "Acts on the systems those tools reach",
   },
   "telemetry:write": { label: "Send OpenTelemetry data", group: "agents" },
-  agents: {
+  "agents:write": {
     label: "Coding-agent hooks and model recommendations",
     group: "agents",
   },
   "usage:read": { label: "Read its own budget and usage", group: "usage" },
   "usage:write": { label: "Report usage observed elsewhere", group: "usage" },
-  "end_users:read": { label: "List its end users", group: "endUsers" },
-  "end_users:write": {
+  "end-users:read": { label: "List its end users", group: "endUsers" },
+  "end-users:write": {
     label: "Create, move and block its end users",
     group: "endUsers",
   },
-  "end_users:delete": {
+  "end-users:delete": {
     label: "Delete its end users",
     group: "endUsers",
     risk: "Erases their records for good",

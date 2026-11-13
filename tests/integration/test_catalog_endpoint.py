@@ -834,7 +834,7 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     assert by_selector[_FIREWORKS_GLM]["usage_30d"] is None
 
     # A key reads its organization's usage only with the scope the usage routes require.
-    for scopes, reads_usage in ((["inference"], False), (["inference", "usage:read"], True)):
+    for scopes, reads_usage in ((["inference:run"], False), (["inference:run", "usage:read"], True)):
         created = priced.post(f"{API_ROOT}/keys", json={"key_name": "reader", "scopes": scopes}, headers=master_header)
         assert created.status_code == status.HTTP_200_OK, created.text
         key_header = {"Authorization": f"Bearer {created.json()['key']}"}

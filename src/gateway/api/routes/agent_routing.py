@@ -98,7 +98,7 @@ class _RecommenderCall:
             "description": "No subagent router is switched on, or a master-key call names no `user`.",
         },
     },
-    openapi_extra=key_scope(KeyScope.AGENTS),
+    openapi_extra=key_scope(KeyScope.AGENTS_WRITE),
 )
 async def recommend_model_for_agent(
     raw_request: Request,

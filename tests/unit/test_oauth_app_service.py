@@ -28,7 +28,7 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         code_hash="hash",
         user_id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
-        scopes=["inference"],
+        scopes=["inference:run"],
         expires_at=now + timedelta(seconds=1),
     )
     grants.consume.return_value = True

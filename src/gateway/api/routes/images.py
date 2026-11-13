@@ -66,7 +66,7 @@ class ImageGenerationRequest(derive_request_base(ImageGenerationParams)):  # typ
     response_format: str | None = None
 
 
-@router.post("/images/generations", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/images/generations", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_image(
     raw_request: Request,
     response: Response,
@@ -244,7 +244,7 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
         422: {"description": "A required field is missing, or a field is the wrong type."},
     },
     openapi_extra=key_scope(
-        KeyScope.INFERENCE,
+        KeyScope.INFERENCE_RUN,
         requestBody={"required": True, "content": {"multipart/form-data": {"schema": _EDIT_UPLOAD_SCHEMA}}},
     ),
 )

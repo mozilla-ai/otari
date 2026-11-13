@@ -423,7 +423,7 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 _ADAPTER = _ResponsesAdapter()
 
 
-@router.post("/responses", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/responses", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_response(
     raw_request: Request,
     response: FastAPIResponse,

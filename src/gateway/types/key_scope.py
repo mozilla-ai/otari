@@ -6,7 +6,7 @@ exactly one scope or is open to every key (read-only discovery: the model, tool
 and price catalogs). The master key holds every scope.
 
 Reads and writes are separate wherever a write can spend, change or destroy
-something, and ``end_users:delete`` is separate from ``end_users:write`` because
+something, and ``end-users:delete`` is separate from ``end-users:write`` because
 deleting an end user erases its records. No scope lets a key manage keys:
 a key that could mint keys would outlive its own revocation.
 """
@@ -16,29 +16,35 @@ from enum import StrEnum
 
 
 class KeyScope(StrEnum):
-    """One group of endpoints an API key may be granted."""
+    """One group of endpoints an API key may be granted, named ``resource:action``.
 
-    INFERENCE = "inference"
+    Ordered by resource, not A-Z: the order is what a stored list is normalized
+    to and what the dashboard renders, and the end-user scopes come last because
+    only a service key may hold them.
+    """
+
+    INFERENCE_RUN = "inference:run"
     FILES_READ = "files:read"
     FILES_WRITE = "files:write"
     BATCHES_READ = "batches:read"
     BATCHES_WRITE = "batches:write"
-    WEB = "web"
+    WEB_SEARCH = "web:search"
+    WEB_FETCH = "web:fetch"
     CODE_EXECUTE = "code:execute"
     MCP_READ = "mcp:read"
     MCP_EXECUTE = "mcp:execute"
     TELEMETRY_WRITE = "telemetry:write"
-    AGENTS = "agents"
+    AGENTS_WRITE = "agents:write"
     USAGE_READ = "usage:read"
     USAGE_WRITE = "usage:write"
-    END_USERS_READ = "end_users:read"
-    END_USERS_WRITE = "end_users:write"
-    END_USERS_DELETE = "end_users:delete"
+    END_USERS_READ = "end-users:read"
+    END_USERS_WRITE = "end-users:write"
+    END_USERS_DELETE = "end-users:delete"
 
 
 # What a key is given when its creator names no scopes: calling models, which is
 # what most keys are for.
-DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (KeyScope.INFERENCE,)
+DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (KeyScope.INFERENCE_RUN,)
 
 # Only a service key has end users, so only a service key may hold these.
 END_USER_SCOPES: frozenset[KeyScope] = frozenset(
@@ -50,17 +56,18 @@ END_USER_SCOPES: frozenset[KeyScope] = frozenset(
 # Frozen: a scope added later is never granted to a key that did not ask for it,
 # so this list must not grow with the enum.
 UNSCOPED_KEY_SCOPES: tuple[KeyScope, ...] = (
-    KeyScope.INFERENCE,
+    KeyScope.INFERENCE_RUN,
     KeyScope.FILES_READ,
     KeyScope.FILES_WRITE,
     KeyScope.BATCHES_READ,
     KeyScope.BATCHES_WRITE,
-    KeyScope.WEB,
+    KeyScope.WEB_SEARCH,
+    KeyScope.WEB_FETCH,
     KeyScope.CODE_EXECUTE,
     KeyScope.MCP_READ,
     KeyScope.MCP_EXECUTE,
     KeyScope.TELEMETRY_WRITE,
-    KeyScope.AGENTS,
+    KeyScope.AGENTS_WRITE,
     KeyScope.USAGE_READ,
     KeyScope.USAGE_WRITE,
     KeyScope.END_USERS_READ,

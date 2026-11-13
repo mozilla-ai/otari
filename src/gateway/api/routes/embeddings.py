@@ -56,7 +56,7 @@ class EmbeddingRequest(BaseModel):
     )
 
 
-@router.post("/embeddings", openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/embeddings", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_embedding(
     raw_request: Request,
     response: Response,

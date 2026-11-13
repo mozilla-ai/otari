@@ -19,7 +19,7 @@ from gateway.api.routes._pipeline import (
 from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.services.code_execution.containers import ContainerLease
 
-_MISSING_WEB = KeyScopeMissingError("web", "searching or fetching the web")
+_MISSING_WEB = KeyScopeMissingError("web:search", "searching or fetching the web")
 
 
 def _admitted(release: AsyncMock, *, held: bool = True) -> Any:
