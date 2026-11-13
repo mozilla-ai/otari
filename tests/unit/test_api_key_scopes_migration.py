@@ -19,7 +19,7 @@ from gateway.types.key_scope import unscoped_key_scopes
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "c3f8a1d6e2b9"
-_BEFORE = "d8a491bc02fa"
+_BEFORE = "3ec751593322"
 
 
 def _alembic_config(database_url: str) -> Config:
