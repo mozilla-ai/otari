@@ -324,7 +324,11 @@ def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
     tmp_file_store: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A model given a file can repeat it, so attaching one reads it: an inference-only key resolves none."""
+    """A model given a file can repeat it, so attaching one reads it: an inference-only key is refused.
+
+    The refusal names the scope, as every other missing-scope refusal does, rather
+    than answering without the file and leaving the caller to notice.
+    """
 
     async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
         return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
@@ -341,10 +345,11 @@ def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
     )
     assert narrowed.status_code == 200, narrowed.text
     assert client.get(f"{API_ROOT}/files/{up.json()['id']}/content", headers=api_key_header).status_code == 403
-    captured: dict[str, Any] = {}
+    reached_provider = False
 
     async def mock_acompletion(**kwargs: Any) -> Any:
-        captured.update(kwargs)
+        nonlocal reached_provider
+        reached_provider = True
         return _make_completion()
 
     body = {
@@ -354,8 +359,54 @@ def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
 
+    assert resp.status_code == 403, resp.text
+    assert "files:read" in resp.json()["detail"]
+    assert not reached_provider
+
+
+def test_a_key_without_files_read_still_sends_back_a_code_execution_result(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """Otari names the files a code run produced by id, and a client echoes that turn back as history.
+
+    Those ids are output, not an attachment the model reads, so the refusal must
+    not fire on them: the second turn of a run would otherwise be refused where
+    the first succeeded.
+    """
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "code_execution_tool_result",
+                        "content": {
+                            "type": "code_execution_result",
+                            "content": [{"type": "code_execution_output", "file_id": "file_produced"}],
+                        },
+                    }
+                ],
+            },
+            {"role": "user", "content": "and now plot it"},
+        ],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
     assert resp.status_code == 200, resp.text
-    assert "quarterly numbers" not in json.dumps(captured["messages"])
 
 
 def test_budget_rejection_skips_normalization(

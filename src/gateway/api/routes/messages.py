@@ -994,6 +994,7 @@ async def create_message(
             model=target.model,
             files=files,
             user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,

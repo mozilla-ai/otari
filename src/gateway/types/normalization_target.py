@@ -30,10 +30,12 @@ class NormalizationTarget:
     ``client_country`` is the country the request comes from, None when no source
     knows it, which keeps such a side-call within ``provider_supported_countries``.
     ``file_user_id`` is the user whose stored files a ``file_id`` resolves among,
-    ``None`` where the request's key lacks ``files:read``, so it resolves none.
+    and ``None`` for a request with no resolved user, which owns none.
+    ``may_read_files`` is whether the caller may resolve one at all.
     """
 
     file_user_id: str | None
+    may_read_files: bool
     provider: LLMProvider | None
     model: str
     instance: str | None

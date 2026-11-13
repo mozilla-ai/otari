@@ -41,7 +41,9 @@ def _image_msg(url: str = _PNG_DATA_URL) -> list[dict[str, Any]]:
 async def test_string_content_untouched() -> None:
     cfg = GatewayConfig()
     msgs = [{"role": "user", "content": "plain text"}]
-    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
+    out, stats = await normalize_messages(
+        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u", may_read_files=True
+    )
     assert out == msgs
     assert not stats.touched
 
@@ -59,6 +61,7 @@ async def test_bare_string_messages_untouched() -> None:
         fmt="responses",
         files=None,
         user_id="u",
+        may_read_files=True,
     )
     assert cast("Any", out) == text
     assert not stats.touched
@@ -68,7 +71,9 @@ async def test_bare_string_messages_untouched() -> None:
 async def test_native_image_passthrough() -> None:
     cfg = GatewayConfig()
     msg = _image_msg()
-    out, stats = await normalize_messages(msg, config=cfg, caps=_NATIVE, fmt="openai", files=None, user_id="u")
+    out, stats = await normalize_messages(
+        msg, config=cfg, caps=_NATIVE, fmt="openai", files=None, user_id="u", may_read_files=True
+    )
     block = out[0]["content"][1]
     assert block["type"] == "image_url"
     # An already-inline block must pass through byte-identical — no decode/
@@ -87,7 +92,7 @@ async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(cn, "describe_image", fake_describe)
     cfg = GatewayConfig(vision_strategy="describe")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u", may_read_files=True
     )
     block = out[0]["content"][1]
     assert block["type"] == "text"
@@ -104,7 +109,7 @@ async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_text_only_image_dropped_when_off() -> None:
     cfg = GatewayConfig(vision_strategy="off")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u", may_read_files=True
     )
     block = out[0]["content"][1]
     assert block["type"] == "text"
@@ -122,6 +127,7 @@ async def test_remote_image_url_not_fetched_and_passed_through() -> None:
         fmt="openai",
         files=None,
         user_id="u",
+        may_read_files=True,
     )
     # Remote URLs are never fetched (SSRF-safe); the block is left for the model
     # turn marker since it can't be rendered.
@@ -142,7 +148,9 @@ async def test_document_extracted_to_text(monkeypatch: pytest.MonkeyPatch) -> No
             "content": [{"type": "file", "file": {"file_data": pdf_data_url, "filename": "q3.pdf"}}],
         }
     ]
-    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
+    out, stats = await normalize_messages(
+        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u", may_read_files=True
+    )
     block = out[0]["content"][0]
     assert block["type"] == "text"
     assert "q3.pdf" in block["text"]
@@ -159,7 +167,9 @@ async def test_anthropic_image_passthrough_native() -> None:
             "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}],
         }
     ]
-    out, stats = await normalize_messages(msgs, config=cfg, caps=_NATIVE, fmt="anthropic", files=None, user_id="u")
+    out, stats = await normalize_messages(
+        msgs, config=cfg, caps=_NATIVE, fmt="anthropic", files=None, user_id="u", may_read_files=True
+    )
     assert out[0]["content"][0]["type"] == "image"
     assert out[0]["content"][0]["source"]["type"] == "base64"
     assert not stats.touched
@@ -169,7 +179,9 @@ async def test_anthropic_image_passthrough_native() -> None:
 async def test_responses_uses_input_text_block() -> None:
     cfg = GatewayConfig(vision_strategy="off")
     msgs = [{"role": "user", "content": [{"type": "input_image", "image_url": _PNG_DATA_URL}]}]
-    out, _ = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", files=None, user_id="u")
+    out, _ = await normalize_messages(
+        msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", files=None, user_id="u", may_read_files=True
+    )
     assert out[0]["content"][0]["type"] == "input_text"
 
 
@@ -186,6 +198,7 @@ async def test_file_id_resolved_and_inlined_for_native() -> None:
         fmt="openai",
         files=files,
         user_id="u",
+        may_read_files=True,
     )
     block = out[0]["content"][0]
     # file_id rewritten to an inline data URL the upstream provider understands.
@@ -197,7 +210,7 @@ async def test_file_id_resolved_and_inlined_for_native() -> None:
 async def test_disabled_is_noop() -> None:
     cfg = GatewayConfig(file_understanding_enabled=False, vision_strategy="off")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u", may_read_files=True
     )
     assert out == _image_msg()
     assert not stats.touched
@@ -247,6 +260,7 @@ async def test_container_upload_staged_for_sandbox_without_reading_bytes() -> No
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
         sandbox_requested=True,
     )
     # Staged for the sandbox, named for the model, and the blob never loaded here.
@@ -274,6 +288,7 @@ async def test_container_upload_without_sandbox_is_read_as_document(monkeypatch:
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
     )
     assert stats.sandbox_inputs == []
     assert stats.files_extracted == 1
@@ -294,6 +309,7 @@ async def test_document_file_id_is_also_staged_when_sandbox_runs() -> None:
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
         sandbox_requested=True,
     )
     # The model still gets the document (inlined for a native model), and the
@@ -321,6 +337,7 @@ async def test_bare_responses_input_file_item_is_normalized(monkeypatch: pytest.
         fmt="responses",
         files=files,
         user_id="u",
+        may_read_files=True,
     )
     assert stats.files_extracted == 1
     # Extracted text cannot sit bare in ``input``; it is wrapped in a user message.
@@ -340,6 +357,7 @@ async def test_bare_responses_input_file_item_inlined_for_native() -> None:
         fmt="responses",
         files=files,
         user_id="u",
+        may_read_files=True,
     )
     # Stays a bare item, now carrying inline data the provider can read.
     assert out[0]["type"] == "input_file"
@@ -366,7 +384,9 @@ async def test_text_document_is_extracted_for_a_pdf_capable_model(
     monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
     files = _files(_stored("file-md", "README.md", "text/markdown"), data=b"# Otari")
     msgs = [{"role": "user", "content": [block]}]
-    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u", may_read_files=True
+    )
     text_type = "input_text" if fmt == "responses" else "text"
     assert out[0]["content"][0]["type"] == text_type
     assert "# Otari" in out[0]["content"][0]["text"]
@@ -388,7 +408,9 @@ async def test_an_uploaded_image_in_a_file_block_reaches_a_vision_model_as_an_im
 ) -> None:
     files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
     msgs = [{"role": "user", "content": [block]}]
-    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u", may_read_files=True
+    )
     part = out[0]["content"][0]
     if fmt == "anthropic":
         assert part == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}
@@ -413,7 +435,13 @@ async def test_an_uploaded_image_in_a_file_block_is_described_for_a_text_only_mo
     files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
     msgs = [{"role": "user", "content": [block]}]
     out, stats = await normalize_messages(
-        msgs, config=GatewayConfig(vision_strategy="describe"), caps=_TEXT_ONLY, fmt=fmt, files=files, user_id="u"
+        msgs,
+        config=GatewayConfig(vision_strategy="describe"),
+        caps=_TEXT_ONLY,
+        fmt=fmt,
+        files=files,
+        user_id="u",
+        may_read_files=True,
     )
     assert "a red circle" in out[0]["content"][0]["text"]
     assert stats.images_described == 1
@@ -423,7 +451,9 @@ async def test_an_uploaded_image_in_a_file_block_is_described_for_a_text_only_mo
 @pytest.mark.asyncio
 async def test_an_inline_image_in_a_file_block_is_rewritten_to_an_image_part() -> None:
     msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_data": _PNG_DATA_URL}}]}]
-    out, _ = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=None, user_id="u")
+    out, _ = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=None, user_id="u", may_read_files=True
+    )
     assert out[0]["content"][0] == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
 
 
@@ -438,7 +468,7 @@ async def test_an_inline_image_in_a_file_block_is_rewritten_to_an_image_part() -
 async def test_an_inline_anthropic_image_in_a_file_block_is_rewritten_to_an_image_part(block: dict[str, Any]) -> None:
     msgs = [{"role": "user", "content": [block]}]
     out, _ = await normalize_messages(
-        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=None, user_id="u"
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=None, user_id="u", may_read_files=True
     )
     assert out[0]["content"][0] == {
         "type": "image",
@@ -451,7 +481,7 @@ async def test_an_uploaded_image_type_loses_its_parameters() -> None:
     files = _files(_stored("file-png", "post.png", "image/PNG; charset=binary"), data=b"\x89PNG\r\n\x1a\n")
     msgs = [{"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-png"}}]}]
     out, _ = await normalize_messages(
-        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=files, user_id="u"
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=files, user_id="u", may_read_files=True
     )
     assert out[0]["content"][0]["source"]["media_type"] == "image/png"
 
@@ -465,7 +495,7 @@ async def test_an_uploaded_image_no_provider_reads_stays_a_document(monkeypatch:
     files = _files(_stored("file-svg", "logo.svg", "image/svg+xml"), data=b"<svg/>")
     msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_id": "file-svg"}}]}]
     out, stats = await normalize_messages(
-        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=files, user_id="u"
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=files, user_id="u", may_read_files=True
     )
     assert "<svg/>" in out[0]["content"][0]["text"]
     assert stats.files_extracted == 1
@@ -509,6 +539,7 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
         sandbox_requested=True,
     )
     assert [(s.file_id, s.filename) for s in stats.sandbox_inputs] == [("file-a", "data.csv"), ("file-b", "data-2.csv")]
@@ -531,6 +562,7 @@ async def test_container_upload_is_held_for_the_providers_container() -> None:
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
         provider_container=True,
     )
 
@@ -556,6 +588,7 @@ async def test_container_upload_is_held_and_staged_when_candidates_split() -> No
         fmt="anthropic",
         files=files,
         user_id="u",
+        may_read_files=True,
         sandbox_requested=True,
         provider_container=True,
     )
@@ -603,6 +636,7 @@ async def test_container_upload_naming_an_unknown_file_refuses() -> None:
             fmt="anthropic",
             files=_files(_stored()),
             user_id="u",
+            may_read_files=True,
             provider_container=True,
         )
 
@@ -629,6 +663,7 @@ async def test_a_container_upload_whose_lookup_fails_refuses(monkeypatch: pytest
             fmt="anthropic",
             files=cast(Any, _Broken()),
             user_id="u",
+            may_read_files=True,
             provider_container=True,
         )
 
@@ -667,7 +702,14 @@ async def _normalize_within(
     msgs: list[dict[str, Any]], limit: cn.InlineLimit, fmt: str = "openai"
 ) -> tuple[list[dict[str, Any]], cn.NormalizationStats]:
     return await normalize_messages(
-        msgs, config=GatewayConfig(), caps=_NATIVE, fmt=cast(Any, fmt), files=None, user_id="u", inline_limit=limit
+        msgs,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt=cast(Any, fmt),
+        files=None,
+        user_id="u",
+        may_read_files=True,
+        inline_limit=limit,
     )
 
 

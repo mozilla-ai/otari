@@ -2941,7 +2941,8 @@ async def resolve_request_context(
             # workspace", matching the /api/v1/files routes.
             post_chars, vision_usage = await normalize_messages(
                 NormalizationTarget(
-                    file_user_id=user_id if _may_read_files(api_key) else None,
+                    file_user_id=user_id,
+                    may_read_files=_may_read_files(api_key),
                     provider=gate_impl,
                     model=gate_model,
                     instance=gate_instance,
