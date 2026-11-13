@@ -171,4 +171,14 @@ describe("McpSharedAccount", () => {
     expect(screen.getByText(/nothing for you to connect/)).toBeVisible()
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
+
+  it("tells a member when no account is set up yet", () => {
+    mockApi()
+    renderAccount(NOT_SET_UP, false)
+
+    expect(
+      screen.getByText(/An admin has not set up an account yet/),
+    ).toBeVisible()
+    expect(screen.queryByText(/An admin set it up/)).not.toBeInTheDocument()
+  })
 })

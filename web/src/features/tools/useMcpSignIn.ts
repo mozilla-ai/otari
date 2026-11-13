@@ -112,9 +112,14 @@ export function useMcpSignIn({
       {
         onSuccess: (started) => {
           const url = started.authorization_url
-          if (opened === undefined || opened.closed) {
+          if (opened === undefined) {
             rememberSignInOrigin(returnTo)
             onLeave(url)
+            return
+          }
+          // Closed by the person while the start was on its way: they backed out.
+          if (opened.closed) {
+            setRunning(undefined)
             return
           }
           const state = stateOf(url)

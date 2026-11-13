@@ -5,6 +5,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Chip } from "@/design-system/indicators/Chip"
 import { AccessChooser } from "@/features/tools/AccessChooser"
+import { McpNotice } from "@/features/tools/McpNotice"
 import {
   type AccessMode,
   accessDraft,
@@ -40,6 +41,8 @@ export function McpGrantDialog({
   isKnown,
   onCheck,
   isChecking,
+  checkError = "",
+  onDismissCheckError,
   readTools,
   isPending,
   error,
@@ -63,6 +66,9 @@ export function McpGrantDialog({
   /** Runs the server's check, offered while its tools are not known. */
   onCheck?: () => void
   isChecking?: boolean
+  /** Why the last check started here could not run; `""` when it did. */
+  checkError?: string
+  onDismissCheckError?: () => void
   /** The tools a manager labeled read, which "Read tools only" allows. */
   readTools: readonly string[]
   isPending: boolean
@@ -110,7 +116,9 @@ export function McpGrantDialog({
       isPending={isPending}
       isSubmitDisabled={!isComplete}
       isDirty={
-        picks > initialUserIds.length ||
+        keyIds.length > 0 ||
+        userIds.length !== initialUserIds.length ||
+        userIds.some((id) => !initialUserIds.includes(id)) ||
         mode !== seed.mode ||
         picked.join() !== seed.picked.join()
       }
@@ -182,6 +190,12 @@ export function McpGrantDialog({
           )}
         </div>
       )}
+      {checkError ? (
+        <McpNotice
+          message={checkError}
+          onDismiss={() => onDismissCheckError?.()}
+        />
+      ) : null}
       <AccessChooser
         label="Action"
         mode={mode}

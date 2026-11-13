@@ -713,6 +713,9 @@ function useGrantWrite<
       void queryClient.invalidateQueries({
         queryKey: mcpKeyAccessRoot(workspaceId),
       })
+      void queryClient.invalidateQueries({
+        queryKey: mcpMyToolsKey(workspaceId, serverId),
+      })
     },
   })
 }
@@ -915,6 +918,12 @@ function playgroundToolsKey(workspaceId: string) {
   return [PLAYGROUND, workspaceId, "tools"] as const
 }
 
+// Under the server's key, so a check, an edit, a finished sign-in or a
+// connection made through `useCompleteMcpConnection` refreshes it with the server.
+function mcpMyToolsKey(workspaceId: string, serverId: string) {
+  return [WORKSPACES, workspaceId, "mcp-servers", serverId, "my-tools"] as const
+}
+
 function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
   return [
     WORKSPACES,
@@ -941,9 +950,9 @@ export function useMyMcpConnections(workspaceId: string | null) {
 }
 
 /**
- * The tools the caller may use on a server under their own rule. Under the
- * server's key, so a check or an edit of the server refreshes it, and under the
- * connections too, since connecting can be what makes the list known.
+ * The tools the caller may use on a server under their own rule. A check, an
+ * edit of the server, a rule change, a connection and a disconnection each
+ * refresh it.
  */
 export function useMyMcpServerTools(
   workspaceId: string | null,
@@ -951,7 +960,7 @@ export function useMyMcpServerTools(
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: [...mcpConnectionsKey(workspaceId ?? ""), "tools", serverId],
+    queryKey: mcpMyToolsKey(workspaceId ?? "", serverId),
     enabled: enabled && workspaceId !== null,
     staleTime: 60_000,
     queryFn: ({ signal }) =>
@@ -1133,6 +1142,9 @@ export function useDisconnectMcp() {
       })
       void queryClient.invalidateQueries({
         queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpMyToolsKey(workspaceId, serverId),
       })
     },
   })

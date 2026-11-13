@@ -39,6 +39,24 @@ function Harness({
 const selected = () => screen.getByLabelText("Selected").textContent
 
 describe("ToolChecklist", () => {
+  it("searches a tool named like an object's own machinery without crashing", async () => {
+    const user = userEvent.setup()
+    render(
+      <ToolChecklist
+        label="Rule tools"
+        tools={["constructor", "toString"]}
+        isKnown
+        selected={[]}
+        onChange={() => {}}
+      />,
+    )
+
+    await user.type(screen.getByRole("searchbox"), "con")
+    const list = await screen.findByRole("list", { name: "Rule tools" })
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1)
+    expect(within(list).getByText("constructor")).toBeVisible()
+  })
+
   it("lists the checked tools with their descriptions, and selects all or none", async () => {
     const user = userEvent.setup()
     render(<Harness />)

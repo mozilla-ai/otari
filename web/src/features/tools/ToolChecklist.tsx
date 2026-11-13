@@ -60,12 +60,15 @@ export function ToolChecklist({
   const [query, setQuery] = useState("")
   const entry = typed.trim()
   const known = isKnown ? tools : []
+  // A tool can be named `constructor`, so read only the map's own entries.
+  const descriptionOf = (name: string) =>
+    Object.hasOwn(descriptions, name) ? descriptions[name] : ""
   const needle = query.trim().toLowerCase()
   const visible = known.filter(
     (name) =>
       needle === "" ||
       name.toLowerCase().includes(needle) ||
-      (descriptions[name] ?? "").toLowerCase().includes(needle),
+      descriptionOf(name).toLowerCase().includes(needle),
   )
   const others = selected.filter((name) => !known.includes(name))
   const pickedKnown = known.filter((name) => selected.includes(name))
@@ -151,9 +154,9 @@ export function ToolChecklist({
                       <span className="font-mono text-sm break-all">
                         {name}
                       </span>
-                      {descriptions[name] ? (
+                      {descriptionOf(name) ? (
                         <span className="text-caption break-words">
-                          {descriptions[name]}
+                          {descriptionOf(name)}
                         </span>
                       ) : null}
                     </span>

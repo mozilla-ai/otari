@@ -182,6 +182,36 @@ describe("McpServerSignIn", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("stops, and leaves the page where it is, when the popup is closed before the sign-in starts", async () => {
+    const calls = mockApi()
+    // Closed by the person while the start request was on its way.
+    const popup = {
+      closed: true,
+      close: vi.fn(),
+      opener: {},
+      location: { href: "" },
+    }
+    const user = userEvent.setup()
+    const onLeave = renderSignIn(false, () => popup as unknown as Window)
+
+    const connect = await screen.findByRole("button", {
+      name: "Connect your account",
+    })
+    await waitFor(() => expect(connect).toBeEnabled())
+    await user.click(connect)
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST")).toBe(true),
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Finish signing in in the window that opened."),
+      ).not.toBeInTheDocument(),
+    )
+    expect(onLeave).not.toHaveBeenCalled()
+    expect(popup.location.href).toBe("")
+  })
+
   it("sends a person who has not connected to the server's authorization page", async () => {
     const calls = mockApi()
     const onLeave = renderSignIn()

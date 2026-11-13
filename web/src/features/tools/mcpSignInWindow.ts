@@ -38,12 +38,15 @@ export type McpSignInResult =
  * Opens the empty window the sign-in will run in. Called straight from the
  * press, before the gateway has answered, because a browser only lets a page
  * open a window while it is handling the person's own action. `undefined`
- * when the browser blocked it.
+ * when the browser blocked it, or when it has no `BroadcastChannel` to carry
+ * the result back, so the sign-in takes the whole page instead.
  */
 export function openSignInWindow(): Window | undefined {
+  if (typeof BroadcastChannel === "undefined") return undefined
   try {
     const popup = window.open("", WINDOW_NAME, WINDOW_FEATURES)
-    if (!popup) return undefined
+    // A blocker can hand back a window it has already closed.
+    if (!popup || popup.closed) return undefined
     popup.document.title = "Signing in…"
     popup.document.body.textContent = "Opening the sign-in…"
     return popup
