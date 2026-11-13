@@ -22,7 +22,7 @@ from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppDetails, AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.types.key_scope import checked_scopes, known_scopes
+from gateway.types.key_scope import KeyScopeSet
 
 
 def _code_hash(code: str) -> str:
@@ -78,8 +78,10 @@ class OAuthAppService:
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent without leaving an active key for an abandoned approval."""
         self.require_registered_redirect(request.client_id, request.redirect_uri)
-        approved = checked_scopes(self.apps[request.client_id].scopes, is_service_key=False)
-        if approved != checked_scopes(request.scopes, is_service_key=False):
+        approved = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
+        # The caller's list is compared, never validated: a rule it breaks is a
+        # mismatch with the registration, which is this refusal, not a 500.
+        if set(approved) != set(request.scopes):
             raise OAuthAppGrantError("invalid_request", "The app's access changed while you were approving it")
         now = self.clock()
         code = secrets.token_urlsafe(32)
@@ -130,7 +132,7 @@ class OAuthAppService:
             )
             if grant is None:
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
-            held = known_scopes(grant.scopes)
+            held = grant.scopes
             if not held:
                 # A grant written by a newer worker naming only scopes this one
                 # does not know. A partial overlap narrows to the known ones.

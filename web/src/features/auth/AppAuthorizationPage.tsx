@@ -113,7 +113,7 @@ export function AppAuthorizationPage() {
                     const info = SCOPE_INFO[scope]
                     return (
                       <li key={scope} className="text-caption">
-                        {info?.label ?? scope}
+                        {info ? info.label : `${scope} (not described here)`}
                         {info?.risk ? (
                           <span className="text-warning">
                             {" "}

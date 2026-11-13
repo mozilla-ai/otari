@@ -196,7 +196,9 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
 
 
-# Every vocabulary a request can name a built-in tool in, and the one it cannot.
+# The vocabularies a request reaches the scope gate in, and the one it cannot.
+# NOTE: Gemini's untyped ``{"code_execution": {}}`` is absent because the route
+# rewrites it to a typed entry before the gate reads the declarations.
 _DECLARATIONS: dict[str, tuple[list[dict[str, Any]], set[str]]] = {
     "the gateway's own types": (
         [{"type": "otari_web_search"}, {"type": "otari_web_fetch"}, {"type": "otari_code_execution"}],

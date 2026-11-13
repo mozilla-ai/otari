@@ -224,9 +224,9 @@ async def execute_code(
         inputs=[],
     )
     if request.file_ids:
-        if api_key is not None and not api_key.holds_scope(KeyScope.FILES_READ):
+        if api_key is not None and KeyScope.FILES_READ not in api_key.scopes:
             # The run can print a staged file, so staging one reads it.
-            missing = KeyScopeMissingError(KeyScope.FILES_READ.value, "staging stored files")
+            missing = KeyScopeMissingError(KeyScope.FILES_READ, "staging stored files")
             raise await refuse(missing.message, status.HTTP_403_FORBIDDEN)
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)

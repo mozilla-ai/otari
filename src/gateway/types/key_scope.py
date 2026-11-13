@@ -11,8 +11,10 @@ deleting an end user erases its records. No scope lets a key manage keys:
 a key that could mint keys would outlive its own revocation.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import Self
 
 
 class KeyScope(StrEnum):
@@ -76,55 +78,74 @@ UNSCOPED_KEY_SCOPES: tuple[KeyScope, ...] = (
 )
 
 
-def unscoped_key_scopes(*, is_service_key: bool) -> list[str]:
-    """What a key that names no scopes of its own holds: every original scope its kind of key may hold."""
-    return normalize_scopes(scope for scope in UNSCOPED_KEY_SCOPES if is_service_key or scope not in END_USER_SCOPES)
+@dataclass(frozen=True)
+class KeyScopeSet:
+    """The scopes one key holds, each once and in the enum's order.
 
-
-def normalize_scopes(scopes: Iterable[KeyScope | str]) -> list[str]:
-    """``scopes`` as stored: each once, in the enum's order.
-
-    Raises:
-        ValueError: an entry names no scope.
+    Built only through the constructors below, so a set that exists has been
+    through the rule its constructor names. ``in`` answers whether a key may
+    reach a scope, and iteration yields the scopes in order.
     """
-    held = {KeyScope(scope) for scope in scopes}
-    return [scope.value for scope in KeyScope if scope in held]
 
+    _held: frozenset[KeyScope]
 
-def checked_scopes(scopes: Iterable[KeyScope | str], *, is_service_key: bool) -> list[str]:
-    """``scopes`` as a key of this kind stores them, normalized.
+    @classmethod
+    def read(cls, stored: Iterable[str]) -> Self:
+        """What a stored list names here, leaving out any scope a newer gateway wrote before a downgrade.
 
-    Raises:
-        ValueError: ``scopes`` is empty or names one this kind of key may not hold.
-    """
-    normalized = normalize_scopes(scopes)
-    if not normalized:
-        raise ValueError("A key needs at least one scope.")
-    misplaced = [scope for scope in normalized if KeyScope(scope) in END_USER_SCOPES]
-    if misplaced and not is_service_key:
-        raise ValueError(f"Only a service key may hold {', '.join(misplaced)}: a key that is not one has no end users.")
-    return normalized
+        NOTE: an unknown scope is dropped rather than refused, so a set read back may hold fewer than were written.
+        """
+        return cls(frozenset(KeyScope(scope) for scope in stored if scope in KeyScope))
 
+    @classmethod
+    def checked(cls, scopes: Iterable[KeyScope | str], *, is_service_key: bool) -> Self:
+        """What a key of this kind may hold, from a caller's own list.
 
-def updated_scopes(
-    stored: list[str], requested: Iterable[KeyScope | str] | None, *, was_service_key: bool, is_service_key: bool
-) -> list[str]:
-    """The scopes a key holds after an update naming ``requested`` (None leaves them) and whether it is a service key.
+        Raises:
+            ValueError: ``scopes`` is empty or names one this kind of key may not hold, or no scope at all.
+        """
+        held = cls(frozenset(KeyScope(scope) for scope in scopes))
+        if not held:
+            raise ValueError("A key needs at least one scope.")
+        misplaced = [scope.value for scope in held if scope in END_USER_SCOPES]
+        if misplaced and not is_service_key:
+            msg = f"Only a service key may hold {', '.join(misplaced)}: a key that is not one has no end users."
+            raise ValueError(msg)
+        return held
 
-    Checked against what the key is after the update, so one request may make a key a service key and grant it the
-    end-user scopes. A key that stops being one loses those scopes rather than keeping them for the day it is one again.
+    @classmethod
+    def unscoped(cls, *, is_service_key: bool) -> Self:
+        """What a key that names none of its own holds: every original scope its kind of key may hold."""
+        return cls(frozenset(s for s in UNSCOPED_KEY_SCOPES if is_service_key or s not in END_USER_SCOPES))
 
-    Raises:
-        ValueError: as ``checked_scopes`` does, or turning a service key into a plain one leaves it with no scope.
-    """
-    if requested is not None:
-        return checked_scopes(requested, is_service_key=is_service_key)
-    if is_service_key or not was_service_key:
-        return stored
-    end_user_scopes = {scope.value for scope in END_USER_SCOPES}
-    return checked_scopes((scope for scope in stored if scope not in end_user_scopes), is_service_key=False)
+    def updated(
+        self, requested: Iterable[KeyScope | str] | None, *, was_service_key: bool, is_service_key: bool
+    ) -> Self:
+        """What the key holds after an update naming ``requested``, which ``None`` leaves as it is.
 
+        Checked against what the key is after the update, so one request may make a key a service key and
+        grant it the end-user scopes.
+        A key that stops being one loses those scopes rather than keeping them for the day it is one again.
 
-def known_scopes(stored: Iterable[str]) -> list[KeyScope]:
-    """The stored scopes this gateway knows, leaving out any a newer one wrote before a downgrade."""
-    return [KeyScope(scope) for scope in stored if scope in KeyScope._value2member_map_]
+        Raises:
+            ValueError: as ``checked`` does, or turning a service key into a plain one leaves it with no scope.
+        """
+        if requested is not None:
+            return type(self).checked(requested, is_service_key=is_service_key)
+        if is_service_key or not was_service_key:
+            return self
+        return type(self).checked((s for s in self if s not in END_USER_SCOPES), is_service_key=False)
+
+    @property
+    def stored(self) -> list[str]:
+        """The set as a column holds it."""
+        return [scope.value for scope in self]
+
+    def __contains__(self, scope: object) -> bool:
+        return scope in self._held
+
+    def __iter__(self) -> Iterator[KeyScope]:
+        return (scope for scope in KeyScope if scope in self._held)
+
+    def __len__(self) -> int:
+        return len(self._held)

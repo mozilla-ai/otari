@@ -20,7 +20,7 @@ from gateway.exceptions.budget_exceptions import DeclaredAccessError
 from gateway.main import apply_declared_access
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_API_TOKEN, Budget, ScopedBudget
-from gateway.types.key_scope import unscoped_key_scopes
+from gateway.types.key_scope import KeyScopeSet
 
 from .conftest import _to_async_url, build_test_client
 
@@ -320,7 +320,7 @@ async def test_replicas_starting_at_once_create_one_of_each(test_config: Gateway
 def test_a_declared_key_holds_its_scopes_and_a_change_to_them_is_written_back(test_config: GatewayConfig) -> None:
     with _boot(_config(test_config, mlpa=_key())) as client:
         (key,) = _declared_keys(client)
-        assert key["scopes"] == unscoped_key_scopes(is_service_key=True)
+        assert key["scopes"] == KeyScopeSet.unscoped(is_service_key=True).stored
 
     with _boot(_config(test_config, mlpa=_key(scopes=["inference:run", "end-users:read"]))) as client:
         assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["scopes"] == [

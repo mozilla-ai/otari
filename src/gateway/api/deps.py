@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope, insufficient_scope_challenge
+from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import (
@@ -579,16 +579,13 @@ def _require_route_scope(request: Request, api_key: APIKey) -> None:
         # Said this way because no scope would help: only a service key may hold this one.
         record_auth_failure("not_service_key")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SERVICE_KEY_REQUIRED_DETAIL)
-    if required is not None and not api_key.holds_scope(required):
+    if required is not None and required not in api_key.scopes:
         record_auth_failure("missing_key_scope")
         logger.info(
             "Refused API key %s on %s: it lacks the %s scope", api_key.id, getattr(route, "path", "?"), required
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=KeyScopeMissingError(required.value, "this endpoint").message,
-            headers=insufficient_scope_challenge(required),
-        )
+        missing = KeyScopeMissingError(required, "this endpoint")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=missing.message, headers=missing.challenge)
 
 
 async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:

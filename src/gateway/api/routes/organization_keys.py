@@ -106,7 +106,7 @@ from gateway.services.model_access import (
 from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
-from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, checked_scopes
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 router = APIRouter(
     prefix="/organizations/me/keys",
@@ -352,7 +352,7 @@ async def create_own_key(
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
-        scopes = checked_scopes(request.scopes, is_service_key=request.is_service_key)
+        scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -515,7 +515,7 @@ async def update_own_key(
         changes["is_active"] = request.is_active
     if request.scopes is not None:
         try:
-            changes["scopes"] = checked_scopes(request.scopes, is_service_key=key.is_service_key)
+            changes["scopes"] = KeyScopeSet.checked(request.scopes, is_service_key=key.is_service_key)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if request.metadata is not None:

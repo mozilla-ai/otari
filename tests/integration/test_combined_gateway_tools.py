@@ -936,6 +936,7 @@ def test_a_key_without_a_tools_scope_cannot_run_it_through_a_completion(
 
     assert refused.status_code == 403, refused.text
     assert f"'{scope}'" in refused.json()["error"]["message"]
+    assert refused.headers["WWW-Authenticate"] == f'Bearer error="insufficient_scope", scope="{scope}"'
     assert not sent
     assert not _ran(backends)
 

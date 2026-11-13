@@ -36,7 +36,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
-from gateway.types.key_scope import KeyScope, checked_scopes
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 
 class KeySummary(NamedTuple):
@@ -81,7 +81,7 @@ class ApiKeyService:
         Raises:
             ValueError: ``scopes`` is empty or names one an app key may not hold.
         """
-        held = checked_scopes(scopes, is_service_key=False)
+        held = KeyScopeSet.checked(scopes, is_service_key=False)
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
             raise AppKeyOwnerInactiveError
         key = key_format.mint()

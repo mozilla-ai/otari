@@ -22,16 +22,6 @@ from gateway.types.key_scope import KeyScope
 KEY_SCOPE_EXTENSION = "x-otari-key-scopes"
 
 
-def insufficient_scope_challenge(required: KeyScope) -> dict[str, str]:
-    """The ``WWW-Authenticate`` header naming ``required``, as RFC 6750 section 3.1 shapes it.
-
-    A refusal that names the scope only in its prose leaves a client reading
-    English to learn what it lacks. The challenge says it in the field a bearer
-    client already parses.
-    """
-    return {"WWW-Authenticate": f'Bearer error="insufficient_scope", scope="{required.value}"'}
-
-
 class UndeclaredKeyScope:
     """A route that declares no key scope."""
 

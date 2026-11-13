@@ -139,7 +139,7 @@ def test_dashboard_consent_has_its_own_workspace_and_extra_field_contract() -> N
     assert wire.model_dump() == {**payload, "response_type": "code"}
     with pytest.raises(ValidationError, match="workspace_id"):
         AppAuthorizationRequest.model_validate(payload)
-    consent = {**payload, "workspace_id": str(uuid.uuid4())}
+    consent = {**payload, "workspace_id": str(uuid.uuid4()), "scopes": ["inference:run"]}
     assert str(AppAuthorizationRequest.model_validate(consent).workspace_id) == consent["workspace_id"]
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         AppAuthorizationRequest.model_validate({**consent, "scope": "models"})

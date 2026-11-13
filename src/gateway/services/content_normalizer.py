@@ -293,7 +293,7 @@ async def _resolve_from_ref(
     file_id = ref.get("file_id")
     if file_id and files is not None:
         if not may_read_files:
-            raise KeyScopeMissingError(KeyScope.FILES_READ.value, "attaching a stored file")
+            raise KeyScopeMissingError(KeyScope.FILES_READ, "attaching a stored file")
         # A request with no resolved user owns no file, so it resolves nothing.
         scope = None if user_id is None else FileScope(user_id, workspace_id)
         staged = None if scope is None else await files.staged_upload(str(file_id), scope)

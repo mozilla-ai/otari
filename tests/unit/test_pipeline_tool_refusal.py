@@ -16,10 +16,12 @@ from gateway.api.routes._pipeline import (
     _release_unused_claims,
     _ToolRefusal,
 )
-from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
+from gateway.exceptions.tools_exceptions import WebToolDeclarationError
 from gateway.services.code_execution.containers import ContainerLease
 
-_MISSING_WEB = KeyScopeMissingError("web:search", "searching or fetching the web")
+# What a candidate is refused with after its admission: the declaration this
+# deployment cannot serve. A missing scope is refused before any admission.
+_REFUSAL = WebToolDeclarationError("this deployment serves no web search")
 
 
 def _admitted(release: AsyncMock, *, held: bool = True) -> Any:
@@ -38,7 +40,7 @@ def _admitted(release: AsyncMock, *, held: bool = True) -> Any:
 
 
 def _refused(admitted: Any) -> _ToolRefusal:
-    return _refuse_after_admission(messages._ADAPTER, admitted, _MISSING_WEB)
+    return _refuse_after_admission(messages._ADAPTER, admitted, _REFUSAL)
 
 
 def test_a_refusal_keeps_its_claim_for_the_caller_to_settle() -> None:
@@ -47,7 +49,7 @@ def test_a_refusal_keeps_its_claim_for_the_caller_to_settle() -> None:
 
     refusal = _refused(admitted)
 
-    assert refusal.error.status_code == 403
+    assert refusal.error.status_code == 400
     assert refusal.admitted is admitted
     release.assert_not_called()
 

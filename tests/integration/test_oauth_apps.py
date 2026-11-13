@@ -99,7 +99,7 @@ def test_approved_key_is_owned_budget_enforced_and_single_use(
         assert key.self_service and not key.exclude_from_budget and not key.is_service_key
         assert key.metadata_["oauth_client_id"] == "thunderbolt"
         # The registration names no scopes, so the key calls models and nothing else.
-        assert key.scopes == ["inference:run"]
+        assert key.scopes.stored == ["inference:run"]
         assert db.scalars(select(OAuthAppGrant)).first() is None
     assert redeem(client, code).status_code == 400
     headers = {"Authorization": f"Bearer {result.json()['access_token']}"}
@@ -258,6 +258,16 @@ def test_removed_app_cannot_exchange_a_pending_approval(
     assert redeem(client, code).status_code == 400
 
 
+@pytest.mark.parametrize("scopes", [[], ["end-users:read"]], ids=["none", "one no app key may hold"])
+def test_an_approval_naming_scopes_a_key_could_not_hold_is_refused_not_a_server_error(
+    client: TestClient, world: _World, scopes: list[str]
+) -> None:
+    """The approval's scopes are the caller's, so a list that breaks a key's rules is a mismatch, not a fault."""
+    refused = approve(client, world, scopes=scopes)
+
+    assert refused.status_code == 400, refused.text
+
+
 def test_a_registration_that_moved_while_the_person_read_it_refuses_the_approval(
     client: TestClient, world: _World, test_config: GatewayConfig
 ) -> None:
@@ -284,7 +294,7 @@ def test_widening_a_registration_does_not_widen_an_approval_already_given(
     assert redeem(client, code).status_code == 200
     with db_session_factory() as db:
         key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
-        assert key.scopes == ["inference:run"]
+        assert key.scopes.stored == ["inference:run"]
 
 
 def test_expired_approvals_are_pruned_without_creating_keys(

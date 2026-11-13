@@ -19,7 +19,7 @@ from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
-from gateway.types.key_scope import KeyScope, checked_scopes, unscoped_key_scopes
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 # A declared key's name follows the budget id rule, so it reads the same in a
 # config file, a log line and the dashboard.
@@ -122,14 +122,14 @@ class ApiKeyConfig(BaseModel):
     @model_validator(mode="after")
     def _scopes_fit_the_key(self) -> Self:
         if self.scopes is not None:
-            checked_scopes(self.scopes, is_service_key=self.is_service_key)
+            KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
         return self
 
-    def held_scopes(self) -> list[str]:
+    def held_scopes(self) -> KeyScopeSet:
         """The scopes the declared key holds: its own, or else what a key that names none holds."""
         if self.scopes is None:
-            return unscoped_key_scopes(is_service_key=self.is_service_key)
-        return checked_scopes(self.scopes, is_service_key=self.is_service_key)
+            return KeyScopeSet.unscoped(is_service_key=self.is_service_key)
+        return KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
 
     def declaration_digest(self) -> str:
         """A digest of this entry, which changes when any field config.yml sets for it, or its secret, does.
