@@ -988,7 +988,8 @@ it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
 ### Environments
 
 `GET /api/v1/code/environments` lists the sandbox environments the caller's
-workspace may run code in, for any API key or the master key; see
+workspace may run code in, for any API key; a master key or a dashboard
+session gets the deployment's whole list. See
 [Sandbox environments](tools.md#sandbox-environments).
 
 ```json

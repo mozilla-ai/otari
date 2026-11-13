@@ -34925,7 +34925,7 @@
     },
     "/api/v1/code/environments": {
       "get": {
-        "description": "List the sandbox environments the caller's workspace may run code in, with their prices.\n\nThe code execution counterpart of ``GET /api/v1/models``: each environment's\n``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a\n``label`` and ``description``, ``price_per_run`` for the caller's\norganization, and whether it is the ``default`` a run that names none gets.\nA workspace whose code execution policy is off lists none, and one that\npins an environment lists that one alone. So does a gateway with no sandbox,\nor one that names no image, whose runs go to the backend's own default.\n``skip`` and ``limit`` page the list in the operator's order.",
+        "description": "List the sandbox environments the caller's workspace may run code in, with their prices.\n\nThe code execution counterpart of ``GET /api/v1/models``: each environment's\n``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a\n``label`` and ``description``, ``price_per_run`` for the caller's\norganization, and whether it is the ``default`` a run that names none gets.\nA workspace whose code execution policy is off lists none, and one that\npins an environment lists that one alone. A gateway with no sandbox lists\nnone, as does one that names no image, whose runs go to the backend's own\ndefault. A master key or a dashboard session belongs to no single workspace,\nso it gets the deployment's whole list at the deployment's prices.\n``skip`` and ``limit`` page the list in the operator's order.",
         "operationId": "code-execution-list_code_execution_environments",
         "parameters": [
           {
