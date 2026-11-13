@@ -16,7 +16,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _DOCS_DIR = _REPO / "docs"
 _SPEC = _DOCS_DIR / "public" / "openapi.json"
 
-_API_PATH = re.compile(r"`(?:(?:GET|POST|PUT|PATCH|DELETE) )?(/api/v1/[^`\s?]*)`")
+_API_PATH = re.compile(r"`(?:(?:GET|POST|PUT|PATCH|DELETE) )?(/api/v1/[^`\s?]*)(?:\?[^`\s]*)?`")
 _PARAM = re.compile(r"\{[^}]+\}")
 
 # Paths the docs name on purpose although the spec has no route for them.
