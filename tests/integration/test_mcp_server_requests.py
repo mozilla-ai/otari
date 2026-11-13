@@ -53,7 +53,12 @@ from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerService
-from gateway.services.tools import McpGrantMembershipListener, McpServerRequestService, WorkspaceMcpServerUrls
+from gateway.services.tools import (
+    McpGrantMembershipListener,
+    McpServerRequestService,
+    WorkspaceMcpServerUrls,
+    _mcp_server_requests,
+)
 from gateway.services.tools._mcp_server_requests import (
     MAX_PENDING_REQUESTS_PER_MEMBER,
     MAX_REQUEST_MAIL_RECIPIENTS,
@@ -423,6 +428,25 @@ async def test_both_lists_page_and_a_managers_page_keeps_each_servers_requests_t
     newest = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, limit=1)
     older = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, skip=1, limit=1)
     assert [entry.catalog_name for entry in newest.data + older.data] == [LINEAR[0], SENTRY[0]]
+
+
+@pytest.mark.asyncio
+async def test_a_page_cut_by_the_request_cap_keeps_earlier_servers_whole_and_counts_each_server(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    for who, name in ((team.ada, SENTRY[0]), (team.ada, LINEAR[0]), (team.grace, SENTRY[0]), (team.grace, LINEAR[0])):
+        await world.requests.create(user=who, workspace_id=team.workspace.id, request=_ask(name))
+    monkeypatch.setattr(_mcp_server_requests, "MAX_PENDING_LISTED", 3)
+
+    listed = await world.requests.pending(user=team.owner, workspace_id=team.workspace.id)
+
+    assert [(group.catalog_name, len(group.requesters), group.requester_count) for group in listed.data] == [
+        (SENTRY[0], 2, 2),
+        (LINEAR[0], 1, 2),
+    ]
+    assert listed.count == 4
 
 
 @pytest.mark.asyncio

@@ -99,9 +99,14 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
     async def pending_in_workspace(
         self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], limit: int
     ) -> list[McpServerRequest]:
-        """A workspace's pending requests for these catalog servers, oldest first."""
+        """A workspace's pending requests for these catalog servers, grouped as :meth:`pending_servers` orders them.
+
+        Each server's requests come oldest first, after those of every server waited for longer, so
+        ``limit`` cuts the last servers short rather than every one.
+        """
         if not catalog_names:
             return []
+        first = func.min(McpServerRequest.created_at).over(partition_by=McpServerRequest.catalog_name)
         rows = await self.db.execute(
             select(McpServerRequest)
             .where(
@@ -109,10 +114,25 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
                 McpServerRequest.status == _PENDING,
                 McpServerRequest.catalog_name.in_(list(catalog_names)),
             )
-            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+            .order_by(first, McpServerRequest.catalog_name, McpServerRequest.created_at, McpServerRequest.id)
             .limit(limit)
         )
         return list(rows.scalars().all())
+
+    async def count_pending_by_server(self, workspace_id: uuid.UUID, catalog_names: Collection[str]) -> dict[str, int]:
+        """How many requests wait for each of these catalog servers, in one query."""
+        if not catalog_names:
+            return {}
+        rows = await self.db.execute(
+            select(McpServerRequest.catalog_name, func.count())
+            .where(
+                McpServerRequest.workspace_id == workspace_id,
+                McpServerRequest.status == _PENDING,
+                McpServerRequest.catalog_name.in_(list(catalog_names)),
+            )
+            .group_by(McpServerRequest.catalog_name)
+        )
+        return {name: count for name, count in rows.all()}
 
     async def count_pending_in_workspace(self, workspace_id: uuid.UUID) -> int:
         counted = (

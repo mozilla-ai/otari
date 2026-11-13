@@ -8,14 +8,16 @@ the commit to the caller.
 
 import uuid
 from collections.abc import Callable, Collection
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Never
 
 from sqlalchemy import ColumnElement, delete, event, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import McpSharedConnection, McpUserConnection
 from gateway.repositories.base_repository import BaseRepository
@@ -180,9 +182,9 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
     ) -> McpUserConnection:
         """Stage a user's connection to a server, replacing the tokens of one they already hold.
 
-        Two sign-ins by one user can finish together, and the unique constraint refuses the second
-        insert. The insert runs in a SAVEPOINT, so losing rolls back this insert alone, and the
-        winner's row then takes these tokens: the later sign-in is the one the user finished last.
+        Two sign-ins by one user can finish together. The insert turns into an update on the unique
+        ``(server_id, user_id)`` constraint, so the later sign-in is the one the row keeps, and the row
+        is read back locked until the caller commits.
         """
         fields = {
             "encrypted_access_token": encrypted_access_token,
@@ -195,22 +197,20 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
             "revocation_endpoint": revocation_endpoint,
             "resource": resource,
         }
-        existing = await self.find(server_id, user_id, lock=True)
-        if existing is None:
-            try:
-                async with self.db.begin_nested():
-                    created = McpUserConnection(server_id=server_id, user_id=user_id, **fields)
-                    self.db.add(created)
-                    await self.db.flush()
-                return created
-            except IntegrityError:
-                existing = await self.find(server_id, user_id, lock=True)
-                if existing is None:
-                    raise
-        for field, value in fields.items():
-            setattr(existing, field, value)
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        await self.db.execute(
+            insert(McpUserConnection)
+            .values(server_id=server_id, user_id=user_id, **fields)
+            .on_conflict_do_update(
+                index_elements=[McpUserConnection.server_id, McpUserConnection.user_id],
+                set_={**fields, "updated_at": datetime.now(UTC)},
+            )
+        )
         await self.db.flush()
-        return existing
+        stored = await self.find(server_id, user_id, lock=True)
+        if stored is None:
+            raise RuntimeError("an upserted MCP connection could not be read back")
+        return stored
 
     async def find_shared(self, server_id: uuid.UUID, *, lock: bool = False) -> McpSharedConnection | None:
         """A shared server's account, or ``None``; read and locked as :meth:`find` does."""

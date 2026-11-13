@@ -73,6 +73,11 @@ class Logo:
         return await asyncio.to_thread(cls.of, content, content_type)
 
     @staticmethod
+    async def decodes(content: bytes) -> bool:
+        """Whether a raster's pixel data decodes in full, on a worker thread. Within the pixel cap only."""
+        return await asyncio.to_thread(_raster_decodes, content)
+
+    @staticmethod
     def sniff(content: bytes) -> str | None:
         """The image type these bytes are, or None when they are no image a logo may be."""
         return sniff_image(content)
@@ -109,6 +114,20 @@ def _raster_size_ok(content: bytes) -> bool:
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         return False
     return 0 < width * height <= _MAX_PIXELS
+
+
+def _raster_decodes(content: bytes) -> bool:
+    """Whether every pixel of a raster within the pixel cap decodes: a truncated or corrupt one does not."""
+    from PIL import Image, UnidentifiedImageError  # noqa: PLC0415 - only logo handling needs it
+
+    if not _raster_size_ok(content):
+        return False
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return False
+    return True
 
 
 def sniff_image(content: bytes) -> str | None:

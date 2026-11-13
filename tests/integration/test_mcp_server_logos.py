@@ -211,6 +211,21 @@ async def test_only_a_png_is_accepted_as_an_upload(async_db: AsyncSession) -> No
         )
 
 
+async def test_a_png_whose_pixels_do_not_decode_is_refused(async_db: AsyncSession) -> None:
+    """Its signature and header read fine, so only decoding it finds the damage."""
+    workspace, owner, _ = await _setup(async_db)
+    service = _service(async_db, _Fetcher())
+    server_id = await _server(async_db, workspace, "https://mcp.example.com/mcp")
+    whole = _png((0, 0, 0, 255), size=64)
+    truncated = whole[: len(whole) // 2]
+    assert Logo.sniff(truncated) == "image/png"
+
+    with pytest.raises(McpLogoInvalidError):
+        await service.set_logo(
+            user=owner, workspace_id=workspace.id, server_id=server_id, tile="auto", content=truncated
+        )
+
+
 async def test_a_member_reads_logos_but_may_not_change_one(async_db: AsyncSession) -> None:
     workspace, _, member = await _setup(async_db)
     service = _service(async_db, _Fetcher())

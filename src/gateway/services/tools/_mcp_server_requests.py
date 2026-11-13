@@ -292,7 +292,8 @@ class McpServerRequestService:
         """A workspace's pending requests, grouped by the server asked for. Workspace managers only.
 
         A page holds ``limit`` servers after the first ``skip``, the one waited for longest first, and
-        each server's requests whole up to ``MAX_PENDING_LISTED`` in the page.
+        their requests up to ``MAX_PENDING_LISTED`` in the page, the earlier servers' whole. Each
+        server's ``requester_count`` says how many wait for it, listed or not.
         """
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
@@ -302,6 +303,7 @@ class McpServerRequestService:
             rows = await self._requests.pending_in_workspace(
                 workspace.id, catalog_names=names, limit=MAX_PENDING_LISTED
             )
+            waiting = await self._requests.count_pending_by_server(workspace.id, names)
             count = len(rows)
             if skip > 0 or len(names) == limit or count == MAX_PENDING_LISTED:
                 count = await self._requests.count_pending_in_workspace(workspace.id)
@@ -317,6 +319,7 @@ class McpServerRequestService:
                     url=row.url,
                     catalog_server=entries.get(row.catalog_name),
                     requesters=[],
+                    requester_count=waiting.get(row.catalog_name, 0),
                     first_requested_at=row.created_at,
                 )
             person = people.get(row.requester_id)

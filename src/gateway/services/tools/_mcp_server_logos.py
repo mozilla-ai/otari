@@ -144,6 +144,8 @@ class McpServerLogoService:
         if content is not None:
             if len(content) > Logo.MAX_UPLOAD_BYTES or Logo.sniff(content) != "image/png":
                 raise McpLogoInvalidError
+            if not await Logo.decodes(content):
+                raise McpLogoInvalidError
             uploaded = await Logo.measured(content, "image/png")
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)

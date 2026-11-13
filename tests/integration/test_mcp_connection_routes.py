@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult
@@ -28,7 +29,13 @@ from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import _mcp_oauth
-from gateway.services.tools._mcp_oauth import AUTH_METHOD_NONE, McpOAuthClient, McpOAuthMetadata, McpOAuthTokens
+from gateway.services.tools._mcp_oauth import (
+    AUTH_METHOD_NONE,
+    McpOAuthClient,
+    McpOAuthMetadata,
+    McpOAuthTokenError,
+    McpOAuthTokens,
+)
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 ISSUER = "https://93.184.216.36"
@@ -315,6 +322,57 @@ def test_a_key_is_told_to_sign_in_until_its_user_has(
     assert [tool["name"] for tool in tools.json()["tools"]] == ["list_files"]
     assert seen[0].authorization_token == SECRETS[0], "the call carries the key's own user's token"
     assert SECRETS[0] not in tools.text
+
+
+def test_a_token_refused_mid_call_whose_renewal_needs_a_sign_in_carries_the_link(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    user_key: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The server answers 401, the refresh token is dead too, and the caller still gets a way back in."""
+    workspace = _workspace(test_db, user_key)
+    server_id = _per_user_server(client, master_key_header, workspace)
+    _connect(test_db, server_id, "alice")
+    headers = _bearer(user_key)
+    revisions: list[str] = []
+
+    async def enter(stack: Any, server: ResolvedMcpServer, *, screen_answers: bool) -> Any:
+        revisions.append(server.revision)
+        request = httpx2.Request("POST", PUBLIC_URL)
+        raise BaseExceptionGroup(
+            "transport",
+            [httpx2.HTTPStatusError("refused", request=request, response=httpx2.Response(401, request=request))],
+        )
+
+    async def refresh(*args: Any, **kwargs: Any) -> McpOAuthTokens:
+        raise McpOAuthTokenError("refused", status_code=400, error_code="invalid_grant")
+
+    monkeypatch.setattr(mcp_stateless, "_enter_session", enter)
+    monkeypatch.setattr(_mcp_oauth, "refresh", refresh)
+    execute = {
+        "mcp_server_id": server_id,
+        "tool_name": "list_files",
+        "arguments": {},
+        "server_revision": "0" * 32,
+        "client_execution_id": str(uuid.uuid4()),
+    }
+
+    tools = client.get(f"{API_ROOT}/mcp/servers/{server_id}/tools", headers=headers)
+
+    assert tools.status_code == 403, tools.text
+    assert tools.json()["code"] == MCP_SIGN_IN_REQUIRED
+    assert tools.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
+
+    _connect(test_db, server_id, "alice")
+    executed = client.post(
+        f"{API_ROOT}/mcp/execute", json={**execute, "server_revision": revisions[0]}, headers=headers
+    )
+
+    assert executed.status_code == 403, executed.text
+    assert executed.json()["code"] == MCP_SIGN_IN_REQUIRED
+    assert executed.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
 
 
 def test_a_key_with_no_owner_is_told_a_per_user_server_does_not_exist(

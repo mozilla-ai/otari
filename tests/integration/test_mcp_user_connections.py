@@ -690,6 +690,61 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     assert wire.registrations == []
 
 
+async def test_a_managers_client_is_never_sent_to_a_moved_token_endpoint_under_the_same_issuer(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A server that is its own authorization server can keep its issuer and move the endpoint the secret goes to."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    assert (await _row(async_db, world.server.id)).oauth_client_token_endpoint == f"{ISSUER}/token"
+
+    wire.metadata = dataclasses.replace(wire.metadata, token_endpoint="https://93.184.216.38/token")
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    with pytest.raises(McpOAuthIssuerChangedError):
+        await service.start_connection(user=world.owner, return_to=None, **ids)
+
+    assert len(wire.exchanges) == 1, "no code was exchanged, so the secret was not sent"
+    row = await _row(async_db, world.server.id)
+    assert (row.oauth_client_issuer, row.oauth_client_token_endpoint) == (ISSUER, f"{ISSUER}/token")
+
+
+async def test_a_sign_in_started_before_the_client_was_saved_again_sends_it_nowhere(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    started = await service.start_connection(user=world.member, return_to=None, **ids)
+    await service.update_server(
+        user=world.owner, request=WorkspaceMcpServerUpdate(oauth_client_secret="new-secret"), **ids
+    )
+
+    with pytest.raises(McpConnectionFlowError):
+        await service.complete_connection(user=world.member, state=_state(started.authorization_url), code="code")
+
+    assert wire.exchanges == []
+
+
+async def test_a_renewal_sends_no_secret_to_a_token_endpoint_the_client_is_no_longer_pinned_to(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(col(WorkspaceMcpServer.id) == world.server.id)
+        .values(oauth_client_token_endpoint="https://93.184.216.38/token")
+    )
+    await async_db.commit()
+
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.token_for(await _row(async_db, world.server.id), str(world.member.id))
+
+    assert wire.refreshes == []
+
+
 async def test_a_client_otari_registered_is_registered_again_with_a_new_authorization_server(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire
 ) -> None:
@@ -1870,6 +1925,36 @@ async def test_a_refused_token_whose_grant_ended_ends_the_connection(
     assert await _connection(async_db, world.server.id, str(world.member.id)) is None
 
 
+async def test_a_request_that_goes_away_while_queued_for_the_renewal_sends_no_exchange(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """During an authorization server outage, nothing is stored, so a queued renewal would send its own exchange."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    user_id = str(world.member.id)
+    row = await _row(async_db, world.server.id)
+    wire.refresh_gate = asyncio.Event()
+    wire.refresh_error = McpOAuthTokenError("unavailable", status_code=503)
+
+    holding = asyncio.create_task(tokens.token_for(row, user_id))
+    while not wire.refreshes:
+        await asyncio.sleep(0.01)
+    queued = asyncio.create_task(tokens.token_for(row, user_id))
+    await asyncio.sleep(0.05)
+    queued.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await queued
+    wire.refresh_gate.set()
+    with pytest.raises(McpConnectionUnavailableError):
+        await holding
+    await asyncio.sleep(0.05)
+
+    assert len(wire.refreshes) == 1, "the request that left while queued sent no exchange"
+    wire.refresh_error = None
+    assert await tokens.token_for(row, user_id) == "renewed-2", "the holder released the lock"
+
+
 async def test_a_renewal_is_stored_even_when_the_request_waiting_on_it_goes_away(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
 ) -> None:
@@ -2124,6 +2209,62 @@ async def test_the_public_callback_checks_iss_for_a_sign_in_with_no_dashboard_se
     assert (outcome.connected == world.server.id) is connects
     assert (outcome.error == "sign_in_failed") is not connects
     assert (await _connection(async_db, world.server.id, "alice") is not None) is connects
+
+
+async def _put(
+    repository: McpUserConnectionRepository, server_id: uuid.UUID, user_id: str, token: str
+) -> McpUserConnection:
+    return await repository.put(
+        server_id,
+        user_id,
+        encrypted_access_token=token,
+        encrypted_refresh_token=None,
+        expires_at=None,
+        scope=None,
+        client_id="client",
+        client_auth_method=AUTH_METHOD_POST,
+        token_endpoint=f"{ISSUER}/token",
+        revocation_endpoint=None,
+        resource=None,
+    )
+
+
+async def test_two_sign_ins_finishing_together_keep_one_row_with_the_later_tokens(
+    async_db: AsyncSession, config: GatewayConfig, postgres_url: str
+) -> None:
+    """The second insert waits on the unique constraint and becomes an update, with no savepoint."""
+    world = await _world(async_db, config)
+    user_id = str(world.member.id)
+    async_db.add(BillingUser(user_id=user_id))
+    await async_db.commit()
+    await _put(McpUserConnectionRepository(async_db), world.server.id, user_id, "first")
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as other_session:
+            later = asyncio.create_task(
+                _put(McpUserConnectionRepository(other_session), world.server.id, user_id, "second")
+            )
+            await asyncio.sleep(0.1)
+            assert not later.done(), "the second insert waits for the first to commit"
+            await async_db.commit()
+            stored = await later
+            await other_session.commit()
+    finally:
+        await engine.dispose()
+
+    assert stored.encrypted_access_token == "second"
+    rows = (
+        (
+            await async_db.execute(
+                select(McpUserConnection)
+                .where(McpUserConnection.server_id == world.server.id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [row.encrypted_access_token for row in rows] == ["second"]
 
 
 async def test_a_savepoint_released_before_the_commit_sends_nothing_yet(async_db: AsyncSession) -> None:

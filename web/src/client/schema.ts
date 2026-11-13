@@ -15603,8 +15603,13 @@ export interface components {
              */
             first_requested_at: string;
             /**
+             * Requester Count
+             * @description How many pending requests ask for this server in all
+             */
+            requester_count: number;
+            /**
              * Requesters
-             * @description Who asked, earliest first
+             * @description Who asked, earliest first. Shorter than requester_count when the page's request cap cut it
              */
             requesters: components["schemas"]["McpServerRequesterPublic"][];
             /** Title */

@@ -1018,7 +1018,10 @@ class McpServerRequestGroupPublic(pydantic.BaseModel):
     catalog_server: McpCatalogServerPublic | None = pydantic.Field(
         description="The catalog's entry as it is now; null once the catalog no longer lists the server"
     )
-    requesters: list[McpServerRequesterPublic] = pydantic.Field(description="Who asked, earliest first")
+    requesters: list[McpServerRequesterPublic] = pydantic.Field(
+        description="Who asked, earliest first. Shorter than requester_count when the page's request cap cut it"
+    )
+    requester_count: int = pydantic.Field(description="How many pending requests ask for this server in all")
     first_requested_at: datetime
 
 

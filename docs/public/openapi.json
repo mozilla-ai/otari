@@ -13906,8 +13906,13 @@
             "title": "First Requested At",
             "type": "string"
           },
+          "requester_count": {
+            "description": "How many pending requests ask for this server in all",
+            "title": "Requester Count",
+            "type": "integer"
+          },
           "requesters": {
-            "description": "Who asked, earliest first",
+            "description": "Who asked, earliest first. Shorter than requester_count when the page's request cap cut it",
             "items": {
               "$ref": "#/components/schemas/McpServerRequesterPublic"
             },
@@ -13929,6 +13934,7 @@
           "url",
           "catalog_server",
           "requesters",
+          "requester_count",
           "first_requested_at"
         ],
         "title": "McpServerRequestGroupPublic",

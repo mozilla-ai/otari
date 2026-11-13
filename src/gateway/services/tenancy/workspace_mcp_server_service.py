@@ -1346,6 +1346,7 @@ class WorkspaceMcpServerService:
         if client is not None and client.dynamic:
             server.oauth_client = None
             server.oauth_client_issuer = None
+            server.oauth_client_token_endpoint = None
 
     async def _record_check(
         self, server: WorkspaceMcpServer, *, required: bool = False, check_token: str | None = None
@@ -1673,6 +1674,7 @@ class WorkspaceMcpServerService:
         # Saving the client again approves whichever authorization server its next sign-in finds.
         if store_client or moves_host or isinstance(new_client_id, str) or isinstance(new_client_secret, str):
             server.oauth_client_issuer = None
+            server.oauth_client_token_endpoint = None
         for field, value in fields.items():
             setattr(server, field, value)
         if connection_changed:
