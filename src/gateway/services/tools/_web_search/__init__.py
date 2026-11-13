@@ -16,6 +16,7 @@ from gateway.services.tools._web_search._direct import (
     resolve_direct_search,
     resolve_organization_key_search,
     run_direct_search,
+    servable_direct_search_instances,
     unnamed_direct_search_tool,
     unpriced_direct_search_detail,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "run_direct_search",
     "search_default_to_pin",
     "search_resolves",
+    "servable_direct_search_instances",
     "served_fetch_instances",
     "unnamed_direct_search_tool",
     "unpriced_direct_fetch_detail",

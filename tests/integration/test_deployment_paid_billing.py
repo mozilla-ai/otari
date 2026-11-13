@@ -920,7 +920,7 @@ def _search(client: TestClient, key: dict[str, Any]) -> Any:
 
 
 def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_it_cost(
-    billed_search: tuple[TestClient, ModuleType],
+    billed_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
     client, probe = billed_search
     key = _key(client)
@@ -940,10 +940,11 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     user = _user(client)
     assert user["spend"] == pytest.approx(0.007)
     assert user["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [True]
 
 
 def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
-    billed_search: tuple[TestClient, ModuleType],
+    billed_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
     client, probe = billed_search
     key = _key(client)
@@ -964,6 +965,8 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
     assert _user(client)["reserved"] == pytest.approx(0.0)
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
     assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "fake-search")]
+    # Nothing was admitted, so nothing was paid for.
+    assert _deployment_paid_flags(db_session_factory) == [False]
 
 
 def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(

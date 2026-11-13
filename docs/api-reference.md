@@ -69,7 +69,8 @@ An API key reaches:
 - [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
 - the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
   `/providers/catalog`, `/tool-settings/guardrails/catalog`,
-  `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
+  `/tool-settings/guardrails/profiles`, `/search-tools/providers` and
+  `/search-tools/catalog`;
 - for a [service key](end-users.md), the end-user routes.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
@@ -792,6 +793,24 @@ provider. A 502 for a failure that is not the provider's, such as an organizatio
 key this gateway cannot call, carries none of them.
 The completion routes send the same headers when a provider fails a completion;
 see [Provider failures](#provider-failures).
+
+**Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools a
+call may name, for any API key, as `GET /api/v1/models` lists models. Each entry
+carries the tool's name as `id`, its `provider`, a display `label`, its
+`price_per_call` in USD for the caller's organization (its override, else the
+deployment's price list; `null` when nothing prices it), and `default`, true for
+the tool a call that names none runs on. A tool a direct search cannot run on is
+left out, and no key, endpoint or option is returned. An API key whose workspace
+has web access off gets an empty list; `GET /api/v1/tools` says why.
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "exa", "object": "search_tool", "provider": "exa", "label": "Exa", "price_per_call": 0.008, "default": true}
+  ]
+}
+```
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.

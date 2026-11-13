@@ -142,7 +142,10 @@ class DirectToolCall(Generic[ResultT]):
 
 @dataclass(frozen=True)
 class DirectToolUsage:
-    """One usage row of a direct tool call. A served call reports zero tokens; the others report none."""
+    """One usage row of a direct tool call. A served call reports zero tokens; the others report none.
+
+    ``deployment_paid`` marks a call the organization's funds were admitted to pay for.
+    """
 
     workspace_id: uuid.UUID
     api_key_id: str | None
@@ -160,6 +163,7 @@ class DirectToolUsage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    deployment_paid: bool = False
 
 
 class DirectToolAccounts(Protocol):
@@ -651,6 +655,7 @@ class DirectToolService:
                 endpoint=endpoint,
                 latency_ms=_elapsed_ms(started_at),
                 counts_toward_budget=not budget_exempt,
+                deployment_paid=funding is not None,
                 request_group_id=request_id,
                 **fields,
             )
