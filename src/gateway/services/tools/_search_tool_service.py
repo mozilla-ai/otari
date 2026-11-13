@@ -7,6 +7,7 @@ synchronously, so a write takes effect at once on the worker that served it,
 and on the others within the refresh interval.
 """
 
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -31,6 +32,8 @@ from gateway.schemas.tools import (
     CreateSearchToolRequest,
     ListedSearchToolSchema,
     ReencryptSearchToolsResponse,
+    SearchToolCatalogEntry,
+    SearchToolCatalogResponse,
     SearchToolsResponse,
     SearchToolTestRequest,
     StoredSearchToolSchema,
@@ -63,6 +66,7 @@ from gateway.services.tools._search_tool_writes import (
     check_tool_write,
     default_to_pin,
 )
+from gateway.services.tools._web_search import servable_direct_search_instances, unnamed_direct_search_tool
 from gateway.types.tool_charges import InstanceRateKey, instance_rate_key
 
 # The runtime tool settings as stored, every valid one.
@@ -80,8 +84,9 @@ class ToolRateInForce(NamedTuple):
     under_old_key: bool
 
 
-# The rate in force for an instance's rate key on the deployment's price list, or None when no row prices it.
-ReadToolRate = Callable[[InstanceRateKey], Awaitable[ToolRateInForce | None]]
+# The rate in force for an instance's rate key, or None when no row prices it: the organization's override
+# when one is named and has one, else the deployment's price list.
+ReadToolRate = Callable[[InstanceRateKey, uuid.UUID | None], Awaitable[ToolRateInForce | None]]
 
 
 def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
@@ -189,6 +194,25 @@ class SearchToolService:
                     )
                 )
         return SearchToolsResponse(stored=listed, config=configured)
+
+    async def catalog(self, organization_id: uuid.UUID | None) -> SearchToolCatalogResponse:
+        """The search tools a direct search may name, each priced for ``organization_id``."""
+        default = unnamed_direct_search_tool(self.config)
+        entries: list[SearchToolCatalogEntry] = []
+        async with self.uow:
+            for instance in servable_direct_search_instances(self.config):
+                rate_key = instance_rate_key("search", instance.name, instance.provider)
+                rate = await self.read_rate(rate_key, organization_id)
+                entries.append(
+                    SearchToolCatalogEntry(
+                        id=instance.name,
+                        provider=instance.provider,
+                        label=instance.provider.capitalize(),
+                        price_per_call=float(rate.unit_rate) if rate is not None else None,
+                        default=instance.name == default,
+                    )
+                )
+        return SearchToolCatalogResponse(data=entries)
 
     async def create(self, request: CreateSearchToolRequest) -> CreatedSearchToolSchema:
         """Store a search or fetch instance, pinning the in-loop default first when it adds a second one.
@@ -452,7 +476,7 @@ class SearchToolService:
 
         ``set_in_config`` marks a tool whose own row each start writes from its ``price_per_call``.
         """
-        rate = await self.read_rate(instance_rate_key(kind, name, provider))
+        rate = await self.read_rate(instance_rate_key(kind, name, provider), None)
         if rate is None:
             return None, "none"
         if rate.under_old_key:

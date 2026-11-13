@@ -6370,6 +6370,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search-tools/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Search Tool Catalog
+         * @description List the search tools a direct search may name, with what one search costs the caller.
+         *
+         *     Each entry is a tool ``POST /api/v1/search/{tool}`` serves, with its
+         *     provider, a display name, its price per search for the caller's
+         *     organization, and whether it is the deployment's default. Tools a direct
+         *     search cannot run on are left out, and no key, endpoint or option is
+         *     returned.
+         *
+         *     Called with an API key whose workspace does not allow web search, the list
+         *     is empty; ``GET /api/v1/tools`` says why. A master key or a dashboard
+         *     session gets the deployment's list.
+         */
+        get: operations["search-tools-list_search_tool_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search-tools/providers": {
         parameters: {
             query?: never;
@@ -19210,6 +19240,57 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SearchToolCatalogEntry
+         * @description One search tool a direct search may name, as any caller may see it: never its key, endpoint or options.
+         */
+        SearchToolCatalogEntry: {
+            /**
+             * Default
+             * @description True for the deployment's default, the tool a direct search that names none runs on unless the caller's organization brings its own search key.
+             */
+            default: boolean;
+            /**
+             * Id
+             * @description The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.
+             */
+            id: string;
+            /**
+             * Label
+             * @description A display name for the tool: its provider's name, capitalized.
+             */
+            label: string;
+            /**
+             * Object
+             * @default search_tool
+             * @constant
+             */
+            object: "search_tool";
+            /**
+             * Price Per Call
+             * @description USD the caller's organization is charged for one search on the tool when the provider reports no cost of its own: the organization's override, else the deployment's price list. Null when no row prices it.
+             */
+            price_per_call: number | null;
+            /**
+             * Provider
+             * @description The search provider the tool runs on.
+             */
+            provider: string;
+        };
+        /**
+         * SearchToolCatalogResponse
+         * @description The search tools a direct search may name.
+         */
+        SearchToolCatalogResponse: {
+            /** Data */
+            data: components["schemas"]["SearchToolCatalogEntry"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * SearchToolTestRequest
@@ -33530,6 +33611,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "search-tools-list_search_tool_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolCatalogResponse"];
                 };
             };
         };

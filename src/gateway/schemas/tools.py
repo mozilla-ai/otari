@@ -389,6 +389,35 @@ class SearchToolsResponse(pydantic.BaseModel):
     config: list[ConfigSearchToolSchema]
 
 
+class SearchToolCatalogEntry(pydantic.BaseModel):
+    """One search tool a direct search may name, as any caller may see it: never its key, endpoint or options."""
+
+    id: str = pydantic.Field(description="The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.")
+    object: Literal["search_tool"] = "search_tool"
+    provider: str = pydantic.Field(description="The search provider the tool runs on.")
+    label: str = pydantic.Field(description="A display name for the tool: its provider's name, capitalized.")
+    price_per_call: float | None = pydantic.Field(
+        description=(
+            "USD the caller's organization is charged for one search on the tool when the provider reports no "
+            "cost of its own: the organization's override, else the deployment's price list. Null when no row "
+            "prices it."
+        )
+    )
+    default: bool = pydantic.Field(
+        description=(
+            "True for the deployment's default, the tool a direct search that names none runs on unless the "
+            "caller's organization brings its own search key."
+        )
+    )
+
+
+class SearchToolCatalogResponse(pydantic.BaseModel):
+    """The search tools a direct search may name."""
+
+    object: Literal["list"] = "list"
+    data: list[SearchToolCatalogEntry]
+
+
 class CreateSearchToolRequest(pydantic.BaseModel):
     """Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
 

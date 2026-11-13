@@ -918,8 +918,8 @@ async def verify_catalog_reader(
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
     variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
-    ``GET /api/v1/tool-settings/guardrails/profiles`` and
-    ``GET /api/v1/search-tools/providers``. The
+    ``GET /api/v1/tool-settings/guardrails/profiles``,
+    ``GET /api/v1/search-tools/providers`` and ``GET /api/v1/search-tools/catalog``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
@@ -967,6 +967,22 @@ async def catalog_reader_operates_deployment(
         return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
     _, is_master_key = auth
     return is_master_key
+
+
+async def catalog_reader_organization(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+) -> uuid.UUID | None:
+    """The organization whose prices a caller :func:`verify_catalog_reader` admitted is shown.
+
+    Resolved as settlement resolves it: a session's active organization, an API
+    key's workspace's, and the default workspace's for the master key.
+    """
+    if session_identity is not None:
+        return session_identity.active_organization_id
+    api_key, _ = auth
+    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
 
 
 async def verify_catalog_reader_or_public(
@@ -2057,9 +2073,11 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
-async def _deployment_tool_rate(session: AsyncSession, rate_key: InstanceRateKey) -> ToolRateInForce | None:
+async def _deployment_tool_rate(
+    session: AsyncSession, rate_key: InstanceRateKey, organization_id: uuid.UUID | None
+) -> ToolRateInForce | None:
     """The rate one of the deployment's search or fetch tools settles at on its own account, as settlement reads it."""
-    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True)
+    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True, organization_id=organization_id)
     if rate is None:
         return None
     return ToolRateInForce(rate.unit_rate, under_old_key=rate.old_key)
@@ -2078,7 +2096,7 @@ def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config:
         tools=SearchToolRepository(uow),
         read_settings=lambda: load_overrides(session, report_invalid=False),
         stage_setting=lambda key, value: stage_override(session, key, value),
-        read_rate=lambda rate_key: _deployment_tool_rate(session, rate_key),
+        read_rate=lambda rate_key, organization_id: _deployment_tool_rate(session, rate_key, organization_id),
     )
 
 

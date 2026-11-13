@@ -18,13 +18,19 @@ validation is structural, matching ``/api/v1/tool-settings`` rather than the pro
 SSRF gate: the backend this most often points at is a SearXNG sidecar on a
 private address, which a deny-private gate would refuse.
 
-``/api/v1/search-tools/providers`` is the exception, on ``catalog_router``: it lists
+``/api/v1/search-tools/providers`` is an exception, on ``catalog_router``: it lists
 the providers any-search and any-fetch serve, which is a property of the build
 rather than of this deployment, so any catalog reader may see it. What it says
 about this deployment, its tools and their inherited endpoints, only an operator
 sees.
+
+``/api/v1/search-tools/catalog`` is the other, the search counterpart of
+``GET /api/v1/models``: the tools a caller may name in ``POST /api/v1/search``,
+with what a search costs the caller's organization and nothing of their
+configuration.
 """
 
+import uuid
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -35,7 +41,9 @@ from gateway.api.deps import (
     SearchToolServiceDep,
     SearchToolTesterDep,
     WebProviderClientDep,
+    WorkspaceWebSearchPoliciesDep,
     catalog_reader_operates_deployment,
+    catalog_reader_organization,
     get_config,
     require_deployment_operator,
     verify_catalog_reader,
@@ -45,11 +53,13 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings.tools import ToolInstance, ToolKind
 from gateway.inflight import track_request
+from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import (
     CreatedSearchToolSchema,
     CreateSearchToolRequest,
     ReencryptSearchToolsResponse,
     SearchProviderSchema,
+    SearchToolCatalogResponse,
     SearchToolsResponse,
     SearchToolTestRequest,
     SearchToolTestResponse,
@@ -100,6 +110,36 @@ async def list_search_providers(
     reader withholds the same from anyone else.
     """
     return search_provider_catalog(config, kind, operates=operates)
+
+
+@catalog_router.get("/catalog")
+async def list_search_tool_catalog(
+    service: SearchToolServiceDep,
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    organization_id: Annotated[uuid.UUID | None, Depends(catalog_reader_organization)],
+    web_policies: WorkspaceWebSearchPoliciesDep,
+) -> SearchToolCatalogResponse:
+    """List the search tools a direct search may name, with what one search costs the caller.
+
+    Each entry is a tool ``POST /api/v1/search/{tool}`` serves, with its
+    provider, a display name, its price per search for the caller's
+    organization, and whether it is the deployment's default. Tools a direct
+    search cannot run on are left out, and no key, endpoint or option is
+    returned.
+
+    Called with an API key whose workspace does not allow web search, the list
+    is empty; ``GET /api/v1/tools`` says why. A master key or a dashboard
+    session gets the deployment's list.
+    """
+    api_key, _ = auth
+    if api_key is not None:
+        allowed, _policy = await web_policies.access(api_key.workspace_id)
+        if not allowed:
+            return SearchToolCatalogResponse(data=[])
+    try:
+        return await service.catalog(organization_id)
+    except DATABASE_ERRORS as exc:
+        raise database_error("list the search tool catalog", exc) from None
 
 
 @router.get("")

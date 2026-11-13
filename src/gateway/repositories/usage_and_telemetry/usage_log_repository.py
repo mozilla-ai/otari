@@ -49,6 +49,7 @@ def new_usage_row(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
+    deployment_paid: bool = False,
 ) -> UsageLog:
     """A new usage row holding these values, with a fresh id and the current time."""
     return UsageLog(
@@ -70,6 +71,7 @@ def new_usage_row(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        deployment_paid=deployment_paid,
     )
 
 

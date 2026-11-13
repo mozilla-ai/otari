@@ -133,6 +133,17 @@ def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
         return None
 
 
+def servable_direct_search_instances(config: ToolSettings) -> list[ToolInstance]:
+    """The search instances a direct search may name and be served on, by name."""
+    servable: list[ToolInstance] = []
+    for name in sorted(effective_search_instances(config)):
+        try:
+            servable.append(pick_direct_search_instance(config, name))
+        except (SearchToolSelectionError, SearchToolMisconfiguredError):
+            continue
+    return servable
+
+
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
     """``web_search_default_tool`` when it names an instance any-search serves, else the only instance.
 
