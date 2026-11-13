@@ -81,7 +81,9 @@ remove a name when you move its code, and never add one.
 - **Reacting to another domain.** Dependencies between domains run one way. A domain that must
   react to a change in a domain that does not depend on it receives a listener interface by
   constructor injection, defined by the domain where the change happens. The listener runs in the
-  caller's transaction and never commits.
+  caller's transaction and never commits. One told of something no transaction records is run in a
+  background task by the domain that tells it, and works on a Unit of Work of its own
+  ([DOMAINS.md](../../../DOMAINS.md#the-target-shape)).
 - **Repositories** inherit `BaseRepository`, flush and never commit. A repository that turns a
   specific database error, such as `IntegrityError`, into a domain error is the module that
   imports it.

@@ -135,7 +135,10 @@ model, except a module on the model's baseline.
   on it receives a listener interface by constructor injection, defined by the
   domain where the change happens.
 - Flag a listener implementation that commits or rolls back. The caller owns
-  the transaction.
+  the transaction. A listener told of something no transaction records, such
+  as a request that failed, is run in a background task by the domain that tells it, and does its
+  work on a Unit of Work of its own. Flag such a listener that starts a task
+  itself.
 - The check refuses a default on a parameter or a class field whose type name
   contains `Listener`. Flag a default on a listener whose type does not name
   it, such as a bare `Callable`.

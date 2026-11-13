@@ -53,11 +53,13 @@ How a domain fits together:
   the domain where the change happens defines a listener interface and receives
   an implementation by constructor injection (Observer, and the Dependency
   Inversion Principle). The listener runs inside the caller's transaction and
-  never commits. The parameter that receives it has no default, so a caller
-  cannot skip the listener by leaving it out. A listener interface's name ends
-  in `Listener`, and the architecture check finds such a parameter by a type
-  name that contains `Listener`. A package root may export a listener it
-  offers another domain.
+  never commits. A listener told of something no transaction records, such as a
+  request that failed, is run in a background task by the domain that tells it,
+  and does its work on a Unit of Work of its own. The parameter that receives
+  it has no default, so a caller cannot skip the listener by leaving it out. A
+  listener interface's name ends in `Listener`, and the architecture check
+  finds such a parameter by a type name that contains `Listener`. A package
+  root may export a listener it offers another domain.
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more
