@@ -305,6 +305,7 @@ from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
+    AnsweredRounds,
     MaxToolIterationsExceeded,
     ToolBackend,
 )
@@ -701,6 +702,21 @@ def failure_error_message(exc: BaseException) -> str:
     if _is_image_input_rejection(exc):
         return unsupported_image_detail()
     return str(exc)
+
+
+def answered_rounds_usage(adapter: FormatAdapter[Any, Any], exc: BaseException | None) -> CompletionUsage | None:
+    """What the rounds a failed tool loop had answered owe, or None when it failed before one was.
+
+    The provider billed those rounds, so the failure row bills them too, as a
+    stream that dies after reporting usage still owes for it.
+    """
+    answered = AnsweredRounds.of(exc)
+    if answered is None:
+        return None
+    if answered.result is not None:
+        return adapter.extract_usage(answered.result)
+    reported = (adapter.extract_stream_usage(event) for event in reversed(answered.events))
+    return next((usage for usage in reported if usage is not None), None)
 
 
 def _rejected_param(exc: BaseException, request_params: Collection[str] = _FORWARDED_PARAMS) -> str | None:
@@ -1383,13 +1399,16 @@ class RequestContext:
         # What the ``rate_limits`` rules hold for this request, settled where its reservation is.
         self.rate_limit_grant = rate_limit_grant
         self.reservation = reservation
-        # USD already written onto a failure row for gateway-run tool calls. A
-        # request whose plan is exhausted still owes for the searches it ran, and
+        # USD already written onto a failure row: the gateway-run tool calls and the
+        # tool-loop rounds a provider answered. A request whose plan is
+        # exhausted still owes for the searches and rounds it ran, and
         # ``log_exhausted_plan`` writes that onto the row without settling. Recording
         # it here lets the single release site reconcile it instead of refunding,
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
         self.tool_charge: Decimal = Decimal(0)
+        # Those rounds' tokens, for the token ceiling and the per-minute token limit.
+        self.tool_charge_tokens = 0
         # USD the reservation grew by to hold gateway-run tool calls before they ran.
         # A fallover's top-up holds it on top of the next candidate's estimate, since
         # those calls are billed whichever attempt wins.
@@ -5604,18 +5623,18 @@ async def release_reservation(ctx: RequestContext) -> None:
     it, which is the only thing that ever gives it back (the budget reset zeroes
     spend and leaves the hold in place).
 
-    When ``ctx.tool_charge`` is set, the request already ran gateway-run tool calls
-    that were written onto its failure row, so the reservation is *reconciled* to
-    that amount rather than refunded: a refund releases the hold without recording
-    spend, which would leave the charge visible in the activity log and missing from
-    the budget it should have consumed.
+    When ``ctx.tool_charge`` is set, its failure row already carries what the request
+    ran (gateway-run tool calls, tool-loop rounds a provider answered), so the
+    reservation is *reconciled* to that amount rather than refunded: a refund releases
+    the hold without recording spend, which would leave the charge visible in the
+    activity log and missing from the budget it should have consumed.
     """
     if ctx.rate_limit_grant is not None:
-        await ctx.rate_limit_grant.settle(0)
+        await ctx.rate_limit_grant.settle(ctx.tool_charge_tokens)
     if ctx.reservation is None:
         return
-    if ctx.tool_charge:
-        await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge)
+    if ctx.tool_charge or ctx.tool_charge_tokens:
+        await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge, actual_tokens=ctx.tool_charge_tokens)
         return
     await refund_reservation(ctx.db, ctx.reservation)
 
@@ -5751,6 +5770,7 @@ async def _log_failure_and_refund(
     status_code: int | None = None,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
+    usage: CompletionUsage | None = None,
 ) -> None:
     """Record a request-level failure and release its reservation.
 
@@ -5762,10 +5782,11 @@ async def _log_failure_and_refund(
     When gateway-run tool calls happened before the failure, their cost is
     reconciled rather than refunded: ``refund_reservation`` releases the hold
     *without* writing spend, which would leave the cost visible on the row and
-    absent from ``users.spend``.
+    absent from ``users.spend``. ``usage`` is settled the same way: the tokens
+    of the tool-loop rounds the provider answered before the failure.
     """
     if ctx.rate_limit_grant is not None:
-        await ctx.rate_limit_grant.settle(0)
+        await ctx.rate_limit_grant.settle(_settled_tokens(usage))
     logged = await record_usage(
         request_facts=ctx.price_facts,
         db=ctx.db,
@@ -5775,6 +5796,7 @@ async def _log_failure_and_refund(
         provider=provider,
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
+        usage_override=usage,
         error=error,
         status_code=status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
@@ -5786,6 +5808,7 @@ async def _log_failure_and_refund(
         tags=ctx.tags,
         source_label=ctx.source_label,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -5800,7 +5823,10 @@ async def _log_failure_and_refund(
                 expects_cost=False,
                 tool_funding=ctx.tool_funding,
             )
-            await reconcile_reservation(ctx.db, ctx.reservation, cost)
+            await reconcile_reservation(ctx.db, ctx.reservation, cost, actual_tokens=_settled_tokens(usage))
+        elif tokens := _settled_tokens(usage):
+            # A free model's answered rounds still count against a token ceiling, as a stream's do.
+            await reconcile_reservation(ctx.db, ctx.reservation, Decimal(0), actual_tokens=tokens)
         else:
             await refund_reservation(ctx.db, ctx.reservation)
 
@@ -6496,18 +6522,29 @@ def build_streaming_response(
         provider_cut = (
             first_chunk_at is not None and not isinstance(exc, _GATEWAY_SIDE_FAILURES) and is_provider_cut(exc)
         )
+        # A tool loop's hidden rounds never reach the client's stream, so their usage
+        # rides on the failure instead; the provider billed them all the same. What the
+        # stream did report (an Anthropic round's message_start) only fills in around it.
+        answered = answered_rounds_usage(adapter, exc)
+        reported = (
+            reported_usage
+            if answered is None
+            else answered
+            if reported_usage is None
+            else merge_stream_usage(reported_usage, answered)
+        )
         cut = (
             settle_cut_stream(
                 policy=config.stream_missing_usage_policy,
                 prompt_chars=prompt_chars,
                 streamed_chars=streamed_chars,
-                reported_usage=reported_usage,
-                usage_is_final=usage_is_final,
+                reported_usage=reported,
+                usage_is_final=usage_is_final and answered is None,
             )
             if provider_cut
             else None
         )
-        billed_usage = cut if cut is not None else reported_usage
+        billed_usage = cut if cut is not None else reported
         if isinstance(exc, AnswerRefused) and exc.usage is not None:
             # The provider answered in full and a guardrail refused it; the answer is owed.
             billed_usage = exc.usage
@@ -7000,6 +7037,7 @@ async def run_single_attempt_stream(
             failure_status_code(exc),
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, exc),
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
@@ -7117,7 +7155,8 @@ async def log_exhausted_plan(
     caller's existing single refund site stays the only one.
 
     ``tool_tally`` is what makes an exhausted plan still owe for the searches it
-    ran, including the case that cannot fail over at all: once a tool loop has
+    ran, as the tool-loop rounds the provider answered owe their tokens, including
+    in the case that cannot fail over at all: once a tool loop has
     produced an assistant message the plan locks to that provider (see
     ``_attempts``), so a failure inside the loop is terminal and this is the only
     row the request gets. The charge is recorded on ``ctx`` for the caller's single
@@ -7131,6 +7170,9 @@ async def log_exhausted_plan(
         note_unavailable_model(
             ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
         )
+    answered = answered_rounds_usage(adapter, exc.__cause__)
+    # Rounds the locked candidate answered ran on its account, so they are funded as a served request is.
+    funded = ctx.deployment_charge if answered is not None else None
     logged = await record_usage(
         request_facts=ctx.price_facts,
         db=ctx.db,
@@ -7140,6 +7182,7 @@ async def log_exhausted_plan(
         provider=last.instance,
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
+        usage_override=answered,
         error=str(exc.detail),
         status_code=exc.status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
@@ -7150,11 +7193,14 @@ async def log_exhausted_plan(
         tags=ctx.tags,
         source_label=ctx.source_label,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
+        deployment_paid=funded is not None,
     )
     ctx.tool_charge = logged.cost or Decimal(0)
+    ctx.tool_charge_tokens = _settled_tokens(answered)
     if ctx.reservation is not None:
         await charge_deployment_paid(
-            None,
+            funded,
             ctx.db,
             logged.deployment_paid_cost,
             tools=logged.deployment_paid_tools,
@@ -7492,6 +7538,7 @@ async def run_non_stream(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, e),
         )
         raise adapter.error(422, str(e), ErrorKind.INVALID_REQUEST) from e
     except SandboxNotReachableError as e:
@@ -7520,6 +7567,7 @@ async def run_non_stream(
             failure_status_code(e),
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, e),
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
