@@ -20,7 +20,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
-from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    GatewayConfig,
+    SandboxEnvironmentConfig,
+)
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.ports.billing_port import InsufficientFundsError
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReachableError, SandboxSessionGoneError
@@ -116,12 +123,14 @@ def _rows(client: TestClient, master_key_header: dict[str, str], user_id: str) -
     return [dict(row) for row in resp.json()]
 
 
-def _price(client: TestClient, master_key_header: dict[str, str], per_million: float) -> None:
+def _price(
+    client: TestClient, master_key_header: dict[str, str], per_million: float, key: str = "otari:code_execution"
+) -> None:
     """A flat per-run rate: the stored rate is USD per million runs."""
     resp = client.post(
         f"{API_ROOT}/pricing",
         json={
-            "model_key": "otari:code_execution",
+            "model_key": key,
             "input_price_per_million": per_million,
             "output_price_per_million": 0.0,
         },
@@ -479,3 +488,176 @@ def test_a_budget_on_a_run_naming_no_end_user_is_refused(
     assert refused.status_code == 400, refused.text
     assert refused.headers["Otari-Error-Code"] == "end_user_budget_without_end_user"
     assert port.executed == []
+
+
+_ENVIRONMENTS = f"{API_ROOT}/code/environments"
+
+
+@pytest.fixture
+def environments(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Offer two environments, ``python`` the deployment's default, ``python-data`` described by the operator."""
+    monkeypatch.setattr(test_config, "sandbox_session_image", "python")
+    monkeypatch.setattr(test_config, "sandbox_allowed_session_images", "python-data")
+    monkeypatch.setattr(
+        test_config,
+        "sandbox_environments",
+        {"python-data": SandboxEnvironmentConfig(label="Python data", description="pandas and numpy, 2 vCPU")},
+    )
+
+
+def test_a_named_environment_runs_in_its_image_at_its_own_price(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    _price(client, master_key_header, 5000.0)
+    _price(client, master_key_header, 9000.0, key="otari:code_execution:python-data")
+
+    named = client.post(_ENDPOINT, json={"code": "print(1)", "environment": "python-data"}, headers=api_key_header)
+    unnamed = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+
+    assert named.status_code == 200, named.text
+    assert [opened["image"] for opened in port.opened] == ["python-data", "python"]
+    assert named.headers[COST_USD_HEADER] == "0.009000"
+    assert unnamed.headers[COST_USD_HEADER] == "0.005000", "an environment with no row of its own takes the tool's"
+    costs = sorted(row["cost"] for row in _rows(client, master_key_header, api_key_obj["user_id"]))
+    assert costs == [pytest.approx(0.005), pytest.approx(0.009)]
+
+
+def test_an_environment_the_gateway_does_not_offer_is_a_400(
+    client: TestClient, port: _FakePort, environments: None, api_key_header: dict[str, str]
+) -> None:
+    resp = client.post(_ENDPOINT, json={"code": "print(1)", "environment": "ruby"}, headers=api_key_header)
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == (
+        "Environment 'ruby' is not offered on this gateway. GET /api/v1/code/environments lists those it offers."
+    )
+    assert port.opened == []
+
+
+def test_an_environment_other_than_the_workspaces_pin_is_refused(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    _set_policy(client, master_key_header, enabled=True, image="python-data")
+
+    refused = client.post(_ENDPOINT, json={"code": "print(1)", "environment": "python"}, headers=api_key_header)
+    pinned = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+
+    assert refused.status_code == 403, refused.text
+    assert "'python-data' only" in refused.json()["detail"]
+    assert pinned.status_code == 200, pinned.text
+    assert [opened["image"] for opened in port.opened] == ["python-data"]
+
+
+def test_a_held_container_keeps_its_environment_and_refuses_another(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    _price(client, master_key_header, 5000.0)
+    _price(client, master_key_header, 9000.0, key="otari:code_execution:python-data")
+    first = client.post(
+        _ENDPOINT, json={"code": "x = 2", "container": "auto", "environment": "python-data"}, headers=api_key_header
+    )
+    container_id = first.headers["Otari-Container-Id"]
+
+    mismatch = client.post(
+        _ENDPOINT, json={"code": "print(x)", "container": container_id, "environment": "python"}, headers=api_key_header
+    )
+    resumed = client.post(_ENDPOINT, json={"code": "print(x)", "container": container_id}, headers=api_key_header)
+
+    assert mismatch.status_code == 400, mismatch.text
+    assert mismatch.json()["detail"].startswith(
+        f"Container '{container_id}' runs in the environment 'python-data', not 'python'."
+    )
+    assert resumed.status_code == 200, "the refusal gave the container back"
+    assert resumed.headers[COST_USD_HEADER] == "0.009000", "a resumed sandbox is priced as the environment it runs"
+    assert len(port.opened) == 2
+
+
+def test_the_environment_listing_describes_and_prices_each_offered_environment(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    _price(client, master_key_header, 9000.0, key="otari:code_execution:python-data")
+
+    resp = client.get(_ENVIRONMENTS, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "object": "list",
+        "data": [
+            {
+                "object": "code_execution.environment",
+                "name": "python",
+                "label": "python",
+                "description": None,
+                "price_per_run": None,
+                "default": True,
+            },
+            {
+                "object": "code_execution.environment",
+                "name": "python-data",
+                "label": "Python data",
+                "description": "pandas and numpy, 2 vCPU",
+                "price_per_run": pytest.approx(0.009),
+                "default": False,
+            },
+        ],
+    }
+
+
+def test_the_listing_falls_back_to_the_tools_price(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    _price(client, master_key_header, 5000.0)
+
+    data = client.get(_ENVIRONMENTS, headers=api_key_header).json()["data"]
+
+    assert [env["price_per_run"] for env in data] == [pytest.approx(0.005), pytest.approx(0.005)]
+
+
+def test_the_listing_follows_the_workspaces_pin_and_its_switch(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    _set_policy(client, master_key_header, enabled=True, image="python-data")
+    pinned = client.get(_ENVIRONMENTS, headers=api_key_header).json()["data"]
+    _set_policy(client, master_key_header, enabled=False)
+    off = client.get(_ENVIRONMENTS, headers=api_key_header).json()["data"]
+
+    assert [(env["name"], env["default"]) for env in pinned] == [("python-data", True)]
+    assert off == []
+
+
+def test_a_gateway_with_no_sandbox_lists_no_environment(
+    client: TestClient, environments: None, api_key_header: dict[str, str]
+) -> None:
+    resp = client.get(_ENVIRONMENTS, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"object": "list", "data": []}
+
+
+def test_the_listing_needs_a_key(client: TestClient, port: _FakePort) -> None:
+    assert client.get(_ENVIRONMENTS).status_code == 401

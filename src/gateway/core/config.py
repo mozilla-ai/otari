@@ -472,6 +472,17 @@ def _canonical_model(rule_name: str, entry: str) -> str:
     return f"{instance}:{model}"
 
 
+class SandboxEnvironmentConfig(BaseModel):
+    """How the environment listing describes one sandbox image: what it contains and how big it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, max_length=100, description="Display name, such as 'Python data'.")
+    description: str | None = Field(
+        default=None, max_length=500, description="What the image contains and its size, in a sentence."
+    )
+
+
 class ModelCapabilityConfig(BaseModel):
     """Per-model multimodal capability override.
 
@@ -1406,20 +1417,28 @@ class GatewayConfig(
         max_length=255,
         description=(
             "Sandbox image this deployment asks the code-execution backend to run "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
-            "the backend runs whatever it runs by default. A workspace policy may name a different "
-            "image only if sandbox_allowed_session_images lists it."
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'), or with sandbox_provider 'e2b' the E2B "
+            "template's name or id. When unset, nothing is asked for and the backend runs whatever it "
+            "runs by default. A workspace policy or a direct run may name a different image only if "
+            "sandbox_allowed_session_images lists it."
         ),
     )
     sandbox_allowed_session_images: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Comma-separated sandbox images a workspace's code-execution policy may pin "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
-            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
-            "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
-            "workspace may not pin an image at all. Applies to the 'protocol' sandbox provider: a hosted "
-            "provider names its workspaces its own way and ignores this."
+            "Comma-separated sandbox images a workspace's code-execution policy may pin and a direct run "
+            "may name as its environment (e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2', "
+            "or E2B template names with sandbox_provider 'e2b'). Deliberately not editable from the "
+            "dashboard: it is the operator's supply-chain allow-list, and sandbox_session_image is always "
+            "pinnable whether or not it appears here. When unset, a workspace may not pin an image at all."
+        ),
+    )
+    sandbox_environments: Annotated[dict[str, SandboxEnvironmentConfig], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "How GET /api/v1/code/environments describes each image sandbox_session_image and "
+            "sandbox_allowed_session_images offer (image -> {label, description}). An image with no entry "
+            "is listed under its own name; an entry for an image neither setting offers lists nothing."
         ),
     )
     sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(

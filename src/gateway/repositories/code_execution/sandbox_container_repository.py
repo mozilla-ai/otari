@@ -32,6 +32,7 @@ class SandboxContainerRow:
     expires_at: datetime
     hard_expires_at: datetime
     in_use_until: datetime | None = None
+    session_image: str | None = None
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -51,6 +52,7 @@ def _row(model: SandboxContainer) -> SandboxContainerRow:
         expires_at=_as_utc(model.expires_at),
         hard_expires_at=_as_utc(model.hard_expires_at),
         in_use_until=_as_utc(model.in_use_until) if model.in_use_until is not None else None,
+        session_image=model.session_image,
     )
 
 
@@ -82,6 +84,7 @@ async def upsert_container_row(uow: UnitOfWork, row: SandboxContainerRow) -> Non
                 expires_at=row.expires_at,
                 hard_expires_at=row.hard_expires_at,
                 in_use_until=None,
+                session_image=row.session_image,
             )
         )
     else:

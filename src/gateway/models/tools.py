@@ -631,6 +631,8 @@ class SandboxContainer(Base):
     # same workspace at the same time. Cleared when the request records its
     # lease; the timestamp releases one a crashed gateway never gave back.
     in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    # The image the sandbox was created in, which a resume keeps; None where no image was asked for.
+    session_image: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
 
 
 class SandboxCredential(Base):
