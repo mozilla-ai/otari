@@ -57,14 +57,18 @@ function useShouldWelcome(): boolean {
   const canStoreKey = useProviderKeyEncryption()
   const enabled = answer === "operator"
   const hosted = useHostedProviders(enabled)
-  const [decided, setDecided] = useState<boolean | undefined>(undefined)
-  if (decided === undefined && isSettled && (!enabled || !hosted.isPending)) {
+  const [decision, setDecision] = useState<"pending" | "show" | "hide">(
+    "pending",
+  )
+  if (decision === "pending" && isSettled && (!enabled || !hosted.isPending)) {
     const connected = (hosted.data?.data ?? []).some(
       (provider) => provider.name === PLATFORM_PROVIDER_NAME,
     )
-    setDecided(enabled && canStoreKey && !hosted.isError && !connected)
+    setDecision(
+      enabled && canStoreKey && !hosted.isError && !connected ? "show" : "hide",
+    )
   }
-  return decided === true
+  return decision === "show"
 }
 
 /**

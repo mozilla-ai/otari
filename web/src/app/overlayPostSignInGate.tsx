@@ -3,8 +3,7 @@ import type { ReactNode } from "react"
 import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
 
 /**
- * Where a build that has a post-sign-in step mounts it, and in this build that
- * step is the operator's one-time welcome.
+ * Where a build that has a post-sign-in step mounts it.
  *
  * The composition seam for anything that has to sit in front of the whole app
  * once a session exists and before the dashboard behind it: otari.ai's signup
@@ -16,10 +15,9 @@ import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
  * composition with no surface of their own, so a step that had to precede the
  * dashboard had nowhere to go.
  *
- * The base default renders its children unchanged, with `WelcomeDialog` over
- * them: a dismissible dialog offering otari.ai, shown once to a self-hosted
- * deployment's operator. It lives here rather than in the chrome so that the
- * build that replaces this module, otari.ai's own, can never show it.
+ * The base default mounts `WelcomeDialog` here rather than in the chrome so
+ * that the build replacing this module, otari.ai's own, can never show its
+ * offer to connect to otari.ai.
  *
  * One export, and its shape is the contract: a component named `PostSignInGate`
  * taking `{ children }`.
