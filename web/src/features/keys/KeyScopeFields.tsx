@@ -50,9 +50,7 @@ export function KeyScopeFields({
 
   return (
     <fieldset className="flex flex-col gap-3 border border-control-border p-3">
-      <legend className="px-1 text-sm font-medium text-foreground">
-        Access
-      </legend>
+      <legend className="px-1 text-emphasis">Access</legend>
       <p className="text-caption">
         What this key may call. Grant only what it needs.
       </p>
@@ -70,14 +68,10 @@ export function KeyScopeFields({
                   onChange={(isSelected) => set(group.scopes, isSelected)}
                   ariaLabel={`All ${group.label.toLowerCase()} scopes`}
                 >
-                  <span className="font-medium text-foreground">
-                    {group.label}
-                  </span>
+                  <span className="text-emphasis">{group.label}</span>
                 </Checkbox>
               ) : (
-                <span className="font-medium text-body text-foreground">
-                  {group.label}
-                </span>
+                <span className="text-emphasis">{group.label}</span>
               )}
               <div
                 className={`mt-1 flex flex-col gap-1.5${group.scopes.length > 1 ? " pl-6" : ""}`}
