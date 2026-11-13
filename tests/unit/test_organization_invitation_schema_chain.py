@@ -12,6 +12,7 @@ import gateway.models  # noqa: F401  (registers every table on the shared metada
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "3ec751593322"
+_DOWN_REVISION = "c6e8a0b2d4f1"
 _TABLES = {"organization_invitation", "organization_membership_origin"}
 
 
@@ -72,7 +73,8 @@ def test_the_membership_origins_inviter_column_is_indexed(sqlite_at_head: tuple[
 def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
     config, engine = sqlite_at_head
 
-    command.downgrade(config, "-1")
+    # By name, not "-1": a later migration can sit above this one at head.
+    command.downgrade(config, _DOWN_REVISION)
     assert not (_TABLES & set(inspect(engine).get_table_names()))
 
     command.upgrade(config, _REVISION)

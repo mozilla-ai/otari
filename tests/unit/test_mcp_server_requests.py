@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
@@ -196,13 +197,52 @@ async def test_adding_a_server_approves_its_requests_and_mails_only_those_who_ca
         (McpServerRequestStatus.APPROVED, server_id, admin.id)
     }
     assert other.status == McpServerRequestStatus.PENDING
-    assert session.commits == 1
+    # The approval, then the read of whom to tell in a block of its own.
+    assert session.commits == 2
     # Nothing goes out until the deferred work runs, and then only to an active account with an
     # address that is not the admin who added the server.
     assert mail.sent == []
     for work in deferred:
         await work()
     assert mail.sent == [("ada@example.com", "Sentry was added to Research")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_read_of_whom_to_tell_does_not_fail_the_approval_it_follows() -> None:
+    """The approval has committed by then, so a retry would find nothing to approve."""
+
+    class _Unreadable:
+        async def people(self, user_ids: Collection[uuid.UUID]) -> list[User]:
+            raise OperationalError("SELECT", {}, Exception("connection lost"))
+
+    workspace_id = uuid.uuid4()
+    ada, admin = _person("Ada"), _person("Admin")
+    rows = [_request(ada, workspace_id)]
+    mail = _Mail()
+    deferred: list[Callable[[], Awaitable[None]]] = []
+    session = _Session()
+    service = McpServerRequestService(
+        UnitOfWork(cast(Any, session)),
+        cast(McpServerRequestRepository, _Requests(rows)),
+        cast(WorkspaceMcpServerRepository, None),
+        cast(Any, _Unreadable()),
+        _Catalog(),
+        cast(Mailer, mail),
+        send_later=deferred.append,
+    )
+
+    approved = await service.server_added(
+        workspace_id=workspace_id,
+        workspace_name="Research",
+        server_id=uuid.uuid4(),
+        url="https://mcp.sentry.dev/mcp",
+        added_by=admin.id,
+    )
+
+    assert approved == 1
+    assert rows[0].status == McpServerRequestStatus.APPROVED
+    assert session.commits == 1
+    assert deferred == []
 
 
 @pytest.mark.asyncio

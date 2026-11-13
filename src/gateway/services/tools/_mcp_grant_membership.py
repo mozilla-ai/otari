@@ -40,15 +40,18 @@ class McpGrantMembershipListener:
         await self._flows.remove_for_user(str(user_id), server_ids)
         await self._requests.withdraw_for_requester(user_id, workspace_ids, at=datetime.now(UTC))
 
-    async def _revoke_after_commit(self, *, server_ids: Sequence[uuid.UUID], user_id: str | None = None) -> None:
+    async def _revoke_after_commit(
+        self, *, server_ids: Sequence[uuid.UUID], user_id: str | None = None, shared: bool = False
+    ) -> None:
         """Ask the authorization servers to end the tokens being deleted, once the caller's change commits.
 
         The change is the caller's, which may still roll back, so nothing is sent before it commits.
+        ``shared`` adds the servers' shared accounts, for a change that deletes the servers.
         """
         if not server_ids:
             return
         revocations, unread = await collect_revocations(
-            self._connections, self._servers, server_ids=server_ids, user_id=user_id
+            self._connections, self._servers, server_ids=server_ids, user_id=user_id, shared=shared
         )
         if revocations or unread:
             self._connections.after_commit(lambda: revoke_in_background(revocations, unread=unread))
@@ -69,8 +72,8 @@ class McpGrantMembershipListener:
         """Nothing here: the workspaces a person lost are what ends their grants."""
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
-        """The workspace's servers and their connections go with it; their tokens are revoked once it commits."""
-        await self._revoke_after_commit(server_ids=await self._servers.ids_in_workspaces([workspace_id]))
+        """The workspace's servers go with it, and every token they hold is revoked once it commits."""
+        await self._revoke_after_commit(server_ids=await self._servers.ids_in_workspaces([workspace_id]), shared=True)
 
     async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         """Remove the person's grants on, and connections to, these workspaces' servers."""

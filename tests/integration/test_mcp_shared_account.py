@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.tools_exceptions import (
     McpConnectionFlowError,
@@ -37,7 +38,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
 )
-from gateway.services.tools import McpUserTokens
+from gateway.services.tools import McpGrantMembershipListener, McpUserTokens
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
 from . import test_mcp_user_connections as base
@@ -403,3 +404,22 @@ async def test_a_shared_sign_in_without_a_public_address_says_so(
         await _service(async_db, config).start_shared_sign_in(
             user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
         )
+
+
+async def test_deleting_the_workspace_revokes_its_shared_account_and_a_member_leaving_does_not(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+    await base._drain_revocations()
+    assert wire.revoked == []
+    assert await _account(async_db, world) is not None
+
+    async with uow:
+        await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
+    await base._drain_revocations()
+    assert wire.revoked == ["refresh-1"]

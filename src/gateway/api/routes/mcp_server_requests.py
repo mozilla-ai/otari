@@ -7,8 +7,9 @@ pending request for it, or by declining here. Thin composition over
 """
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from gateway.api.deps import CurrentIdentity, McpServerRequestServiceDep, verify_master_key
 from gateway.schemas.tools import (
@@ -19,6 +20,7 @@ from gateway.schemas.tools import (
     McpServerRequestsDeclined,
     McpServerRequestsPublic,
 )
+from gateway.services.tools import McpServerRequestService
 
 # Auth is declared on the router, as `routes/workspace_mcp_servers.py` does.
 router = APIRouter(
@@ -30,20 +32,37 @@ router = APIRouter(
 
 @router.get("")
 async def list_mcp_server_requests(
-    service: McpServerRequestServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+    service: McpServerRequestServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of catalog servers to skip")] = 0,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=McpServerRequestService.MAX_PENDING_SERVERS_PAGE,
+            description="Maximum number of catalog servers to return",
+        ),
+    ] = McpServerRequestService.MAX_PENDING_SERVERS_PAGE,
 ) -> McpServerRequestGroupsPublic:
     """The workspace's pending requests, one entry per catalog server, the longest-waiting first.
 
     Organization owners/admins or this workspace's owners/admins. Each entry names who asked and
-    carries their notes, and the catalog's entry for the server as it is now. At most 500
-    requests are listed; `count` says how many wait in all.
+    carries their notes, and the catalog's entry for the server as it is now. A page holds `limit`
+    servers after the first `skip`, and at most 500 requests; `count` says how many wait in all.
     """
-    return await service.pending(user=current_identity, workspace_id=workspace_id)
+    return await service.pending(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @router.get("/mine")
 async def list_my_mcp_server_requests(
-    service: McpServerRequestServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+    service: McpServerRequestServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[
+        int, Query(ge=1, le=McpServerRequestService.MAX_OWN_PAGE, description="Maximum number of records to return")
+    ] = 50,
 ) -> McpServerRequestsPublic:
     """The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.
 
@@ -51,7 +70,7 @@ async def list_my_mcp_server_requests(
     caller acknowledges it. A declined request also leaves the list when the caller asks for the
     server again or the server is added, and an approved one when its server is deleted.
     """
-    return await service.mine(user=current_identity, workspace_id=workspace_id)
+    return await service.mine(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @router.post(

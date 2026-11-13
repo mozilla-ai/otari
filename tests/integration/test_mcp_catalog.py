@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -33,6 +33,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import WorkspaceMcpServerRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
 from gateway.services.mcp_catalog import Logo, McpCatalogService, RegistryError, RegistryPage
 from gateway.services.mcp_catalog import _extras as extras_list
@@ -43,7 +44,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tools import WorkspaceMcpServerUrls
 
-from .conftest import build_test_client
+from .conftest import _to_async_url, build_test_client
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CATALOG = f"{API_ROOT}/mcp-catalog"
@@ -164,7 +165,7 @@ def _service(
         McpCatalogSyncStateRepository(uow),
         WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         config,
-        workspace_servers=WorkspaceMcpServerUrls(uow),
+        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
         fetcher=fetcher or _Fetcher(),
         look_budget=budget or catalog_service.LogoLookBudget(),
         clock=clock,
@@ -1113,19 +1114,51 @@ async def test_the_catalog_goes_stale_a_day_after_its_last_complete_sync(async_d
 
 
 @pytest.mark.asyncio
-async def test_two_workers_polling_at_once_start_one_sync(async_db: AsyncSession) -> None:
+async def test_two_workers_polling_at_once_start_one_sync(async_db: AsyncSession, postgres_url: str) -> None:
+    clock = _Clock()
+    await _ask(_service(async_db, _config(), clock))
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def poll() -> bool:
+        # Each worker claims and commits in a session of its own, so the loser waits on the winner's row lock.
+        async with sessions() as session:
+            claimed = await McpCatalogSyncStateRepository(session).claim(
+                clock.now, scheduled=False, stale_before=clock.now, next_sync_at=clock.now
+            )
+            await session.commit()
+            return claimed
+
+    try:
+        claims = await asyncio.gather(poll(), poll())
+    finally:
+        await engine.dispose()
+
+    assert sorted(claims) == [False, True]
+    row = (await async_db.execute(select(McpCatalogSyncState).execution_options(populate_existing=True))).scalar_one()
+    assert (row.running, row.sync_requested) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_a_request_read_before_a_worker_claims_the_sync_does_not_queue_a_second_one(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     clock = _Clock()
     service = _service(async_db, _config(), clock)
-    await _ask(service)
-    state = McpCatalogSyncStateRepository(async_db)
+    await service.sync_status()
+    read_state = McpCatalogSyncStateRepository.get_or_create
 
-    claims = [
-        await state.claim(clock.now, scheduled=False, stale_before=clock.now, next_sync_at=clock.now) for _ in range(2)
-    ]
-    await async_db.commit()
+    async def claimed_right_after_the_read(self: McpCatalogSyncStateRepository) -> McpCatalogSyncState:
+        row = await read_state(self)
+        monkeypatch.setattr(McpCatalogSyncStateRepository, "get_or_create", read_state)
+        await self.claim(clock.now, scheduled=True, stale_before=clock.now, next_sync_at=clock.now)
+        return row
 
-    assert claims == [True, False]
-    row = (await async_db.execute(select(McpCatalogSyncState))).scalar_one()
+    monkeypatch.setattr(McpCatalogSyncStateRepository, "get_or_create", claimed_right_after_the_read)
+    status = await service.request_sync(user=_OPERATOR, workspace_id=None, operates_deployment=True)
+
+    assert (status.running, status.requested) == (True, False)
+    row = (await async_db.execute(select(McpCatalogSyncState).execution_options(populate_existing=True))).scalar_one()
     assert (row.running, row.sync_requested) == (True, False)
 
 

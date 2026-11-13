@@ -11,8 +11,9 @@ acknowledge it.
 import uuid
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import ClassVar, Protocol
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
     McpCatalogServerNotListedError,
@@ -51,9 +52,11 @@ MAX_PENDING_REQUESTS_PER_MEMBER = 10
 MAX_REQUESTS_PER_MEMBER_PER_DAY = 10
 # The managers one request is mailed to, the workspace's own first.
 MAX_REQUEST_MAIL_RECIPIENTS = 20
-# What a manager's list reads. Past it the count still says how many wait.
+# The most requests one page of a manager's list reads. Past it the count still says how many wait.
 MAX_PENDING_LISTED = 500
-_MAX_OWN_LISTED = 50
+# The most catalog servers one page of a manager's list groups, and the most of a member's own requests.
+MAX_PENDING_SERVERS_PAGE = 500
+MAX_OWN_PAGE = 100
 
 SERVERS_PAGE = "/#/tools/mcp-servers"
 
@@ -156,6 +159,10 @@ def render_decision_mail(
 class McpServerRequestService:
     """Takes members' requests for catalog servers, lists them, and records the managers' answers."""
 
+    # The hard maximum of each list's page, for the routes to declare.
+    MAX_PENDING_SERVERS_PAGE: ClassVar[int] = MAX_PENDING_SERVERS_PAGE
+    MAX_OWN_PAGE: ClassVar[int] = MAX_OWN_PAGE
+
     def __init__(
         self,
         uow: UnitOfWork,
@@ -197,12 +204,7 @@ class McpServerRequestService:
         async with self._uow:
             # Serializes with a manager adding the server, and makes the two counts below exact.
             await self._workspaces.lock_workspace(workspace.id)
-            stored = {
-                spelling
-                for url in (await self._servers.urls_in_workspace(workspace.id)).values()
-                for spelling in _spellings(url)
-            }
-            if stored.intersection(_spellings(entry.url)):
+            if await self._servers.has_url(workspace.id, entry.url):
                 raise McpServerAlreadyAddedError
             if await self._requests.has_pending(workspace.id, entry.name, user.id):
                 raise McpServerAlreadyRequestedError
@@ -236,11 +238,13 @@ class McpServerRequestService:
         await self._mail_managers(workspace, requester=user, title=entry.title, note=note)
         return public
 
-    async def mine(self, *, user: User, workspace_id: uuid.UUID) -> McpServerRequestsPublic:
-        """The caller's own pending requests in a workspace, and the answers they have not acknowledged."""
+    async def mine(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = 50
+    ) -> McpServerRequestsPublic:
+        """A page of the caller's own pending requests in a workspace, and the answers they have not acknowledged."""
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         async with self._uow:
-            rows = await self._requests.for_requester(workspace.id, user.id, limit=_MAX_OWN_LISTED)
+            rows = await self._requests.for_requester(workspace.id, user.id, skip=skip, limit=min(limit, MAX_OWN_PAGE))
         entries = await self._catalog.servers_by_names([row.catalog_name for row in rows])
         return McpServerRequestsPublic(data=[_own(row, entries.get(row.catalog_name)) for row in rows])
 
@@ -253,7 +257,8 @@ class McpServerRequestService:
         """
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         async with self._uow:
-            row = await self._requests.find(workspace.id, request_id)
+            # Locked as an answer locks the rows it changes, so a withdrawal never overwrites one.
+            row = await self._requests.find(workspace.id, request_id, lock=True)
             if row is None or row.requester_id != user.id:
                 raise McpServerRequestNotFoundError(request_id)
             if row.status != McpServerRequestStatus.PENDING:
@@ -281,14 +286,24 @@ class McpServerRequestService:
                 row.acknowledged_at = self._clock()
                 await self._requests.save()
 
-    async def pending(self, *, user: User, workspace_id: uuid.UUID) -> McpServerRequestGroupsPublic:
-        """Every pending request of a workspace, grouped by the server asked for. Workspace managers only."""
+    async def pending(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = MAX_PENDING_SERVERS_PAGE
+    ) -> McpServerRequestGroupsPublic:
+        """A workspace's pending requests, grouped by the server asked for. Workspace managers only.
+
+        A page holds ``limit`` servers after the first ``skip``, the one waited for longest first, and
+        each server's requests whole up to ``MAX_PENDING_LISTED`` in the page.
+        """
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
+        limit = min(limit, MAX_PENDING_SERVERS_PAGE)
         async with self._uow:
-            rows = await self._requests.pending_in_workspace(workspace.id, limit=MAX_PENDING_LISTED)
+            names = await self._requests.pending_servers(workspace.id, skip=skip, limit=limit)
+            rows = await self._requests.pending_in_workspace(
+                workspace.id, catalog_names=names, limit=MAX_PENDING_LISTED
+            )
             count = len(rows)
-            if count == MAX_PENDING_LISTED:
+            if skip > 0 or len(names) == limit or count == MAX_PENDING_LISTED:
                 count = await self._requests.count_pending_in_workspace(workspace.id)
         people = {person.id: person for person in await self._workspaces.people({row.requester_id for row in rows})}
         entries = await self._catalog.servers_by_names(list({row.catalog_name for row in rows}))
@@ -393,7 +408,13 @@ class McpServerRequestService:
     async def _mail_managers(self, workspace: Workspace, *, requester: User, title: str, note: str | None) -> None:
         if not self._mailer.can_send_links:
             return
-        managers = await self._workspaces.workspace_managers(workspace)
+        try:
+            # A block of its own, after the step committed: a failure here rolls back nothing that step stored.
+            async with self._uow:
+                managers = await self._workspaces.workspace_managers(workspace)
+        except DATABASE_ERRORS as exc:
+            logger.warning("MCP server request mail not sent reason=recipients error=%s", describe_database_error(exc))
+            return
         message = render_request_mail(
             requester=_person(requester),
             title=title,
@@ -416,9 +437,13 @@ class McpServerRequestService:
     ) -> None:
         if not answered or not self._mailer.can_send_links:
             return
-        people = {
-            person.id: person for person in await self._workspaces.people({requester for requester, _ in answered})
-        }
+        try:
+            async with self._uow:
+                found = await self._workspaces.people({requester for requester, _ in answered})
+        except DATABASE_ERRORS as exc:
+            logger.warning("MCP server request mail not sent reason=recipients error=%s", describe_database_error(exc))
+            return
+        people = {person.id: person for person in found}
         deliveries: list[tuple[str, MailMessage]] = []
         for requester_id, title in answered:
             person = people.get(requester_id)

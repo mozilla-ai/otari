@@ -355,6 +355,11 @@ def test_a_home_page_is_read_only_for_the_icons_it_declares() -> None:
     ]
 
 
+def test_a_malformed_icon_link_is_skipped_and_the_next_one_kept() -> None:
+    page = '<link rel="icon" href="https://["><link rel="icon" href="/favicon.ico">'
+    assert declared_icons(page, "https://www.example.com/") == ["https://www.example.com/favicon.ico"]
+
+
 @pytest.mark.asyncio
 async def test_a_site_root_is_searched_for_its_declared_icon() -> None:
     png = _png((10, 10, 10, 255))

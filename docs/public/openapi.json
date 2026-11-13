@@ -60498,7 +60498,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
       "get": {
-        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names who asked and\ncarries their notes, and the catalog's entry for the server as it is now. At most 500\nrequests are listed; `count` says how many wait in all.",
+        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names who asked and\ncarries their notes, and the catalog's entry for the server as it is now. A page holds `limit`\nservers after the first `skip`, and at most 500 requests; `count` says how many wait in all.",
         "operationId": "mcp-servers-list_mcp_server_requests",
         "parameters": [
           {
@@ -60509,6 +60509,33 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Number of catalog servers to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of catalog servers to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of catalog servers to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "Maximum number of catalog servers to return",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -60695,6 +60722,33 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

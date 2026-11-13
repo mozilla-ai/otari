@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 import pytest
 from PIL import Image
+from sqlalchemy import Engine, event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -256,3 +257,29 @@ async def test_deleting_a_server_takes_its_logo(async_db: AsyncSession) -> None:
 
     async with UnitOfWork(async_db) as uow:
         assert await WorkspaceMcpServerLogoRepository(uow).find(server_id) is None
+
+
+async def test_the_list_shows_an_upload_without_reading_its_image(async_db: AsyncSession) -> None:
+    workspace, owner, member = await _setup(async_db)
+    service = _service(async_db, _Fetcher())
+    server_id = await _server(async_db, workspace, "https://mcp.example.com/mcp")
+    saved = await service.set_logo(
+        user=owner, workspace_id=workspace.id, server_id=server_id, tile="never", content=_png((250, 250, 250, 255))
+    )
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, statement: str, *_args: object) -> None:
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", record)
+    try:
+        listed = await service.list_logos(user=member, workspace_id=workspace.id)
+    finally:
+        event.remove(Engine, "before_cursor_execute", record)
+
+    (row,) = listed.data
+    assert (row.logo_url, row.has_logo_override, row.logo_tile) == (saved.logo_url, True, "never")
+    logo_reads = [statement for statement in statements if "workspace_mcp_server_logos" in statement]
+    # Whether an image is held is asked; the image itself is never selected.
+    selected = [s.replace("workspace_mcp_server_logos.content IS NOT NULL", "") for s in logo_reads]
+    assert logo_reads and not any("workspace_mcp_server_logos.content" in s for s in selected)

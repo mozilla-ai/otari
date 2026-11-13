@@ -24,7 +24,7 @@ import zlib
 from dataclasses import dataclass
 from email.utils import unquote
 from typing import Any
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import quote_plus, urlencode, urljoin, urlsplit
 from urllib.request import parse_http_list
 
 import httpx
@@ -36,6 +36,8 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 _DISCOVERY_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _TOKEN_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 _MAX_RESPONSE_BYTES = 1024 * 1024
+# What one request may take in all, sending and reading: the timeouts above bound each read, not the whole answer.
+_REQUEST_DEADLINE_SECONDS = 20.0
 _CLIENT_NAME = "Otari"
 # Above any real lifetime and any real epoch second this century, below what a datetime overflows on.
 _MAX_SECONDS = 2**32
@@ -181,15 +183,15 @@ async def _send(
 ) -> tuple[httpx.Response, dict[str, Any] | None]:
     """Send one request to a checked URL; return the response and its JSON object, if it sent one.
 
-    ``deadline`` bounds sending and reading, in seconds. It covers nothing after the body is read,
-    so an answer that arrived is always returned: a refresh token the server rotated is not lost
-    to a deadline that fires while the connection closes.
+    ``deadline`` bounds sending and reading, in seconds, ``_REQUEST_DEADLINE_SECONDS`` when none is given.
+    It covers nothing after the body is read, so an answer that arrived is always returned: a refresh
+    token the server rotated is not lost to a deadline that fires while the connection closes.
     """
     body = bytearray()
     client = _http_client(timeout)
     response: httpx.Response | None = None
     try:
-        async with asyncio.timeout(deadline):
+        async with asyncio.timeout(_REQUEST_DEADLINE_SECONDS if deadline is None else deadline):
             # Inside the deadline: the check resolves the host, and a renewal holds a row lock meanwhile.
             await _checked(url, label)
             # Identity, so the raw stream is the body: httpx's decoded iterator closes the response
@@ -487,11 +489,14 @@ async def _metadata(
 
 
 def auth_method_for(client_secret: str | None, metadata: McpOAuthMetadata) -> str:
-    """How a client a manager supplied authenticates at the token endpoint: by what it holds and the server takes."""
+    """How a client a manager supplied authenticates at the token endpoint: by what it holds and the server takes.
+
+    Metadata that lists no methods means ``client_secret_basic`` alone (RFC 8414 section 2).
+    """
     if not client_secret:
         return AUTH_METHOD_NONE
-    methods = metadata.token_auth_methods
-    if methods and AUTH_METHOD_POST not in methods and AUTH_METHOD_BASIC in methods:
+    methods = metadata.token_auth_methods or (AUTH_METHOD_BASIC,)
+    if AUTH_METHOD_POST not in methods and AUTH_METHOD_BASIC in methods:
         return AUTH_METHOD_BASIC
     return AUTH_METHOD_POST
 
@@ -632,6 +637,11 @@ def _lifetime(value: object) -> int | None:
     return int(min(value, _MAX_SECONDS))
 
 
+def _basic_auth(client_id: str, client_secret: str) -> httpx.BasicAuth:
+    """HTTP Basic credentials for a client: each half form-encoded first, as RFC 6749 section 2.3.1 says."""
+    return httpx.BasicAuth(quote_plus(client_id, safe=""), quote_plus(client_secret, safe=""))
+
+
 async def _token_request(
     token_endpoint: str,
     client: McpOAuthClient,
@@ -645,7 +655,7 @@ async def _token_request(
         form["resource"] = resource
     auth: httpx.Auth | None = None
     if client.auth_method == AUTH_METHOD_BASIC and client.client_secret:
-        auth = httpx.BasicAuth(client.client_id, client.client_secret)
+        auth = _basic_auth(client.client_id, client.client_secret)
     else:
         form["client_id"] = client.client_id
         if client.auth_method != AUTH_METHOD_NONE and client.client_secret:
@@ -730,7 +740,7 @@ async def revoke(revocation_endpoint: str, client: McpOAuthClient, *, token: str
     form = {"token": token}
     auth: httpx.Auth | None = None
     if client.auth_method == AUTH_METHOD_BASIC and client.client_secret:
-        auth = httpx.BasicAuth(client.client_id, client.client_secret)
+        auth = _basic_auth(client.client_id, client.client_secret)
     else:
         form["client_id"] = client.client_id
         if client.auth_method != AUTH_METHOD_NONE and client.client_secret:

@@ -152,6 +152,7 @@ from gateway.services.tools._mcp_server_requests import (
     McpServerRequestService,
 )
 from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
+from gateway.services.tools._mcp_signed_in_servers import McpSignedInServers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -343,6 +344,7 @@ __all__ = [
     "McpConnectionEligibility",
     "McpConnectionService",
     "McpServerRequestService",
+    "McpSignedInServers",
     "McpServerContact",
     "McpServerContacts",
     "McpServerLogoService",

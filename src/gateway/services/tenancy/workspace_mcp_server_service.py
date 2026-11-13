@@ -963,6 +963,7 @@ async def _resolve_for_request(
             purpose_hint=row.purpose_hint,
             user_id=access.user_id,
             reason=McpSignInReason.NOT_SIGNED_IN if access.user_id else McpSignInReason.NO_USER,
+            attached=config.attached,
         )
         planned.append((config, McpServerRef.of(row) if per_user else None, need))
 
@@ -1344,6 +1345,7 @@ class WorkspaceMcpServerService:
         client = McpConnectionService.stored_oauth_client(server)
         if client is not None and client.dynamic:
             server.oauth_client = None
+            server.oauth_client_issuer = None
 
     async def _record_check(
         self, server: WorkspaceMcpServer, *, required: bool = False, check_token: str | None = None
@@ -1668,6 +1670,9 @@ class WorkspaceMcpServerService:
         names_a_client = isinstance(new_client_id, str) and bool(new_client_id)
         if moves_host and not names_a_client:
             server.oauth_client = None
+        # Saving the client again approves whichever authorization server its next sign-in finds.
+        if store_client or moves_host or isinstance(new_client_id, str) or isinstance(new_client_secret, str):
+            server.oauth_client_issuer = None
         for field, value in fields.items():
             setattr(server, field, value)
         if connection_changed:
