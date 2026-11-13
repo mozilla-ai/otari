@@ -453,7 +453,9 @@ def test_retrieve_batch_results(
         results=[
             BatchResultItem(custom_id="req-1", result=completion, error=None),
             BatchResultItem(
-                custom_id="req-2", result=None, error=BatchResultError(code="rate_limit", message="Rate limit exceeded")
+                custom_id="req-2",
+                result=None,
+                error=BatchResultError(code="rate_limit", message="Quota exceeded; retry after 60 seconds"),
             ),
         ]
     )
@@ -480,7 +482,7 @@ def test_retrieve_batch_results(
     assert data["results"][1]["custom_id"] == "req-2"
     assert data["results"][1]["result"] is None
     assert data["results"][1]["error"]["code"] == "rate_limit"
-    assert data["results"][1]["error"]["message"] == "Rate limit exceeded"
+    assert data["results"][1]["error"]["message"] == "Quota exceeded; retry after 60 seconds"
 
 
 def test_retrieve_batch_results_not_complete(
@@ -1050,6 +1052,15 @@ def test_recorded_batch_results_log_each_item_and_redact_errors(
         ),
         patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
     ):
+        with (
+            patch(
+                "gateway.api.routes.batches.record_external_spend",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("spend fold failed"),
+            ),
+            pytest.raises(RuntimeError, match="spend fold failed"),
+        ):
+            client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
         first = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
         second = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
 
