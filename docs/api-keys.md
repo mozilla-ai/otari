@@ -213,7 +213,8 @@ key may hold the `end_users` scopes.
 A request whose key lacks the scope an endpoint needs is refused with `403`,
 and the message names the scope, except on the MCP routes, which answer every
 refusal with the same fixed `forbidden` error. A model call that asks Otari to run a web,
-code execution or MCP tool needs that tool's scope too. The master key holds
+code execution or MCP tool needs that tool's scope too, and one that attaches a
+stored file by its `file_id` needs `files:read`. The master key holds
 every scope. Each operation in the [OpenAPI specification](public/openapi.json)
 lists the scopes it needs in `x-otari-key-scopes`, empty where every key may
 call it.

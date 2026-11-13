@@ -26,6 +26,7 @@ from fastapi import HTTPException
 from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.files_exceptions import (
     InlineAttachmentsTooLargeError,
     NoCandidateHoldsCopiesError,
@@ -190,6 +191,7 @@ async def normalize_request_messages(
     model: str,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
@@ -223,8 +225,11 @@ async def normalize_request_messages(
     The exception is an attachment past an inline limit that could not be moved,
     which the provider would refuse anyway, so the request is refused here first.
 
+    ``may_read_files`` is whether the caller may resolve a stored file at all.
+
     Raises:
         AttachedFileUnavailableError: a ``file_id`` the caller cannot reach.
+        KeyScopeMissingError: a message names a stored file and ``may_read_files`` is false.
         ProviderAttachmentError: otherwise only where ``provider_container`` is set.
         InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
@@ -249,6 +254,7 @@ async def normalize_request_messages(
             fmt=fmt,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
             client_country=client_country,
@@ -256,7 +262,7 @@ async def normalize_request_messages(
             provider_container=provider_container,
             inline_limit=inline_limit,
         )
-    except (ProviderAttachmentError, InlineAttachmentsTooLargeError):
+    except (KeyScopeMissingError, ProviderAttachmentError, InlineAttachmentsTooLargeError):
         raise
     except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
         if provider_container:
