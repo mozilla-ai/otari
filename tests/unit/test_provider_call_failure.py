@@ -5,8 +5,8 @@ import openai
 from any_llm.utils.exception_handler import convert_exception
 
 from gateway.api.routes._passthrough import provider_call_failure
-from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_details import ProviderDetail
 
 _REQUEST = httpx.Request("GET", "https://api.openai.com/v1/videos/video_abc")
 
@@ -39,7 +39,7 @@ def test_a_rejected_credential_answers_424_without_the_key() -> None:
     )
 
     assert answer.status_code == 424
-    assert answer.detail == PROVIDER_CREDENTIALS_DETAIL
+    assert answer.detail == ProviderDetail.CREDENTIALS
     assert (answer.headers or {})[ERROR_CODE_HEADER] == PROVIDER_CREDENTIAL_REJECTED
 
 
