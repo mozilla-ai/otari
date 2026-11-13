@@ -71,7 +71,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `EntitlementPort` | Which capabilities a deployment is entitled to. |
 | `IdentityProviderPort` | Authenticating users/sign-in. |
 | `RoutingPort` | Choosing the provider/model attempts for a request. |
-| `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none. |
+| `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none, and whether any such credential serves only some countries. |
 | `CodeExecutionPort` | Running model-generated code in a sandbox. Two core adapters: the published protocol over HTTP, and E2B's hosted sandboxes. |
 | `BillingPort` | Metering and charging for usage. |
 | `AccountCountryPort` | Where an organization's account is, so the provider country gate can check where a caller lives as well as where a request comes from. The core adapter knows no country. |
