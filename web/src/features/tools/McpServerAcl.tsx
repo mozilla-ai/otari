@@ -1,11 +1,14 @@
-import { useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 
 import type { WorkspaceMcpServer, WorkspaceMcpServerGrant } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import {
+  SettingsBlock,
+  SettingsGroup,
+} from "@/design-system/layout/SettingsGroup"
 import {
   attributionId,
   useMemberAttributionLabels,
@@ -20,6 +23,8 @@ import {
   keyName,
   userLabel,
 } from "@/features/tools/mcpGrantSubjects"
+import { checkedTools } from "@/features/tools/mcpServerHealth"
+import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
 import { ApiError } from "@/shared/api/client"
 import { useOrganizationMembers } from "@/shared/api/organizations"
@@ -34,20 +39,34 @@ import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 const MATCH_ORDER =
-  "Rules are matched from the most specific: a rule for the key, then a rule for the user who owns it, then the default policy. Tools the server does not expose are never reachable, whatever a rule says."
+  "Who can use this server. The most specific rule wins: a key's own, then its user's, then the default."
+const WHO_A_RULE_NAMES =
+  "A rule can name any member or API key, including people who have not connected yet."
+const CONNECTED_USER_SHORTCUT =
+  "Clicking a connected user above opens that person's rule."
+
+/** A request, from elsewhere on the page, to open one user's rule. */
+export interface UserRuleRequest {
+  userId: string
+  /** Bumped on every request, so asking for the same user twice opens it twice. */
+  nonce: number
+}
 
 /**
- * A server's ACL: its rules for keys and users, its default policy, and a
- * trace of one key's call to one tool through them.
+ * A server's access rules: its rules for keys and users, its default policy,
+ * and a trace of one key's call to one tool through them.
  */
 export function McpServerAcl({
   workspaceId,
   server,
   canManage,
+  userRuleRequest,
 }: {
   workspaceId: string
   server: WorkspaceMcpServer
   canManage: boolean
+  /** Opens the rule for this user: their existing one to edit, else a new one with them ticked. */
+  userRuleRequest?: UserRuleRequest
 }) {
   const access = useWorkspaceMcpServerAccess(workspaceId, server.id, canManage)
   // A session's tool call links here with its key and tool, to show the rule that decided it.
@@ -71,6 +90,8 @@ export function McpServerAcl({
   const [editing, setEditing] = useState<WorkspaceMcpServerGrant>()
   const [isEditingDefault, setEditingDefault] = useState(false)
   const [removing, setRemoving] = useState<WorkspaceMcpServerGrant>()
+  const [presetUserId, setPresetUserId] = useState("")
+  const section = useRef<HTMLDivElement>(null)
 
   // A viewer is refused the list, and so is anyone whose rights changed since
   // the page decided what to offer; both read as "not yours to see".
@@ -79,9 +100,21 @@ export function McpServerAcl({
     (access.error instanceof ApiError && access.error.status === 403)
   // What a rule can usefully name: the tools the server exposes, which is its
   // allow-list where it has one and what its last check listed otherwise.
-  const tools = (server.allowed_tools ?? server.health?.tools ?? []).filter(
-    isLiteralToolName,
-  )
+  const picker = checkedTools(server, { withinAllowList: true })
+  const tools = picker.isKnown
+    ? picker.tools
+    : (server.allowed_tools ?? []).filter(isLiteralToolName)
+  const check = useMcpServerCheck({
+    workspaceId,
+    returnTo: `/tools/mcp-servers/${server.id}`,
+  })
+  const pickerProps = {
+    tools,
+    descriptions: picker.descriptions,
+    isKnown: picker.isKnown,
+    onCheck: () => check.run(server),
+    isChecking: check.isRunning(server.id),
+  }
   const grants = access.data?.grants ?? []
 
   // Everyone the Playground lets into the workspace joins the key owners as a
@@ -125,6 +158,7 @@ export function McpServerAcl({
 
   const openAdd = () => {
     addGrants.reset()
+    setPresetUserId("")
     setOpenCount((count) => count + 1)
     setAdding(true)
   }
@@ -140,11 +174,37 @@ export function McpServerAcl({
   }
   const ids = { workspaceId, serverId: server.id }
 
+  // An effect event, so the effect below fires on a new request alone rather
+  // than on every refetch of the rules it consults.
+  const openUserRule = useEffectEvent((userId: string) => {
+    const existing = grants.find(
+      (grant) => grant.subject === "user" && grant.user_id === userId,
+    )
+    section.current?.scrollIntoView?.({ block: "start", behavior: "smooth" })
+    if (existing) {
+      openEdit(existing)
+    } else {
+      openAdd()
+      setPresetUserId(userId)
+    }
+  })
+  const nonce = userRuleRequest?.nonce
+  const requestedUserId = userRuleRequest?.userId ?? ""
+  useEffect(() => {
+    if (nonce !== undefined && requestedUserId !== "") {
+      openUserRule(requestedUserId)
+    }
+  }, [nonce, requestedUserId])
+
   return (
-    <div className="flex flex-col gap-8">
+    <div ref={section} className="flex scroll-mt-4 flex-col gap-8">
       <SettingsGroup
-        title="ACL"
-        description={MATCH_ORDER}
+        title="Access rules"
+        description={
+          server.credential_mode === "per_user"
+            ? `${MATCH_ORDER} ${WHO_A_RULE_NAMES} ${CONNECTED_USER_SHORTCUT}`
+            : `${MATCH_ORDER} ${WHO_A_RULE_NAMES}`
+        }
         isBounded
         action={
           canManage && !isRefused ? (
@@ -156,10 +216,7 @@ export function McpServerAcl({
       >
         <div className="flex flex-col gap-2">
           {isRefused ? (
-            <InfoBanner>
-              Only an owner or admin of the workspace or organization can see
-              and change the rules for keys and users.
-            </InfoBanner>
+            <InfoBanner>Only an owner or admin can see these rules.</InfoBanner>
           ) : (
             <ErrorBanner error={access.error} />
           )}
@@ -182,21 +239,25 @@ export function McpServerAcl({
       {canManage && !isRefused ? (
         <SettingsGroup
           title="Trace a call"
-          description="Which rule matches when a key calls a tool."
+          description="Check whether a key can call a tool, and which rule decides."
           isBounded
         >
-          <McpAccessTest
-            workspaceId={workspaceId}
-            serverId={server.id}
-            serverEnabled={server.enabled}
-            keys={[...testKeys].map(([id, label]) => ({ id, label }))}
-            tools={tools}
-            initial={linkedCall}
-            ruleOwner={(grantId) => {
-              const grant = grants.find((entry) => entry.id === grantId)
-              return grant ? grantSubject(grant, labels).name : "a key or user"
-            }}
-          />
+          <SettingsBlock>
+            <McpAccessTest
+              workspaceId={workspaceId}
+              serverId={server.id}
+              serverEnabled={server.enabled}
+              keys={[...testKeys].map(([id, label]) => ({ id, label }))}
+              tools={tools}
+              initial={linkedCall}
+              ruleOwner={(grantId) => {
+                const grant = grants.find((entry) => entry.id === grantId)
+                return grant
+                  ? grantSubject(grant, labels).name
+                  : "a key or user"
+              }}
+            />
+          </SettingsBlock>
         </SettingsGroup>
       ) : null}
 
@@ -205,7 +266,9 @@ export function McpServerAcl({
         isOpen={isAdding}
         onOpenChange={setAdding}
         users={users}
-        tools={tools}
+        initialUserIds={presetUserId ? [presetUserId] : []}
+        initialQuery={presetUserId ? userLabel(presetUserId, labels) : ""}
+        {...pickerProps}
         readTools={server.read_tools}
         isPending={addGrants.isPending}
         error={addGrants.error}
@@ -228,7 +291,7 @@ export function McpServerAcl({
             name: grantSubject(editing, labels).name,
             tools: editing.tools,
           }}
-          tools={tools}
+          {...pickerProps}
           readTools={server.read_tools}
           isPending={updateGrant.isPending}
           error={updateGrant.error}
@@ -249,7 +312,7 @@ export function McpServerAcl({
           }}
           users={[]}
           editing={{ name: "the default policy", tools: server.everyone_tools }}
-          tools={tools}
+          {...pickerProps}
           readTools={server.read_tools}
           isPending={updateServer.isPending}
           error={updateServer.error}

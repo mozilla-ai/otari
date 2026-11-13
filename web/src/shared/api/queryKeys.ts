@@ -63,6 +63,16 @@ export const HEALTH_CHECKS = "health-checks"
 // A run is started by a worker that polls every 15 seconds, so the page polls
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
+// The catalog of remote MCP servers: its search, its Popular shelf and its sync
+// status, under one head, since a sync changes them all.
+export const MCP_CATALOG = "mcp-catalog"
+// A sync is started by a worker that polls once a minute and stores a page at
+// a time, so the status is worth re-reading this often only while one is
+// running or waiting to start.
+export const MCP_CATALOG_SYNC_POLL_MS = 5_000
+// Members' requests for a catalog server, the segment after a workspace's own
+// key: `[WORKSPACES, id, MCP_SERVER_REQUESTS, "mine" | "pending"]`.
+export const MCP_SERVER_REQUESTS = "mcp-server-requests"
 export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
 export const KEYS = "keys"

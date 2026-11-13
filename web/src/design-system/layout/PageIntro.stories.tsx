@@ -38,6 +38,20 @@ export const WithDescription: Story = {
  * `primary`. A page with both this and a group's Save has two primaries, and
  * that is correct: each is the one thing its own band is for.
  */
+export const WithLeadingMark: Story = {
+  args: {
+    title: "Sentry",
+    leading: (
+      <span
+        aria-hidden
+        className="flex size-11 items-center justify-center rounded-md border border-control-border bg-surface-alt text-title text-muted"
+      >
+        S
+      </span>
+    ),
+  },
+}
+
 export const WithAction: Story = {
   args: {
     children: "A key authenticates a caller against this gateway.",

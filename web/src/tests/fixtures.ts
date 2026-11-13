@@ -15,6 +15,8 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  McpCatalogServer,
+  McpCatalogSyncStatus,
   OidcConnection,
   OidcConnectionDomain,
   Organization,
@@ -164,6 +166,7 @@ export const SURFACES = [
   "health_checks",
   "hosted_providers",
   "keys",
+  "mcp_catalog",
   "models",
   "organization_guardrails",
   "organization_providers",
@@ -1014,6 +1017,53 @@ export function workspaceMcpServer(
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A server the MCP catalog lists. */
+export function mcpCatalogServer(
+  overrides: Partial<McpCatalogServer> = {},
+): McpCatalogServer {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    name: "io.example/sentry",
+    title: "Sentry",
+    description: "Read issues and events.",
+    url: "https://mcp.sentry.example/mcp",
+    requires_token: false,
+    website_url: null,
+    icon_url: null,
+    logo_url: null,
+    logo_tone: null,
+    publisher_kind: "vendor",
+    version: "1.0.0",
+    source: "registry",
+    ...overrides,
+  }
+}
+
+/** The catalog's sync status on a deployment that has never synced. */
+export function mcpCatalogSyncStatus(
+  overrides: Partial<McpCatalogSyncStatus> = {},
+): McpCatalogSyncStatus {
+  return {
+    mode: "manual",
+    running: false,
+    requested: false,
+    outcome: null,
+    error: null,
+    started_at: null,
+    finished_at: null,
+    last_completed_at: null,
+    next_sync_at: null,
+    pages: 0,
+    fetched: 0,
+    kept: 0,
+    removed: 0,
+    server_count: 0,
+    is_stale: true,
+    next_request_at: null,
     ...overrides,
   }
 }

@@ -64,6 +64,7 @@ import {
   isNoOrganizationError,
   useOrganizationContext,
 } from "@/shared/api/organizations"
+import { BreadcrumbLeafProvider } from "@/shared/hooks/BreadcrumbLeaf"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
@@ -474,7 +475,9 @@ export function AppShell() {
   return (
     <EntitlementResolver>
       <PostSignInGate>
-        <AppShellChrome />
+        <BreadcrumbLeafProvider>
+          <AppShellChrome />
+        </BreadcrumbLeafProvider>
       </PostSignInGate>
     </EntitlementResolver>
   )

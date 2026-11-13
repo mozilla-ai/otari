@@ -1,17 +1,20 @@
 import type { Workspace } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Toggle } from "@/design-system/forms/Toggle"
+import { McpInfoHint } from "@/features/tools/McpInfoHint"
 import { useSetWorkspaceRequestMcpServers } from "@/shared/api/workspaces"
 
-const LABEL = "Let requests name their own MCP servers"
+const LABEL = "Allow servers outside this list"
 
 /**
- * Whether the workspace's keys may name an MCP server by URL in a request,
- * beside the stored servers above. Writes when flipped.
+ * Whether a request made with one of this workspace's API keys may carry its
+ * own MCP server (URL and token) in its body, beside the stored servers. Writes
+ * when flipped.
  *
- * The explanation stays on the page rather than in a tooltip, because it is
- * what makes the switch matter: while it is on, a key can reach any server it
- * knows the URL of, whatever the access lists say.
+ * One line under the page's opening, because it is not a property of any server
+ * in the list: it decides whether servers that are *not* listed can be reached
+ * at all. The label says what the switch allows, and the icon beside it says
+ * what each position does.
  */
 export function WorkspaceRequestMcpServers({
   workspace,
@@ -21,21 +24,24 @@ export function WorkspaceRequestMcpServers({
   const set = useSetWorkspaceRequestMcpServers()
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-body">{LABEL}</p>
-          <p className="mt-1 max-w-prose text-caption">
-            On, a request may list servers by URL with its own token, which the
-            access lists here do not cover. Turn it off to make the access lists
-            airtight: requests can then reach only the stored servers.
-          </p>
-        </div>
+      <div className="flex items-center gap-2">
         <Toggle
           isSelected={workspace.request_mcp_servers_allowed}
           onChange={(allowed) => set.mutate({ id: workspace.id, allowed })}
           label={LABEL}
           isDisabled={set.isPending}
         />
+        <span className="text-sm">{LABEL}</span>
+        <McpInfoHint label="Explain this switch">
+          <span>
+            On: an API request may carry the URL and token of any MCP server in
+            its body. The access rules set here do not apply to those servers.
+          </span>
+          <span>
+            Off: requests can only use the servers in this list. Members connect
+            the same servers in the dashboard either way.
+          </span>
+        </McpInfoHint>
       </div>
       <ErrorBanner error={set.error} />
     </div>

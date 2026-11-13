@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   CheckWorkspaceMcpServerRequest,
   CreatedSearchTool,
@@ -7,6 +12,10 @@ import type {
   CreateWorkspaceMcpServerGrantsRequest,
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
+  McpConnectionCompleted,
+  McpConnectionStarted,
+  McpConnections,
+  McpServerConnections,
   OrganizationGuardrail,
   OrganizationGuardrailTestResult,
   SandboxCredentialPublic,
@@ -33,6 +42,9 @@ import type {
   WorkspaceMcpServerAccessCheck,
   WorkspaceMcpServerHealth,
   WorkspaceMcpServerKeyAccess,
+  WorkspaceMcpServerLogo,
+  WorkspaceMcpServerLogos,
+  WorkspaceMcpServerMyTools,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -40,7 +52,9 @@ import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   GUARDRAIL_PROFILES,
+  MCP_SERVER_REQUESTS,
   ORGANIZATION_GUARDRAILS,
+  PLAYGROUND,
   SEARCH_PROVIDERS,
   SEARCH_TOOLS,
   TOOL_SETTINGS,
@@ -532,6 +546,79 @@ export function useWorkspaceMcpServer(
   })
 }
 
+/**
+ * The logo of each of a workspace's servers, by server id: what each one shows
+ * and whether it needs a tile. Under the servers' key, so a write that refreshes
+ * the list (a new server, a changed URL) refreshes this too. Reading it makes
+ * the gateway fetch nothing; an image URL without a version does, once.
+ */
+export function useWorkspaceMcpServerLogos(workspaceId: string | null) {
+  const query = useQuery({
+    queryKey: [WORKSPACES, workspaceId, "mcp-servers", "logos"],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServerLogos>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers/logos`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+  return new Map((query.data?.data ?? []).map((logo) => [logo.server_id, logo]))
+}
+
+/** An admin's own logo for a server and the tile choice, saved together. */
+export function useSetWorkspaceMcpServerLogo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      tile,
+      png,
+    }: {
+      workspaceId: string
+      serverId: string
+      tile: WorkspaceMcpServerLogo["logo_tile"]
+      /** Absent to keep the logo it has. */
+      png?: Blob
+    }) => {
+      const body = new FormData()
+      body.set("tile", tile)
+      if (png) body.set("file", png, "logo.png")
+      return apiFetch<WorkspaceMcpServerLogo>(
+        `${mcpServerPath(workspaceId, serverId)}/logo`,
+        { method: "PUT", body },
+      )
+    },
+    onSuccess: (_logo, { workspaceId }) =>
+      queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers", "logos"],
+      }),
+  })
+}
+
+/** Remove an admin's uploaded logo, so the server shows its own again. */
+export function useRemoveWorkspaceMcpServerLogo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServerLogo>(
+        `${mcpServerPath(workspaceId, serverId)}/logo`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_logo, { workspaceId }) =>
+      queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers", "logos"],
+      }),
+  })
+}
+
 function mcpServerPath(workspaceId: string, serverId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`
 }
@@ -704,6 +791,10 @@ export function useCreateWorkspaceMcpServer() {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
+      // Storing a server approves the members' requests for it.
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, MCP_SERVER_REQUESTS],
+      })
     },
   })
 }
@@ -780,6 +871,320 @@ export function useTestWorkspaceMcpServerConnection() {
         `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
         { method: "POST", body: JSON.stringify(body) },
       ),
+  })
+}
+
+// A probe answers for the server as it was a moment ago, which is all a
+// suggested default needs; re-asking while the review step is open would only
+// slow the add down.
+const MCP_SERVER_PROBE_STALE_MS = 5 * 60_000
+
+/**
+ * A connection check of each of `urls` with no credential, without storing
+ * anything: what a server says to a caller who has not signed in. The answer
+ * suggests a connection mode, so nothing waits on it and a refusal of the
+ * check itself (a busy gateway) is simply no suggestion.
+ */
+export function useMcpServerProbes(workspaceId: string, urls: string[]) {
+  return useQueries({
+    queries: urls.map((url) => ({
+      queryKey: [WORKSPACES, workspaceId, "mcp-server-probe", url],
+      staleTime: MCP_SERVER_PROBE_STALE_MS,
+      retry: false,
+      queryFn: () =>
+        apiFetch<WorkspaceMcpServerHealth>(
+          `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
+          {
+            method: "POST",
+            body: JSON.stringify({ url, authorization_token: "" }),
+          },
+        ),
+    })),
+  })
+}
+
+// One page of who is connected. The section says so when there are more.
+const MCP_CONNECTIONS_PAGE_SIZE = 200
+
+function mcpConnectionsKey(workspaceId: string) {
+  return [WORKSPACES, workspaceId, "mcp-connections"] as const
+}
+
+/** The Playground's tools menu says which servers still need a sign-in. */
+function playgroundToolsKey(workspaceId: string) {
+  return [PLAYGROUND, workspaceId, "tools"] as const
+}
+
+function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
+  return [
+    WORKSPACES,
+    workspaceId,
+    "mcp-servers",
+    serverId,
+    "connections",
+  ] as const
+}
+
+/** The caller's own sign-ins to this workspace's per-user servers. */
+export function useMyMcpConnections(workspaceId: string | null) {
+  return useQuery({
+    queryKey: mcpConnectionsKey(workspaceId ?? ""),
+    enabled: workspaceId !== null,
+    // Every write that moves it invalidates it, so a minute between reads is safe.
+    staleTime: 60_000,
+    queryFn: ({ signal }) =>
+      apiFetch<McpConnections>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-connections`,
+        { signal },
+      ),
+  })
+}
+
+/**
+ * The tools the caller may use on a server under their own rule. Under the
+ * server's key, so a check or an edit of the server refreshes it, and under the
+ * connections too, since connecting can be what makes the list known.
+ */
+export function useMyMcpServerTools(
+  workspaceId: string | null,
+  serverId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: [...mcpConnectionsKey(workspaceId ?? ""), "tools", serverId],
+    enabled: enabled && workspaceId !== null,
+    staleTime: 60_000,
+    queryFn: ({ signal }) =>
+      apiFetch<WorkspaceMcpServerMyTools>(
+        `${mcpServerPath(workspaceId as string, serverId)}/my-tools`,
+        { signal },
+      ),
+  })
+}
+
+/**
+ * Starts a manager's sign-in made only to check a Personal server: the answer
+ * is where to send the browser. Finishing it records the check and connects
+ * nobody.
+ */
+export function useStartMcpCheckSignIn() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      returnTo,
+    }: {
+      workspaceId: string
+      serverId: string
+      returnTo: string
+    }) =>
+      apiFetch<McpConnectionStarted>(
+        `${mcpServerPath(workspaceId, serverId)}/check/sign-in`,
+        { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+      ),
+  })
+}
+
+/**
+ * Starts a manager's sign-in for everyone on a Shared server: the answer is
+ * where to send the browser. Finishing it stores the account as the server's
+ * shared account, in place of a token.
+ */
+export function useStartMcpSharedSignIn() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      returnTo,
+    }: {
+      workspaceId: string
+      serverId: string
+      returnTo: string
+    }) =>
+      apiFetch<McpConnectionStarted>(
+        `${mcpServerPath(workspaceId, serverId)}/shared-account`,
+        { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+      ),
+  })
+}
+
+/** Ends a Shared server's account. The answer is the server, checked again without it. */
+export function useEndMcpSharedAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${mcpServerPath(workspaceId, serverId)}/shared-account`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+    },
+  })
+}
+
+/**
+ * Refreshes what a finished sign-in in another window changed: the caller's
+ * connections, the Playground's tools menu, the server's connected users, and,
+ * after a check, the server itself. The window that finished it has a query
+ * cache of its own, so this page's is refreshed here.
+ */
+export function useRefreshAfterMcpSignIn() {
+  const queryClient = useQueryClient()
+  return (workspaceId: string, serverId: string) => {
+    for (const queryKey of [
+      mcpConnectionsKey(workspaceId),
+      playgroundToolsKey(workspaceId),
+      [WORKSPACES, workspaceId, "mcp-servers"],
+      mcpServerConnectionsKey(workspaceId, serverId),
+    ]) {
+      void queryClient.invalidateQueries({ queryKey })
+    }
+  }
+}
+
+/** Starts the caller's sign-in: the answer is where to send the browser. */
+export function useStartMcpConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      returnTo,
+    }: {
+      workspaceId: string
+      serverId: string
+      returnTo: string
+    }) =>
+      apiFetch<McpConnectionStarted>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-connections/${encodeURIComponent(serverId)}`,
+        { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
+      ),
+  })
+}
+
+/** Finishes a sign-in from the code its authorization server returned. */
+export function useCompleteMcpConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      state,
+      code,
+      iss,
+    }: {
+      state: string
+      code: string
+      iss?: string
+    }) =>
+      apiFetch<McpConnectionCompleted>("/mcp-connections/complete", {
+        method: "POST",
+        // `JSON.stringify` drops an absent `iss`.
+        body: JSON.stringify({ state, code, iss }),
+      }),
+    onSuccess: (done) => {
+      // Every finished sign-in lists the server's tools once, so its health moved.
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, done.workspace_id, "mcp-servers"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(done.workspace_id),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(done.workspace_id),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(done.workspace_id, done.server_id),
+      })
+    },
+  })
+}
+
+/** Ends the caller's own connection to a server. */
+export function useDisconnectMcp() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<void>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-connections/${encodeURIComponent(serverId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+      })
+    },
+  })
+}
+
+/** Who is connected to a per-user server. Workspace managers only. */
+export function useMcpServerConnections(
+  workspaceId: string,
+  serverId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+    enabled,
+    // Other people connect without this page hearing of it, so it is read again sooner.
+    staleTime: 30_000,
+    queryFn: ({ signal }) =>
+      apiFetch<McpServerConnections>(
+        `${mcpServerPath(workspaceId, serverId)}/connections?limit=${MCP_CONNECTIONS_PAGE_SIZE}`,
+        { signal },
+      ),
+  })
+}
+
+/** Ends one user's connection to a server. Workspace managers only. */
+export function useRemoveMcpServerConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      userId,
+    }: {
+      workspaceId: string
+      serverId: string
+      userId: string
+    }) =>
+      apiFetch<void>(
+        `${mcpServerPath(workspaceId, serverId)}/connections/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: mcpConnectionsKey(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+    },
   })
 }
 

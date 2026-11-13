@@ -20,11 +20,14 @@ import { DocsLink } from "../navigation/DocsLink"
  */
 export function PageIntro({
   title,
+  leading,
   action,
   docsHref,
   children,
 }: {
   title: string
+  /** A mark at the title's leading edge, such as a record's logo. Decorative: the title names it. */
+  leading?: ReactNode
   action?: ReactNode
   /**
    * Trails the description rather than sitting in `action`: a link to the
@@ -37,7 +40,14 @@ export function PageIntro({
   return (
     <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div className="max-w-[38.75rem]">
-        <h1 className="text-display">{title}</h1>
+        {leading ? (
+          <div className="flex items-center gap-3">
+            {leading}
+            <h1 className="min-w-0 text-display break-words">{title}</h1>
+          </div>
+        ) : (
+          <h1 className="text-display">{title}</h1>
+        )}
         {children || docsHref ? (
           <p className="mt-1 text-sm text-muted">
             {children}

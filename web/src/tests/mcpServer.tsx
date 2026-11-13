@@ -4,15 +4,19 @@ import { vi } from "vitest"
 
 import type {
   ApiKey,
+  McpServerConnection,
   OrganizationContext,
   OrganizationMember,
   WorkspaceMcpServer,
   WorkspaceMcpServerAccess,
   WorkspaceMcpServerAccessCheck,
+  WorkspaceMcpServerMyTools,
 } from "@/client"
 import { McpServerDetailPage } from "@/features/tools/McpServerDetailPage"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   organizationContext,
   workspaceMcpServer,
   workspaceMember,
@@ -44,6 +48,8 @@ export function mockMcpServerApi({
   accessStatus,
   deploymentOperator = true,
   otherWorkspaces = [],
+  connections = [],
+  myTools,
 }: {
   server?: WorkspaceMcpServer
   access?: WorkspaceMcpServerAccess
@@ -62,6 +68,10 @@ export function mockMcpServerApi({
   deploymentOperator?: boolean
   /** Workspaces the caller also belongs to, after the selected one. */
   otherWorkspaces?: { workspace_id: string; name: string; role: string }[]
+  /** Who is signed in to the server, as a manager reads it. */
+  connections?: McpServerConnection[]
+  /** What the caller may use on the server; unknown, under everyone's rule, when left out. */
+  myTools?: WorkspaceMcpServerMyTools
 } = {}): McpCall[] {
   const calls: McpCall[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -72,6 +82,9 @@ export function mockMcpServerApi({
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ url, method, body })
+    if (url.endsWith("/mcp-servers/logos")) {
+      return Response.json({ data: [] })
+    }
     if (url.includes("/access")) {
       if (accessStatus !== undefined) {
         return Response.json({ detail: "refused" }, { status: accessStatus })
@@ -87,6 +100,26 @@ export function mockMcpServerApi({
         )
       }
       return Response.json(method === "GET" ? access : (written ?? access))
+    }
+    if (url.endsWith("/my-tools")) {
+      return Response.json(
+        myTools ?? {
+          server_id: server.id,
+          decided_by: "everyone",
+          access: server.everyone_tools.length > 0 ? "some" : "none",
+          known: false,
+          checked_at: null,
+          tools: [],
+        },
+      )
+    }
+    // Who is signed in to the server.
+    if (url.includes("/connections?")) {
+      return Response.json({ data: connections, count: connections.length })
+    }
+    // The caller's own sign-ins: none.
+    if (url.includes("/mcp-connections")) {
+      return Response.json({ data: [], count: 0 })
     }
     if (url.includes("/mcp-servers/")) {
       // Read from any other workspace, the server is not there.
@@ -147,11 +180,13 @@ export function renderMcpServerPage(
   })
   const url = `/tools/mcp-servers/${serverId}${search}`
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>
-        <McpServerDetailPage serverId={serverId} workspaceId={workspaceId} />
-      </SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>
+          <McpServerDetailPage serverId={serverId} workspaceId={workspaceId} />
+        </SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     {
       wrapper: withRouter({
         url,

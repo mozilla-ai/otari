@@ -59,6 +59,33 @@ export const WithDescription: Story = {
 }
 
 /**
+ * A set whose labels do not say what each choice does carries one sentence per
+ * choice in the open list. The closed control still shows the label alone.
+ */
+export const OptionDescriptions: Story = {
+  args: {
+    label: "Availability",
+    // A native element on the label's line; see the prop's own note.
+    labelAction: <span className="text-caption">(per server)</span>,
+    value: "on_request",
+    className: "w-44",
+    options: [
+      { value: "off", label: "Off", description: "Nobody can use it." },
+      {
+        value: "on_request",
+        label: "On request",
+        description: "Used only by requests that ask for it.",
+      },
+      {
+        value: "every_request",
+        label: "Every request",
+        description: "Added to every request from this workspace.",
+      },
+    ],
+  },
+}
+
+/**
  * An error replaces the description rather than adding a row, which is why they
  * share one line. `shouldReserveMessage` holds that line open so the form does not
  * move when the message appears.
