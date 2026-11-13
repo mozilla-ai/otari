@@ -307,11 +307,12 @@ BUILTIN_FETCH_INSTANCE = ToolInstance(
 
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
-    """The in-loop search backend the legacy settings describe.
+    """The search backend the legacy settings describe, priced under ``otari:web_search``.
 
-    It is not in either map, so it cannot be named by a default or by the direct
-    endpoint's path, and it is priced under ``otari:web_search``. Its name is
-    its provider's.
+    It is not in either map, so no default can name it. The in-loop tool falls
+    back to it, and on a deployment with no search instance the direct endpoint
+    serves it too (:func:`direct_search_fallback`). Its name is its provider's,
+    so a search instance of that name can later replace it unnoticed.
     """
 
     provider: str
@@ -795,6 +796,16 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         engines=engines or DEFAULT_SEARXNG_ENGINES,
         provider_defaults=_NO_OPTIONS,
     )
+
+
+def direct_search_fallback(settings: ToolSettings) -> SynthesizedSearchInstance | None:
+    """The legacy backend the direct endpoint serves, or ``None``: only a deployment with no search instance has one.
+
+    Here rather than in the tools services because access-list validation, which they import, reads it too.
+    """
+    if effective_search_instances(settings):
+        return None
+    return synthesized_search_instance(settings)
 
 
 def _warn_about_entry(section: str, name: str, problems: list[str]) -> None:

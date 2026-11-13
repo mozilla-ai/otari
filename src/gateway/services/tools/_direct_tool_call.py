@@ -46,6 +46,7 @@ from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, Insuffici
 from gateway.services.tools._tool_prices import unfunded_tool_detail
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    legacy_search_instance,
     organization_key_search_instance,
     pick_direct_fetch_instance,
     pick_direct_search_instance,
@@ -334,10 +335,11 @@ class DirectToolService:
         stood_in: list[ToolInstance] = []
 
         def stand_in(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
-            """The organization's key, standing in for a tool where an unnamed call finds none to pick."""
+            """What an unnamed call with no tool to pick runs on: the organization's key, else the legacy backend."""
             if (instance := organization_key_search_instance(policy)) is not None:
                 stood_in.append(instance)
-            return instance
+                return instance
+            return legacy_search_instance(config)
 
         def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[SearchResponse]:
             # A workspace whose organization brought its own search key searches with it on a
@@ -366,7 +368,8 @@ class DirectToolService:
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
             # A named call means a deployment tool; an unnamed one may find none to pick, as
-            # on a deployment where every organization brings its own key.
+            # on a deployment where every organization brings its own key or only the legacy
+            # settings describe a backend.
             stand_in=stand_in if tool_name is None else None,
             stand_in_for=(SearchToolSelectionError,),
         )
