@@ -88,10 +88,19 @@ export function McpServerSignIn({
           </span>
           {connection ? (
             <div className="flex flex-wrap gap-2">
-              <Button onPress={own.connect} isPending={isStarting}>
+              <Button
+                onPress={own.connect}
+                isPending={isStarting}
+                className="min-h-11 md:min-h-0"
+              >
                 Reconnect
               </Button>
-              <Button onPress={own.openDisconnect}>Disconnect</Button>
+              <Button
+                onPress={own.openDisconnect}
+                className="min-h-11 md:min-h-0"
+              >
+                Disconnect
+              </Button>
             </div>
           ) : (
             <Button
@@ -245,28 +254,25 @@ function ConnectedUsers({
           </p>
         </SettingsBlock>
       ) : null}
-      <ConfirmDialog
-        isOpen={removing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setRemoving(undefined)
-        }}
-        heading="Remove connection"
-        body={
-          removing
-            ? `${describeUser(removing)} stops reaching ${server.name} until they connect again.`
-            : ""
-        }
-        confirmLabel="Remove connection"
-        isPending={remove.isPending}
-        error={remove.error}
-        onConfirm={() => {
-          if (!removing) return
-          remove.mutate(
-            { workspaceId, serverId: server.id, userId: removing.user_id },
-            { onSuccess: () => setRemoving(undefined) },
-          )
-        }}
-      />
+      {removing ? (
+        <ConfirmDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setRemoving(undefined)
+          }}
+          heading="Remove connection"
+          body={`${describeUser(removing)} stops reaching ${server.name} until they connect again.`}
+          confirmLabel="Remove connection"
+          isPending={remove.isPending}
+          error={remove.error}
+          onConfirm={() =>
+            remove.mutate(
+              { workspaceId, serverId: server.id, userId: removing.user_id },
+              { onSuccess: () => setRemoving(undefined) },
+            )
+          }
+        />
+      ) : null}
     </SettingsGroup>
   )
 }

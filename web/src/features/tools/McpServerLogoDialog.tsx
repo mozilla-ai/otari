@@ -264,14 +264,16 @@ export function McpServerLogoButton({
           </button>
         )}
       </Tooltip>
-      <McpServerLogoDialog
-        isOpen={isOpen}
-        onOpenChange={setOpen}
-        workspaceId={workspaceId}
-        serverId={serverId}
-        name={name}
-        logo={logo}
-      />
+      {isOpen ? (
+        <McpServerLogoDialog
+          isOpen
+          onOpenChange={setOpen}
+          workspaceId={workspaceId}
+          serverId={serverId}
+          name={name}
+          logo={logo}
+        />
+      ) : null}
     </>
   )
 }

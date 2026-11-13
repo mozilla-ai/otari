@@ -20,6 +20,22 @@ export function isMcpCatalogSyncing(
 }
 
 /**
+ * When to read the sync's status again: on a short poll while a sync runs or
+ * waits for a worker, once just after `next_request_at` while a cooldown holds
+ * the request control off, and otherwise not on a timer.
+ */
+export function mcpCatalogSyncRefetchMs(
+  status: McpCatalogSyncStatus | undefined,
+  now = Date.now(),
+): number | false {
+  if (isMcpCatalogSyncing(status)) return MCP_CATALOG_SYNC_POLL_MS
+  const until = status?.next_request_at
+    ? Date.parse(status.next_request_at) - now
+    : Number.NaN
+  return Number.isFinite(until) ? Math.max(until, 0) + 1_000 : false
+}
+
+/**
  * One page of the catalog, filtered by the gateway. The previous page stays on
  * screen while the next query is in flight, so typing does not blank the list.
  * Re-read while a sync stores pages, so the list fills in as it goes.
@@ -79,7 +95,8 @@ export function useMcpCatalogPopular(workspaceId: string, isLoading = false) {
 
 /**
  * The sync's status. Polled while a sync is running or waiting for a worker,
- * which is the only time it changes without this tab. When that ends, the
+ * which is the only time it changes without this tab, and read again when a
+ * cooldown ends so the request control comes back. When a sync ends, the
  * catalog's lists are read again, so they show what the sync stored.
  */
 export function useMcpCatalogSync(enabled = true) {
@@ -102,8 +119,7 @@ export function useMcpCatalogSync(enabled = true) {
       }
       return status
     },
-    refetchInterval: (query) =>
-      isMcpCatalogSyncing(query.state.data) ? MCP_CATALOG_SYNC_POLL_MS : false,
+    refetchInterval: (query) => mcpCatalogSyncRefetchMs(query.state.data),
   })
 }
 

@@ -160,21 +160,23 @@ export function McpOwnAccountNotes({
           You'll need to connect again when this sign-in expires.
         </p>
       ) : null}
-      <ConfirmDialog
-        isOpen={own.isDisconnecting}
-        onOpenChange={own.setDisconnecting}
-        heading="Disconnect your account"
-        body={`Your keys and the Playground stop reaching ${own.server.name} until you connect again.`}
-        confirmLabel="Disconnect"
-        isPending={own.disconnect.isPending}
-        error={own.disconnect.error}
-        onConfirm={() =>
-          own.disconnect.mutate(
-            { workspaceId: own.workspaceId ?? "", serverId: own.server.id },
-            { onSuccess: () => own.setDisconnecting(false) },
-          )
-        }
-      />
+      {own.isDisconnecting ? (
+        <ConfirmDialog
+          isOpen
+          onOpenChange={own.setDisconnecting}
+          heading="Disconnect your account"
+          body={`Your keys and the Playground stop reaching ${own.server.name} until you connect again.`}
+          confirmLabel="Disconnect"
+          isPending={own.disconnect.isPending}
+          error={own.disconnect.error}
+          onConfirm={() =>
+            own.disconnect.mutate(
+              { workspaceId: own.workspaceId ?? "", serverId: own.server.id },
+              { onSuccess: () => own.setDisconnecting(false) },
+            )
+          }
+        />
+      ) : null}
     </>
   )
 }

@@ -79,8 +79,12 @@ export function McpSharedAccount({
       <SettingsGroup title="Shared account" isBounded>
         <SettingsBlock>
           <p className="text-body">
-            {MEANING} An admin set it up, so there is nothing for you to
-            connect.
+            {MEANING}{" "}
+            {state === "not_set_up"
+              ? "An admin has not set up an account yet, so requests skip this server until one is."
+              : state === "open"
+                ? "The server answered without an account, so there is nothing for you to connect."
+                : "An admin set it up, so there is nothing for you to connect."}
           </p>
         </SettingsBlock>
       </SettingsGroup>
@@ -156,7 +160,11 @@ export function McpSharedAccount({
           <div className="flex flex-wrap gap-2">
             {account ? (
               <>
-                <Button onPress={start} isPending={isStarting}>
+                <Button
+                  onPress={start}
+                  isPending={isStarting}
+                  className="min-h-11 md:min-h-0"
+                >
                   Reconnect
                 </Button>
                 <Button
@@ -164,6 +172,7 @@ export function McpSharedAccount({
                     end.reset()
                     setEnding(true)
                   }}
+                  className="min-h-11 md:min-h-0"
                 >
                   Disconnect
                 </Button>
@@ -205,21 +214,23 @@ export function McpSharedAccount({
         ) : null}
       </SettingsBlock>
 
-      <ConfirmDialog
-        isOpen={isEnding}
-        onOpenChange={setEnding}
-        heading="Disconnect the shared account"
-        body={`Everyone's keys and the Playground stop reaching ${server.name} until an account is set up again.`}
-        confirmLabel="Disconnect"
-        isPending={end.isPending}
-        error={end.error}
-        onConfirm={() =>
-          end.mutate(
-            { workspaceId, serverId: server.id },
-            { onSuccess: () => setEnding(false) },
-          )
-        }
-      />
+      {isEnding ? (
+        <ConfirmDialog
+          isOpen
+          onOpenChange={setEnding}
+          heading="Disconnect the shared account"
+          body={`Everyone's keys and the Playground stop reaching ${server.name} until an account is set up again.`}
+          confirmLabel="Disconnect"
+          isPending={end.isPending}
+          error={end.error}
+          onConfirm={() =>
+            end.mutate(
+              { workspaceId, serverId: server.id },
+              { onSuccess: () => setEnding(false) },
+            )
+          }
+        />
+      ) : null}
     </SettingsGroup>
   )
 }

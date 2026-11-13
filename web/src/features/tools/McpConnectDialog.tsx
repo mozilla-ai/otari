@@ -89,6 +89,8 @@ export function McpConnectDialog({
                 <Button
                   onPress={() => onPick(server)}
                   isPending={pendingId === server.id}
+                  // Starting another would drop this one's result.
+                  isDisabled={pendingId !== "" && pendingId !== server.id}
                   aria-label={`Connect ${server.name}`}
                   fullWidth
                   className="h-full min-h-28 flex-col justify-start gap-2 px-3 py-4 whitespace-normal"

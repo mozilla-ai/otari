@@ -114,6 +114,8 @@ export function McpServerAcl({
     isKnown: picker.isKnown,
     onCheck: () => check.run(server),
     isChecking: check.isRunning(server.id),
+    checkError: check.error,
+    onDismissCheckError: check.dismissError,
   }
   const grants = access.data?.grants ?? []
 
