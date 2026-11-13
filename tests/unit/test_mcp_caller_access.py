@@ -12,7 +12,11 @@ from gateway.services.tenancy.workspace_mcp_server_service import _caller_access
 
 def _server(allowed_tools: list[str] | None, *, enabled: bool = True) -> WorkspaceMcpServer:
     return WorkspaceMcpServer(
-        workspace_id=uuid.uuid4(), name="drive", url="https://93.184.216.34/mcp", enabled=enabled, allowed_tools=allowed_tools
+        workspace_id=uuid.uuid4(),
+        name="drive",
+        url="https://93.184.216.34/mcp",
+        enabled=enabled,
+        allowed_tools=allowed_tools,
     )
 
 
