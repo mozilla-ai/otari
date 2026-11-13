@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/22f1f131dade3a6c4aae119c804fb44ddb2d03e7/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/8b51bc05d31566a458e7f59c07efbbee11705887/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -690,6 +690,14 @@ for it works against Otari with its base URL changed. `include_raw` and
 - Where there is no tool to pick (none configured, or several and no default),
   a call that names none still runs on the organization key, as the tool
   `web_search` on the key's provider, with a 30 second timeout.
+- A deployment with no search tool, whose legacy settings describe a backend
+  (`web_search_provider` with its key, else `web_search_url`), serves that
+  backend as a tool named after its provider, such as `tavily` or `searxng`.
+  A call that names none runs on it when the workspace has no organization key;
+  a call that names it runs on it in any case; any other name is a 400 listing
+  it. The deployment pays: it is priced under `otari:web_search`, and an
+  `allowed_tools` grants it by that name. Once any search tool exists, the
+  legacy backend is neither served nor listed here.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search
@@ -769,7 +777,7 @@ A served search carries what it settled at in `Otari-Cost-USD` and
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
-| `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key or the legacy settings serve); the detail names it | 402 | `pricing_required` |
 | The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
 | A rate limit is full | 429 | `rate_limited` |
 | The workspace's organization search key cannot be used as it is | 502 | |
@@ -807,6 +815,9 @@ tool, which says nothing of whether its provider reports a cost. A call that
 names no tool runs on the default, unless the workspace has an organization
 search key, which then serves it; a call that names the default tool runs on that tool's own key and price. A tool a direct
 search cannot run on is left out, and no key, endpoint or option is returned.
+On a deployment with no search tool, the backend the legacy settings describe
+is the one entry, named after its provider, the default, and priced at the
+`otari:web_search` rate.
 An API key whose workspace has web access off gets an empty list;
 `GET /api/v1/tools` says why. The list takes `skip` and `limit` (at most 1000,
 100 by default).

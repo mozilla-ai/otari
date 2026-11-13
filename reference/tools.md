@@ -1088,6 +1088,15 @@ with a 30 second timeout. The search is priced under `otari:web_search`. A searc
 Brave key localizes results to the request's `country`; Tavily takes a country by
 its full name, so a Tavily key does not.
 
+A deployment with no search tool falls back to the search backend the legacy
+settings describe (`web_search_provider` with its key, else `web_search_url`),
+as the in-loop tool does. A direct search serves it as a tool named after its
+provider, such as `tavily`, on the deployment's account: priced under
+`otari:web_search`, charged to the organization's funds, and granted in
+`allowed_tools` by that name. Tavily keeps returning page text, as it does in
+the loop. Adding any search tool ends the fallback; one named after the same
+provider replaces it without callers changing what they name.
+
 `GET /api/v1/search-tools/catalog` lists the tools a direct search may name,
 with each one's configured rate for the caller's organization (what a call is
 charged when its provider reports no cost; `null` when no rate row prices it)
