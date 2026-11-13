@@ -3,6 +3,7 @@ how one candidate is fetched, and how a logo is served."""
 
 import io
 import ipaddress
+import threading
 from collections.abc import Sequence
 
 import httpx
@@ -47,9 +48,32 @@ def test_an_svg_with_a_document_type_is_refused_so_no_entity_expands() -> None:
 
 
 def test_a_raster_declaring_too_many_pixels_is_refused() -> None:
-    buffer = io.BytesIO()
-    Image.new("1", (5000, 5000)).save(buffer, format="PNG")
-    assert logos.sniff_image(buffer.getvalue()) is None
+    def png(width: int, height: int) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("1", (width, height)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    assert logos.sniff_image(png(1024, 1024)) == "image/png"
+    assert logos.sniff_image(png(1025, 1024)) is None
+
+
+@pytest.mark.asyncio
+async def test_a_logo_is_measured_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Measuring decodes the image, so it runs on a worker thread and the loop stays free."""
+    measured_on: list[threading.Thread] = []
+    measure = logos.logo_luminance
+
+    def recording(content: bytes, content_type: str) -> float | None:
+        measured_on.append(threading.current_thread())
+        return measure(content, content_type)
+
+    monkeypatch.setattr(logos, "logo_luminance", recording)
+    content = _png((10, 10, 10, 255))
+
+    logo = await logos.Logo.measured(content, "image/png")
+
+    assert measured_on and measured_on[0] is not threading.current_thread()
+    assert logo == logos.Logo.of(content, "image/png")
 
 
 def test_luminance_reads_the_ink_and_a_filled_square_needs_no_tile() -> None:

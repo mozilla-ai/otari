@@ -11,9 +11,9 @@ ask, and `gateway.services.tools`, which runs the sign-in; see
 
 import uuid
 from typing import Annotated
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from gateway.api.deps import (
@@ -21,13 +21,21 @@ from gateway.api.deps import (
     McpConnectionServiceDep,
     WorkspaceMcpServerServiceDep,
     get_config,
+    get_session_identity,
     verify_master_key,
 )
-from gateway.api.routes._mcp_sign_in_pages import SignInPage, conversation_page
+from gateway.api.routes._mcp_sign_in_pages import (
+    SignInPage,
+    confirm_page,
+    conversation_page,
+    leaving_page,
+    other_user_page,
+)
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import McpConnectionFlowError
 from gateway.log_config import logger
+from gateway.models.tenancy import User as TenancyUser
 from gateway.schemas.tools import (
     McpConnectionComplete,
     McpConnectionCompleted,
@@ -36,6 +44,7 @@ from gateway.schemas.tools import (
     McpConnectionStarted,
     McpServerConnectionsPublic,
 )
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerService
 from gateway.services.tools import McpConnectionService
 
 # Auth is declared on the router, as `routes/workspace_mcp_servers.py` does.
@@ -52,8 +61,9 @@ session_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Where an authorization server sends the browser back to. It carries no credential of ours, because
-# the session cookie is SameSite=Strict and does not travel on a redirect from another site.
+# Where an authorization server sends the browser back to, and where a conversation's sign-in link
+# opens. A request arriving from another site carries no credential of ours, because the session
+# cookie is SameSite=Strict; the link's own page posts from this origin, so its POST does.
 callback_router = APIRouter(prefix="/mcp-connections", tags=["mcp-connections"])
 
 
@@ -172,26 +182,95 @@ async def complete_mcp_connection(
     return await service.complete_connection(user=current_identity, state=body.state, code=body.code, iss=body.iss)
 
 
+async def _sign_in_link_page(
+    service: WorkspaceMcpServerService, ticket: str, opened_by: TenancyUser | None
+) -> tuple[Response, bool]:
+    """The page a sign-in link shows before anything starts, and whether it offers to continue."""
+    try:
+        preview = await service.sign_in_link_preview(ticket=ticket, opened_by=opened_by)
+    except McpConnectionFlowError:
+        return conversation_page(SignInPage.LINK_EXPIRED), False
+    except TenancyError as exc:
+        # The server is gone or changed mode: the person can only try later.
+        logger.info("MCP sign-in link refused reason=%s", type(exc).__name__)
+        return conversation_page(SignInPage.CANNOT_START), False
+    if preview.other_user and preview.opened_as is not None:
+        logger.warning("MCP sign-in link refused reason=other_identity")
+        return (
+            other_user_page(
+                server_name=preview.server_name, user_label=preview.user_label, opened_as=preview.opened_as
+            ),
+            False,
+        )
+    return (
+        confirm_page(
+            ticket=ticket,
+            server_name=preview.server_name,
+            server_host=preview.server_host,
+            user_label=preview.user_label,
+            opened_as=preview.opened_as,
+        ),
+        True,
+    )
+
+
+def _posted_from_this_gateway(request: Request, config: GatewayConfig) -> bool:
+    """Whether a POST came from a page of this gateway's own origin, so no other site can press Continue.
+
+    A browser says so itself in ``Sec-Fetch-Site``; one too old to send it is held to its ``Origin``.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        return fetch_site == "same-origin"
+    origin, own = urlsplit(request.headers.get("Origin", "")), urlsplit(config.public_base_url or "")
+    return bool(origin.netloc) and (origin.scheme, origin.netloc.lower()) == (own.scheme, own.netloc.lower())
+
+
 @callback_router.get("/sign-in", include_in_schema=False)
 async def open_mcp_sign_in_link(
-    connections: McpConnectionServiceDep,
+    service: WorkspaceMcpServerServiceDep,
+    opened_by: Annotated[TenancyUser | None, Depends(get_session_identity)],
     ticket: Annotated[str, Query(max_length=1024)] = "",
 ) -> Response:
-    """Open a sign-in link a conversation showed, and send the browser on to the server's sign-in page.
+    """Open a sign-in link a conversation showed: say whose it is and which server, and ask before starting.
 
-    The link names its server and user itself, so no session is needed. One that is
-    forged, altered or expired gets a plain page saying to ask for a new one.
+    Nothing starts and nothing is stored here, so a link previewer or a scanner that fetches the
+    link does nothing. The link names its server and user itself, so no session is needed; one
+    opened in the dashboard session of another user is refused. A link that is forged, altered or
+    expired gets a plain page saying to ask for a new one.
     """
+    page, _ = await _sign_in_link_page(service, ticket, opened_by)
+    return page
+
+
+@callback_router.post("/sign-in", include_in_schema=False)
+async def start_mcp_sign_in_from_link(
+    request: Request,
+    service: WorkspaceMcpServerServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    opened_by: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    ticket: Annotated[str, Form(max_length=1024)] = "",
+) -> Response:
+    """Start the sign-in a link names, once the person pressed Continue on the page the link opened.
+
+    Only that page can ask: a POST from anywhere else is answered with the page itself, as a GET
+    would be. A dashboard session it arrives in must be the link's own user, and the sign-in is
+    then bound to that session.
+    """
+    page, offered = await _sign_in_link_page(service, ticket, opened_by)
+    if not offered or not _posted_from_this_gateway(request, config):
+        return page
     try:
-        url = await connections.start_from_link(ticket)
+        url = await service.start_from_sign_in_link(ticket=ticket, opened_by=opened_by)
     except McpConnectionFlowError:
         return conversation_page(SignInPage.LINK_EXPIRED)
     except TenancyError as exc:
-        # The server is gone or changed mode, the deployment cannot run a sign-in, or the
-        # authorization server could not be reached: the person can only try later.
+        # The deployment cannot run a sign-in, or the authorization server could not be reached.
         logger.info("MCP sign-in link refused reason=%s", type(exc).__name__)
         return conversation_page(SignInPage.CANNOT_START)
-    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    if urlsplit(url).scheme not in ("https", "http"):
+        return conversation_page(SignInPage.CANNOT_START)
+    return leaving_page(url)
 
 
 @callback_router.get("/client-metadata", include_in_schema=False)

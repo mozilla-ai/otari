@@ -34,6 +34,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpConnectionUpstreamError,
+    McpSignInLinkOtherUserError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
@@ -2219,7 +2220,7 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
     world = await _world(async_db, config)
-    async_db.add(BillingUser(user_id="alice"))
+    async_db.add(BillingUser(user_id="alice", alias="Alice A"))
     await async_db.commit()
     connections = _connections(async_db, config)
     ticket = sign_in_link(config, server_id=world.server.id, user_id="alice").split("ticket=", 1)[1]
@@ -2227,6 +2228,12 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
         user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
     )
 
+    target = await connections.read_link(ticket)
+    assert (target.server_name, target.server_host) == ("drive", "93.184.216.34")
+    assert (target.user_id, target.user_alias) == ("alice", "Alice A")
+    assert len((await async_db.execute(select(McpOAuthFlow))).scalars().all()) == 1, "reading a link starts nothing"
+    with pytest.raises(McpSignInLinkOtherUserError):
+        await connections.start_from_link(ticket, opened_by=world.member.id)
     await connections.start_from_link(ticket)
     second = await connections.start_from_link(ticket)
     flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()

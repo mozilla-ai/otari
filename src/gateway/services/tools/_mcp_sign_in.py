@@ -2,8 +2,8 @@
 
 A request's tool loop cannot open such a server: there is no token to send. Rather than refuse the
 request, the loop gets one stand-in tool per server, ``sign_in_to_<server>``. Its description says
-the server exists and needs the user's own sign-in, and calling it returns a link that starts that
-sign-in, so the model can show it in its answer and the user can ask again once signed in.
+the server exists and needs the user's own sign-in, and calling it returns a link to the page that
+starts that sign-in, so the model can show it in its answer and the user can ask again once signed in.
 
 A tool rather than a note in the system message, because a tool reaches the model the same way in
 all three API shapes, sits beside the many tools a coding agent already sends without rewriting its
@@ -188,6 +188,7 @@ class McpSignInBackend:
         prefix = f" A genuine link always starts with {self._link_prefix}" if self._link_prefix else ""
         return (
             f"{state} {ask} by opening this link, which works for {_LINK_MINUTES} minutes: {link}\n"
-            "Show the link exactly as written. Once they have signed in, they ask again in this conversation, and "
-            f"{label} will be available. Do not call this tool again in this turn.{prefix}"
+            "Show the link exactly as written, and tell the user it is for them alone: they should not pass it on, "
+            "and should never open a sign-in link someone else sent them. Once they have signed in, they ask again "
+            f"in this conversation, and {label} will be available. Do not call this tool again in this turn.{prefix}"
         )

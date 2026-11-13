@@ -62,6 +62,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
+    WorkspaceMcpServerCheckOriginError,
     WorkspaceMcpServerGrantNotFoundError,
     WorkspaceMcpServerGrantSubjectError,
     WorkspaceMcpServerKeyNotFoundError,
@@ -130,6 +131,7 @@ from gateway.services.tools import (
     McpSignInNeeded,
     McpSignInReason,
     McpUserTokens,
+    SignInLinkTarget,
     StoredMcpOAuthClient,
     WorkspaceMcpServerHealth,
     mcp_server_contacts,
@@ -311,9 +313,10 @@ class WorkspaceMcpServerUpdate(BaseModel):
 class WorkspaceMcpServerCheckRequest(BaseModel):
     """Connection details to check without storing them, for a form to test before it saves.
 
-    ``server_id`` names a stored server whose token stands in when
-    ``authorization_token`` is omitted, so an edit form can test a new URL with
-    a token it was never shown. ``""`` checks with no token at all.
+    ``server_id`` names a stored server whose credential stands in when
+    ``authorization_token`` is omitted, so an edit form can test a new path with
+    a token it was never shown. The credential is only sent to that server's own
+    origin. ``""`` checks with no token at all.
     """
 
     url: str = Field(min_length=1, max_length=2048, description="Streamable HTTP MCP endpoint")
@@ -323,7 +326,9 @@ class WorkspaceMcpServerCheckRequest(BaseModel):
     allowed_tools: list[Annotated[str, Field(max_length=MAX_TOOL_NAME_LENGTH)]] | None = Field(
         default=None, max_length=MAX_ALLOWED_TOOLS, description="The allow-list to report the catalog against"
     )
-    server_id: uuid.UUID | None = Field(default=None, description="A stored server whose token to use")
+    server_id: uuid.UUID | None = Field(
+        default=None, description="A stored server whose credential to use, when `url` is on that server's origin"
+    )
 
 
 McpCallerAccess = Literal["all", "read", "some", "none"]
@@ -673,6 +678,20 @@ def _origin(url: str) -> str:
     except ValueError:
         return f"{scheme}://{parts.netloc.lower()}"
     return f"{scheme}://{(parts.hostname or '').lower()}:{port}"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class McpSignInLinkPreview:
+    """What the page a sign-in link opens says before anything starts."""
+
+    server_name: str
+    server_host: str
+    # The user the sign-in will be attached to, by the most recognizable name it has.
+    user_label: str
+    # The dashboard account the link was opened in, when there is one.
+    opened_as: str | None
+    # That account is not the user the link was made for, so the sign-in is not offered.
+    other_user: bool
 
 
 class WorkspaceMcpConnectionEligibility:
@@ -1937,6 +1956,10 @@ class WorkspaceMcpServerService:
 
         An unsafe URL is refused with the same 400 a create gets, since this is
         the form that would go on to store it.
+
+        Raises:
+            WorkspaceMcpServerCheckOriginError: the check borrows a stored server's credential for a
+                URL on another origin than that server's.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         token: str | None = None
@@ -1948,6 +1971,10 @@ class WorkspaceMcpServerService:
                 raise McpConnectionSetupError(
                     "A per-user server holds no token to test with: connect your account, then check the server"
                 )
+            # The stored token or shared account goes only where the server it was stored for is.
+            if _origin(request.url) != _origin(server.url):
+                logger.warning("MCP connection test refused reason=other_origin server_id=%s", server.id)
+                raise WorkspaceMcpServerCheckOriginError
             try:
                 token = _stored_token(server) or await self._tokens.shared_token_for(server)
             except (SecretDecryptionError, SecretBoxUnavailableError, McpConnectionUnavailableError):
@@ -2211,6 +2238,57 @@ class WorkspaceMcpServerService:
             shared=done.shared,
         )
 
+    async def sign_in_link_preview(self, *, ticket: str, opened_by: User | None) -> McpSignInLinkPreview:
+        """What a conversation's sign-in link would do, read without starting or storing anything.
+
+        ``opened_by`` is the dashboard identity whose session the link was opened in, when there is one.
+
+        Raises:
+            McpConnectionFlowError: the link is forged, altered or expired.
+            WorkspaceMcpServerNotFoundError: the server is gone.
+            McpConnectionModeError: the server no longer takes each user's own sign-in.
+        """
+        target = await self._connection_service().read_link(ticket)
+        return McpSignInLinkPreview(
+            server_name=target.server_name,
+            server_host=target.server_host,
+            user_label=await self._sign_in_user_label(target),
+            opened_as=(opened_by.email or opened_by.full_name or str(opened_by.id)) if opened_by is not None else None,
+            other_user=opened_by is not None
+            and not McpConnectionService.sign_in_link_is_for(target.user_id, opened_by.id),
+        )
+
+    async def _sign_in_user_label(self, target: SignInLinkTarget) -> str:
+        """A dashboard account's email, which it cannot choose freely; else a chosen name beside the user's ID."""
+        try:
+            parsed = uuid.UUID(target.user_id)
+        except ValueError:
+            parsed = None
+        # Only the canonical spelling names a dashboard account, as ``may_connect`` reads it.
+        if parsed is not None and str(parsed) == target.user_id:
+            identities = await UserRepository(self.db).get_by_ids([parsed])
+            if identities and identities[0].email:
+                return identities[0].email
+            if identities and identities[0].full_name:
+                return f"{identities[0].full_name} (user ID {target.user_id})"
+        if target.user_alias and target.user_alias != target.user_id:
+            return f"{target.user_alias} (user ID {target.user_id})"
+        return target.user_id
+
+    async def start_from_sign_in_link(self, *, ticket: str, opened_by: User | None) -> str:
+        """Start the sign-in a conversation's link names, once the person confirmed it, and return where to send them.
+
+        A link confirmed inside a dashboard session is bound to it: it must be that identity's own, and
+        the sign-in finishes only in that session.
+
+        Raises:
+            McpConnectionFlowError: the link is forged, altered or expired.
+            McpSignInLinkOtherUserError: ``opened_by`` is not the user the link was made for.
+        """
+        return await self._connection_service().start_from_link(
+            ticket, opened_by=opened_by.id if opened_by is not None else None
+        )
+
     async def my_connections(self, *, user: User, workspace_id: uuid.UUID) -> McpConnectionsPublic:
         """The caller's own connections to this workspace's servers, oldest first."""
         resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
@@ -2297,6 +2375,7 @@ __all__ = [
     "MAX_GRANTS_PER_SERVER",
     "McpServerSummary",
     "McpSharedAccountPublic",
+    "McpSignInLinkPreview",
     "RequestMcpServers",
     "WorkspaceMcpServerAccess",
     "WorkspaceMcpServerAccessCheck",

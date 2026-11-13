@@ -11,6 +11,7 @@ Also here: whether a catalog entry is its maker's own server or someone else's
 behind one that would vanish on its background.
 """
 
+import asyncio
 import hashlib
 import io
 import re
@@ -24,8 +25,8 @@ from urllib.parse import urlsplit
 MAX_LOGO_BYTES = 256 * 1024
 # An admin's upload: the dashboard sends a 256 px PNG, so this is generous.
 MAX_UPLOAD_BYTES = 512 * 1024
-# A raster declaring more pixels than this is refused before it is decoded.
-_MAX_PIXELS = 4096 * 4096
+# A raster declaring more pixels than this is refused before it is decoded. A logo is shown small.
+_MAX_PIXELS = 1024 * 1024
 
 PublisherKind = Literal["vendor", "community"]
 LogoTone = Literal["dark", "light", "tile"]
@@ -65,6 +66,11 @@ class Logo:
     def of(cls, content: bytes, content_type: str) -> Self:
         """The logo these bytes make, with its digest and how bright its ink is."""
         return cls(content, content_type, etag_of(content), logo_luminance(content, content_type))
+
+    @classmethod
+    async def measured(cls, content: bytes, content_type: str) -> Self:
+        """:meth:`of`, run on a worker thread: measuring decodes a raster, which would hold the event loop."""
+        return await asyncio.to_thread(cls.of, content, content_type)
 
     @staticmethod
     def sniff(content: bytes) -> str | None:

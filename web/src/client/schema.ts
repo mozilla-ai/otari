@@ -2872,8 +2872,8 @@ export interface paths {
          *     the token are never returned. A master key has no workspace and is refused with a 404.
          *
          *     A server that sends each user's own credential is listed with `sign_in_required` true until this
-         *     key's user has signed in to it, with a `sign_in_url` that starts their sign-in, and is left out for a
-         *     key that has no user. Tool discovery and execution answer such a server with a 403, the code
+         *     key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
+         *     left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
          *     `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
          */
         get: operations["mcp-list_mcp_servers"];
@@ -8229,8 +8229,10 @@ export interface paths {
          *
          *     What a form's Test button calls before it saves. Answers with what a stored
          *     server's `health` would say, and records nothing. Pass `server_id` and omit
-         *     `authorization_token` to test with that server's stored token. The URL is
-         *     checked for SSRF safety first, with the same 400 a create gets.
+         *     `authorization_token` to test with that server's stored credential, which is
+         *     only sent to a URL on that server's own origin (scheme, host and port): any
+         *     other is a 400. The URL is checked for SSRF safety first, with the same 400
+         *     a create gets.
          */
         post: operations["mcp-servers-check_workspace_mcp_server_connection"];
         delete?: never;
@@ -23010,9 +23012,10 @@ export interface components {
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
-         *     ``server_id`` names a stored server whose token stands in when
-         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
-         *     a token it was never shown. ``""`` checks with no token at all.
+         *     ``server_id`` names a stored server whose credential stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new path with
+         *     a token it was never shown. The credential is only sent to that server's own
+         *     origin. ``""`` checks with no token at all.
          */
         WorkspaceMcpServerCheckRequest: {
             /**
@@ -23027,7 +23030,7 @@ export interface components {
             authorization_token?: string | null;
             /**
              * Server Id
-             * @description A stored server whose token to use
+             * @description A stored server whose credential to use, when `url` is on that server's origin
              */
             server_id?: string | null;
             /**
@@ -37856,7 +37859,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
                 };
             };
-            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            /** @description The URL failed the SSRF or TLS check, or is on another origin than the stored server whose credential was asked for; nothing was sent to it. */
             400: {
                 headers: {
                     [name: string]: unknown;

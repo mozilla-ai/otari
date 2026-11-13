@@ -34,6 +34,7 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
+    WorkspaceMcpServerCheckOriginError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
@@ -1402,17 +1403,45 @@ async def test_an_edit_form_tests_with_the_stored_token_unless_it_sends_one(
         user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
     )
 
+    other_path = PUBLIC_URL.replace("/mcp", ":443/v2/mcp")
     for token in (None, "", "ghp_typed"):
         await service.check_connection(
             user=owner,
             workspace_id=workspace.id,
-            request=WorkspaceMcpServerCheckRequest(
-                url=OTHER_PUBLIC_URL, authorization_token=token, server_id=created.id
-            ),
+            request=WorkspaceMcpServerCheckRequest(url=other_path, authorization_token=token, server_id=created.id),
         )
 
     assert [seen.authorization_token for seen in check.seen[1:]] == ["ghp_stored", None, "ghp_typed"]
-    assert all(seen.url == OTHER_PUBLIC_URL for seen in check.seen[1:])
+    assert all(seen.url == other_path for seen in check.seen[1:])
+
+
+async def test_a_stored_token_is_never_tested_against_another_origin(async_db: AsyncSession, check: _FakeCheck) -> None:
+    """A manager cannot have the stored token sent to an address they type: only a token they typed goes there."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
+    )
+
+    for url in (OTHER_PUBLIC_URL, PUBLIC_URL.replace("/mcp", ":8443/mcp"), PUBLIC_URL.replace("https:", "http:")):
+        with pytest.raises(WorkspaceMcpServerCheckOriginError):
+            await service.check_connection(
+                user=owner,
+                workspace_id=workspace.id,
+                request=WorkspaceMcpServerCheckRequest(url=url, server_id=created.id),
+            )
+    assert len(check.seen) == 1, "nothing was sent anywhere but by the create's own check"
+
+    await service.check_connection(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMcpServerCheckRequest(
+            url=OTHER_PUBLIC_URL, authorization_token="ghp_typed", server_id=created.id
+        ),
+    )
+    assert (check.seen[-1].url, check.seen[-1].authorization_token) == (OTHER_PUBLIC_URL, "ghp_typed")
 
 
 async def test_a_test_refuses_an_unsafe_url_the_way_a_create_does(async_db: AsyncSession, check: _FakeCheck) -> None:

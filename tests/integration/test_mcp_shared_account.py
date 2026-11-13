@@ -21,6 +21,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionNotFoundError,
     McpConnectionSetupError,
     McpConnectionUnavailableError,
+    WorkspaceMcpServerCheckOriginError,
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.models.mcp import ResolvedMcpServer
@@ -31,6 +32,7 @@ from gateway.services.mcp_stateless import CheckFailure, ServerCheck
 from gateway.services.model_access import McpAccess
 from gateway.services.secret_box import decrypt_secret
 from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerPublic,
     WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
@@ -155,6 +157,31 @@ async def test_a_manager_signs_in_for_everyone_and_every_caller_then_carries_tha
         user=world.member, workspace_id=world.workspace.id, server_id=world.server.id
     )
     assert seen.shared_account is not None and seen.shared_account.signed_in_by == "Owner"
+
+
+async def test_the_shared_account_is_only_tested_against_the_servers_own_origin(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, asks_for_an_account: list[str | None]
+) -> None:
+    """A test of unsaved details cannot carry the shared account's token to an address a manager types."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    service = _service(async_db, config)
+    sent = len(asks_for_an_account)
+
+    with pytest.raises(WorkspaceMcpServerCheckOriginError):
+        await service.check_connection(
+            user=world.owner,
+            workspace_id=world.workspace.id,
+            request=WorkspaceMcpServerCheckRequest(url=base.OTHER_PUBLIC_URL, server_id=world.server.id),
+        )
+    assert len(asks_for_an_account) == sent, "nothing was sent"
+
+    await service.check_connection(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCheckRequest(url=f"{base.PUBLIC_URL}?tab=1", server_id=world.server.id),
+    )
+    assert asks_for_an_account[sent:] == ["access-1"]
 
 
 async def test_only_a_manager_starts_or_ends_the_shared_account_and_only_on_a_shared_server(

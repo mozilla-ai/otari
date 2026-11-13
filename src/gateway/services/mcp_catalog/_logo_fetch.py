@@ -16,7 +16,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from gateway.services.mcp_catalog._logos import MAX_LOGO_BYTES, Logo, make_logo, sniff_image
+from gateway.services.mcp_catalog._logos import MAX_LOGO_BYTES, Logo, sniff_image
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
     AddressResolver,
@@ -89,7 +89,7 @@ class LogoFetcher:
         if body is None:
             return None
         content_type = sniff_image(body[0])
-        return make_logo(body[0], content_type) if content_type else None
+        return await Logo.measured(body[0], content_type) if content_type else None
 
     async def _declared(self, page_url: str) -> Logo | None:
         page = await self._get(page_url, NetworkDeadline(FETCH_SECONDS), MAX_PAGE_BYTES, _PAGE_HEADERS)

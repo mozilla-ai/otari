@@ -44,6 +44,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpConnectionUpstreamError,
+    McpSignInLinkOtherUserError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
 )
@@ -54,7 +55,7 @@ from gateway.repositories.tools import (
     McpUserConnectionRepository,
     WorkspaceMcpServerRepository,
 )
-from gateway.repositories.users_repository import DEFAULT_USER_ID
+from gateway.repositories.users_repository import DEFAULT_USER_ID, UserAccessRepository
 from gateway.services.mcp_stateless import CheckFailure
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -84,7 +85,7 @@ EXPIRY_SKEW = timedelta(minutes=5)
 # How long one renewal may hold a connection's row while it waits on the authorization server.
 RENEWAL_DEADLINE_SECONDS = 20.0
 CALLBACK_PATH = "/mcp-connections/callback"
-# The gateway's own path a sign-in link opens, under the API root. It starts the sign-in when clicked.
+# The gateway's own path a sign-in link opens, under the API root: a page that asks before the sign-in starts.
 SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
 # How long a sign-in link handed to a conversation can be clicked. Nothing is stored until it is.
 SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
@@ -212,13 +213,13 @@ def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
 
 
 def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -> str:
-    """A link that starts ``user_id``'s sign-in to a per-user server when it is opened, for a conversation to show.
+    """A link to the page that starts ``user_id``'s sign-in to a per-user server, for a conversation to show.
 
     Minting stores nothing: the link carries the server and the user sealed with ``OTARI_SECRET_KEY``,
-    and the sign-in, with its single-use state, starts only when somebody opens it, within
-    ``SIGN_IN_LINK_LIFETIME``. It always points at this gateway, never at an authorization server,
-    so a conversation can tell it apart from any other link by its address. The caller has decided
-    that this user may sign in to this server.
+    and the sign-in, with its single-use state, starts only when somebody opens it and confirms on
+    the page it shows, within ``SIGN_IN_LINK_LIFETIME``. It always points at this gateway, never at an
+    authorization server, so a conversation can tell it apart from any other link by its address. The
+    caller has decided that this user may sign in to this server.
 
     Raises:
         McpConnectionSetupError: ``public_base_url`` is unset, or the user is the shared ``default`` one.
@@ -253,6 +254,15 @@ def read_sign_in_link(ticket: str) -> tuple[uuid.UUID, str] | None:
         return uuid.UUID(payload["s"]), str(payload["u"])
     except (InvalidToken, SecretBoxUnavailableError, ValueError, KeyError, TypeError):
         return None
+
+
+def sign_in_link_is_for(user_id: str, identity_id: uuid.UUID) -> bool:
+    """Whether a sign-in link made for ``user_id`` is this dashboard identity's own.
+
+    A dashboard identity's keys bill to the user named by its ID, so that is the one user it may
+    attach a sign-in to.
+    """
+    return str(identity_id) == user_id
 
 
 def require_per_user_support(config: GatewayConfig) -> None:
@@ -331,6 +341,19 @@ def _client_from(stored: StoredMcpOAuthClient | None, *, client_id: str, auth_me
         return None
     secret = decrypt_secret(stored.encrypted_secret) if stored.encrypted_secret else None
     return McpOAuthClient(client_id=client_id, client_secret=secret, auth_method=auth_method)
+
+
+@dataclass(frozen=True, slots=True)
+class SignInLinkTarget:
+    """What a sign-in link names, for the page that asks before the sign-in starts."""
+
+    server_id: uuid.UUID
+    server_name: str
+    # The host of the server's URL, which is where the person is about to sign in.
+    server_host: str
+    user_id: str
+    # The user's alias, when their row has one.
+    user_alias: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,6 +585,7 @@ class McpConnectionService:
     revocations_for = staticmethod(revocations_for)
     revoke_in_background = staticmethod(revoke_in_background)
     sign_in_link = staticmethod(sign_in_link)
+    sign_in_link_is_for = staticmethod(sign_in_link_is_for)
     sign_in_link_prefix = staticmethod(sign_in_link_prefix)
     sign_in_problem = staticmethod(sign_in_problem)
     stored_oauth_client = staticmethod(stored_oauth_client)
@@ -582,6 +606,7 @@ class McpConnectionService:
         self._flows = flows
         self._config = config
         self._eligibility = eligibility
+        self._users = UserAccessRepository(uow)
 
     async def start(
         self,
@@ -676,24 +701,55 @@ class McpConnectionService:
             metadata, client_id=client.client_id, redirect_uri=redirect_uri, state=state, verifier=verifier
         )
 
-    async def start_from_link(self, ticket: str) -> str:
-        """Start the sign-in a link from :func:`sign_in_link` names, and return the authorization URL.
-
-        The sign-in finishes on its state alone, since the person opening the link need not have a
-        dashboard session, and lands on a page telling them to go back to their conversation.
+    async def read_link(self, ticket: str) -> SignInLinkTarget:
+        """What a link from :func:`sign_in_link` names, read without starting or storing anything.
 
         Raises:
             McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
             WorkspaceMcpServerNotFoundError: the server is gone.
             McpConnectionModeError: the server no longer takes each user's own sign-in.
+        """
+        server_id, user_id = self._named_by(ticket)
+        async with self._uow:
+            server = await self._server_in_mode(server_id, McpCredentialMode.PER_USER)
+            alias = (await self._users.aliases([user_id])).get(user_id)
+            return SignInLinkTarget(
+                server_id=server.id,
+                server_name=server.name,
+                server_host=urlsplit(server.url).hostname or "",
+                user_id=user_id,
+                user_alias=alias,
+            )
+
+    async def start_from_link(self, ticket: str, *, opened_by: uuid.UUID | None = None) -> str:
+        """Start the sign-in a link from :func:`sign_in_link` names, and return the authorization URL.
+
+        ``opened_by`` is the dashboard identity whose session the link was confirmed in, when there
+        is one. It must be the user the link was made for, and the sign-in then finishes only in
+        that identity's session. With none, the person need not have a dashboard session: the
+        sign-in finishes on its state alone and lands on a page telling them to go back to their
+        conversation, so the caller has shown them whose link it is and they have confirmed it.
+
+        Raises:
+            McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
+            McpSignInLinkOtherUserError: ``opened_by`` is not the user the link was made for.
+            WorkspaceMcpServerNotFoundError: the server is gone.
+            McpConnectionModeError: the server no longer takes each user's own sign-in.
             McpConnectionSetupError: the sign-in cannot start on this deployment.
             McpConnectionUpstreamError: the server's authorization setup could not be discovered.
         """
+        server_id, user_id = self._named_by(ticket)
+        if opened_by is not None and not sign_in_link_is_for(user_id, opened_by):
+            logger.warning("MCP sign-in link refused reason=other_identity server_id=%s", server_id)
+            raise McpSignInLinkOtherUserError
+        return await self.start(server_id=server_id, user_id=user_id, identity_id=opened_by)
+
+    @staticmethod
+    def _named_by(ticket: str) -> tuple[uuid.UUID, str]:
         named = read_sign_in_link(ticket)
         if named is None:
             raise McpConnectionFlowError("This sign-in link is not valid or has expired. Ask again for a new one.")
-        server_id, user_id = named
-        return await self.start(server_id=server_id, user_id=user_id)
+        return named
 
     async def _server_in_mode(
         self, server_id: uuid.UUID, mode: McpCredentialMode, *, lock: bool = False

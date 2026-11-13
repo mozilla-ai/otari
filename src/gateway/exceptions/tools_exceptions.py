@@ -215,6 +215,23 @@ class McpConnectionFlowError(TenancyValidationError):
     """A sign-in could not be finished: its state is unknown, used, expired, or another person's."""
 
 
+class McpSignInLinkOtherUserError(TenancyForbiddenError):
+    """A sign-in link was opened in the dashboard session of somebody other than the user it was made for."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link was made for another user")
+
+
+class WorkspaceMcpServerCheckOriginError(TenancyValidationError):
+    """A connection check asked to send a stored server's credential to another origin than that server's."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A stored server's credential is only sent to that server's own address. "
+            "To test another address, enter a token for it."
+        )
+
+
 class McpConnectionUpstreamError(TenancyValidationError):
     """The MCP server or its authorization server refused or failed a sign-in step.
 

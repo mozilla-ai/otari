@@ -608,8 +608,8 @@ async def list_mcp_servers(
     the token are never returned. A master key has no workspace and is refused with a 404.
 
     A server that sends each user's own credential is listed with `sign_in_required` true until this
-    key's user has signed in to it, with a `sign_in_url` that starts their sign-in, and is left out for a
-    key that has no user. Tool discovery and execution answer such a server with a 403, the code
+    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
+    left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
     `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
     """
     principal = await _authenticate(raw_request, db, config)

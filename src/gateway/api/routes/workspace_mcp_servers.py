@@ -368,7 +368,12 @@ async def end_workspace_mcp_server_shared_account(
 @router.post(
     "/check",
     responses={
-        status.HTTP_400_BAD_REQUEST: {"description": "The URL failed the SSRF or TLS check; nothing was sent to it."},
+        status.HTTP_400_BAD_REQUEST: {
+            "description": (
+                "The URL failed the SSRF or TLS check, or is on another origin than the stored server "
+                "whose credential was asked for; nothing was sent to it."
+            )
+        },
         status.HTTP_429_TOO_MANY_REQUESTS: {
             "description": "Every check slot on this gateway was busy. Try again shortly."
         },
@@ -384,8 +389,10 @@ async def check_workspace_mcp_server_connection(
 
     What a form's Test button calls before it saves. Answers with what a stored
     server's `health` would say, and records nothing. Pass `server_id` and omit
-    `authorization_token` to test with that server's stored token. The URL is
-    checked for SSRF safety first, with the same 400 a create gets.
+    `authorization_token` to test with that server's stored credential, which is
+    only sent to a URL on that server's own origin (scheme, host and port): any
+    other is a 400. The URL is checked for SSRF safety first, with the same 400
+    a create gets.
     """
     return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
 

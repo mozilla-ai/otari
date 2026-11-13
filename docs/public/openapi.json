@@ -30487,7 +30487,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerCheckRequest": {
-        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose token stands in when\n``authorization_token`` is omitted, so an edit form can test a new URL with\na token it was never shown. ``\"\"`` checks with no token at all.",
+        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose credential stands in when\n``authorization_token`` is omitted, so an edit form can test a new path with\na token it was never shown. The credential is only sent to that server's own\norigin. ``\"\"`` checks with no token at all.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -30529,7 +30529,7 @@
                 "type": "null"
               }
             ],
-            "description": "A stored server whose token to use",
+            "description": "A stored server whose credential to use, when `url` is on that server's origin",
             "title": "Server Id"
           },
           "url": {
@@ -41641,7 +41641,7 @@
     },
     "/api/v1/mcp/servers": {
       "get": {
-        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` that starts their sign-in, and is left out for a\nkey that has no user. Tool discovery and execution answer such a server with a 403, the code\n`mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.",
+        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is\nleft out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code\n`mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.",
         "operationId": "mcp-list_mcp_servers",
         "responses": {
           "200": {
@@ -60991,7 +60991,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
       "post": {
-        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored credential, which is\nonly sent to a URL on that server's own origin (scheme, host and port): any\nother is a 400. The URL is checked for SSRF safety first, with the same 400\na create gets.",
         "operationId": "mcp-servers-check_workspace_mcp_server_connection",
         "parameters": [
           {
@@ -61027,7 +61027,7 @@
             "description": "Successful Response"
           },
           "400": {
-            "description": "The URL failed the SSRF or TLS check; nothing was sent to it."
+            "description": "The URL failed the SSRF or TLS check, or is on another origin than the stored server whose credential was asked for; nothing was sent to it."
           },
           "422": {
             "content": {

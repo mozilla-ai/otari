@@ -6,10 +6,13 @@ the streamed chat path. `test_mcp_user_connections.py` covers the resolution rul
 
 from __future__ import annotations
 
+import html
 import json
+import re
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -34,13 +37,17 @@ from openai.types.responses import ResponseFunctionToolCall, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
+from gateway.models.tenancy import DashboardSession
+from gateway.models.tenancy import User as Identity
 from gateway.models.tools import McpOAuthFlow, McpUserConnection
 from gateway.services import mcp_stateless
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, _mcp_oauth
@@ -227,6 +234,47 @@ def _link(text: str) -> str:
     return text[start:].split()[0]
 
 
+# What a browser sends with the confirmation page's own form.
+FROM_THE_PAGE = {"Sec-Fetch-Site": "same-origin"}
+
+
+def _confirm(client: TestClient, link: str, headers: dict[str, str] | None = None) -> Any:
+    """Press Continue on the page a link opens."""
+    ticket = parse_qs(urlsplit(link).query)["ticket"][0]
+    return client.post(
+        f"{API_ROOT}/mcp-connections/sign-in",
+        data={"ticket": ticket},
+        headers=FROM_THE_PAGE if headers is None else headers,
+    )
+
+
+def _sent_on_to(response: Any) -> str:
+    """The authorization URL the page after Continue sends the browser to."""
+    assert response.status_code == 200, response.text
+    found = re.search(r'<meta http-equiv="refresh" content="0; url=([^"]+)">', response.text)
+    assert found is not None, response.text
+    return html.unescape(found.group(1))
+
+
+def _dashboard_session(client: TestClient, master: dict[str, str], test_db: Session, email: str) -> Identity:
+    """Sign the client in to the dashboard as a new member with this email."""
+    added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": email}, headers=master)
+    assert added.status_code == 201, added.text
+    identity = test_db.scalars(select(Identity).where(col(Identity.email) == email)).one()
+    token = f"session-{uuid.uuid4().hex}"
+    test_db.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=identity.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    test_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    return identity
+
+
 # --------------------------------------------------------------------------- #
 # Attached by default
 # --------------------------------------------------------------------------- #
@@ -340,14 +388,20 @@ def test_an_unsigned_in_user_gets_a_link_in_the_conversation_and_the_next_ask_wo
     assert mcp.headers == [], "nothing connects to a server the user has not signed in to"
     assert test_db.execute(select(McpOAuthFlow)).first() is None, "minting a link stores nothing"
 
-    opened = client.get(link.removeprefix(ORIGIN), follow_redirects=False)
-    assert opened.status_code == 303, opened.text
-    assert opened.headers["location"].startswith(f"{ISSUER}/authorize?")
-    again = client.get(link.removeprefix(ORIGIN), follow_redirects=False)
+    for _ in range(2):
+        opened = client.get(link.removeprefix(ORIGIN), follow_redirects=False)
+        assert opened.status_code == 200, opened.text
+        assert "sign in to jira (93.184.216.34)" in opened.text and "this Otari user: alice" in opened.text
+        assert "Continue only if alice is you and you asked for this link yourself" in opened.text
+        assert "form-action 'self'" in opened.headers["content-security-policy"]
+    assert test_db.execute(select(McpOAuthFlow)).first() is None, "opening a link starts nothing, however often"
+
+    assert _sent_on_to(_confirm(client, link)).startswith(f"{ISSUER}/authorize?")
+    again = _confirm(client, link)
     test_db.expire_all()
     [flow] = test_db.execute(select(McpOAuthFlow)).scalars().all()
-    assert (flow.user_id, flow.identity_id) == ("alice", None), "opening it twice leaves one pending sign-in"
-    state = parse_qs(urlsplit(again.headers["location"]).query)["state"][0]
+    assert (flow.user_id, flow.identity_id) == ("alice", None), "confirming it twice leaves one pending sign-in"
+    state = parse_qs(urlsplit(_sent_on_to(again)).query)["state"][0]
 
     landed = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "c"})
     assert landed.status_code == 200
@@ -367,9 +421,76 @@ def test_an_unsigned_in_user_gets_a_link_in_the_conversation_and_the_next_ask_wo
 def test_a_link_that_is_forged_or_altered_starts_nothing(client: TestClient) -> None:
     for ticket in ("", "nonsense", encrypt_secret('{"p":"other","s":"x","u":"alice"}').rstrip("=")):
         opened = client.get(f"{API_ROOT}/mcp-connections/sign-in", params={"ticket": ticket}, follow_redirects=False)
-        assert opened.status_code == 400
-        assert "This link has expired" in opened.text
-        assert opened.headers["content-security-policy"].startswith("default-src 'none'")
+        confirmed = client.post(f"{API_ROOT}/mcp-connections/sign-in", data={"ticket": ticket}, headers=FROM_THE_PAGE)
+        for answer in (opened, confirmed):
+            assert answer.status_code == 400
+            assert "This link has expired" in answer.text
+            assert answer.headers["content-security-policy"].startswith("default-src 'none'")
+
+
+def _per_user_link(client: TestClient, master: dict[str, str], test_db: Session, user_id: str = "alice") -> str:
+    key = _key(client, master, user_id)
+    _server(client, master, _workspace(test_db, key), "jira", credential_mode="per_user", attach_by_default=True)
+    link: str = client.get(f"{API_ROOT}/mcp/servers", headers=_bearer(key)).json()["servers"][0]["sign_in_url"]
+    return link
+
+
+def test_only_the_links_own_page_can_start_its_sign_in(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """Another site that posts the ticket for its visitor gets the question, not the sign-in."""
+    link = _per_user_link(client, master_key_header, test_db)
+
+    for headers in ({}, {"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example"}, {"Origin": "null"}):
+        forged = _confirm(client, link, headers)
+        assert forged.status_code == 200 and "Continue only if alice is you" in forged.text
+        assert "http-equiv" not in forged.text
+    assert test_db.execute(select(McpOAuthFlow)).first() is None
+
+    # A browser too old to say where a request came from is held to its Origin.
+    assert _sent_on_to(_confirm(client, link, {"Origin": ORIGIN})).startswith(f"{ISSUER}/authorize?")
+
+
+def test_a_link_opened_in_another_users_dashboard_session_is_refused(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """Mallory sends Bob her link: Bob's session is not Mallory's user, so he is not offered Continue."""
+    link = _per_user_link(client, master_key_header, test_db, "mallory")
+    _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+
+    opened = client.get(link.removeprefix(ORIGIN))
+    confirmed = _confirm(client, link)
+
+    for answer in (opened, confirmed):
+        assert answer.status_code == 403, answer.text
+        assert "This sign-in link is not yours" in answer.text
+        assert "Otari user mallory" in answer.text and "signed in to Otari as bob@example.com" in answer.text
+        assert "<form" not in answer.text and "http-equiv" not in answer.text
+    assert test_db.execute(select(McpOAuthFlow)).first() is None
+
+
+def test_a_link_confirmed_in_its_own_users_dashboard_session_is_bound_to_it(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    identity = _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+    link = _per_user_link(client, master_key_header, test_db, str(identity.id))
+
+    opened = client.get(link.removeprefix(ORIGIN))
+    assert opened.status_code == 200, opened.text
+    assert "this Otari user: bob@example.com" in opened.text
+    assert "You are signed in to Otari as bob@example.com." in opened.text
+
+    state = parse_qs(urlsplit(_sent_on_to(_confirm(client, link))).query)["state"][0]
+    test_db.expire_all()
+    [flow] = test_db.execute(select(McpOAuthFlow)).scalars().all()
+    assert (flow.user_id, flow.identity_id) == (str(identity.id), identity.id)
+    # Bound to the session, so the callback hands the code to the dashboard instead of spending it.
+    landed = client.get(
+        f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "c"}, follow_redirects=False
+    )
+    assert landed.status_code == 303
+    assert landed.headers["location"].startswith(f"{ORIGIN}/#/mcp-connections/callback?")
+    assert test_db.execute(select(McpUserConnection)).first() is None
 
 
 def test_a_failed_sign_in_from_a_link_ends_on_the_plain_page(
@@ -380,8 +501,7 @@ def test_a_failed_sign_in_from_a_link_ends_on_the_plain_page(
         client, master_key_header, _workspace(test_db, key), "jira", credential_mode="per_user", attach_by_default=True
     )
     listed = client.get(f"{API_ROOT}/mcp/servers", headers=_bearer(key)).json()["servers"]
-    opened = client.get(listed[0]["sign_in_url"].removeprefix(ORIGIN), follow_redirects=False)
-    state = parse_qs(urlsplit(opened.headers["location"]).query)["state"][0]
+    state = parse_qs(urlsplit(_sent_on_to(_confirm(client, listed[0]["sign_in_url"]))).query)["state"][0]
 
     refused = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "error": "access_denied"})
 

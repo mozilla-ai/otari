@@ -20,7 +20,8 @@ one from a check, and ``mcp_server_contacts`` (a ``McpServerContacts``) records 
 ``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
 through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
 that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in;
-``sign_in_link`` mints the link a conversation shows a user to start their sign-in, and ``McpSignInBackend`` gives a
+``sign_in_link`` mints the link a conversation shows a user to start their sign-in, which names a
+``SignInLinkTarget``, and ``McpSignInBackend`` gives a
 request's tool loop one stand-in tool per server ``McpSignInNeeded`` names, whose result carries that link,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
@@ -135,6 +136,7 @@ from gateway.services.tools._mcp_connections import (
     McpRevocation,
     McpServerRef,
     McpUserTokens,
+    SignInLinkTarget,
     StoredMcpOAuthClient,
 )
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
@@ -346,6 +348,7 @@ __all__ = [
     "mcp_server_contacts",
     "McpRevocation",
     "McpServerRef",
+    "SignInLinkTarget",
     "McpUserTokens",
     "McpSignInBackend",
     "McpSignInNeeded",

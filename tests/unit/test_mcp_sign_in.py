@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from gateway.api.routes._mcp_sign_in_pages import confirm_page, leaving_page, other_user_page
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.tools_exceptions import McpConnectionSetupError, McpSignInRequiredError
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -189,7 +190,8 @@ async def test_a_connection_removed_mid_conversation_is_answered_as_final_with_a
     assert "No retry, other tool or subagent will reach Notion until the user signs in again." in told
     assert "Stop and tell the user to sign in" in told
     assert f"works for {int(SIGN_IN_LINK_LIFETIME.total_seconds() // 60)} minutes" in told
-    assert "Show the link exactly as written." in told
+    assert "Show the link exactly as written" in told
+    assert "never open a sign-in link someone else sent them" in told
     assert read_sign_in_link(_ticket(link)) == (SERVER, "alice") and minted == [(SERVER, "alice")]
     # A plain result, not a tool error: an error reads as something to retry.
     assert not is_tool_error(told)
@@ -215,3 +217,41 @@ def test_a_stand_in_never_takes_a_name_already_in_use() -> None:
     )
 
     assert [tool["function"]["name"] for tool in backend.openai_tools] == ["sign_in_to_jira_2", "sign_in_to_jira_3"]
+
+
+# --------------------------------------------------------------------------- #
+# The pages a link opens
+# --------------------------------------------------------------------------- #
+
+HOSTILE = '"><script>alert(1)</script><img src=x onerror=alert(1)>'
+
+
+def test_the_confirmation_page_names_the_user_and_the_server_and_escapes_every_value() -> None:
+    plain = confirm_page(
+        ticket="abc", server_name="Jira", server_host="mcp.jira.example", user_label="bob@example.com", opened_as=None
+    )
+    hostile = confirm_page(
+        ticket=HOSTILE, server_name=HOSTILE, server_host=HOSTILE, user_label=HOSTILE, opened_as=HOSTILE
+    )
+
+    text = bytes(plain.body).decode()
+    assert plain.status_code == 200
+    assert "sign in to Jira (mcp.jira.example)" in text and "this Otari user: bob@example.com" in text
+    assert "Continue only if bob@example.com is you and you asked for this link yourself" in text
+    assert '<form method="post"><input type="hidden" name="ticket" value="abc">' in text
+    csp = plain.headers["content-security-policy"]
+    assert csp.startswith("default-src 'none'") and "form-action 'self'" in csp and "frame-ancestors 'none'" in csp
+    assert plain.headers["x-frame-options"] == "DENY" and plain.headers["cache-control"] == "no-store"
+    for page in (hostile, other_user_page(server_name=HOSTILE, user_label=HOSTILE, opened_as=HOSTILE)):
+        body = bytes(page.body).decode()
+        assert "<script>" not in body and "<img" not in body and 'value=""' not in body
+        assert "&lt;script&gt;" in body
+
+
+def test_the_page_that_sends_the_browser_on_escapes_the_address_it_was_given() -> None:
+    page = leaving_page('https://as.example/authorize?state=s&x="><script>alert(1)</script>')
+    body = bytes(page.body).decode()
+
+    assert '<meta http-equiv="refresh" content="0; url=https://as.example/authorize?state=s&amp;x=&quot;&gt;' in body
+    assert "<script>" not in body and "Continue to as.example" in body
+    assert "form-action" not in page.headers["content-security-policy"]
