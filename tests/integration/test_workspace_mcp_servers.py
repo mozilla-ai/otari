@@ -70,7 +70,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
-from .conftest import ALL_KEY_SCOPES
+from .conftest import ALL_KEY_SCOPES_HELD
 
 pytestmark = pytest.mark.asyncio
 
@@ -1481,7 +1481,7 @@ async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None
         workspace_id=workspace_id,
         key_hash=uuid.uuid4().hex,
         user_id=user_id,
-        scopes=ALL_KEY_SCOPES,
+        scopes=ALL_KEY_SCOPES_HELD,
     )
     db.add(key)
     await db.flush()

@@ -213,7 +213,8 @@ key may hold the `end-users` scopes.
 
 A request whose key lacks the scope an endpoint needs is refused with `403`,
 and the message names the scope, except on the MCP routes, which answer every
-refusal with the same fixed `forbidden` error. The response also carries
+refusal with the same fixed `forbidden` error and no challenge. Every other
+refusal for a missing scope carries
 `WWW-Authenticate: Bearer error="insufficient_scope", scope="<scope>"`
 ([RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750#section-3.1)), so a
 client reads the scope it lacks without parsing the message. A model call that declares a web,

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gateway.core.oauth_apps import parse_oauth_redirect
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
-from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, checked_scopes
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 
 class OAuthAppConfig(BaseModel):
@@ -35,7 +35,7 @@ class OAuthAppConfig(BaseModel):
     @field_validator("scopes")
     @classmethod
     def validate_scopes(cls, values: list[KeyScope]) -> list[KeyScope]:
-        return [KeyScope(scope) for scope in checked_scopes(values, is_service_key=False)]
+        return list(KeyScopeSet.checked(values, is_service_key=False))
 
 
 class IdentitySettings(BaseModel):

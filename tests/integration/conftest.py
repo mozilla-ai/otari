@@ -48,11 +48,13 @@ from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
-from gateway.types.key_scope import END_USER_SCOPES, KeyScope
+from gateway.types.key_scope import END_USER_SCOPES, KeyScope, KeyScopeSet
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 # Every scope a key that is not a service key may hold, for a test of something other than scopes.
-ALL_KEY_SCOPES = [scope.value for scope in KeyScope if scope not in END_USER_SCOPES]
+ALL_KEY_SCOPES_HELD = KeyScopeSet.checked((s for s in KeyScope if s not in END_USER_SCOPES), is_service_key=False)
+# The same scopes as a request body names them.
+ALL_KEY_SCOPES = ALL_KEY_SCOPES_HELD.stored
 # Every scope, which only a service key may hold.
 ALL_SERVICE_KEY_SCOPES = [scope.value for scope in KeyScope]
 

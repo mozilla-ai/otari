@@ -15,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, create_engine, text
 
-from gateway.types.key_scope import unscoped_key_scopes
+from gateway.types.key_scope import KeyScopeSet
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "c3f8a1d6e2b9"
@@ -71,8 +71,8 @@ def test_each_existing_key_keeps_what_it_could_reach(before: tuple[Config, Engin
 
     command.upgrade(config, _REVISION)
 
-    assert _scopes(engine, plain) == unscoped_key_scopes(is_service_key=False)
-    assert _scopes(engine, service) == unscoped_key_scopes(is_service_key=True)
+    assert _scopes(engine, plain) == KeyScopeSet.unscoped(is_service_key=False).stored
+    assert _scopes(engine, service) == KeyScopeSet.unscoped(is_service_key=True).stored
 
 
 def test_a_key_inserted_without_scopes_reaches_nothing(before: tuple[Config, Engine]) -> None:
@@ -90,4 +90,4 @@ def test_the_revision_downgrades_and_upgrades_again(before: tuple[Config, Engine
     command.downgrade(config, _BEFORE)
     command.upgrade(config, _REVISION)
 
-    assert _scopes(engine, plain) == unscoped_key_scopes(is_service_key=False)
+    assert _scopes(engine, plain) == KeyScopeSet.unscoped(is_service_key=False).stored

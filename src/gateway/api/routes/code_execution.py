@@ -224,10 +224,10 @@ async def execute_code(
         inputs=[],
     )
     if request.file_ids:
-        if api_key is not None and not api_key.holds_scope(KeyScope.FILES_READ):
+        if api_key is not None and KeyScope.FILES_READ not in api_key.scopes:
             # The run can print a staged file, so staging one reads it.
-            missing = KeyScopeMissingError(KeyScope.FILES_READ.value, "staging stored files")
-            raise await refuse(missing.message, status.HTTP_403_FORBIDDEN)
+            missing = KeyScopeMissingError(KeyScope.FILES_READ, "staging stored files")
+            raise await refuse(missing.message, status.HTTP_403_FORBIDDEN, missing.challenge)
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)
         # The master key acts deployment-wide, so it reaches an upload in any workspace.
@@ -253,7 +253,8 @@ async def execute_code(
         )
         admitted = await declared.admit(claimed=False, beside_sandbox=False, environment=request.environment)
     except TenancyError as exc:
-        raise await refuse(exc.message, exc.status_code) from exc
+        challenge = exc.challenge if isinstance(exc, KeyScopeMissingError) else None
+        raise await refuse(exc.message, exc.status_code, challenge) from exc
 
     claimed = admitted.container_lease
     containers = admitted.containers

@@ -11,7 +11,7 @@ from gateway.models.api_keys import APIKey
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.key_scope import unscoped_key_scopes
+from gateway.types.key_scope import KeyScopeSet
 
 
 async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_format: ApiKeyFormatPort) -> None:
@@ -50,7 +50,7 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_f
         key_name="bootstrap",
         user_id=user.user_id,
         # The key a new deployment is tried out with, so it reaches what any key could before scopes existed.
-        scopes=unscoped_key_scopes(is_service_key=False),
+        scopes=KeyScopeSet.unscoped(is_service_key=False),
         metadata_={"bootstrap": True},
     )
     db.add(db_key)

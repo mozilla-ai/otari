@@ -46,7 +46,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.organizations import AccessLists
 from gateway.services.workspace_scope import organization_default_workspace_id
-from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, checked_scopes, known_scopes, updated_scopes
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 router = APIRouter(
     prefix="/keys",
@@ -281,7 +281,7 @@ class KeyInfo(BaseModel):
             operator_can_enable=operator_enable_refusal(key) is None,
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
-            scopes=known_scopes(key.scopes),
+            scopes=list(key.scopes),
             exclude_from_budget=bool(key.exclude_from_budget),
             reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
             capture_agent_telemetry=(
@@ -357,7 +357,7 @@ async def create_key(
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
-        scopes = checked_scopes(request.scopes, is_service_key=request.is_service_key)
+        scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
@@ -565,8 +565,7 @@ async def update_key(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     try:
-        scopes = updated_scopes(
-            key.scopes,
+        scopes = key.scopes.updated(
             request.scopes,
             was_service_key=key.is_service_key,
             is_service_key=key.is_service_key if request.is_service_key is None else request.is_service_key,

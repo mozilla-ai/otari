@@ -1169,7 +1169,7 @@ def viewer_reads_usage(caller: tuple[APIKey | None, bool] | None) -> bool:
     if caller is None:
         return False
     api_key, _ = caller
-    return api_key is None or api_key.holds_scope(KeyScope.USAGE_READ)
+    return api_key is None or KeyScope.USAGE_READ in api_key.scopes
 
 
 @dataclass(frozen=True)

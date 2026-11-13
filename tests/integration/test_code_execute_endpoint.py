@@ -252,6 +252,7 @@ def test_staging_an_upload_needs_files_read(
 
     assert resp.status_code == 403, resp.text
     assert "'files:read'" in resp.json()["detail"]
+    assert resp.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
     assert port.opened == []
 
 

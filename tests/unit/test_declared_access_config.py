@@ -203,14 +203,14 @@ def test_a_key_naming_no_scopes_holds_what_keys_held_before_scopes() -> None:
     service = ApiKeyConfig(secret=SecretStr(SECRET), is_service_key=True)
 
     assert "end-users:read" not in plain.held_scopes()
-    assert plain.held_scopes() == [scope for scope in service.held_scopes() if not scope.startswith("end-users:")]
+    assert plain.held_scopes().stored == [s for s in service.held_scopes().stored if not s.startswith("end-users:")]
     assert {"end-users:read", "end-users:write", "end-users:delete"} <= set(service.held_scopes())
 
 
 def test_a_key_holds_the_scopes_it_names() -> None:
     key = ApiKeyConfig.model_validate({"secret": SECRET, "scopes": ["usage:read", "inference:run", "inference:run"]})
 
-    assert key.held_scopes() == ["inference:run", "usage:read"]
+    assert key.held_scopes().stored == ["inference:run", "usage:read"]
 
 
 @pytest.mark.parametrize(

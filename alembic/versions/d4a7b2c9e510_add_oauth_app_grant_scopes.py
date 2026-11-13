@@ -33,9 +33,9 @@ def upgrade() -> None:
     op.execute(sa.text(f"DELETE FROM {_TABLE}"))
     # The column takes no default, so an insert that omits the scopes fails
     # rather than storing a grant that redeems to a key reaching nothing.
-    # NOTE: recreate="always" because SQLite cannot add a NOT NULL column with
-    # no default by ALTER, and batch mode does not rebuild for an add alone.
-    with op.batch_alter_table(_TABLE, recreate="always") as batch_op:
+    # NOTE: SQLite accepts a NOT NULL column with no default only on an empty
+    # table, which the delete above guarantees.
+    with op.batch_alter_table(_TABLE) as batch_op:
         batch_op.add_column(sa.Column("scopes", sa.JSON(), nullable=False))
 
 

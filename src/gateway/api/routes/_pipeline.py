@@ -695,11 +695,14 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         logger.error("Request failed: %s", exc.message)
         return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
+    headers = error_headers(exc.error_code) if exc.error_code is not None else {}
+    if isinstance(exc, KeyScopeMissingError):
+        headers = {**headers, **exc.challenge}
     return adapter.error(
         exc.status_code,
         exc.message,
         _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST),
-        headers=error_headers(exc.error_code) if exc.error_code is not None else None,
+        headers=headers or None,
     )
 
 
@@ -3941,9 +3944,9 @@ def _require_declared_tool_scopes(
 
 def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
     """Why the request's key may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
-    if ctx.api_key is None or ctx.api_key.holds_scope(scope):
+    if ctx.api_key is None or scope in ctx.api_key.scopes:
         return None
-    return KeyScopeMissingError(scope.value, what)
+    return KeyScopeMissingError(scope, what)
 
 
 async def _admit_tool_funding(
@@ -4306,7 +4309,7 @@ def _may_read_files(api_key: APIKey | None) -> bool:
     The same scope as reading it from ``/api/v1/files``, since a model given the file
     can repeat it. A request no key made (the master key, a Playground session) may.
     """
-    return api_key is None or api_key.holds_scope(KeyScope.FILES_READ)
+    return api_key is None or KeyScope.FILES_READ in api_key.scopes
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:

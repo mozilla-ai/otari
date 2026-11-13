@@ -23,7 +23,7 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.budgets import BudgetScopeRequest
 from gateway.services.budgets._scoped_enforcement import get_scope_ceilings
 
-from .conftest import ALL_KEY_SCOPES
+from .conftest import ALL_KEY_SCOPES, ALL_KEY_SCOPES_HELD
 from .tenancy_helpers import budget_service, create_budget, create_member, create_organization, create_workspace
 
 
@@ -317,7 +317,7 @@ async def test_a_members_key_lists_the_ceilings_the_gate_checks(async_db: AsyncS
         key_hash="hash-volunteer",
         workspace_id=workspace.id,
         user_id=str(volunteer.id),
-        scopes=ALL_KEY_SCOPES,
+        scopes=ALL_KEY_SCOPES_HELD,
     )
     async_db.add(key)
     for scope_type, scope_id in (

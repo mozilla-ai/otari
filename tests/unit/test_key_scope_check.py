@@ -8,7 +8,7 @@ from starlette.requests import Request
 from gateway.api.deps import _require_route_scope
 from gateway.api.key_scopes import key_scope
 from gateway.models.api_keys import APIKey
-from gateway.types.key_scope import KeyScope
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 
 async def _endpoint() -> None:
@@ -24,7 +24,7 @@ def _route(**openapi_extra: object) -> APIRoute:
 
 
 def _key(*scopes: KeyScope) -> APIKey:
-    return APIKey(id="key-1", scopes=[scope.value for scope in scopes])
+    return APIKey(id="key-1", scopes=KeyScopeSet.read(scope.value for scope in scopes))
 
 
 def test_a_key_holding_the_scope_passes() -> None:
