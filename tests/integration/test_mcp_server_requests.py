@@ -53,7 +53,12 @@ from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerService
-from gateway.services.tools import McpGrantMembershipListener, McpServerRequestService, WorkspaceMcpServerUrls
+from gateway.services.tools import (
+    McpGrantMembershipListener,
+    McpServerRequestService,
+    WorkspaceMcpServerUrls,
+    _mcp_server_requests,
+)
 from gateway.services.tools._mcp_server_requests import (
     MAX_PENDING_REQUESTS_PER_MEMBER,
     MAX_REQUEST_MAIL_RECIPIENTS,
@@ -423,6 +428,85 @@ async def test_both_lists_page_and_a_managers_page_keeps_each_servers_requests_t
     newest = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, limit=1)
     older = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, skip=1, limit=1)
     assert [entry.catalog_name for entry in newest.data + older.data] == [LINEAR[0], SENTRY[0]]
+
+
+async def _waiting(db: AsyncSession, team: _Team, entry: tuple[str, str, str], people: int) -> None:
+    """``people`` members of their own asking for one catalog server, written directly: each asks once."""
+    start = datetime.now(UTC)
+    for n in range(people):
+        person = await UserRepository(db).create_local_identity(
+            full_name=f"Asker {n}", active_organization_id=team.organization.id
+        )
+        db.add(
+            McpServerRequest(
+                workspace_id=team.workspace.id,
+                catalog_name=entry[0],
+                title=entry[1],
+                url=entry[2],
+                requester_id=person.id,
+                note=f"note {n}",
+                created_at=start + timedelta(microseconds=n),
+            )
+        )
+    await db.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored", [f"{SENTRY[2]}\n", f"\t{SENTRY[2]}/", f" {SENTRY[2]}/\r\n"])
+async def test_a_stored_url_with_whitespace_around_it_still_counts_as_stored(
+    async_db: AsyncSession, stored: str
+) -> None:
+    team = await _team(async_db)
+    async_db.add(WorkspaceMcpServer(workspace_id=team.workspace.id, name="sentry", url=stored))
+    await async_db.commit()
+
+    async with UnitOfWork(async_db) as uow:
+        assert await WorkspaceMcpServerRepository(uow).has_url(team.workspace.id, SENTRY[2])
+
+
+@pytest.mark.asyncio
+async def test_one_busy_server_cannot_crowd_another_out_of_the_page_and_says_how_many_asked(
+    async_db: AsyncSession,
+) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    await _waiting(async_db, team, SENTRY, _mcp_server_requests.MAX_REQUESTERS_LISTED + 3)
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask(LINEAR[0]))
+
+    listed = await world.requests.pending(user=team.owner, workspace_id=team.workspace.id)
+
+    cap = _mcp_server_requests.MAX_REQUESTERS_LISTED
+    assert [(group.catalog_name, len(group.requesters), group.requester_count) for group in listed.data] == [
+        (SENTRY[0], cap, cap + 3),
+        (LINEAR[0], 1, 1),
+    ]
+    assert listed.count == cap + 4
+
+
+@pytest.mark.asyncio
+async def test_every_requester_of_a_server_past_any_cap_can_be_read_a_page_at_a_time(
+    async_db: AsyncSession,
+) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    await _waiting(async_db, team, SENTRY, 501)
+
+    seen: list[str | None] = []
+    skip = 0
+    while True:
+        page = await world.requests.requesters(
+            user=team.owner, workspace_id=team.workspace.id, catalog_name=SENTRY[0], skip=skip
+        )
+        assert len(page.data) <= _mcp_server_requests.MAX_REQUESTERS_PAGE
+        assert page.count == 501
+        if not page.data:
+            break
+        seen.extend(requester.note for requester in page.data)
+        skip += len(page.data)
+
+    assert seen == [f"note {n}" for n in range(501)]
+    with pytest.raises(NotAuthorizedError):
+        await world.requests.requesters(user=team.ada, workspace_id=team.workspace.id, catalog_name=SENTRY[0])
 
 
 @pytest.mark.asyncio

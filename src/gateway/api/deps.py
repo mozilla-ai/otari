@@ -1817,7 +1817,11 @@ def get_mcp_connection_service(
         McpOAuthFlowRepository(uow),
         config,
         eligibility=WorkspaceMcpConnectionEligibility(
-            uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            uow,
+            WorkspaceRepository(uow),
+            WorkspaceMemberRepository(uow),
+            OrganizationMemberRepository(uow),
+            UserRepository(uow),
         ),
         users=get_user_access(uow),
     )

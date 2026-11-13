@@ -614,6 +614,7 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo         # 
 GET /api/v1/workspaces/{workspace_id}/mcp-server-requests                     # dashboard surface: members ask admins for a catalog server
 POST /api/v1/workspaces/{workspace_id}/mcp-server-requests                    # dashboard surface: members ask admins for a catalog server
 GET /api/v1/workspaces/{workspace_id}/mcp-server-requests/mine                # dashboard surface: members ask admins for a catalog server
+GET /api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters          # dashboard surface: members ask admins for a catalog server
 POST /api/v1/workspaces/{workspace_id}/mcp-server-requests/decline            # dashboard surface: members ask admins for a catalog server
 DELETE /api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}     # dashboard surface: members ask admins for a catalog server
 POST /api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}/acknowledge # dashboard surface: members ask admins for a catalog server

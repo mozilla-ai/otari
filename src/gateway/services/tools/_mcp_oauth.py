@@ -21,6 +21,7 @@ import math
 import re
 import secrets
 import zlib
+from contextvars import ContextVar
 from dataclasses import dataclass
 from email.utils import unquote
 from typing import Any
@@ -38,6 +39,10 @@ _TOKEN_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 _MAX_RESPONSE_BYTES = 1024 * 1024
 # What one request may take in all, sending and reading: the timeouts above bound each read, not the whole answer.
 _REQUEST_DEADLINE_SECONDS = 20.0
+# What discovery or registration may take in all, over every request it makes.
+_OPERATION_DEADLINE_SECONDS = 30.0
+# When the operation running in this context must end, on the loop's clock; each request's deadline stops there.
+_operation_ends: ContextVar[float | None] = ContextVar("mcp_oauth_operation_ends", default=None)
 _CLIENT_NAME = "Otari"
 # Above any real lifetime and any real epoch second this century, below what a datetime overflows on.
 _MAX_SECONDS = 2**32
@@ -190,8 +195,12 @@ async def _send(
     body = bytearray()
     client = _http_client(timeout)
     response: httpx.Response | None = None
+    allowed = _REQUEST_DEADLINE_SECONDS if deadline is None else deadline
+    ends = _operation_ends.get()
+    if ends is not None:
+        allowed = min(allowed, max(0.0, ends - asyncio.get_running_loop().time()))
     try:
-        async with asyncio.timeout(_REQUEST_DEADLINE_SECONDS if deadline is None else deadline):
+        async with asyncio.timeout(allowed):
             # Inside the deadline: the check resolves the host, and a renewal holds a row lock meanwhile.
             await _checked(url, label)
             # Identity, so the raw stream is the body: httpx's decoded iterator closes the response
@@ -390,11 +399,14 @@ async def discover(server_url: str) -> McpOAuthMetadata:
     Raises:
         McpOAuthDiscoveryError: nothing usable was found, or a URL in it failed its safety check.
     """
+    token = _operation_ends.set(asyncio.get_running_loop().time() + _OPERATION_DEADLINE_SECONDS)
     try:
         return await _discover(server_url)
     except ValueError:
         # A URL in the server's metadata that no parser accepts, such as a broken IPv6 host.
         raise McpOAuthDiscoveryError("The server's OAuth metadata holds a URL that is not valid") from None
+    finally:
+        _operation_ends.reset(token)
 
 
 async def _discover(server_url: str) -> McpOAuthMetadata:
@@ -510,11 +522,21 @@ async def register_client(registration_endpoint: str, redirect_uri: str) -> McpO
     """Register the gateway as a client of an authorization server.
 
     A confidential client is asked for first. Some servers register only public PKCE clients and
-    answer 400 to a request for a secret, so that is tried once more as a public client.
+    answer 400 to a request for a secret, so that is tried once more as a public client. Both tries
+    share ``_OPERATION_DEADLINE_SECONDS``, as every request of a discovery does.
 
     Raises:
         McpOAuthRegistrationError: the server refused, which no retry and no user can change.
     """
+    token = _operation_ends.set(asyncio.get_running_loop().time() + _OPERATION_DEADLINE_SECONDS)
+    try:
+        return await _register(registration_endpoint, redirect_uri)
+    finally:
+        _operation_ends.reset(token)
+
+
+async def _register(registration_endpoint: str, redirect_uri: str) -> McpOAuthClient:
+    """:func:`register_client`, inside its total deadline."""
     response, payload = None, None
     for auth_method in (AUTH_METHOD_POST, AUTH_METHOD_NONE):
         response, payload = await _send(

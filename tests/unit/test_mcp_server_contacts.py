@@ -19,7 +19,12 @@ from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
 from gateway.services.model_access import mcp_read_tools
 from gateway.services.tools import McpServerContact, McpServerContacts
-from gateway.services.tools._mcp_server_health import CONTACT_WRITE_INTERVAL_S, health_after_contact, server_health
+from gateway.services.tools._mcp_server_health import (
+    _MAX_PENDING_WRITES,
+    CONTACT_WRITE_INTERVAL_S,
+    health_after_contact,
+    server_health,
+)
 
 SERVER = uuid.uuid4()
 URL = "https://93.184.216.34/mcp"
@@ -135,11 +140,18 @@ def test_a_listing_is_read_against_the_allow_list() -> None:
 class _Recorder(McpServerContacts):
     """Keeps what would be written, so the throttle is read without a database."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, per_user: bool = False, gate: asyncio.Event | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.written: list[McpServerContact] = []
+        self.per_user = per_user
+        self.gate = gate
 
-    async def _write(self, contact: McpServerContact) -> None:
+    async def _write(self, contact: McpServerContact, handed: Any = None, before: Any = None) -> None:
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.per_user and contact.failure in (CheckFailure.UNAUTHORIZED, CheckFailure.FORBIDDEN):
+            self._discarded(contact.server_id, handed, before)
+            return
         self.written.append(contact)
 
 
@@ -165,6 +177,66 @@ async def test_one_server_is_handed_to_a_write_once_per_interval_unless_its_stat
     assert len(recorder.written) == 3
 
 
+def _refused(status: int) -> httpx2.HTTPStatusError:
+    request = httpx2.Request("POST", URL)
+    return httpx2.HTTPStatusError("refused", request=request, response=httpx2.Response(status, request=request))
+
+
+@pytest.mark.asyncio
+async def test_a_listing_after_a_call_that_listed_nothing_is_written() -> None:
+    """A tool call records success with no catalog; the listing after it still stores the tools."""
+    recorder = _Recorder(interval_s=900, clock=lambda: 0.0)
+
+    recorder.reached(SERVER, URL)
+    recorder.reached(SERVER, URL, LISTING)
+    recorder.reached(SERVER, URL, LISTING)
+    await recorder.drain()
+
+    assert [contact.listing for contact in recorder.written] == [None, LISTING]
+
+
+@pytest.mark.asyncio
+async def test_one_user_s_refusal_on_a_per_user_server_does_not_hold_back_a_real_failure() -> None:
+    recorder = _Recorder(per_user=True, interval_s=900, clock=lambda: 0.0)
+
+    recorder.reached(SERVER, URL)
+    await recorder.drain()
+    recorder.failed(SERVER, URL, _refused(401))
+    await recorder.drain()
+    recorder.failed(SERVER, URL, _refused(401))
+    recorder.failed(SERVER, URL, httpx2.ConnectError("refused"))
+    await recorder.drain()
+
+    assert [contact.failure for contact in recorder.written] == [None, CheckFailure.UNREACHABLE]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_account_s_refusal_keeps_the_same_status_throttle() -> None:
+    recorder = _Recorder(interval_s=900, clock=lambda: 0.0)
+
+    recorder.failed(SERVER, URL, _refused(401))
+    recorder.failed(SERVER, URL, httpx2.ConnectError("refused"))
+    await recorder.drain()
+
+    assert [contact.failure for contact in recorder.written] == [CheckFailure.UNAUTHORIZED]
+
+
+@pytest.mark.asyncio
+async def test_writes_in_flight_are_capped_and_a_contact_past_the_cap_is_skipped() -> None:
+    gate = asyncio.Event()
+    recorder = _Recorder(gate=gate)
+
+    for _ in range(_MAX_PENDING_WRITES + 5):
+        recorder.reached(uuid.uuid4(), URL)
+    assert len(recorder._tasks) == _MAX_PENDING_WRITES
+    gate.set()
+    await recorder.drain()
+    recorder.reached(uuid.uuid4(), URL)
+    await recorder.drain()
+
+    assert len(recorder.written) == _MAX_PENDING_WRITES + 1
+
+
 @pytest.mark.asyncio
 async def test_a_missing_sign_in_and_an_inline_server_record_nothing() -> None:
     recorder = _Recorder()
@@ -180,7 +252,7 @@ async def test_a_missing_sign_in_and_an_inline_server_record_nothing() -> None:
 @pytest.mark.asyncio
 async def test_a_write_that_fails_never_reaches_the_request() -> None:
     class Broken(McpServerContacts):
-        async def _write(self, contact: McpServerContact) -> None:
+        async def _write(self, contact: McpServerContact, handed: Any = None, before: Any = None) -> None:
             raise RuntimeError("no database")
 
     recorder = Broken()

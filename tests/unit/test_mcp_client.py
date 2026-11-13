@@ -899,9 +899,14 @@ async def test_a_slow_named_server_spends_none_of_the_attached_budget(monkeypatc
     monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_BUDGET_S", 0.1)
     connected: list[str] = []
 
-    async def fake_connect(self: MCPClientPool, cfg: McpServerConfig, *_: object) -> _ConnectedServer:
+    async def fake_connect(
+        self: MCPClientPool, cfg: McpServerConfig, expires_at: float | None = None
+    ) -> _ConnectedServer:
         if not cfg.attached:
             await asyncio.sleep(0.2)
+        else:
+            # The budget is enforced as the pool enforces it: an attached server past it never connects.
+            assert expires_at is not None and expires_at > asyncio.get_running_loop().time(), "budget already spent"
         connected.append(cfg.name)
         return _ConnectedServer(name=cfg.name, session=object())  # type: ignore[arg-type]
 

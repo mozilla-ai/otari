@@ -42,6 +42,8 @@ CONTACT_WRITE_INTERVAL_S = 15 * 60
 
 # Past this many servers the throttle forgets what it saw, which costs one extra write each.
 _MAX_REMEMBERED_SERVERS = 10_000
+# Writes in flight at once. A contact past this bound is not recorded; a later contact is.
+_MAX_PENDING_WRITES = 64
 
 
 class WorkspaceMcpServerHealth(BaseModel):
@@ -223,8 +225,10 @@ class McpServerContacts:
         self._unit_of_work = unit_of_work
         self._interval_s = interval_s
         self._clock = clock
-        # When each server was last handed to a write, and with which status.
-        self._seen: dict[uuid.UUID, tuple[float, bool]] = {}
+        # When each server was last handed to a write, with which status, and whether it carried a listing.
+        self._seen: dict[uuid.UUID, tuple[float, bool, bool]] = {}
+        # Per-user servers a write found, and when: one user's 401 or 403 there is never stored.
+        self._per_user: dict[uuid.UUID, float] = {}
         # Held so a running write is not collected before it finishes.
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -259,9 +263,17 @@ class McpServerContacts:
 
     def _record(self, contact: McpServerContact) -> None:
         ok = contact.failure is None
+        listed = contact.listing is not None
         now = self._clock()
+        if contact.failure in _ONE_USERS_REFUSAL:
+            learned = self._per_user.get(contact.server_id)
+            if learned is not None and now - learned < self._interval_s:
+                return
         last = self._seen.get(contact.server_id)
-        if last is not None and last[1] == ok and now - last[0] < self._interval_s:
+        # A listing after a contact that listed nothing is let through once, so the catalog is stored.
+        if last is not None and last[1] == ok and (last[2] or not listed) and now - last[0] < self._interval_s:
+            return
+        if len(self._tasks) >= _MAX_PENDING_WRITES:
             return
         try:
             loop = asyncio.get_running_loop()
@@ -269,8 +281,10 @@ class McpServerContacts:
             return
         if len(self._seen) >= _MAX_REMEMBERED_SERVERS:
             self._seen.clear()
-        self._seen[contact.server_id] = (now, ok)
-        task = loop.create_task(self._write(contact), name="mcp-server-contact")
+            self._per_user.clear()
+        handed = (now, ok, listed)
+        self._seen[contact.server_id] = handed
+        task = loop.create_task(self._write(contact, handed, last), name="mcp-server-contact")
         self._tasks.add(task)
         task.add_done_callback(self._finished)
 
@@ -279,17 +293,26 @@ class McpServerContacts:
         if not task.cancelled() and (failure := task.exception()) is not None:
             logger.warning("MCP server contact not recorded error_class=%s", type(failure).__name__)
 
-    async def _write(self, contact: McpServerContact) -> None:
+    async def _write(
+        self,
+        contact: McpServerContact,
+        handed: tuple[float, bool, bool] | None = None,
+        before: tuple[float, bool, bool] | None = None,
+    ) -> None:
         try:
             async with self._unit_of_work() as uow, uow:
                 server = await WorkspaceMcpServerRepository(uow).find(contact.server_id, lock=True)
                 # A request that resolved the server before its URL was edited describes the old one.
                 if server is None or server.url != contact.url:
                     return
+                per_user = server.credential_mode == McpCredentialMode.PER_USER
+                if per_user and contact.failure in _ONE_USERS_REFUSAL:
+                    self._discarded(contact.server_id, handed, before)
+                    return
                 health = health_after_contact(
                     server.health,
                     allowed_tools=server.allowed_tools,
-                    per_user=server.credential_mode == McpCredentialMode.PER_USER,
+                    per_user=per_user,
                     contact=contact,
                     interval_s=self._interval_s,
                 )
@@ -303,6 +326,21 @@ class McpServerContacts:
             )
             return
         logger.info("MCP server contact recorded server_id=%s outcome=%s", contact.server_id, contact.failure or "ok")
+
+    def _discarded(
+        self,
+        server_id: uuid.UUID,
+        handed: tuple[float, bool, bool] | None,
+        before: tuple[float, bool, bool] | None,
+    ) -> None:
+        """Take back the throttle entry of a contact that was not stored, so a real failure after it is."""
+        self._per_user[server_id] = self._clock()
+        if handed is None or self._seen.get(server_id) != handed:
+            return
+        if before is None:
+            del self._seen[server_id]
+        else:
+            self._seen[server_id] = before
 
     async def drain(self) -> None:
         """Wait for the writes in flight, for a shutdown or a test that reads what they stored."""

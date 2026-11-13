@@ -214,7 +214,7 @@ async def test_an_attached_server_gives_way_to_a_request_server_of_the_same_name
 
 @pytest.mark.asyncio
 async def test_an_attached_sign_in_gives_way_to_a_request_server_of_the_same_name() -> None:
-    """No sign-in tool is offered for a name the request's own server already answers to; a named one stays."""
+    """No sign-in tool is offered for a name the request's own server already answers to; a named one collides."""
 
     def need(name: str, *, attached: bool) -> McpSignInNeeded:
         return McpSignInNeeded(
@@ -235,10 +235,7 @@ async def test_an_attached_sign_in_gives_way_to_a_request_server_of_the_same_nam
             )
 
     admitted = await admit_mcp_servers(
-        [
-            McpServerConfig(name="mine", url="https://93.184.216.35/mcp"),
-            McpServerConfig(name="named", url="https://93.184.216.36/mcp"),
-        ],
+        [McpServerConfig(name="mine", url="https://93.184.216.35/mcp")],
         [uuid.uuid4()],
         servers=cast(WorkspaceMcpServers, _SignIns()),
         workspace_id=uuid.uuid4(),
@@ -247,6 +244,16 @@ async def test_an_attached_sign_in_gives_way_to_a_request_server_of_the_same_nam
     )
 
     assert [entry.name for entry in admitted.sign_in] == ["drive", "named"]
+    # A server the request named, waiting on a sign-in, collides with a request server as a connected one does.
+    with pytest.raises(McpServerDeclarationError):
+        await admit_mcp_servers(
+            [McpServerConfig(name="named", url="https://93.184.216.36/mcp")],
+            [uuid.uuid4()],
+            servers=cast(WorkspaceMcpServers, _SignIns()),
+            workspace_id=uuid.uuid4(),
+            access=McpAccess(),
+            attach=True,
+        )
 
 
 @pytest.mark.asyncio

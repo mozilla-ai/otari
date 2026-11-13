@@ -562,9 +562,14 @@ async def closed_with(stack: AsyncExitStack, failure: BaseException) -> BaseExce
 
 
 def refused_token(failure: BaseException) -> bool:
-    """Whether a failed session was the server answering 401, the one failure a new token can mend."""
+    """Whether a failed session was the server answering 401, the one failure a new token can mend.
+
+    With answers screened, as a check screens them, the 401 arrives already named.
+    """
     return any(
-        isinstance(leaf, httpx2.HTTPStatusError) and leaf.response.status_code == 401 for leaf in _leaves(failure)
+        (isinstance(leaf, httpx2.HTTPStatusError) and leaf.response.status_code == 401)
+        or (isinstance(leaf, _UnusableAnswer) and leaf.http_status == 401)
+        for leaf in _leaves(failure)
     )
 
 

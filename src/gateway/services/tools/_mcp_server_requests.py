@@ -9,7 +9,7 @@ acknowledge it.
 """
 
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar, Protocol
 
@@ -37,6 +37,7 @@ from gateway.schemas.tools import (
     McpServerRequestCreate,
     McpServerRequestDecline,
     McpServerRequesterPublic,
+    McpServerRequestersPublic,
     McpServerRequestGroupPublic,
     McpServerRequestGroupsPublic,
     McpServerRequestPublic,
@@ -52,10 +53,12 @@ MAX_PENDING_REQUESTS_PER_MEMBER = 10
 MAX_REQUESTS_PER_MEMBER_PER_DAY = 10
 # The managers one request is mailed to, the workspace's own first.
 MAX_REQUEST_MAIL_RECIPIENTS = 20
-# The most requests one page of a manager's list reads. Past it the count still says how many wait.
-MAX_PENDING_LISTED = 500
-# The most catalog servers one page of a manager's list groups, and the most of a member's own requests.
-MAX_PENDING_SERVERS_PAGE = 500
+# The most catalog servers one page of a manager's list groups, and the requesters it lists for each:
+# a page reads at most their product. Past them, a server's requesters list pages through the rest.
+MAX_PENDING_SERVERS_PAGE = 100
+MAX_REQUESTERS_LISTED = 5
+MAX_REQUESTERS_PAGE = 100
+# The most of a member's own requests one page holds.
 MAX_OWN_PAGE = 100
 
 SERVERS_PAGE = "/#/tools/mcp-servers"
@@ -156,11 +159,24 @@ def render_decision_mail(
     )
 
 
+def _requester(row: McpServerRequest, people: Mapping[uuid.UUID, User]) -> McpServerRequesterPublic:
+    person = people.get(row.requester_id)
+    return McpServerRequesterPublic(
+        request_id=row.id,
+        user_id=row.requester_id,
+        full_name=person.full_name if person is not None else None,
+        email=person.email if person is not None else None,
+        note=row.note,
+        requested_at=row.created_at,
+    )
+
+
 class McpServerRequestService:
     """Takes members' requests for catalog servers, lists them, and records the managers' answers."""
 
     # The hard maximum of each list's page, for the routes to declare.
     MAX_PENDING_SERVERS_PAGE: ClassVar[int] = MAX_PENDING_SERVERS_PAGE
+    MAX_REQUESTERS_PAGE: ClassVar[int] = MAX_REQUESTERS_PAGE
     MAX_OWN_PAGE: ClassVar[int] = MAX_OWN_PAGE
 
     def __init__(
@@ -292,7 +308,8 @@ class McpServerRequestService:
         """A workspace's pending requests, grouped by the server asked for. Workspace managers only.
 
         A page holds ``limit`` servers after the first ``skip``, the one waited for longest first, and
-        each server's requests whole up to ``MAX_PENDING_LISTED`` in the page.
+        the first ``MAX_REQUESTERS_LISTED`` requests of each. Each server's ``requester_count`` says
+        how many wait for it, and :meth:`requesters` pages through the rest.
         """
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
@@ -300,12 +317,13 @@ class McpServerRequestService:
         async with self._uow:
             names = await self._requests.pending_servers(workspace.id, skip=skip, limit=limit)
             rows = await self._requests.pending_in_workspace(
-                workspace.id, catalog_names=names, limit=MAX_PENDING_LISTED
+                workspace.id, catalog_names=names, per_server=MAX_REQUESTERS_LISTED
             )
-            count = len(rows)
-            if skip > 0 or len(names) == limit or count == MAX_PENDING_LISTED:
+            waiting = await self._requests.count_pending_by_server(workspace.id, names)
+            count = sum(waiting.values())
+            if skip > 0 or len(names) == limit:
                 count = await self._requests.count_pending_in_workspace(workspace.id)
-        people = {person.id: person for person in await self._workspaces.people({row.requester_id for row in rows})}
+        people = await self._people(rows)
         entries = await self._catalog.servers_by_names(list({row.catalog_name for row in rows}))
         groups: dict[str, McpServerRequestGroupPublic] = {}
         for row in rows:
@@ -317,20 +335,33 @@ class McpServerRequestService:
                     url=row.url,
                     catalog_server=entries.get(row.catalog_name),
                     requesters=[],
+                    requester_count=waiting.get(row.catalog_name, 0),
                     first_requested_at=row.created_at,
                 )
-            person = people.get(row.requester_id)
-            group.requesters.append(
-                McpServerRequesterPublic(
-                    request_id=row.id,
-                    user_id=row.requester_id,
-                    full_name=person.full_name if person is not None else None,
-                    email=person.email if person is not None else None,
-                    note=row.note,
-                    requested_at=row.created_at,
-                )
-            )
+            group.requesters.append(_requester(row, people))
         return McpServerRequestGroupsPublic(data=list(groups.values()), count=count)
+
+    async def requesters(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        catalog_name: str,
+        skip: int = 0,
+        limit: int = MAX_REQUESTERS_PAGE,
+    ) -> McpServerRequestersPublic:
+        """A page of the members waiting for one catalog server, oldest first. Workspace managers only."""
+        workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
+        await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
+        limit = min(limit, MAX_REQUESTERS_PAGE)
+        async with self._uow:
+            rows = await self._requests.pending_for_name(workspace.id, catalog_name, skip=skip, limit=limit)
+            count = (await self._requests.count_pending_by_server(workspace.id, [catalog_name])).get(catalog_name, 0)
+        people = await self._people(rows)
+        return McpServerRequestersPublic(data=[_requester(row, people) for row in rows], count=count)
+
+    async def _people(self, rows: Sequence[McpServerRequest]) -> dict[uuid.UUID, User]:
+        return {person.id: person for person in await self._workspaces.people({row.requester_id for row in rows})}
 
     async def decline(
         self, *, user: User, workspace_id: uuid.UUID, request: McpServerRequestDecline
