@@ -200,7 +200,11 @@ A workspace's MCP servers, web search policy and code execution policy are
 read from this deployment's own rows, by `WorkspaceMcpServers`,
 `WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
 between them and their callers. A resolved MCP server is connected to directly,
-and nothing proxies MCP traffic. The web search policy says who may search and
+and nothing proxies MCP traffic. A stored server sends one workspace credential
+(a token, or the account a manager signed in to for everyone) or, in per-user
+mode, each user's own: `McpConnectionService` runs a sign-in to such a server
+and ends a connection, and `McpUserTokens` reads the token a request carries
+(`mcp_user_connections`, `mcp_shared_connections`, `mcp_oauth_flows`). The web search policy says who may search and
 how far, and carries the workspace's own search key where its organization
 brought one; a tools service applies it to a request with one rule everywhere.
 The code execution policy says who may run code and within which limits, and
@@ -208,6 +212,13 @@ the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
+So does a member's request for a catalog server and a manager's answer to it
+(`mcp_server_requests`): `McpServerRequestService` asks mcp-catalog for the
+entry a request names and the tenancy checks for who manages the workspace,
+both through interfaces it is handed.
+A stored server's display belongs here too: an admin's uploaded logo and tile
+choice (`workspace_mcp_server_logos`), kept apart from the catalog's fetched
+logos, which it asks mcp-catalog for through an interface it is handed.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the

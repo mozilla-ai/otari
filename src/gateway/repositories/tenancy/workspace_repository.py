@@ -11,7 +11,7 @@ from sqlmodel import col
 
 from gateway.core.database import database_refusal
 from gateway.core.sql import LIKE_ESCAPE, contains_pattern
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
     WORKSPACE_MEMBER_WORKSPACE_FK,
@@ -208,8 +208,13 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
 class WorkspaceMemberRepository:
     """Repository for workspace membership rows."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: AsyncSession | UnitOfWork):
+        self._db = db
+
+    @property
+    def db(self) -> AsyncSession:
+        """The session this repository's operations run on, resolved per call when built on a Unit of Work."""
+        return session_for(self._db) if isinstance(self._db, UnitOfWork) else self._db
 
     async def get_by_workspace(
         self,
@@ -270,19 +275,39 @@ class WorkspaceMemberRepository:
         )
         return result.scalars().first()
 
+    async def active_user_ids_with_roles(self, workspace_id: uuid.UUID, roles: Collection[str]) -> list[uuid.UUID]:
+        """The users holding an active membership of one of ``roles`` in a workspace, oldest membership first."""
+        if not roles:
+            return []
+        result = await self.db.execute(
+            select(col(WorkspaceMember.user_id))
+            .where(
+                col(WorkspaceMember.workspace_id) == workspace_id,
+                col(WorkspaceMember.status) == "active",
+                col(WorkspaceMember.role).in_(list(roles)),
+            )
+            .order_by(col(WorkspaceMember.created_at), col(WorkspaceMember.id))
+        )
+        return list(result.scalars().all())
+
     async def get_active_pairs(
-        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID], *, lock: bool = False
     ) -> set[tuple[uuid.UUID, uuid.UUID]]:
-        """Return each (workspace, user) of these that an *active* membership joins, in one query."""
+        """Return each (workspace, user) of these that an *active* membership joins, in one query.
+
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal
+        that changes one waits for it (PostgreSQL only).
+        """
         if not workspace_ids or not user_ids:
             return set()
-        result = await self.db.execute(
-            select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
-                col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
-                col(WorkspaceMember.user_id).in_(list(user_ids)),
-                col(WorkspaceMember.status) == "active",
-            )
+        statement = select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
+            col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
+            col(WorkspaceMember.user_id).in_(list(user_ids)),
+            col(WorkspaceMember.status) == "active",
         )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         return set(result.tuples().all())
 
     async def get_by_workspaces_and_user(

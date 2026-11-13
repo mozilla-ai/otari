@@ -80,6 +80,7 @@ from gateway.services.budgets import (
 )
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
+from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
@@ -137,10 +138,13 @@ class _Servers:
     def __init__(self, resolve_many: _ResolveMany) -> None:
         self._resolve_many = resolve_many
 
-    async def resolve_many(
-        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: Any = None
-    ) -> list[McpServerConfig]:
-        return await self._resolve_many(workspace_id, server_ids)
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: Any, *, attach: bool
+    ) -> RequestMcpServers:
+        return RequestMcpServers(servers=await self._resolve_many(workspace_id, server_ids))
+
+    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+        return False
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None

@@ -147,6 +147,10 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
+    "mcp_connections.callback_router": (
+        "an authorization server's redirect: the session cookie does not travel on it, and the single-use "
+        "state in the query is what it acts on"
+    ),
     "messages.router": _DATA_PLANE,
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,

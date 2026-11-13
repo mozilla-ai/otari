@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from pydantic.json_schema import SkipJsonSchema
@@ -25,6 +26,9 @@ MAX_MCP_SERVER_IDS = 50
 # below the chance of a stored-server change going unnoticed for any other
 # reason, and stays well inside the 1-to-128-character wire format.
 REVISION_LENGTH = 32
+
+# Takes the token an MCP server refused, and returns the one to try instead.
+TokenRenewer = Callable[[str], Awaitable[str]]
 
 
 class McpServerConfig(BaseModel):
@@ -54,6 +58,11 @@ class McpServerConfig(BaseModel):
     caller_access_source: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
     # Admission's too: the stored server's id, so a trace's tool span links to its page.
     stored_server_id: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
+    # Admission's too: the workspace attached it and the request did not name it, so one that cannot be
+    # reached is left out of the request rather than failing it.
+    attached: SkipJsonSchema[bool] = Field(default=False, exclude=True)
+    # Admission's too, on a per-user stored server: a new token for the one the server refused.
+    renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):
@@ -76,12 +85,17 @@ class ResolvedMcpServer(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(min_length=1)
     authorization_token: str | None = None
+    # What stands for the credential in the revision when it is set: a per-user server's token
+    # changes at every renewal, which no application authorized against.
+    credential_revision: str | None = None
     enabled: StrictBool = True
     # Not part of the revision: who may reach a server is the caller's concern, not its configuration.
     everyone_tools: list[str] = Field(default_factory=lambda: ["*"])
     read_tools: list[str] = Field(default_factory=list)
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
+    # On a per-user server: a new token for the one the server refused, for one retry. Not configuration.
+    renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
 
     @property
     def revision(self) -> str:
@@ -100,7 +114,7 @@ class ResolvedMcpServer(BaseModel):
         canonical = json.dumps(
             {
                 "url": self.url,
-                "credential": _credential_fingerprint(self.authorization_token),
+                "credential": _credential_fingerprint(self.credential_revision or self.authorization_token),
                 "enabled": self.enabled,
                 "allowed_tools": None if self.allowed_tools is None else sorted(self.allowed_tools),
             },

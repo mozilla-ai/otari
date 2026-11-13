@@ -2,7 +2,10 @@ import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
-import type { WorkspaceMcpServer } from "@/client"
+import type {
+  CreateWorkspaceMcpServerRequest,
+  WorkspaceMcpServer,
+} from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -202,7 +205,11 @@ export function WorkspaceMcpServersCard({
   // access list and every later change live.
   const submit = (draft: McpServerDraft) =>
     create.mutate(
-      { workspaceId: selected.workspace_id, body: draft },
+      {
+        workspaceId: selected.workspace_id,
+        // The fields this form does not have are left to the gateway's defaults.
+        body: draft as CreateWorkspaceMcpServerRequest,
+      },
       { onSuccess: (server) => openServer(server.id) },
     )
 

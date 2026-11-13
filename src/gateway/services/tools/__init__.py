@@ -10,7 +10,18 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
-``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
+``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
+``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
+``McpServerLogoService`` reads each stored server's logo and sets or removes an admin's own,
+``McpServerRequestService`` takes a member's request for a catalog server and records a manager's answer, within
+``MAX_PENDING_REQUESTS_PER_MEMBER`` and ``MAX_REQUESTS_PER_MEMBER_PER_DAY``,
+``WorkspaceMcpServerHealth`` is what the gateway last learned by talking to a stored server, ``server_health`` reads
+one from a check, and ``mcp_server_contacts`` (a ``McpServerContacts``) records one from real request traffic,
+``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
+through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
+that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in;
+``sign_in_link`` mints the link a conversation shows a user to start their sign-in, and ``McpSignInBackend`` gives a
+request's tool loop one stand-in tool per server ``McpSignInNeeded`` names, whose result carries that link,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -111,11 +122,33 @@ from gateway.services.tools._direct_tool_call import (
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import (
+    AdmittedMcpServers,
     admit_mcp_servers,
     declares_provider_mcp,
     refuse_shadowed_builtin_tools,
 )
+from gateway.services.tools._mcp_connections import (
+    CompletedConnection,
+    FlowLanding,
+    McpConnectionEligibility,
+    McpConnectionService,
+    McpRevocation,
+    McpServerRef,
+    McpUserTokens,
+    StoredMcpOAuthClient,
+)
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
+from gateway.services.tools._mcp_server_health import (
+    McpServerContact,
+    McpServerContacts,
+    WorkspaceMcpServerHealth,
+    mcp_server_contacts,
+)
+from gateway.services.tools._mcp_server_logos import McpServerLogoService
+from gateway.services.tools._mcp_server_requests import (
+    McpServerRequestService,
+)
+from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -301,6 +334,24 @@ __all__ = [
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "McpGrantMembershipListener",
+    "CompletedConnection",
+    "FlowLanding",
+    "McpConnectionEligibility",
+    "McpConnectionService",
+    "McpServerRequestService",
+    "McpServerContact",
+    "McpServerContacts",
+    "McpServerLogoService",
+    "WorkspaceMcpServerHealth",
+    "mcp_server_contacts",
+    "McpRevocation",
+    "McpServerRef",
+    "McpUserTokens",
+    "McpSignInBackend",
+    "McpSignInNeeded",
+    "McpSignInReason",
+    "StoredMcpOAuthClient",
+    "AdmittedMcpServers",
     "admit_mcp_servers",
     "declares_provider_mcp",
     "admit_web_access",

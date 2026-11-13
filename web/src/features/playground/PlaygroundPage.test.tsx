@@ -782,7 +782,13 @@ describe("sending a question", () => {
         web_search: { configured: true, enabled: true, reason: null },
         code_execution: { configured: true, enabled: true, reason: null },
         mcp_servers: [
-          { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
+          {
+            id: "srv-1",
+            name: "Docs",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: false,
+          },
         ],
       },
     })

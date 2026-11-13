@@ -11,10 +11,26 @@ the service runs. A request reaches these servers by naming their ids in
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from starlette.datastructures import UploadFile
+from starlette.requests import ClientDisconnect
 
-from gateway.api.deps import CurrentIdentity, PersonGrowthSignalPortDep, WorkspaceMcpServerServiceDep, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    McpServerLogoServiceDep,
+    PersonGrowthSignalPortDep,
+    WorkspaceMcpServerServiceDep,
+    verify_master_key,
+)
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._logo_response import LOGO_RESPONSES, logo_response
 from gateway.api.routes.organizations import Message
+from gateway.schemas.tools import (
+    McpConnectionStart,
+    McpConnectionStarted,
+    WorkspaceMcpServerLogoPublic,
+    WorkspaceMcpServerLogosPublic,
+)
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerAccess,
     WorkspaceMcpServerAccessCheck,
@@ -24,6 +40,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerGrantUpdate,
     WorkspaceMcpServerHealth,
     WorkspaceMcpServerKeyAccess,
+    WorkspaceMcpServerMyTools,
     WorkspaceMcpServerPublic,
     WorkspaceMcpServersPublic,
     WorkspaceMcpServerUpdate,
@@ -129,6 +146,19 @@ async def get_workspace_mcp_key_access(
     return await service.key_access(user=current_identity, workspace_id=workspace_id, api_key_id=api_key_id)
 
 
+@router.get("/logos")
+async def list_workspace_mcp_server_logos(
+    service: McpServerLogoServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+) -> WorkspaceMcpServerLogosPublic:
+    """The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.
+
+    Readable by any member who can see the workspace, as the servers are. A logo is
+    an admin's upload, else the catalog's for the server's URL, else one the gateway
+    found on the server's host. Listing them makes the gateway fetch nothing.
+    """
+    return await service.list_logos(user=current_identity, workspace_id=workspace_id)
+
+
 @router.get("/{server_id}")
 async def get_workspace_mcp_server(
     service: WorkspaceMcpServerServiceDep,
@@ -138,6 +168,23 @@ async def get_workspace_mcp_server(
 ) -> WorkspaceMcpServerPublic:
     """One MCP server of a workspace. Readable by any member who can see the workspace, as the list is."""
     return await service.get_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.get("/{server_id}/my-tools")
+async def get_my_workspace_mcp_server_tools(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerMyTools:
+    """The tools the caller may use on a server. Any member who can see the workspace.
+
+    Applies the caller's own rule: their user's grant, else the server's `everyone_tools`, within
+    its `allowed_tools`; a disabled server admits nothing. The tool list comes from the server's
+    last passing check; where there is none and the server is per-user, it is listed with the
+    caller's own connection and not stored. `known` is false when neither is available.
+    """
+    return await service.my_tools(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 
 
 @router.get("/{server_id}/access")
@@ -252,9 +299,70 @@ async def check_workspace_mcp_server(
     Opens one session, lists the server's tools, and stores the outcome as
     `health`. A server that fails is still a 200, with `health.status` set to
     `failing`. A 429 means every check slot on this gateway was busy and
-    nothing was recorded.
+    nothing was recorded. A per-user server holds no token to check with and
+    is refused with a 409: start its check with `POST .../check/sign-in`.
     """
     return await service.check_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.post("/{server_id}/check/sign-in")
+async def start_workspace_mcp_server_check_sign_in(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    body: McpConnectionStart,
+) -> McpConnectionStarted:
+    """Start a sign-in made only to check a per-user server. Organization or workspace owners/admins.
+
+    Returns the authorization page to send the browser to, as starting a connection does. The
+    caller signs in with any account; finishing the sign-in (`POST /mcp-connections/complete`)
+    lists the server's tools once with the token it returns, stores the outcome as `health`, and
+    drops the token, revoking it where the authorization server allows. No connection is created,
+    and the caller's own connection, if they have one, is left as it was. A server in `shared` mode
+    is refused with a 409.
+    """
+    return await service.start_check_sign_in(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, return_to=body.return_to
+    )
+
+
+@router.post("/{server_id}/shared-account")
+async def start_workspace_mcp_server_shared_sign_in(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    body: McpConnectionStart,
+) -> McpConnectionStarted:
+    """Start a sign-in for everyone, to a shared server. Organization or workspace owners/admins.
+
+    Returns the authorization page to send the browser to, as starting a connection does. The
+    caller signs in with the account the whole workspace should act as, so a service account is
+    the better choice. Finishing the sign-in (`POST /mcp-connections/complete`) stores that
+    account as the server's `shared_account`: every caller's call then carries its token, which
+    Otari renews as it does a user's own, and a stored `authorization_token` is removed. A server
+    in `per_user` mode is refused with a 409.
+    """
+    return await service.start_shared_sign_in(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, return_to=body.return_to
+    )
+
+
+@router.delete("/{server_id}/shared-account")
+async def end_workspace_mcp_server_shared_account(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerPublic:
+    """End a shared server's account. Organization owners/admins or this workspace's owners/admins.
+
+    The stored tokens are deleted, and the authorization server is asked to revoke them where it
+    publishes a revocation endpoint. The server is then checked again with no credential, and
+    comes back with `needs_setup` when it asks for one. A server with no shared account is a 404.
+    """
+    return await service.disconnect_shared(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 
 
 @router.post(
@@ -292,3 +400,87 @@ async def delete_workspace_mcp_server(
     """Delete a server and the token stored with it. Organization owners/admins or this workspace's owners/admins."""
     await service.delete_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
     return Message(message="MCP server deleted")
+
+
+# A 256 px PNG from the dashboard is far smaller; this bounds the body, multipart framing included.
+_MAX_LOGO_BODY_BYTES = 520 * 1024
+_LOGO_TOO_LARGE = "The logo is larger than 512 KB"
+_LOGO_UPLOAD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tile": {
+            "type": "string",
+            "enum": ["auto", "always", "never"],
+            "description": "Whether the logo sits on a tile: where it would fade out, always, or never.",
+        },
+        "file": {
+            "type": "string",
+            "contentMediaType": "image/png",
+            "description": "A PNG of at most 512 KB to show instead of the server's own logo. Leave out to keep it.",
+        },
+    },
+    "required": ["tile"],
+}
+
+
+@router.get("/{server_id}/logo", include_in_schema=False, responses=LOGO_RESPONSES)
+async def get_workspace_mcp_server_logo(
+    request: Request,
+    service: McpServerLogoServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> Response:
+    """A server's logo, for any member who can see the workspace; `logo_url` from the logo list points here."""
+    logo = await service.logo(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+    return logo_response(request, logo)
+
+
+@router.put(
+    "/{server_id}/logo",
+    responses={
+        413: {"description": "The body is larger than the logo limit."},
+        422: {"description": "The file is not a PNG, or the tile is not one of the choices."},
+    },
+    openapi_extra={
+        "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": _LOGO_UPLOAD_SCHEMA}}}
+    },
+)
+async def set_workspace_mcp_server_logo(
+    request: Request,
+    service: McpServerLogoServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerLogoPublic:
+    """Set how a server's logo shows: the tile choice, and an uploaded PNG in place of its own logo.
+
+    Organization owners/admins or this workspace's owners/admins. The upload is kept
+    apart from the logo the gateway fetches, so no fetch or catalog sync replaces it.
+    """
+    try:
+        async with bounded_body(request, _MAX_LOGO_BODY_BYTES, _LOGO_TOO_LARGE).form(max_files=1, max_fields=1) as form:
+            tile = form.get("tile")
+            file = form.get("file")
+            if not isinstance(tile, str):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Send the tile choice in the field 'tile'.")
+            content = await file.read() if isinstance(file, UploadFile) else None
+    except ClientDisconnect:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
+    return await service.set_logo(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, tile=tile, content=content
+    )
+
+
+@router.delete("/{server_id}/logo")
+async def remove_workspace_mcp_server_logo(
+    service: McpServerLogoServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerLogoPublic:
+    """Remove a server's uploaded logo, so it shows its own again. The tile choice stays.
+
+    Organization owners/admins or this workspace's owners/admins.
+    """
+    return await service.remove_upload(user=current_identity, workspace_id=workspace_id, server_id=server_id)

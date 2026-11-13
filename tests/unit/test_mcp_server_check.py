@@ -32,6 +32,7 @@ from gateway.services.mcp_stateless import (
     check_stored_server,
     classify_check_failure,
     refuse_unusable_answer,
+    tool_summary,
 )
 
 
@@ -86,6 +87,11 @@ def mcp_url(request: pytest.FixtureRequest) -> Iterator[str]:
 
     @app.tool()
     def close_issue(number: int) -> str:
+        """
+
+        Close one issue by its number.
+        The issue stays readable.
+        """
         return str(number)
 
     with socket.socket() as probe:
@@ -115,6 +121,7 @@ async def test_a_working_server_reports_its_tools(mcp_url: str) -> None:
 
     assert check.failure is None
     assert sorted(check.tool_names) == ["close_issue", "list_issues"]
+    assert check.descriptions == {"close_issue": "Close one issue by its number."}, "the first line, and none for none"
 
 
 @pytest.mark.asyncio
@@ -222,3 +229,11 @@ def test_a_protocol_error_inside_a_group_is_not_mcp() -> None:
 def test_an_unrecognized_failure_is_named_generically() -> None:
     assert classify_check_failure(RuntimeError("boom")) == (CheckFailure.CONNECTION_FAILED, None)
     assert classify_check_failure(asyncio.CancelledError()) == (CheckFailure.CONNECTION_FAILED, None)
+
+
+def test_a_tool_summary_is_one_short_line() -> None:
+    assert tool_summary(None) is None
+    assert tool_summary("  \n\t\n") is None
+    assert tool_summary("\n  Search issues.  \nMore detail.") == "Search issues."
+    long = tool_summary("x" * 500)
+    assert long is not None and len(long) == mcp_stateless.TOOL_SUMMARY_MAX_LENGTH and long.endswith("…")
