@@ -476,8 +476,8 @@ async def _with_usage(
 
     Queried for these selectors alone rather than the whole catalog's: a usage
     row is matched on two unindexed columns, and a detail read asks about one
-    model. A visitor has no organization, and an API key without ``usage:read``
-    may not read its organization's usage, so both get the offerings as they are.
+    model. A visitor has no organization, and a viewer that does not read usage
+    may not read this one's, so both get the offerings as they are.
     """
     if grouped.organization_id is None or not viewer_reads_usage(caller):
         return [member.wire for member in members]
