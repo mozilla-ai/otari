@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, SecretStr, model_validator
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, Uuid
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, Uuid, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -306,6 +306,10 @@ class OrganizationGuardrail(Base):
     # and the scope rows below are not consulted. False means it runs only in
     # the workspaces named there, and a new workspace inherits nothing.
     applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Whether it also checks what agents propose to agent memory in those workspaces, before the consolidator
+    # keeps it. On by default: what is kept reaches other members' prompts through recall. Off is for a check
+    # that misreads memory notes, such as a prompt-injection model that takes "do X before Y" for an injection.
+    applies_to_memory: Mapped[bool] = mapped_column(default=True, server_default=true(), nullable=False)
     # Gotcha: a plain DateTime(timezone=True) reads back naive on SQLite. The dashboard
     # then shows it as local time.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

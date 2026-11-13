@@ -177,6 +177,7 @@ session, and an organization owner or admin) carry:
 | `enabled` | `false` stops this mandate everywhere without discarding the entry. |
 | `applies_to_all_workspaces` | `true` runs it in every workspace, including any created later. |
 | `workspace_ids` | The workspaces it runs in, when it does not apply to all of them. |
+| `applies_to_memory` | `true` (the default) also runs it over what agents propose to [agent memory](memory.md#how-a-proposal-becomes-memory) in those workspaces, before it is kept. `false` checks requests only, for a check that misreads memory notes. |
 
 A new workspace inherits the entries marked `applies_to_all_workspaces` and
 nothing else. A workspace cannot opt out of an entry scoped to it: the scope is

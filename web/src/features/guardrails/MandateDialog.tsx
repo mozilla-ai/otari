@@ -8,6 +8,7 @@ import type {
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
@@ -31,6 +32,8 @@ import {
 } from "@/shared/api/tools"
 
 type Mode = "block" | "monitor"
+
+const MEMORY_LABEL = "Also check what agents save to agent memory"
 /** Who runs the check: Otari, from a definition, or a guardrails service. */
 export type MandateShape = "definition" | "remote"
 
@@ -137,6 +140,9 @@ export function MandateDialog({
   const [scope, setScope] = useState<string[]>([
     ...(mandate?.workspace_ids ?? []),
   ])
+  const [checksMemory, setChecksMemory] = useState(
+    mandate?.applies_to_memory ?? true,
+  )
 
   const definition = definitions.find((row) => row.id === definitionId)
   const builtIn = builtInCatalog?.guardrails?.find(
@@ -169,6 +175,7 @@ export function MandateDialog({
     credential,
     everywhere,
     scope,
+    checksMemory,
     values: parameters.values,
     extraJson: parameters.extraJson,
   })
@@ -190,6 +197,7 @@ export function MandateDialog({
     const scopeBody = {
       applies_to_all_workspaces: everywhere,
       workspace_ids: everywhere ? [] : scope,
+      applies_to_memory: checksMemory,
     }
     const done = {
       onSuccess: () => {
@@ -225,6 +233,7 @@ export function MandateDialog({
           on: reads,
           on_unavailable: onUnavailable,
           applies_to_all_workspaces: everywhere,
+          applies_to_memory: checksMemory,
           // The server refuses a list beside "every workspace".
           ...(everywhere ? {} : { workspace_ids: scope }),
           // Sent whole: the form renders all of it, so an untouched form sends
@@ -400,6 +409,17 @@ export function MandateDialog({
           )
         }
       />
+      <div className="flex flex-col gap-1">
+        <Checkbox isSelected={checksMemory} onChange={setChecksMemory}>
+          {MEMORY_LABEL}
+        </Checkbox>
+        <p className="text-caption">
+          Before an agent's proposal is kept in agent memory, where it reaches
+          other members' prompts. Turn it off for a check that misreads memory
+          notes, such as a prompt-injection model that flags a procedure like
+          "run X before Y".
+        </p>
+      </div>
       <GuardrailParametersSection
         // Remounted when the panel's shape changes, which is what recomputes
         // whether it starts open.

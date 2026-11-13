@@ -44,7 +44,8 @@ class MemoryGuardrails(Protocol):
     """Where the consolidator finds the guardrails an organization mandates for a workspace."""
 
     async def mandated(self, organization_id: uuid.UUID, workspace_id: uuid.UUID) -> MandatedGuardrails | None:
-        """The enabled mandates covering the workspace, or None where there are none, so nothing is called.
+        """The enabled mandates covering the workspace that check its memory too, or None where there are none,
+        so nothing is called. A mandate an organization set to check requests only is not among them.
 
         Raises:
             GuardrailsUnavailableError: the mandates could not be read, so none can be run.

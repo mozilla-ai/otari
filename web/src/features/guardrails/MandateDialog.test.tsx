@@ -149,6 +149,7 @@ describe("MandateDialog, creating one", () => {
       validate_kwargs: { output_text: "the answer" },
       applies_to_all_workspaces: false,
       workspace_ids: [],
+      applies_to_memory: true,
     })
   })
 
@@ -174,6 +175,27 @@ describe("MandateDialog, editing one", () => {
     })
     expect(dialog().getByText("a guardrail you set up")).toBeInTheDocument()
     expect(dialog().queryByRole("button", { name: /Runs on/ })).toBeNull()
+  })
+
+  it("lets a mandate check requests only, leaving what agents save to memory alone", async () => {
+    const calls = mockApi()
+    const { onSaved } = renderDialog({
+      mandate: organizationGuardrail({
+        profile: "prompt-injection",
+        url: "https://guardrails.example/validate",
+      }),
+    })
+    const user = userEvent.setup()
+    const memory = dialog().getByRole("checkbox", {
+      name: "Also check what agents save to agent memory",
+    })
+    expect(memory).toBeChecked()
+
+    await user.click(memory)
+    await user.click(dialog().getByRole("button", { name: "Save mandate" }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(posted(calls, "PATCH")).toMatchObject({ applies_to_memory: false })
   })
 
   it("sends a remote mandate's mode without touching its endpoint or credential", async () => {

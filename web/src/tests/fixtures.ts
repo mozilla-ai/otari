@@ -659,6 +659,7 @@ export function organizationGuardrail(
     enabled: true,
     applies_to_all_workspaces: false,
     workspace_ids: [],
+    applies_to_memory: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
     ...overrides,

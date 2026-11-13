@@ -249,3 +249,29 @@ def test_without_a_mandate_no_guardrail_is_called(
 
     assert guardrails.calls == []
     assert _remembered(memory_client, headers, INJECTION) == [INJECTION]
+
+
+def test_a_mandate_set_to_check_requests_only_does_not_check_proposals(
+    memory_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = _key(memory_client, master_key_header, db_session_factory)
+    _mandate(
+        memory_client,
+        master_key_header,
+        profile="prompt-injection",
+        mode="block",
+        applies_to_all_workspaces=True,
+        applies_to_memory=False,
+    )
+    guardrails = _Guardrails(monkeypatch)
+    _propose(memory_client, headers, INJECTION)
+
+    assert _consolidate(memory_client) == 1
+
+    assert guardrails.calls == []
+    assert _remembered(memory_client, headers, INJECTION) == [INJECTION]
+    [listed] = memory_client.get(f"{API_ROOT}/organizations/me/guardrails", headers=master_key_header).json()["data"]
+    assert listed["applies_to_memory"] is False

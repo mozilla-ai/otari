@@ -2409,7 +2409,7 @@ class _MemoryGuardrails:
             # On a session of its own, closed before any check runs, so no transaction idles over one.
             async with create_session() as session:
                 mandates = await resolve_organization_guardrails(
-                    session, organization_id=organization_id, workspace_id=workspace_id
+                    session, organization_id=organization_id, workspace_id=workspace_id, for_memory=True
                 )
         except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
             # As on a request, a mandate whose credential will not open is not run unauthenticated.

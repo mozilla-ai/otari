@@ -243,6 +243,13 @@ class OrganizationGuardrailCreate(BaseModel):
         max_length=MAX_SCOPED_WORKSPACES,
         description="Workspaces this guardrail runs in. Must be empty when applies_to_all_workspaces is true",
     )
+    applies_to_memory: bool = Field(
+        default=True,
+        description=(
+            "True also runs this over what agents propose to agent memory in those workspaces, before it is kept; "
+            "false checks requests only"
+        ),
+    )
 
     @model_validator(mode="after")
     def _reject_redundant_scope(self) -> OrganizationGuardrailCreate:
@@ -322,6 +329,7 @@ class OrganizationGuardrailUpdate(BaseModel):
     enabled: bool | SkipJsonSchema[None] = None
     applies_to_all_workspaces: bool | SkipJsonSchema[None] = None
     workspace_ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_SCOPED_WORKSPACES)
+    applies_to_memory: bool | SkipJsonSchema[None] = None
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> OrganizationGuardrailUpdate:
@@ -334,7 +342,15 @@ class OrganizationGuardrailUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("profile", "mode", "on", "on_unavailable", "enabled", "applies_to_all_workspaces")
+            for field in (
+                "profile",
+                "mode",
+                "on",
+                "on_unavailable",
+                "enabled",
+                "applies_to_all_workspaces",
+                "applies_to_memory",
+            )
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
@@ -379,6 +395,7 @@ class OrganizationGuardrailPublic(BaseModel):
     # are not consulted at all: reporting a list there would invite a client to
     # edit one that decides nothing.
     workspace_ids: list[uuid.UUID]
+    applies_to_memory: bool
     created_at: str
     updated_at: str
 
@@ -400,6 +417,7 @@ class OrganizationGuardrailPublic(BaseModel):
             enabled=guardrail.enabled,
             applies_to_all_workspaces=guardrail.applies_to_all_workspaces,
             workspace_ids=[] if guardrail.applies_to_all_workspaces else workspace_ids,
+            applies_to_memory=guardrail.applies_to_memory,
             created_at=guardrail.created_at.isoformat(),
             updated_at=guardrail.updated_at.isoformat(),
         )
@@ -466,8 +484,11 @@ async def resolve_organization_guardrails(
     *,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    for_memory: bool = False,
 ) -> list[ResolvedOrganizationGuardrail]:
     """The organization's guardrails that are in effect for one workspace.
+
+    ``for_memory`` keeps only those that also check what agents propose to its memory (``applies_to_memory``).
 
     One indexed read, on every request that reaches a completion endpoint,
     which is inherent rather than incidental: a mandate nobody
@@ -507,6 +528,8 @@ async def resolve_organization_guardrails(
         )
         .order_by(OrganizationGuardrail.profile)
     )
+    if for_memory:
+        stmt = stmt.where(OrganizationGuardrail.applies_to_memory.is_(True))
     rows = (await db.execute(stmt)).scalars().all()
     return [
         ResolvedOrganizationGuardrail(
@@ -850,6 +873,7 @@ class OrganizationGuardrailService:
             validate_kwargs=restore_redacted_values(request.validate_kwargs, None) or None,
             enabled=request.enabled,
             applies_to_all_workspaces=request.applies_to_all_workspaces,
+            applies_to_memory=request.applies_to_memory,
         )
         self.db.add(guardrail)
         try:
@@ -958,6 +982,8 @@ class OrganizationGuardrailService:
             guardrail.enabled = request.enabled
         if request.applies_to_all_workspaces is not None:
             guardrail.applies_to_all_workspaces = request.applies_to_all_workspaces
+        if request.applies_to_memory is not None:
+            guardrail.applies_to_memory = request.applies_to_memory
 
         # Flushed here rather than left to the commit, and *before* the scope is
         # rewritten, for the reason `workspace_mcp_server_service.update_server`

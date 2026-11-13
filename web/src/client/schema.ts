@@ -16615,6 +16615,12 @@ export interface components {
             created_at: string;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Applies To Memory
+             * @description True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only
+             * @default true
+             */
+            applies_to_memory: boolean;
             /** Guardrail Name */
             guardrail_name: string;
             /**
@@ -16867,6 +16873,8 @@ export interface components {
             profile?: string;
             /** Url */
             url?: string | null;
+            /** Applies To Memory */
+            applies_to_memory: boolean;
             /**
              * Validate Kwargs
              * @description Replaces the stored kwargs whole. A parameter sent as *** keeps the value stored under that name, which is how a credential-shaped one survives an edit of the rest of the entry
@@ -16972,6 +16980,8 @@ export interface components {
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+            /** Applies To Memory */
+            applies_to_memory?: boolean;
              */
             kind?: ("model" | "search" | "fetch") | null;
             /**

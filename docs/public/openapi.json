@@ -16966,6 +16966,12 @@
         ],
         "title": "OrganizationGuardrailDefinitionCreate",
         "type": "object"
+          "applies_to_memory": {
+            "default": true,
+            "description": "True also runs this over what agents propose to agent memory in those workspaces, before it is kept; false checks requests only",
+            "title": "Applies To Memory",
+            "type": "boolean"
+          },
       },
       "OrganizationGuardrailDefinitionPublic": {
         "description": "The API-facing shape. Carries the names of the stored secrets and none of their values.",
@@ -17344,6 +17350,10 @@
                 "type": "number"
               },
               {
+          "applies_to_memory": {
+            "title": "Applies To Memory",
+            "type": "boolean"
+          },
                 "type": "null"
               }
             ],
@@ -17454,6 +17464,7 @@
                 "maxLength": 2048,
                 "type": "string"
               },
+          "applies_to_memory",
               {
                 "type": "null"
               }
@@ -17544,6 +17555,10 @@
             "default": false,
             "title": "Provider Key Encryption Available",
             "type": "boolean"
+          "applies_to_memory": {
+            "title": "Applies To Memory",
+            "type": "boolean"
+          },
           },
           "role": {
             "title": "Role",

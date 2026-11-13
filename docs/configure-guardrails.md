@@ -32,7 +32,7 @@ Only organization owners and admins can add, edit, or delete guardrails.
 
 Each guardrail can be applied across the entire organization or to specific workspaces. You can configure it to either **block requests** or **monitor them** without blocking. Once mandated, the guardrail will run on every chat completions, messages and responses request from the selected workspaces. Embeddings and other endpoints are not checked.
 
-A mandate also checks what agents propose to those workspaces' [agent memory](memory.md#how-a-proposal-becomes-memory) before it is kept, so text it refuses on a request cannot reach other members' prompts through recall.
+A mandate also checks what agents propose to those workspaces' [agent memory](memory.md#how-a-proposal-becomes-memory) before it is kept, so text it refuses on a request cannot reach other members' prompts through recall. Clear **Also check what agents save to agent memory** (`applies_to_memory: false`) for a check that misreads memory notes, such as a prompt-injection model that flags a procedure written as an instruction.
 
 1. In **Guardrails**, click **Mandate a guardrail**.
 2. Choose whether you want to use a guardrail configured from the catalog or your own guardrail service.

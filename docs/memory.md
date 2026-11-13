@@ -229,9 +229,13 @@ member scope is its owner's alone: no other member, and no admin, recalls it.
 2. **Organization guardrails.** The consolidator runs the guardrails the
    organization mandates for the proposal's workspace over its text, before
    anything else is done with it, as they run over a request's input: the
-   mandates for every workspace or for this one, if enabled, each with its own
-   endpoint, `mode` and `on_unavailable`. See
+   mandates for every workspace or for this one, if enabled and set to check
+   memory, each with its own endpoint, `mode` and `on_unavailable`. See
    [Mandate a guardrail](configure-guardrails.md#mandate-a-guardrail).
+   - A mandate checks memory unless its **Also check what agents save to agent
+     memory** box is cleared (`applies_to_memory: false`). Clear it for a check
+     that misreads memory notes: a prompt-injection model can take a procedure
+     such as "notify Lucía before acting" for an instruction to the model.
    - A `block` mandate that flags the proposal refuses it: it never becomes an
      entry, is never embedded, and waits for an admin with the reason
      `guardrail`.

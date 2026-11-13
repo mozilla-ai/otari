@@ -344,6 +344,7 @@ class TestSerializers:
             validate_kwargs={"threshold": 0.8, "patronus_api_key": "live-key"},
             enabled=True,
             applies_to_all_workspaces=True,
+            applies_to_memory=True,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -364,6 +365,7 @@ class TestSerializers:
             validate_kwargs=None,
             enabled=True,
             applies_to_all_workspaces=True,
+            applies_to_memory=True,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
