@@ -1,0 +1,100 @@
+{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "africa.lomi/mcp",
+        "description": "lomi. payments. https://mcp.lomi.africa/mcp and guest https://mcp.lomi.africa/mcp/guest",
+        "title": "lomi.",
+        "version": "1.0.0",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.lomi.africa/mcp"
+          },
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.lomi.africa/mcp/guest"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-11-04T11:43:02.854662Z",
+          "publishedAt": "2026-11-04T11:43:02.854662Z",
+          "updatedAt": "2026-11-04T11:43:02.854662Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ai.adadvisor/mcp-server",
+        "description": "Query Meta Ads performance data — accounts, campaigns, ad sets, ads, metrics & settings.",
+        "title": "AdAdvisor MCP Server",
+        "version": "1.0.1",
+        "websiteUrl": "https://www.adadvisor.ai/docs/user-guide/getting-started-with-mcp?utm_source=mcp-registry",
+        "icons": [
+          {
+            "src": "https://app.adadvisor.ai/adadvisor-logo.png",
+            "mimeType": "image/png"
+          }
+        ],
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://api.adadvisor.ai/mcp",
+            "headers": [
+              {
+                "description": "Bearer token (adv_sk_...). Get key: https://www.adadvisor.ai/docs/user-guide/getting-started-with-mcp?utm_source=mcp-registry",
+                "isRequired": true,
+                "isSecret": true,
+                "name": "Authorization"
+              }
+            ]
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-02-28T13:09:52.236521Z",
+          "publishedAt": "2026-02-28T13:09:52.236521Z",
+          "updatedAt": "2026-02-28T13:09:52.236521Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ai.agentlookups/greenlight",
+        "description": "US plug-in solar (balcony solar) law registry with a daily UL 3700 certification watch.",
+        "title": "GreenLight - Plug-in Solar Law Registry",
+        "version": "1.0.0",
+        "websiteUrl": "https://solar.agentlookups.ai",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://solar.agentlookups.ai/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "deprecated",
+          "statusChangedAt": "2026-10-26T20:15:18.12136Z",
+          "statusMessage": "GreenLight closed on 2026-09-28 because its answers could not be kept correct; the server answers 410 Gone. Notice: https://solar.agentlookups.ai/",
+          "publishedAt": "2026-08-26T18:02:50.186676Z",
+          "updatedAt": "2026-10-26T20:15:18.12136Z",
+          "isLatest": true
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "count": 3
+  }
+}

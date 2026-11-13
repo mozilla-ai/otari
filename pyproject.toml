@@ -314,6 +314,8 @@ gateway = [
     "static/dashboard/pwa/*",
     "static/dashboard/fonts/*",
     "data/*.json",
+    # Logos for the Popular MCP servers, from Simple Icons (CC0-1.0).
+    "data/mcp_logos/*.svg",
 ]
 
 [tool.ruff]

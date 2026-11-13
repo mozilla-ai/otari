@@ -13066,6 +13066,348 @@
         "title": "ManagedTool",
         "type": "object"
       },
+      "McpCatalogServerPublic": {
+        "description": "One remote MCP server the catalog lists.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The https image the registry entry names as the server's icon, null when it names none.",
+            "title": "Icon Url"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "logo_tone": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dark",
+                  "light",
+                  "tile"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both.",
+            "title": "Logo Tone"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where this gateway serves the server's logo, which it fetched once and keeps. Null when it looked and found none. A URL without `v` has not been looked for yet, and asking for it starts the look.",
+            "title": "Logo Url"
+          },
+          "name": {
+            "description": "The source's own identifier, such as `com.example/mcp`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "publisher_kind": {
+            "description": "`vendor` when the server is its maker's own: the endpoint lives on a domain the publisher owns, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API. The rule reads names and vouches for nothing.",
+            "enum": [
+              "vendor",
+              "community"
+            ],
+            "title": "Publisher Kind",
+            "type": "string"
+          },
+          "requires_token": {
+            "description": "The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.",
+            "title": "Requires Token",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Where the entry came from. `registry` is the official MCP Registry; `curated` is a short list bundled with Otari of well-known servers the registry does not list.",
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "The server's streamable HTTP endpoint.",
+            "title": "Url",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "description",
+          "url",
+          "requires_token",
+          "website_url",
+          "icon_url",
+          "logo_url",
+          "logo_tone",
+          "publisher_kind",
+          "version",
+          "source"
+        ],
+        "title": "McpCatalogServerPublic",
+        "type": "object"
+      },
+      "McpCatalogServersPublic": {
+        "description": "A page of catalog servers. `count` is how many match in all.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpCatalogServerPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpCatalogServersPublic",
+        "type": "object"
+      },
+      "McpCatalogSyncRequest": {
+        "additionalProperties": false,
+        "description": "Who asks for a sync, for a caller who does not operate the deployment.",
+        "properties": {
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A workspace the caller may add MCP servers to. Required unless the caller operates the deployment.",
+            "title": "Workspace Id"
+          }
+        },
+        "title": "McpCatalogSyncRequest",
+        "type": "object"
+      },
+      "McpCatalogSyncStatus": {
+        "description": "Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the last sync was partial or failed.",
+            "title": "Error"
+          },
+          "fetched": {
+            "description": "Registry entries read.",
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_stale": {
+            "description": "The catalog is empty, or no sync has read the whole registry into it in the last day.",
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "kept": {
+            "description": "Entries stored: remote servers Otari can connect to.",
+            "title": "Kept",
+            "type": "integer"
+          },
+          "last_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a sync last read the whole registry.",
+            "title": "Last Completed At"
+          },
+          "mode": {
+            "description": "The deployment's `mcp_catalog_sync` setting.",
+            "enum": [
+              "off",
+              "manual",
+              "scheduled"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "next_request_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Before this time a workspace admin's sync request is refused with a 429, because a sync ended recently. Null when one may be asked for now. An operator is not held to it.",
+            "title": "Next Request At"
+          },
+          "next_sync_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the next scheduled sync is due, if the mode is scheduled.",
+            "title": "Next Sync At"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.",
+            "title": "Outcome"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "removed": {
+            "description": "Servers a complete sync deleted because the registry no longer lists them.",
+            "title": "Removed",
+            "type": "integer"
+          },
+          "requested": {
+            "description": "A sync was asked for and no worker has started it yet.",
+            "title": "Requested",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "server_count": {
+            "description": "Servers in the catalog now.",
+            "title": "Server Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "mode",
+          "running",
+          "requested",
+          "outcome",
+          "error",
+          "started_at",
+          "finished_at",
+          "last_completed_at",
+          "next_sync_at",
+          "pages",
+          "fetched",
+          "kept",
+          "removed",
+          "server_count",
+          "is_stale",
+          "next_request_at"
+        ],
+        "title": "McpCatalogSyncStatus",
+        "type": "object"
+      },
       "McpErrorBody": {
         "description": "The one error shape both stored-server endpoints return.",
         "properties": {
@@ -39788,6 +40130,262 @@
         "summary": "Rotate Key",
         "tags": [
           "keys"
+        ]
+      }
+    },
+    "/api/v1/mcp-catalog/popular": {
+      "get": {
+        "description": "Well-known remote MCP servers, from a list bundled with Otari, that the catalog holds now.\n\nEach is matched to the catalog by its URL, so the list is empty until a sync has run.",
+        "operationId": "mcp-catalog-list_popular_mcp_servers",
+        "parameters": [
+          {
+            "description": "A workspace the caller can see. The servers it already has are left out.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A workspace the caller can see. The servers it already has are left out.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogServersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Popular Mcp Servers",
+        "tags": [
+          "mcp-catalog"
+        ]
+      }
+    },
+    "/api/v1/mcp-catalog/servers": {
+      "get": {
+        "description": "Search the catalog of remote MCP servers, or page through all of it with no `q`.\n\nA title that starts with `q` comes first, then a title that contains it, then a\nmatch in the name or description alone; within each, a server whose\n`publisher_kind` is `vendor` comes first. The catalog is\nempty until a sync has run, and stays empty on a deployment whose\n`mcp_catalog_sync` is `off`. Listing a server here permits nothing: a\nworkspace reaches a server only once it is added to that workspace.",
+        "operationId": "mcp-catalog-search_mcp_catalog",
+        "parameters": [
+          {
+            "description": "Text to find in a server's title, name or description",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Text to find in a server's title, name or description",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "A workspace the caller can see. The servers it already has are left out.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A workspace the caller can see. The servers it already has are left out.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogServersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Search Mcp Catalog",
+        "tags": [
+          "mcp-catalog"
+        ]
+      }
+    },
+    "/api/v1/mcp-catalog/sync": {
+      "get": {
+        "description": "Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.",
+        "operationId": "mcp-catalog-get_mcp_catalog_sync",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogSyncStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Mcp Catalog Sync",
+        "tags": [
+          "mcp-catalog"
+        ]
+      },
+      "post": {
+        "description": "Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.\n\nAn operator may always ask. Anyone else names a `workspace_id` they may add MCP\nservers to, and waits out `next_request_at` after the last sync: an hour after\na complete one, five minutes after any other. A sync already running or asked\nfor is left to finish, and this request returns its status.",
+        "operationId": "mcp-catalog-request_mcp_catalog_sync",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/McpCatalogSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpCatalogSyncStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "The caller does not operate the deployment and may not add MCP servers to the workspace."
+          },
+          "409": {
+            "description": "The sync is switched off on this deployment; nothing was started."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "A sync ended too recently for a workspace admin to ask for another; see next_request_at."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Request Mcp Catalog Sync",
+        "tags": [
+          "mcp-catalog"
         ]
       }
     },
