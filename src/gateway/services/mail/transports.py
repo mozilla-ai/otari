@@ -144,6 +144,8 @@ class MailTransport(Protocol):
     """
 
     name: str
+    # False for a transport that shows an email to the deployment operator and delivers it to nobody.
+    delivers_to_recipients: bool
 
     def deliver(self, envelope: MailEnvelope) -> None: ...
 
@@ -152,6 +154,7 @@ class SmtpTransport:
     """Delivers through an SMTP server."""
 
     name = "smtp"
+    delivers_to_recipients = True
 
     def __init__(self, *, host: str, port: int, use_tls: bool, user: str | None, password: str | None) -> None:
         self._host = host
@@ -208,6 +211,7 @@ class ConsoleTransport:
     """
 
     name = "console"
+    delivers_to_recipients = False
 
     def deliver(self, envelope: MailEnvelope) -> None:
         logger.info(
