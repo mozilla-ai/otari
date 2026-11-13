@@ -1,4 +1,4 @@
-# Built-in tools
+dillonvince17@gmail.com # Built-in tools
 
 Otari can run three tools during Chat Completions, Messages, and Responses:
 
