@@ -75,8 +75,10 @@ A client with no secret has nothing to enter again, and the settings form does
 not save an unchanged client ID. Approve the new sign-in server through the API
 instead: send the same client ID again,
 `PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}` with
-`{"oauth_client_id": "<the client ID>"}`. Members stay connected, since it is
-the same client.
+`{"oauth_client_id": "<the client ID>"}`. Otari keeps each member's
+connection, since it is the same client. Whether those connections still work
+is up to the new sign-in server: if it does not accept what the old one issued,
+a member is asked to connect again the next time their token is renewed.
 
 ## Connect your account
 
