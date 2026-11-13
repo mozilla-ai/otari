@@ -1010,8 +1010,8 @@ or turning the fallback on. Two other refusals take precedence:
   `invalid_model`
 
 With `require_pricing: false`, such a request is served with no cost on its
-model tokens and no inline `cost_usd`; priced gateway tools it ran are still
-charged. On an organization's own provider keys, an unpriced model is then
+model tokens and no inline `cost_usd` or `tool_cost_usd`; priced gateway tools
+it ran are still charged. On an organization's own provider keys, an unpriced model is then
 switched on and served free, where `require_pricing: true` keeps it off until
 priced (see [Who is shown which models](models.md#who-is-shown-which-models)).
 

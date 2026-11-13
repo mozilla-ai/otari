@@ -128,10 +128,16 @@ class UsageService:
             rows = await self._usage_logs.request_rows(request_id, api_key_id=api_key_id)
         if rows.served == 0 and rows.errors == 0 and rows.incomplete == 0:
             return None
+        cost_usd = f"{quantize_cost(rows.cost):.6f}" if rows.priced_rows and rows.cost is not None else None
+        # Only where every priced row recorded its tool part: a partial sum would understate it.
+        tool_cost_known = cost_usd is not None and rows.tool_costed_rows == rows.priced_rows
         return RequestSettlement(
             request_id=request_id,
             status="error" if rows.errors else "incomplete" if rows.incomplete else "success",
-            cost_usd=f"{quantize_cost(rows.cost):.6f}" if rows.priced_rows and rows.cost is not None else None,
+            cost_usd=cost_usd,
+            tool_cost_usd=(
+                f"{quantize_cost(rows.tool_cost):.6f}" if tool_cost_known and rows.tool_cost is not None else None
+            ),
             prompt_tokens=rows.prompt_tokens,
             completion_tokens=rows.completion_tokens,
             total_tokens=rows.total_tokens,

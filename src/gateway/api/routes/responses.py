@@ -320,12 +320,7 @@ class _ResponsesAdapter:
         usage = getattr(target, "usage", None)
         if usage is None:
             return False
-        target.usage = usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        target.usage = usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ResponseStreamEvent) -> bool:
@@ -658,7 +653,7 @@ async def create_response(
     return body
 
 
-_INLINE_COST_FIELDS = ("cost_usd", "pricing_source")
+_INLINE_COST_FIELDS = ("cost_usd", "pricing_source", "tool_cost_usd")
 
 
 def response_body(result: Any) -> dict[str, Any]:

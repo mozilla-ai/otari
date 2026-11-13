@@ -21054,7 +21054,7 @@
         "type": "object"
       },
       "RequestSettlement": {
-        "description": "What one request settled at, summed over every usage row it wrote.\n\nA routed request writes a row per attempt and a vision-normalized one a row for\nthe describe call, all sharing the ``Otari-Request-ID`` the caller was sent as\ntheir ``request_group_id``, so this is the request's whole bill rather than one\nattempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null\nwhen no row was priced. ``status`` is ``error`` if any row is an error, and\n``incomplete`` for a stream the client abandoned before the provider reported\nany usage.",
+        "description": "What one request settled at, summed over every usage row it wrote.\n\nA routed request writes a row per attempt and a vision-normalized one a row for\nthe describe call, all sharing the ``Otari-Request-ID`` the caller was sent as\ntheir ``request_group_id``, so this is the request's whole bill rather than one\nattempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null\nwhen no row was priced. ``tool_cost_usd`` is the part of it that is per-call\ntool charges, in the same format, for a completion (Chat Completions,\nMessages, Responses); it is null where ``cost_usd`` is, for any other kind\nof request, and where a row does not record it (written before the gateway\ndid, or whose tool calls could not be priced). ``status`` is ``error`` if any row is an error, and\n``incomplete`` for a stream the client abandoned before the provider reported\nany usage.",
         "properties": {
           "completion_tokens": {
             "title": "Completion Tokens",
@@ -21092,6 +21092,17 @@
             "title": "Status",
             "type": "string"
           },
+          "tool_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Cost Usd"
+          },
           "total_tokens": {
             "title": "Total Tokens",
             "type": "integer"
@@ -21101,6 +21112,7 @@
           "request_id",
           "status",
           "cost_usd",
+          "tool_cost_usd",
           "prompt_tokens",
           "completion_tokens",
           "total_tokens",

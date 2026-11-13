@@ -145,6 +145,8 @@ def test_non_streaming_response_carries_its_request_id_and_settled_cost(
     usage = response.json()["usage"]
     assert usage["cost_usd"] == "0.300000"
     assert usage["pricing_source"] == "deployment"
+    # No tool ran, so none of the cost is tool charges.
+    assert usage["tool_cost_usd"] == "0.000000"
     assert _logged_cost(db_session_factory) == Decimal(usage["cost_usd"])
 
 
@@ -166,6 +168,7 @@ def test_streaming_response_carries_cost_on_its_terminal_usage_chunk(
     assert len(usages) == 1
     assert usages[0]["cost_usd"] == "0.300000"
     assert usages[0]["pricing_source"] == "deployment"
+    assert usages[0]["tool_cost_usd"] == "0.000000"
     assert _logged_cost(db_session_factory) == Decimal("0.300000")
 
 
@@ -201,6 +204,7 @@ def test_unpriced_model_response_has_a_request_id_and_no_cost(
     usage = response.json()["usage"]
     assert "cost_usd" not in usage
     assert "pricing_source" not in usage
+    assert "tool_cost_usd" not in usage
 
 
 def test_each_request_gets_its_own_request_id(
@@ -280,6 +284,7 @@ def test_a_successful_request_settles_to_the_cost_its_response_carried(
         "request_id": request_id,
         "status": "success",
         "cost_usd": response.json()["usage"]["cost_usd"],
+        "tool_cost_usd": "0.000000",
         "prompt_tokens": 100_000,
         "completion_tokens": 200_000,
         "total_tokens": 300_000,
@@ -298,6 +303,7 @@ def test_an_unpriced_request_settles_with_no_cost(
     settled = _settlement(client, response.headers[REQUEST_ID_HEADER], master_key_header)
     assert settled.status_code == 200, settled.text
     assert settled.json()["cost_usd"] is None
+    assert settled.json()["tool_cost_usd"] is None
 
 
 def test_an_api_key_sees_its_own_requests_and_no_other_keys(
