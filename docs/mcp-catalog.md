@@ -143,12 +143,20 @@ A sync stops early when the registry fails three attempts at a page, when a
 page takes more than three minutes, after 5,000 pages, or after 30 minutes. A
 gateway that shuts down mid-sync ends it as `partial` too.
 
+It also stops when the registry's answer points to the next page in a way it
+cannot follow: a cursor that is not a non-empty string, or the same cursor it
+was asked for. Reading the first as the last page would remove every server
+the sync had not reached yet, and following the second would read the same
+page forever. After a repeated cursor, the next sync starts over.
+
 Two answers from the registry are not trusted, because a registry cut short is
 more likely than one that emptied overnight, and both remove nothing:
 
 - a last page reached with no server kept at all, reported as `failed`;
-- a last page reached with fewer than half the servers the catalog holds,
-  reported as `partial`.
+- a last page reached having seen fewer than half the servers the catalog held
+  when the sync began, reported as `partial`. Servers the sync added along the
+  way do not count toward that half, and a sync that resumes keeps the number
+  from when it first began.
 
 In `scheduled` mode, a sync that did not complete is tried again an hour later.
 
