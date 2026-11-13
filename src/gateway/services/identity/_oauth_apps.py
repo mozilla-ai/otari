@@ -78,6 +78,9 @@ class OAuthAppService:
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent without leaving an active key for an abandoned approval."""
         self.require_registered_redirect(request.client_id, request.redirect_uri)
+        approved = checked_scopes(self.apps[request.client_id].scopes, is_service_key=False)
+        if approved != checked_scopes(request.scopes, is_service_key=False):
+            raise OAuthAppGrantError("invalid_request", "The app's access changed while you were approving it")
         now = self.clock()
         code = secrets.token_urlsafe(32)
         async with self.uow:
@@ -96,7 +99,7 @@ class OAuthAppService:
                 challenge=request.code_challenge,
                 user_id=user.id,
                 workspace_id=workspace.id,
-                scopes=checked_scopes(self.apps[request.client_id].scopes, is_service_key=False),
+                scopes=approved,
                 expires_at=now + timedelta(minutes=2),
             )
             await self.grants.prune_expired(now)

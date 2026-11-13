@@ -24,7 +24,7 @@ from .test_organization_member_keys import _World
 from .test_organization_member_keys import world as world
 
 
-def _consent(world: _World) -> dict[str, str]:
+def _consent(world: _World) -> dict[str, object]:
     return dict(
         client_id="thunderbolt",
         redirect_uri=REDIRECT,
@@ -32,6 +32,7 @@ def _consent(world: _World) -> dict[str, str]:
         code_challenge=generate_code_challenge(VERIFIER),
         code_challenge_method="S256",
         workspace_id=str(world.workspaces["alpha_one"]),
+        scopes=["inference:run"],
     )
 
 
@@ -104,6 +105,7 @@ def test_header_authenticated_scripts_can_approve_consent(
             "code_challenge": generate_code_challenge(VERIFIER),
             "code_challenge_method": "S256",
             "workspace_id": workspaces.json()["data"][0]["id"],
+            "scopes": ["inference:run"],
         },
     )
     assert response.status_code == 200, response.text

@@ -2076,6 +2076,14 @@
             "title": "Response Type",
             "type": "string"
           },
+          "scopes": {
+            "description": "The scopes the consent screen showed. A registration that no longer names these is refused.",
+            "items": {
+              "$ref": "#/components/schemas/KeyScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
           "state": {
             "maxLength": 256,
             "minLength": 16,
@@ -2095,7 +2103,8 @@
           "state",
           "code_challenge",
           "code_challenge_method",
-          "workspace_id"
+          "workspace_id",
+          "scopes"
         ],
         "title": "AppAuthorizationRequest",
         "type": "object"

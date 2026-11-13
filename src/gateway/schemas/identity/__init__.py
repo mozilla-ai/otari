@@ -15,6 +15,7 @@ from gateway.models.identity import (
 )
 from gateway.models.tenancy import AVATAR_FACE_COUNT, OrganizationDomainRole
 from gateway.schemas.identity.oauth_apps import OAuthClientId, OAuthRedirectUri, OAuthState, PKCECodeChallenge
+from gateway.types.key_scope import KeyScope
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
@@ -414,3 +415,6 @@ class AppAuthorizationRequest(BaseModel):
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"
     workspace_id: uuid.UUID
+    scopes: list[KeyScope] = Field(
+        description="The scopes the consent screen showed. A registration that no longer names these is refused."
+    )

@@ -53,6 +53,7 @@ def approve(
         code_challenge=pkce_challenge(VERIFIER),
         code_challenge_method="S256",
         workspace_id=str(world.workspaces[workspace]),
+        scopes=["inference:run"],
     )
     body.update(changes)
     return client.post(f"{API_ROOT}/oauth/apps/authorize", json=body, headers={"Sec-Fetch-Site": "same-origin"})
@@ -255,6 +256,20 @@ def test_removed_app_cannot_exchange_a_pending_approval(
     code = code_from(approve(client, world))
     test_config.oauth_apps.clear()
     assert redeem(client, code).status_code == 400
+
+
+def test_a_registration_that_moved_while_the_person_read_it_refuses_the_approval(
+    client: TestClient, world: _World, test_config: GatewayConfig
+) -> None:
+    """The consent screen is served before Approve, so the approval says what it showed."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN, KeyScope.FILES_WRITE]
+    )
+
+    refused = approve(client, world)
+
+    assert refused.status_code == 400, refused.text
+    assert "changed while you were approving" in refused.text, refused.text
 
 
 def test_widening_a_registration_does_not_widen_an_approval_already_given(

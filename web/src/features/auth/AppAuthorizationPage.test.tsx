@@ -98,6 +98,7 @@ it("shows the app, permission boundaries and the sole workspace before explicit 
   expect(JSON.parse(String(call?.[1]?.body))).toEqual({
     ...Object.fromEntries(request),
     workspace_id: "workspace-one",
+    scopes: ["inference:run"],
   })
 })
 

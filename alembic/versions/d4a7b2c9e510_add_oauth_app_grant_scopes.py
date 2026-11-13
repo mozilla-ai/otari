@@ -31,11 +31,11 @@ _TABLE = "oauth_app_grants"
 def upgrade() -> None:
     """Clear the grants approved before scopes existed, then add the column they owe."""
     op.execute(sa.text(f"DELETE FROM {_TABLE}"))
-    # Batch mode because SQLite cannot add a NOT NULL column without a default
-    # in place; it rebuilds the emptied table instead. The column takes no
-    # default, so an insert that omits the scopes fails rather than storing a
-    # grant that redeems to a key reaching nothing.
-    with op.batch_alter_table(_TABLE) as batch_op:
+    # The column takes no default, so an insert that omits the scopes fails
+    # rather than storing a grant that redeems to a key reaching nothing.
+    # NOTE: recreate="always" because SQLite cannot add a NOT NULL column with
+    # no default by ALTER, and batch mode does not rebuild for an add alone.
+    with op.batch_alter_table(_TABLE, recreate="always") as batch_op:
         batch_op.add_column(sa.Column("scopes", sa.JSON(), nullable=False))
 
 
