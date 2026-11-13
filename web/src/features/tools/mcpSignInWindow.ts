@@ -104,12 +104,14 @@ export function markSignInWindow(state: string): void {
 
 /** Whether this sign-in was started in a popup by a dashboard page. */
 export function isSignInWindow(state: string | undefined): boolean {
-  return state !== undefined && state !== "" && state in readPending()
+  return (
+    state !== undefined && state !== "" && Object.hasOwn(readPending(), state)
+  )
 }
 
 export function forgetSignInWindow(state: string): void {
   const pending = readPending()
-  if (!(state in pending)) return
+  if (!Object.hasOwn(pending, state)) return
   delete pending[state]
   writePending(pending)
 }
