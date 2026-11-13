@@ -1,80 +1,6 @@
 import type { KeyScope } from "@/client"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-
-type ScopeInfo = {
-  scope: KeyScope
-  label: string
-  /** Set where a leaked key holding the scope could do lasting harm. */
-  risk?: string
-}
-
-/**
- * Every scope, in the gateway's order (`types/key_scope.py`). A record rather
- * than a list so that a scope the gateway adds fails the typecheck until it is
- * described here: one missing would be dropped from a key on its next save.
- * The end-user scopes come last and are offered only on a service key.
- */
-const SCOPE_INFO: Record<KeyScope, Omit<ScopeInfo, "scope">> = {
-  inference: { label: "Call models" },
-  "files:read": { label: "List and download files" },
-  "files:write": {
-    label: "Upload and delete files",
-    risk: "Can delete files",
-  },
-  "batches:read": { label: "List batches and read their results" },
-  "batches:write": {
-    label: "Create and cancel batches",
-    risk: "Can queue spend that runs after the key is revoked",
-  },
-  web: { label: "Search and fetch the web" },
-  "code:execute": {
-    label: "Run code in the sandbox",
-    risk: "Runs arbitrary code",
-  },
-  "mcp:read": { label: "List MCP servers and their tools" },
-  "mcp:execute": {
-    label: "Call MCP tools",
-    risk: "Acts on the systems those tools reach",
-  },
-  "telemetry:write": { label: "Send OpenTelemetry data" },
-  agents: { label: "Coding-agent hooks and model recommendations" },
-  "usage:read": { label: "Read its own budget and usage" },
-  "usage:write": { label: "Report usage observed elsewhere" },
-  "end_users:read": { label: "List its end users" },
-  "end_users:write": { label: "Create, move and block its end users" },
-  "end_users:delete": {
-    label: "Delete its end users",
-    risk: "Erases their records for good",
-  },
-}
-
-const SCOPES: readonly ScopeInfo[] = Object.entries(SCOPE_INFO).map(
-  ([scope, info]) => ({ scope: scope as KeyScope, ...info }),
-)
-
-type ScopeGroup = {
-  label: string
-  scopes: readonly KeyScope[]
-  serviceKeyOnly?: boolean
-}
-
-/** How the form lays the scopes out. Each scope belongs to exactly one group. */
-const GROUPS: readonly ScopeGroup[] = [
-  { label: "Models", scopes: ["inference"] },
-  { label: "Files", scopes: ["files:read", "files:write"] },
-  { label: "Batches", scopes: ["batches:read", "batches:write"] },
-  {
-    label: "Tools",
-    scopes: ["web", "code:execute", "mcp:read", "mcp:execute"],
-  },
-  { label: "Coding agents", scopes: ["agents", "telemetry:write"] },
-  { label: "Usage", scopes: ["usage:read", "usage:write"] },
-  {
-    label: "End users",
-    scopes: ["end_users:read", "end_users:write", "end_users:delete"],
-    serviceKeyOnly: true,
-  },
-]
+import { GROUPS, SCOPE_INFO, SCOPES } from "@/features/keys/scopes"
 
 const END_USER_SCOPES: ReadonlySet<KeyScope> = new Set(
   GROUPS.filter((group) => group.serviceKeyOnly).flatMap(
@@ -87,7 +13,7 @@ export const DEFAULT_KEY_SCOPES: readonly KeyScope[] = ["inference"]
 
 /** The scopes once each, in the gateway's order, so two lists compare equal when they hold the same. */
 const ordered = (scopes: readonly KeyScope[]): KeyScope[] =>
-  SCOPES.map((info) => info.scope).filter((scope) => scopes.includes(scope))
+  SCOPES.map(([scope]) => scope).filter((scope) => scopes.includes(scope))
 
 /**
  * The scopes a key is sent with: a key that is not a service key cannot hold
@@ -136,7 +62,7 @@ export function KeyScopeFields({
             held.includes(scope),
           ).length
           return (
-            <div key={group.label} className="flex flex-col">
+            <div key={group.key} className="flex flex-col">
               {group.scopes.length > 1 ? (
                 <Checkbox
                   isSelected={count === group.scopes.length}
