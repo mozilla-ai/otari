@@ -319,17 +319,29 @@ to is not refused. The model gets one stand-in tool for that server,
 user's own sign-in. When the user asks for something that server does, the model
 calls it, and the result carries a link to show:
 `<public_base_url>/api/v1/mcp-connections/sign-in?ticket=...`. The person opens
-it, signs in with their own account, and lands on a plain Otari page that tells
-them to go back to the conversation. The next request uses the new connection.
+it and gets a plain Otari page that names the server and the Otari user the
+account will be attached to, and asks them to continue only if that user is
+them. They continue, sign in with their own account, and land on a plain Otari
+page that tells them to go back to the conversation. The next request uses the
+new connection.
 
 - **The link is minted for the key's own user, and only when the model reaches
   for the server.** Making one stores nothing: it carries the server and the user
-  sealed with `OTARI_SECRET_KEY` and works for 30 minutes. Opening it starts a
-  sign-in that finishes on its state alone, since the person may have no
-  dashboard session; opening it again replaces the sign-in it started before.
+  sealed with `OTARI_SECRET_KEY` and works for 30 minutes.
+- **Opening the link starts nothing.** The page it shows starts the sign-in only
+  when the person clicks **This is me, continue**, and only that page can ask:
+  a request from another site gets the page again. So a link previewer, a mail
+  scanner or another site cannot start a sign-in for someone. Continuing again
+  replaces the sign-in started before.
+- **A dashboard session is checked, and none is needed.** With no session, the
+  sign-in finishes on its state alone, and the page is what tells the person
+  whose link it is. A link continued in a dashboard session is bound to that
+  session and finishes in the dashboard. A session that belongs to a different
+  user than the link's is refused.
 - **Treat a link like a short-lived invitation.** Whoever opens it within its 30
-  minutes connects the account they sign in with to that user. It never carries
-  a token or the sign-in's state, and the log masks it.
+  minutes and continues connects the account they sign in with to that user, so
+  nobody should open a sign-in link someone else sent them. It never carries a
+  token or the sign-in's state, and the log masks it.
 - **Only Otari makes the link.** It always starts with the deployment's own
   `public_base_url`, and the stand-in tool tells the model to show no sign-in
   link that came from anywhere else. A server's name reaches the model with
@@ -385,8 +397,11 @@ the server does not offer.
 without storing anything, which is what the dashboard's **Test connection**
 button calls before a save. It takes `url`, `authorization_token` and
 `allowed_tools`, and answers with what `health` would say. Pass `server_id` and
-omit `authorization_token` to test with that server's stored token; `""` tests
-with none. An unsafe URL is refused with the same `400` a create gets.
+omit `authorization_token` to test with that server's stored token or shared
+account; `""` tests with none. A stored credential is only sent to a `url` on
+that server's own origin (scheme, host and port): any other is refused with a
+`400`, so a test cannot carry the credential to another address. An unsafe URL
+is refused with the same `400` a create gets.
 
 `health` is `null` until a check has run or a request has reached the server.
 `tool_count` is `null` on a healthy server whose only contact was a request that
@@ -612,7 +627,7 @@ The enabled stored servers of the key's workspace whose
 [access list](#server-access) grants it something, which is what to send in
 `mcp_server_ids`. `sign_in_required` is true for a
 [per-user server](#credential-mode) the key's user has not signed in to yet, and
-`sign_in_url` is then a link that starts their sign-in, good for 30 minutes.
+`sign_in_url` is then a link to the page that starts their sign-in, good for 30 minutes.
 Making the link stores nothing, so listing costs nothing. A key with no user does
 not see such a server at all. The URL and the token are
 never returned. A master key has no

@@ -110,9 +110,11 @@ server's **Availability** to **Every request**, or your client names the server 
 `mcp_server_ids`, just ask your agent for something the server does:
 
 1. Ask, for example "check my open Jira tasks".
-2. The agent answers with a sign-in link. Open it within 30 minutes and sign in
-   with your own account.
-3. A page says you are signed in. Go back to the conversation and ask again.
+2. The agent answers with a sign-in link. Open it within 30 minutes.
+3. An Otari page names the server and the Otari user your account will be
+   attached to. Check that the user is you, then click **This is me, continue**
+   and sign in with your own account.
+4. A page says you are signed in. Go back to the conversation and ask again.
 
 The second ask uses your account.
 
@@ -123,8 +125,14 @@ An address that only starts the same way, such as
 `https://otari.example.com.other.site/...`, is not Otari: do not open it.
 
 Keep the link to yourself. It is made for you, from the key your agent uses, and
-whoever opens it within its 30 minutes connects the account they sign in with to
-you.
+whoever opens it within its 30 minutes and continues connects the account they
+sign in with to you.
+
+Never open a sign-in link someone else sent you. It is made for their Otari
+user, so signing in through it would hand them the use of your account on that
+server. The page the link opens names the user it is for: if that is not you, or
+you did not ask for the link yourself, close the page. If you are signed in to
+the Otari dashboard as a different user, the page refuses to continue.
 
 ## What your keys see before you connect
 
