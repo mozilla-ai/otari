@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED
 from gateway.exceptions.tools_exceptions import (
     DirectToolCallError,
@@ -24,7 +24,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, ToolUse
 from gateway.schemas.tools import FetchRequest, SearchRequest
-from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolService, DirectToolUsage
+from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolRate, DirectToolService, DirectToolUsage
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 
 WORKSPACE = uuid.uuid4()
@@ -63,8 +63,8 @@ class _Ledger:
     async def organization_of(self, api_key_id: str | None) -> None:
         return None
 
-    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
-        return self.rate
+    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> DirectToolRate | None:
+        return DirectToolRate(self.rate, "deployment") if self.rate is not None else None
 
     async def hold(self, user_id: str, amount: Decimal, **_: Any) -> str:
         self.steps.append(("hold", user_id, amount))
@@ -168,7 +168,7 @@ async def test_a_served_call_settles_its_hold_at_the_reported_cost() -> None:
     outcome = await _search(ledger=ledger, gates=gates)
 
     assert outcome.response.search_tool == "fake-search"
-    assert outcome.headers == RATE_LIMIT
+    assert outcome.headers == {**RATE_LIMIT, COST_USD_HEADER: "0.007000", PRICING_SOURCE_HEADER: "reported"}
     assert ledger.steps == [
         ("hold", "billed", Decimal("0.01")),
         ("admit_funding",),
@@ -192,9 +192,21 @@ async def test_a_served_call_settles_its_hold_at_the_reported_cost() -> None:
 async def test_a_call_whose_provider_reports_no_cost_settles_at_the_rate() -> None:
     ledger = _Ledger()
 
-    await _search(tool="fake-free", ledger=ledger)
+    outcome = await _search(tool="fake-free", ledger=ledger)
 
     assert ledger.steps[-1] == ("settle", "hold", Decimal("0.01"))
+    assert outcome.headers[COST_USD_HEADER] == "0.010000"
+    assert outcome.headers[PRICING_SOURCE_HEADER] == "deployment"
+
+
+@pytest.mark.asyncio
+async def test_an_unpriced_call_answers_without_a_cost() -> None:
+    ledger = _Ledger(rate=None)
+
+    outcome = await _search(tool="fake-free", ledger=ledger)
+
+    assert ledger.steps[-1] == ("settle", "hold", Decimal(0))
+    assert outcome.headers == RATE_LIMIT
 
 
 @pytest.mark.asyncio

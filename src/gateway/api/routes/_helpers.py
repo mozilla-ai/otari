@@ -12,7 +12,13 @@ from sqlmodel import col
 from starlette.types import Message
 
 from gateway.api.request_id import set_request_id
-from gateway.core.config import CONVERSATION_HEADER, END_USER_BUDGET_HEADER, ROUTER_HEADER
+from gateway.core.config import (
+    CONVERSATION_HEADER,
+    COST_USD_HEADER,
+    END_USER_BUDGET_HEADER,
+    PRICING_SOURCE_HEADER,
+    ROUTER_HEADER,
+)
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
@@ -35,6 +41,21 @@ if TYPE_CHECKING:
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
+
+# How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.
+DIRECT_TOOL_COST_HEADERS: dict[str, Any] = {
+    COST_USD_HEADER: {
+        "description": "What the call cost, as a six-decimal USD string; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    PRICING_SOURCE_HEADER: {
+        "description": (
+            "What priced it: organization, deployment or defaults (a rate), or reported (the provider's own "
+            "charge); absent when it was not priced"
+        ),
+        "schema": {"type": "string"},
+    },
+}
 
 
 def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:

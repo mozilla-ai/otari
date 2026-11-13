@@ -10,16 +10,19 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
+from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
+from gateway.ports.billing_port import InsufficientFundsError
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReachableError, SandboxSessionGoneError
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
@@ -157,6 +160,7 @@ def test_runs_the_code_as_sent_and_bills_the_run(
     }
     assert [run["code"] for run in port.executed] == [code], "the code reaches the sandbox byte for byte"
     assert "Otari-Container-Id" not in resp.headers, "a run that asked for no container holds none"
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.005000", "deployment")
     assert port.opened[0]["keep_alive_s"] is None
     (row,) = _rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["model"], row["provider"], row["status"]) == ("code_execution", "otari", "success")
@@ -177,6 +181,7 @@ def test_code_that_fails_is_still_billed(
 
     assert resp.status_code == 200, resp.text
     assert (resp.json()["stderr"], resp.json()["return_code"]) == ("ZeroDivisionError", 1)
+    assert resp.headers[COST_USD_HEADER] == "0.005000"
     (row,) = _rows(client, master_key_header, api_key_obj["user_id"])
     assert row["status"] == "success"
     assert row["cost"] == pytest.approx(0.005), "the sandbox ran the code, whatever it did"
@@ -223,6 +228,8 @@ def test_auto_holds_the_sandbox_and_its_id_runs_there_again(
     first = client.post(_ENDPOINT, json={"code": "x = 2", "container": "auto"}, headers=api_key_header)
 
     assert first.status_code == 200, first.text
+    assert COST_USD_HEADER not in first.headers, "an unpriced run names no cost"
+    assert PRICING_SOURCE_HEADER not in first.headers
     container_id = first.headers["Otari-Container-Id"]
     assert container_id.startswith(CONTAINER_ID_PREFIX)
     assert first.headers["Otari-Container-Expires-At"]
@@ -312,6 +319,24 @@ def test_an_unpriced_run_is_refused_where_pricing_is_required(
 
     assert resp.status_code == 402, resp.text
     assert "otari:code_execution" in resp.json()["detail"]
+    assert COST_USD_HEADER not in resp.headers, "a refused run was not charged"
+    assert port.opened == []
+
+
+def test_a_run_without_funds_is_refused_before_the_sandbox_with_no_cost(
+    client: TestClient, port: _FakePort, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    _price(client, master_key_header, 5000.0)
+    with patch(
+        "gateway.api.routes.code_execution.admit_deployment_paid",
+        new=AsyncMock(side_effect=InsufficientFundsError(Decimal(0))),
+    ):
+        resp = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+
+    assert resp.status_code == 402, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert COST_USD_HEADER not in resp.headers
+    assert PRICING_SOURCE_HEADER not in resp.headers
     assert port.opened == []
 
 
@@ -330,6 +355,7 @@ def test_an_unreachable_sandbox_is_a_502_and_refunds_the_hold(
 
     assert resp.status_code == 502, resp.text
     assert "connect failed" not in resp.text
+    assert COST_USD_HEADER not in resp.headers, "a run the sandbox never took is refunded, so it names no cost"
     (row,) = _rows(client, master_key_header, "sandbox-down")
     assert (row["status"], row["status_code"]) == ("error", 502)
     session = db_session_factory()

@@ -224,6 +224,7 @@ from gateway.services.tools import (
     DirectCaller,
     DirectToolCall,
     DirectToolLedger,
+    DirectToolRate,
     DirectToolService,
     DirectToolUsage,
     McpGrantMembershipListener,
@@ -2918,7 +2919,9 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
         async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
             return await organization_for_key_id(db, api_key_id)
 
-        async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+        async def unit_rate(
+            self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None
+        ) -> DirectToolRate | None:
             rate = await resolve_tool_rate(
                 db,
                 call.rate_keys,
@@ -2926,7 +2929,7 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 deployment_paid=call.deployment_paid,
                 organization_id=organization_id,
             )
-            return rate.unit_rate if rate is not None else None
+            return DirectToolRate(rate.unit_rate, rate.source) if rate is not None else None
 
         async def hold(
             self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
