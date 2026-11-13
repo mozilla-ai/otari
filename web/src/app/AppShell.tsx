@@ -468,7 +468,8 @@ function NavGroup({
  * profile questions, in the build that has a signup. It is mounted here rather
  * than anywhere else because its position *is* its contract, all three
  * boundaries of it, and the module docstring is where that lives. The base
- * default renders its children unchanged, so this build shows no step at all.
+ * default renders its children unchanged, with the operator's one-time welcome
+ * over them.
  */
 export function AppShell() {
   return (
