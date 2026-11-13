@@ -1,0 +1,10 @@
+# Keys and secrets: yours, the gateway's, and the demo people's.
+.env
+keys.env
+keys.env.new
+.last.json
+webui/.*.env
+# What the gateway and the bench write while they run.
+otari-files/
+bench/results-*.json
+__pycache__/

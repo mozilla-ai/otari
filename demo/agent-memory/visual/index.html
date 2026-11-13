@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared Agent Memory</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e4e2dc;
+    --accent: #3b5bdb; --accent-soft: #e7ecfd; --good: #2b8a3e; --good-soft: #e6f4ea;
+    --warn: #b35c00; --warn-soft: #fff1e0; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121212; --panel: #1c1c1c; --ink: #ecebe8; --muted: #9c9a94; --line: #2e2e2c;
+      --accent: #8ea6ff; --accent-soft: #1f2846; --good: #69c27f; --good-soft: #17301f;
+      --warn: #f0a050; --warn-soft: #3a2812; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121212; --panel: #1c1c1c; --ink: #ecebe8; --muted: #9c9a94; --line: #2e2e2c;
+    --accent: #8ea6ff; --accent-soft: #1f2846; --good: #69c27f; --good-soft: #17301f;
+    --warn: #f0a050; --warn-soft: #3a2812; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
+    padding: 18px 28px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .switches { display: flex; gap: 18px; flex-wrap: wrap; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; user-select: none; }
+  .switch input { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--line);
+    position: relative; cursor: pointer; transition: background .2s; margin: 0; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { transform: translateX(16px); }
+  .switch input:disabled { opacity: .4; cursor: not-allowed; }
+  main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 24px; padding: 24px 28px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 16px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; box-shadow: var(--shadow); }
+  .entries { display: flex; flex-direction: column; gap: 8px; }
+  .entry { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px;
+    transition: border-color .3s, background .3s, transform .3s; }
+  .entry.lit { border-color: var(--good); background: var(--good-soft); transform: translateX(4px); }
+  .entry.new { animation: arrive 1.2s ease-out; }
+  @keyframes arrive { from { background: var(--accent-soft); border-color: var(--accent); } }
+  .tags { display: flex; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+  .tag.private { background: var(--warn-soft); color: var(--warn); }
+  .teach { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  textarea, input[type=text] { width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  textarea { min-height: 70px; resize: vertical; }
+  button { font: inherit; border: 0; border-radius: 8px; padding: 10px 16px; background: var(--accent); color: #fff;
+    cursor: pointer; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); font-weight: 500; padding: 6px 12px; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .ask { display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; gap: 10px; }
+  .row input { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 13px; }
+  .earlier { font-size: 13px; color: var(--muted); }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  @media (max-width: 700px) { .results { grid-template-columns: 1fr; } }
+  .answer { min-height: 180px; display: flex; flex-direction: column; gap: 12px; }
+  .answer.with { border-color: var(--good); }
+  .answer .title { display: flex; justify-content: space-between; align-items: baseline; }
+  .answer .text { white-space: pre-wrap; flex: 1; }
+  .meta { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .recalled { display: flex; flex-direction: column; gap: 6px; }
+  .recalled .entry { background: var(--good-soft); border-color: var(--good); }
+  .empty { color: var(--muted); font-size: 13.5px; }
+  .busy { color: var(--muted); font-style: italic; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shared agent memory <span>· Otari</span></h1>
+  <div class="switches">
+    <label class="switch"><input type="checkbox" id="recall"> Recall automatically</label>
+    <label class="switch"><input type="checkbox" id="rerank"> Check relevance</label>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <h2>What the team's agents know</h2>
+    <div class="entries" id="entries"><div class="empty">Loading…</div></div>
+    <div class="teach">
+      <h2 style="margin-top:12px">Teach memory, as Alice's agent</h2>
+      <textarea id="teachText" placeholder="Something an agent learned"></textarea>
+      <div class="row">
+        <button class="ghost" id="teachExample" type="button">Use the tag example</button>
+        <button id="teach" type="button">Propose</button>
+      </div>
+      <div class="note" id="teachNote">The consolidator screens it, compares it with what memory holds, and decides.</div>
+    </div>
+  </section>
+  <section>
+    <div class="panel ask">
+      <h2>Ask, as Bob's agent</h2>
+      <input type="text" id="earlier" placeholder="Earlier in the conversation (optional)">
+      <div class="row">
+        <input type="text" id="question" placeholder="A question">
+        <button id="ask" type="button">Ask</button>
+      </div>
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="results">
+      <div class="panel answer" id="without">
+        <div class="title"><h2>Without memory</h2></div>
+        <div class="text empty">The same question, with memory declined.</div>
+      </div>
+      <div class="panel answer with" id="with">
+        <div class="title"><h2>With memory</h2></div>
+        <div class="text empty">What memory adds before the model sees the question.</div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const PRESETS = [
+  { label: "Staging deploy failed", question: "Our staging deploy failed with 'tag not found'. What should I do? Answer in two sentences." },
+  { label: "Our last meeting", earlier: "I've been talking with Alejandro about how agents could share memory across models and sessions.",
+    question: "What did we decide in our last meeting?" },
+  { label: "Alejandro for fun", question: "What does Alejandro do for fun?" },
+  { label: "Nothing to recall", question: "Write a haiku about autumn." },
+];
+const TAG_EXAMPLE = "A staging deploy fails with tag not found unless the release tag was pushed first: run git push --tags before make deploy-staging.";
+const $ = (id) => document.getElementById(id);
+let known = new Set();
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function entryCard(entry, fresh) {
+  const card = el("div", "entry" + (fresh ? " new" : ""));
+  card.dataset.id = entry.id;
+  const tags = el("div", "tags");
+  tags.append(el("span", "tag", entry.kind));
+  tags.append(el("span", "tag" + (entry.scope === "member" ? " private" : ""), entry.scope === "member" ? "private" : "shared"));
+  if (entry.version > 1) tags.append(el("span", "tag", "v" + entry.version));
+  card.append(tags, el("div", "", entry.text));
+  return card;
+}
+
+function render(state) {
+  $("recall").checked = state.auto_recall;
+  $("rerank").checked = state.recall_rerank && state.rerank_available;
+  $("rerank").disabled = !state.rerank_available;
+  const list = $("entries");
+  list.replaceChildren();
+  if (!state.entries.length) list.append(el("div", "empty", "Nothing yet."));
+  for (const entry of state.entries) list.append(entryCard(entry, known.size > 0 && !known.has(entry.id)));
+  known = new Set(state.entries.map((entry) => entry.id));
+}
+
+async function call(path, body) {
+  const response = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function showAnswer(id, result, title) {
+  const box = $(id);
+  box.replaceChildren();
+  const head = el("div", "title");
+  head.append(el("h2", "", title));
+  box.append(head);
+  if (result.error) { box.append(el("div", "text empty", result.error)); return; }
+  box.append(el("div", "text", result.answer));
+  if (id === "with") {
+    const recalled = el("div", "recalled");
+    recalled.append(el("h2", "", result.recalled.length ? `Memory added ${result.recalled.length}` : "Memory added nothing"));
+    for (const entry of result.recalled) recalled.append(entryCard(entry, false));
+    box.append(recalled);
+  }
+  const meta = el("div", "meta");
+  meta.append(el("span", "", `${result.prompt_tokens ?? "?"} tokens in`), el("span", "", `${result.completion_tokens ?? "?"} out`),
+              el("span", "", `${(result.ms / 1000).toFixed(1)} s`));
+  box.append(meta);
+}
+
+function light(ids) {
+  for (const card of $("entries").children) card.classList.toggle("lit", ids.has(card.dataset.id));
+}
+
+async function ask() {
+  const question = $("question").value.trim();
+  if (!question) return;
+  $("ask").disabled = true;
+  light(new Set());
+  for (const id of ["without", "with"]) {
+    const box = $(id);
+    box.querySelector(".text")?.replaceWith(el("div", "text busy", "Thinking…"));
+  }
+  try {
+    const result = await call("/api/ask", { question, earlier: [$("earlier").value], who: "BOB" });
+    showAnswer("without", result.without, "Without memory");
+    showAnswer("with", result.with, "With memory");
+    light(new Set((result.with.recalled || []).map((entry) => entry.id)));
+  } catch (error) {
+    showAnswer("with", { error: String(error) }, "With memory");
+  } finally {
+    $("ask").disabled = false;
+  }
+}
+
+async function settings() {
+  render(await call("/api/settings", { auto_recall: $("recall").checked, recall_rerank: $("rerank").checked }));
+}
+
+async function teach() {
+  const text = $("teachText").value.trim();
+  if (!text) return;
+  $("teach").disabled = true;
+  $("teachNote").textContent = "Proposed. The consolidator is deciding…";
+  try {
+    const result = await call("/api/teach", { text, kind: "procedure" });
+    if (result.refused) { $("teachNote").textContent = "Refused: " + result.refused; return; }
+    render(result.state);
+    $("teachText").value = "";
+    $("teachNote").textContent = "Kept. It is now in what the team's agents know.";
+  } catch (error) {
+    $("teachNote").textContent = String(error);
+  } finally {
+    $("teach").disabled = false;
+  }
+}
+
+for (const preset of PRESETS) {
+  const chip = el("button", "ghost chip", preset.label);
+  chip.type = "button";
+  chip.onclick = () => { $("earlier").value = preset.earlier || ""; $("question").value = preset.question; ask(); };
+  $("chips").append(chip);
+}
+$("ask").onclick = ask;
+$("question").addEventListener("keydown", (event) => { if (event.key === "Enter") ask(); });
+$("recall").onchange = settings;
+$("rerank").onchange = settings;
+$("teach").onclick = teach;
+$("teachExample").onclick = () => { $("teachText").value = TAG_EXAMPLE; };
+call("/api/state").then(render).catch((error) => { $("entries").replaceChildren(el("div", "empty", String(error))); });
+</script>
+</body>
+</html>

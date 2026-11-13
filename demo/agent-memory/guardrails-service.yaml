@@ -1,0 +1,16 @@
+# any-guardrail's service configuration, mounted into the anyguardrails container (docker-compose.yml).
+# One profile, prompt-injection, answered by PIGuard in the encoderfile container: nothing is downloaded here.
+
+threadpool:
+  max_workers: 8
+
+providers:
+  encoderfile:
+    type: EncoderfileProvider
+    base_url: "http://encoderfile:8080"
+
+guardrails:
+  # The InjecGuard class over the encoderfile provider; the model is whatever the container serves (PIGuard).
+  prompt-injection:
+    guardrail_name: injec_guard
+    provider: encoderfile

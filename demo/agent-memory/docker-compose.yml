@@ -1,0 +1,22 @@
+# The prompt-injection guardrail service the demo's organization mandates: any-guardrail's service, which asks
+# PIGuard in an encoderfile container. The gateway reaches it at guardrails_url (otari-config.yml).
+# start.sh brings it up as the otari-memory-guardrails project, with the encoderfile image for this machine.
+services:
+  anyguardrails:
+    image: ${OTARI_ANYGUARDRAILS_IMAGE:-docker.io/mzdotai/otari-any-guardrail-container:latest}
+    ports:
+      - "127.0.0.1:8183:8000"
+    volumes:
+      - ./guardrails-service.yaml:/app/config/service.yaml:ro
+    environment:
+      - ANY_GUARDRAILS_CONFIG_PATHS=/app/config/service.yaml
+    depends_on:
+      - encoderfile
+    restart: unless-stopped
+
+  encoderfile:
+    # Published per architecture; start.sh sets the tag for this machine.
+    image: ${OTARI_ENCODERFILE_IMAGE:-docker.io/mzdotai/piguard.aarch64-linux-gnu-encoderfile:v0.6.2}
+    ports:
+      - "127.0.0.1:8184:8080"
+    restart: unless-stopped

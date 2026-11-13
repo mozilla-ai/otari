@@ -1,0 +1,21 @@
+# The gateway's configuration for the agent memory demo. Local only, not for production.
+database_url: postgresql://otari_app:otari_app@127.0.0.1:5433/otari_memory
+host: 127.0.0.1
+port: 8010
+auto_migrate: true
+# Local models have no price; without this, budgeted traffic to them is refused.
+require_pricing: false
+
+# Ollama (http://127.0.0.1:11434) and Fireworks are hosted providers, kept in the database: see seed.sh.
+
+# The guardrails service (prompt-injection), started by start.sh.
+guardrails_url: "http://127.0.0.1:8183"
+
+memory_enabled: true
+memory_embedding_model: "ollama:nomic-embed-text"
+# deepseek-v4.1-flash decided 34 of 34 consolidation cases right (bench/consolidation_bench.py). Without a
+# Fireworks key, "ollama:qwen2.5:7b" decides 29 of 34 (ollama pull qwen2.5:7b first).
+memory_consolidation_model: "fireworks:accounts/fireworks/models/deepseek-v4p1-flash"
+# Checks what automatic recall hands over for relevance. Without a Fireworks key, leave it out: recall then
+# goes by similarity alone, and the dashboard's "Check relevance" switch has no model to use.
+memory_rerank_model: "fireworks:accounts/fireworks/models/qwen3-reranker-8b"
