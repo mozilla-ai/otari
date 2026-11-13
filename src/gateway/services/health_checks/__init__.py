@@ -1,6 +1,5 @@
 """The health-checks domain pings every model the hosted providers serve and emails the alert list what changed."""
 
-from gateway.services.health_checks._offerings import list_hosted_offerings
 from gateway.services.health_checks._probe import HealthCheckOffering
 from gateway.services.health_checks._service import HealthCheckService, ListOfferings
 from gateway.services.health_checks._unavailable_models import UnavailableModelListener
@@ -11,6 +10,5 @@ __all__ = [
     "HealthCheckService",
     "ListOfferings",
     "UnavailableModelListener",
-    "list_hosted_offerings",
     "run_health_check_worker",
 ]

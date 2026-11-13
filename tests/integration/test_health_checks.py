@@ -26,7 +26,8 @@ from gateway.repositories.health_checks import (
     HealthCheckSettingsRepository,
 )
 from gateway.schemas.health_checks import HealthCheckSettingsUpdate
-from gateway.services.health_checks import HealthCheckOffering, HealthCheckService, list_hosted_offerings
+from gateway.services.health_checks import HealthCheckOffering, HealthCheckService
+from gateway.services.health_checks._offerings import list_hosted_offerings
 from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import get_model_cache

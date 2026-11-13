@@ -1444,10 +1444,7 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
     ),
     "gateway/services/feedback/": ("new_feedback_rate_limiter",),
     "gateway/services/files/": ("run_file_sweeper",),
-    "gateway/services/health_checks/": (
-        "list_hosted_offerings",
-        "run_health_check_worker",
-    ),
+    "gateway/services/health_checks/": ("run_health_check_worker",),
     "gateway/services/identity/": ("exchange_sso_code",),
     "gateway/services/inference/": (
         "CONVERSATION_CACHE_KEY_FIELD",
