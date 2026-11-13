@@ -507,7 +507,8 @@ class McpCatalogService:
             if not operates_deployment and status.next_request_at is not None:
                 wait = status.next_request_at - self._clock()
                 raise McpCatalogSyncTooSoonError(max(1, -(-int(wait.total_seconds()) // 60)))
-            return await self._status(await self._state.update(state, {"sync_requested": True}))
+            await self._state.request(finished_at=state.finished_at, stale_before=self._clock() - ABANDONED_AFTER)
+            return await self._status(await self._state.get_or_create())
 
     def _next_request_at(self, state: McpCatalogSyncState) -> datetime | None:
         if state.finished_at is None:
