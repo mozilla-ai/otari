@@ -45,8 +45,8 @@ ROWS = Counter(
 )
 
 
-class _UsageLogSession(Protocol):
-    def add_all(self, logs: list[UsageLog]) -> None: ...
+class UsageLogStager(Protocol):
+    async def add_many(self, logs: list[UsageLog]) -> None: ...
 
 
 class LogWriter(Protocol):
@@ -58,8 +58,8 @@ class LogWriter(Protocol):
         """
         ...
 
-    async def stage(self, db: _UsageLogSession, logs: list[UsageLog]) -> None:
-        """Stage rows in the request transaction that owns their accounting claim."""
+    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
+        """Stage rows through the repository in the transaction that owns their accounting claim."""
         ...
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
@@ -88,8 +88,8 @@ class SingleLogWriter:
                 ROWS.labels(writer="single", result="dropped").inc()
                 return False
 
-    async def stage(self, db: _UsageLogSession, logs: list[UsageLog]) -> None:
-        db.add_all(logs)
+    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
+        await usage_logs.add_many(logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         ROWS.labels(writer="single", result="written").inc(len(logs))
@@ -145,8 +145,8 @@ class BatchLogWriter:
             QUEUE_DEPTH.set(self._queue.qsize())
         return True
 
-    async def stage(self, db: _UsageLogSession, logs: list[UsageLog]) -> None:
-        db.add_all(logs)
+    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
+        await usage_logs.add_many(logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         ROWS.labels(writer="batch", result="written").inc(len(logs))
@@ -301,8 +301,8 @@ class TracingLogWriter:
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
         return await self._inner.put(log)
 
-    async def stage(self, db: _UsageLogSession, logs: list[UsageLog]) -> None:
-        await self._inner.stage(db, logs)
+    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
+        await self._inner.stage(usage_logs, logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         for log in logs:
@@ -382,8 +382,8 @@ class SignalingLogWriter:
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
         return accepted
 
-    async def stage(self, db: _UsageLogSession, logs: list[UsageLog]) -> None:
-        await self._inner.stage(db, logs)
+    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
+        await self._inner.stage(usage_logs, logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         await self._inner.after_commit(logs)

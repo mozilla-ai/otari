@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    RequestUsageLogRepositoryDep,
     billing_port_on,
     get_config,
     get_db,
@@ -70,7 +71,7 @@ from gateway.services.inference import (
     deferred_charge,
     describe_port_error,
 )
-from gateway.services.log_writer import LogWriter
+from gateway.services.log_writer import LogWriter, UsageLogStager
 from gateway.services.model_access import (
     is_model_allowed,
     model_not_allowed_detail,
@@ -200,7 +201,7 @@ async def log_batch_usage(
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
-    stage_in_request_transaction: bool = False,
+    usage_log_stager: UsageLogStager | None = None,
 ) -> UsageLog:
     """Log batch API usage, including token counts and cost when derivable.
 
@@ -235,8 +236,8 @@ async def log_batch_usage(
         counts_toward_budget=counts_toward_budget,
         deployment_paid=deployment_paid,
     )
-    if stage_in_request_transaction:
-        await log_writer.stage(db, [usage_log])
+    if usage_log_stager is not None:
+        await log_writer.stage(usage_log_stager, [usage_log])
     else:
         await log_writer.put(usage_log)
     return usage_log
@@ -793,6 +794,7 @@ async def retrieve_batch_results(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    request_usage_logs: RequestUsageLogRepositoryDep,
 ) -> dict[str, Any]:
     """Retrieve the results of a completed batch."""
     api_key, is_master_key = auth_result
@@ -1001,7 +1003,7 @@ async def retrieve_batch_results(
                         counts_toward_budget=not batch_exempt,
                         workspace_id=origin_workspace_id,
                         deployment_paid=deployment_paid,
-                        stage_in_request_transaction=record is not None,
+                        usage_log_stager=request_usage_logs if record is not None else None,
                     )
                 )
         else:
@@ -1024,7 +1026,7 @@ async def retrieve_batch_results(
                     counts_toward_budget=not batch_exempt,
                     workspace_id=origin_workspace_id,
                     deployment_paid=deployment_paid,
-                    stage_in_request_transaction=record is not None,
+                    usage_log_stager=request_usage_logs if record is not None else None,
                 )
             )
         # Charged once, with the claim that accounts a recorded batch once.

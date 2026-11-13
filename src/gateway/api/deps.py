@@ -2563,6 +2563,14 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
+def get_request_usage_log_repository(db: Annotated[AsyncSession, Depends(get_db)]) -> UsageLogRepository:
+    """Build the legacy request-path repository on the session that owns the route transaction."""
+    return UsageLogRepository(db)
+
+
+RequestUsageLogRepositoryDep = Annotated[UsageLogRepository, Depends(get_request_usage_log_repository)]
+
+
 def get_routing_service(
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
