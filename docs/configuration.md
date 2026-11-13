@@ -334,8 +334,9 @@ this setting changes nothing.
 
 Under either setting, a page can read every `Otari-*` header a response carries
 (such as `Otari-Request-ID`, `Otari-Model` and `Otari-Guardrails`), along with
-`Retry-After` and the `X-RateLimit-*` headers. A browser hides any other response
-header from a page on another origin.
+`Retry-After` and the `X-RateLimit-*` headers. Of the other response headers, a
+browser shows a page on another origin only the CORS-safelisted ones, such as
+`Content-Type` and `Cache-Control`.
 
 ## Budgets and API keys in config
 
