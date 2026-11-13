@@ -22,7 +22,7 @@ from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppDetails, AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.types.key_scope import known_scopes, normalize_scopes
+from gateway.types.key_scope import checked_scopes, known_scopes
 
 
 def _code_hash(code: str) -> str:
@@ -96,7 +96,7 @@ class OAuthAppService:
                 challenge=request.code_challenge,
                 user_id=user.id,
                 workspace_id=workspace.id,
-                scopes=normalize_scopes(self.apps[request.client_id].scopes),
+                scopes=checked_scopes(self.apps[request.client_id].scopes, is_service_key=False),
                 expires_at=now + timedelta(minutes=2),
             )
             await self.grants.prune_expired(now)
