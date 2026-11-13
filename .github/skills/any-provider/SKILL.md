@@ -390,7 +390,7 @@ The first provider whose price per call depends on an option.
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
 
-### 2026-11-01, You.com (any-search)
+### 2026-11-11, You.com (any-search)
 
 The first provider that sends defaults on options that have a list of values.
 

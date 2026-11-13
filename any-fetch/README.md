@@ -220,7 +220,7 @@ passed: You.com's default, `standard`, bills each PDF page on top of the URL, an
 the cost tier.
 
 You.com has no length cap, so `max_chars` cuts the text and sets `text_truncated`. Native options:
-`full_page` (Markdown is always requested by the adapter; an HTML copy, when additionaly requested, stays in `raw`), 
+`full_page` (Markdown is always requested by the adapter; an HTML copy, when additionally requested, stays in `raw`), 
 `extraction_source` (`blend`, `cache`, `fetch`), `timeout` (2 to 100 seconds) and `parse_effort` (`lite`, `standard`).
 `None` counts as not passed. You.com's `timeout` is longer than the fetcher's own 15 seconds, and
 `afetch`'s `timeout` argument is the fetcher's, so pass You.com's through `fetch` and give the
