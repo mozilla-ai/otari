@@ -71,6 +71,9 @@ class McpCatalogSyncState(Base):
     next_sync_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     # When the crawl these counters describe began. A resumed crawl keeps it, so its rows share one ``last_seen_at``.
     crawl_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # How many servers the catalog held when that crawl began, kept by a resumed crawl. A crawl that reaches the
+    # last page removes nothing when it did not list most of these, however many new ones it added.
+    servers_at_start: Mapped[int | None] = mapped_column(Integer, default=None)
     # The source's cursor for the next page, kept while a crawl is unfinished so the next sync resumes there.
     cursor: Mapped[str | None] = mapped_column(String, default=None)
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)

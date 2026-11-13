@@ -11,6 +11,7 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
+``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are,
 ``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
 ``McpServerLogoService`` reads each stored server's logo and sets or removes an admin's own,
 ``McpServerRequestService`` takes a member's request for a catalog server and records a manager's answer, within
@@ -269,6 +270,7 @@ from gateway.services.tools._web_search_responses import (
 )
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._web_tool_failure import WebToolFailure
+from gateway.services.tools._workspace_mcp_server_urls import WorkspaceMcpServerUrls
 
 __all__ = [
     "DirectCaller",
@@ -355,6 +357,7 @@ __all__ = [
     "McpSignInReason",
     "StoredMcpOAuthClient",
     "AdmittedMcpServers",
+    "WorkspaceMcpServerUrls",
     "admit_mcp_servers",
     "declares_provider_mcp",
     "admit_web_access",

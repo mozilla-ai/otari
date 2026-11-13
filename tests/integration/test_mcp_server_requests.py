@@ -53,7 +53,7 @@ from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerService
-from gateway.services.tools import McpGrantMembershipListener, McpServerRequestService
+from gateway.services.tools import McpGrantMembershipListener, McpServerRequestService, WorkspaceMcpServerUrls
 from gateway.services.tools._mcp_server_requests import (
     MAX_PENDING_REQUESTS_PER_MEMBER,
     MAX_REQUEST_MAIL_RECIPIENTS,
@@ -124,7 +124,7 @@ class _World:
             McpCatalogSyncStateRepository(uow),
             access,
             GatewayConfig(mcp_catalog_sync="manual"),
-            workspace_servers=WorkspaceMcpServerRepository(uow),
+            workspace_servers=WorkspaceMcpServerUrls(uow),
         )
         self.requests = McpServerRequestService(
             uow,
