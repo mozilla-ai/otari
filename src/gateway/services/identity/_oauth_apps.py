@@ -22,6 +22,7 @@ from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppDetails, AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
+from gateway.types.key_scope import known_scopes, normalize_scopes
 
 
 def _code_hash(code: str) -> str:
@@ -60,8 +61,14 @@ class OAuthAppService:
         return self.apps[client_id].name
 
     def details(self, client_id: str, redirect_uri: str) -> AppDetails:
+        """What the consent screen shows: the app, where it returns, and what its keys will hold."""
         self.require_registered_redirect(client_id, redirect_uri)
-        return AppDetails(name=self._app_name(client_id), redirect_uri=redirect_uri, issuer=self.issuer)
+        return AppDetails(
+            name=self._app_name(client_id),
+            redirect_uri=redirect_uri,
+            issuer=self.issuer,
+            scopes=self.apps[client_id].scopes,
+        )
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
@@ -89,6 +96,7 @@ class OAuthAppService:
                 challenge=request.code_challenge,
                 user_id=user.id,
                 workspace_id=workspace.id,
+                scopes=normalize_scopes(self.apps[request.client_id].scopes),
                 expires_at=now + timedelta(minutes=2),
             )
             await self.grants.prune_expired(now)
@@ -119,6 +127,10 @@ class OAuthAppService:
             )
             if grant is None:
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
+            held = known_scopes(grant.scopes)
+            if not held:
+                # A grant written by a newer worker naming scopes this one does not know.
+                raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
             user = await self.organizations.hold_delegated_workspace_access(
                 user_id=grant.user_id, workspace_id=grant.workspace_id
             )
@@ -129,7 +141,7 @@ class OAuthAppService:
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
                 app_name=self._app_name(request.client_id),
-                scopes=self.apps[request.client_id].scopes,
+                scopes=held,
                 key_format=self.key_format,
             )
 

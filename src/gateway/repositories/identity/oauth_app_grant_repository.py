@@ -24,6 +24,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
         challenge: str,
         user_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        scopes: list[str],
         expires_at: datetime,
     ) -> None:
         """Stage an approval without minting or retaining a credential."""
@@ -35,6 +36,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
                 challenge=challenge,
                 user_id=user_id,
                 workspace_id=workspace_id,
+                scopes=scopes,
                 expires_at=expires_at,
             )
         )

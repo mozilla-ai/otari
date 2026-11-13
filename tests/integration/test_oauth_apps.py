@@ -25,6 +25,7 @@ from gateway.rate_limit import RateLimiter
 from gateway.repositories.api_keys.api_key_repository import ApiKeyRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.types.key_scope import KeyScope
 
 from .conftest import shared_test_config
 from .test_organization_member_keys import _World
@@ -254,6 +255,21 @@ def test_removed_app_cannot_exchange_a_pending_approval(
     code = code_from(approve(client, world))
     test_config.oauth_apps.clear()
     assert redeem(client, code).status_code == 400
+
+
+def test_widening_a_registration_does_not_widen_an_approval_already_given(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
+) -> None:
+    """The grant carries the scopes the person approved, so the exchange cannot read newer ones."""
+    code = code_from(approve(client, world))
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE, KeyScope.FILES_WRITE]
+    )
+
+    assert redeem(client, code).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes == ["inference"]
 
 
 def test_expired_approvals_are_pruned_without_creating_keys(

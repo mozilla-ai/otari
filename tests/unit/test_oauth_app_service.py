@@ -25,7 +25,11 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
     clock = Mock(side_effect=[now, now + timedelta(minutes=3)])
     grants = AsyncMock(spec=OAuthAppGrantRepository)
     grants.find_bound.return_value = OAuthAppGrant(
-        code_hash="hash", user_id=uuid.uuid4(), workspace_id=uuid.uuid4(), expires_at=now + timedelta(seconds=1)
+        code_hash="hash",
+        user_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        scopes=["inference"],
+        expires_at=now + timedelta(seconds=1),
     )
     grants.consume.return_value = True
     keys = AsyncMock(spec=ApiKeyService)
