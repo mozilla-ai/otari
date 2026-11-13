@@ -1067,10 +1067,7 @@ async def run_passthrough(
     except Exception as e:
         if hosted_instance is not None:
             unavailable_model_reporter.report(
-                e,
-                instance=hosted_instance,
-                model=resolved.model,
-                uses_deployment_credential=deployment_charge is not None,
+                e, instance=hosted_instance, model=resolved.model, uses_deployment_credential=True
             )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
         failure = UpstreamFailure(e, request_params=caller_params)

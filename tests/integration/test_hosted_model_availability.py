@@ -206,6 +206,23 @@ def test_an_embeddings_refusal_switches_the_model_off(client: TestClient, hosted
     assert row["disabled_reason"] == "unavailable"
 
 
+def test_an_embeddings_refusal_switches_the_model_off_for_a_workspace_with_no_organization(
+    client: TestClient, hosted: dict[str, str]
+) -> None:
+    refusal = AsyncMock(side_effect=_UpstreamError(400, NOT_SERVERLESS.replace("gpt-4o", "embedder")))
+
+    with (
+        patch("gateway.api.routes._passthrough.organization_for_workspace_id", new=AsyncMock(return_value=None)),
+        patch("gateway.api.routes.embeddings.aembedding", new=refusal),
+    ):
+        response = client.post(
+            f"{API_ROOT}/embeddings", json={"model": "openai:embedder", "input": "hi", "user": "u1"}, headers=hosted
+        )
+
+    assert response.status_code == 400
+    assert _until_switched_off(client, hosted, "embedder")["disabled_reason"] == "unavailable"
+
+
 def test_a_refusal_that_may_be_the_requests_fault_switches_nothing_off(
     client: TestClient, hosted: dict[str, str]
 ) -> None:
