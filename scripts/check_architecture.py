@@ -640,7 +640,6 @@ SAVEPOINT_BASELINE = (
     "gateway/repositories/catalog/served_model_repository.py",
     "gateway/repositories/identity/blocked_email_repository.py",
     "gateway/repositories/identity/oidc_connection_repository.py",
-    "gateway/repositories/mcp_catalog/mcp_catalog_server_repository.py",
     "gateway/repositories/mcp_catalog/mcp_catalog_sync_state_repository.py",
     "gateway/repositories/mcp_catalog/mcp_logo_repository.py",
     "gateway/repositories/providers/workspace_hosted_access_repository.py",
@@ -2132,6 +2131,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.VideoJobRecord": {
         "repository": "gateway/repositories/inference/video_job_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.organizations.OrganizationInvitation": {
+        "repository": "gateway/repositories/organizations/organization_invitation_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.organizations.OrganizationMembershipOrigin": {
+        "repository": "gateway/repositories/organizations/membership_origin_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {

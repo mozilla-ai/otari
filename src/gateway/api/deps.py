@@ -250,6 +250,7 @@ from gateway.services.tools import (
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
+    WorkspaceMcpServerUrls,
     WorkspaceSearchKeys,
     web_search_configured,
 )
@@ -262,7 +263,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     workspace_for_key_id,
 )
-from gateway.types.tool_charges import InstanceRateKey
+from gateway.types.tool_charges import RateKey
 from gateway.types.traces import (
     ContentCapture,
     ContentReader,
@@ -2134,7 +2135,7 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
 
 
 async def _deployment_tool_rate(
-    session: AsyncSession, rate_key: InstanceRateKey, organization_id: uuid.UUID | None
+    session: AsyncSession, rate_key: RateKey, organization_id: uuid.UUID | None
 ) -> ToolRateInForce | None:
     """The rate one of the deployment's search or fetch tools settles at on its own account, as settlement reads it."""
     rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True, organization_id=organization_id)
@@ -2303,7 +2304,7 @@ def build_mcp_catalog_service(
         McpCatalogSyncStateRepository(uow),
         workspaces,
         config,
-        workspace_servers=WorkspaceMcpServerRepository(uow),
+        workspace_servers=WorkspaceMcpServerUrls(uow),
     )
 
 

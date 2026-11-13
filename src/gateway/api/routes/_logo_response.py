@@ -28,11 +28,9 @@ def logo_response(request: Request, logo: Logo | None) -> Response:
     if logo is None:
         return Response(status_code=status.HTTP_404_NOT_FOUND, headers={"Cache-Control": "no-store"})
     etag = f'"{logo.etag}"'
+    # A 304 carries the policy its 200 would, since a cache refreshes what it kept from it.
+    cache_control = _VERSIONED if request.query_params.get("v") == logo.etag else _UNVERSIONED
+    headers = {"Cache-Control": cache_control, "ETag": etag, **_IMAGE_HEADERS}
     if request.headers.get("if-none-match") == etag:
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, **_IMAGE_HEADERS})
-    versioned = request.query_params.get("v") == logo.etag
-    return Response(
-        content=logo.content,
-        media_type=logo.content_type,
-        headers={"Cache-Control": _VERSIONED if versioned else _UNVERSIONED, "ETag": etag, **_IMAGE_HEADERS},
-    )
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=logo.content, media_type=logo.content_type, headers=headers)

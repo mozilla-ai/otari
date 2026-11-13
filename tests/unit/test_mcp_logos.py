@@ -4,6 +4,7 @@ how one candidate is fetched, and how a logo is served."""
 import io
 import ipaddress
 import threading
+import time
 from collections.abc import Sequence
 
 import httpx
@@ -45,6 +46,12 @@ def test_an_svg_with_a_document_type_is_refused_so_no_entity_expands() -> None:
         b'<svg xmlns="http://www.w3.org/2000/svg"><text>&b;</text></svg>'
     )
     assert logos.sniff_image(bomb) is None
+
+
+@pytest.mark.parametrize("encoding", ["xxx", "utf-7", "mbcs"])
+def test_an_svg_in_an_encoding_the_parser_cannot_read_is_refused(encoding: str) -> None:
+    svg = f'<?xml version="1.0" encoding="{encoding}"?><svg xmlns="http://www.w3.org/2000/svg"/>'.encode()
+    assert logos.sniff_image(svg) is None
 
 
 def test_a_raster_declaring_too_many_pixels_is_refused() -> None:
@@ -314,6 +321,12 @@ def test_a_logo_is_served_so_it_cannot_run_and_is_cached_by_its_version() -> Non
     assert versioned.headers["cache-control"] == "private, max-age=604800, immutable"
     assert bare.headers["cache-control"] == "private, max-age=300"
     assert again.status_code == 304
+    # The middleware keeps the 304's own policy instead of replacing it with no-store.
+    revalidated = MutableHeaders(raw=again.raw_headers)
+    _add_security_headers(revalidated, "/api/v1/mcp-catalog/logos/x", again.status_code)
+    assert revalidated["cache-control"] == "private, max-age=300"
+    again_versioned = logo_response(_request(f"v={logo.etag}", headers={"If-None-Match": f'"{logo.etag}"'}), logo)
+    assert again_versioned.headers["cache-control"] == "private, max-age=604800, immutable"
     assert (missing.status_code, missing.headers["cache-control"]) == (404, "no-store")
 
 
@@ -358,3 +371,35 @@ async def test_a_site_root_is_searched_for_its_declared_icon() -> None:
     await fetcher.aclose()
 
     assert logo is not None and logo.content == png
+
+
+@pytest.mark.asyncio
+async def test_an_icon_declared_at_the_page_itself_is_not_searched_again() -> None:
+    png = _png((10, 10, 10, 255))
+    asked: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if request.url.path == "/":
+            return httpx.Response(200, text='<link rel="icon" href="/"><link rel="icon" href="/logo.png">')
+        return httpx.Response(200, content=png)
+
+    fetcher = _fetcher(httpx.MockTransport(handle), {"example.com": "93.184.216.34"})
+    logo = await fetcher.fetch("https://example.com/")
+    await fetcher.aclose()
+
+    assert logo is not None and logo.content == png
+    # The page is read once, then fetched once more as an image, which it is not.
+    assert asked == ["/", "/", "/logo.png"]
+
+
+@pytest.mark.parametrize(
+    "page",
+    ["<link " * 100_000, "<link " + "a" * 200_000 + ">"],
+    ids=["unclosed tags", "a long attribute name with no value"],
+)
+def test_a_page_written_to_stall_the_icon_scan_is_read_in_one_pass(page: str) -> None:
+    started = time.perf_counter()
+    assert declared_icons(page, "https://example.com/") == []
+    # A backtracking scan took minutes on these; one pass takes milliseconds.
+    assert time.perf_counter() - started < 2

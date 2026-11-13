@@ -6,7 +6,7 @@ lets exactly one replica sync. ``mcp_logos`` is keyed by what a logo is of (a
 catalog server's name or a server's host), so it references no other table.
 
 Revision ID: b3d6f8a2c5e1
-Revises: c6e8a0b2d4f1
+Revises: 3ec751593322
 Create Date: 2026-11-13
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3d6f8a2c5e1"
-down_revision: str | Sequence[str] | None = "c6e8a0b2d4f1"
+down_revision: str | Sequence[str] | None = "3ec751593322"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -50,6 +50,7 @@ def upgrade() -> None:
         sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("next_sync_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("crawl_started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("servers_at_start", sa.Integer(), nullable=True),
         sa.Column("cursor", sa.String(), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_completed_at", sa.DateTime(timezone=True), nullable=True),
