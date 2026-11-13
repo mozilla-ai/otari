@@ -129,8 +129,8 @@ an owner/admin of that workspace.
   request body fails with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 - `everyone_tools` (default `["*"]`) is the server's default policy, and
-  `read_tools` (default `[]`) the tools labeled read; see
-  [Server access](#server-access).
+  `read_tools` the tools labeled read, left out (or `null`) to follow the tools
+  the server marks read-only; see [Server access](#server-access).
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
 - `credential_mode` (default `shared`) says whose credential a call carries;
   see [Credential mode](#credential-mode). On a shared server, `shared_account`
@@ -144,7 +144,10 @@ an owner/admin of that workspace.
   /mine` lists the caller's own waiting requests and the answers they have not
   acknowledged, `POST /{request_id}/acknowledge` records that the caller has
   seen an answer, `DELETE /{request_id}` withdraws one, and for a manager `GET` lists everyone waiting and `POST /decline` declines. Storing
-  a server at a requested URL approves the requests for it. See
+  a server at a requested URL approves the requests for it. Both lists take
+  `skip` and `limit`: `GET /mine` pages the caller's requests (50 by default,
+  at most 100), and `GET` pages the servers asked for (500 by default and at
+  most, with at most 500 requests on a page; `count` says how many wait in all). See
   [Answer members' requests](mcp-servers.md#answer-members-requests).
 - `attach_by_default` (default `false`) adds the server to every model request
   from the workspace's keys; see [Attached to every request](#attached-to-every-request).
@@ -253,7 +256,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   has one) on the server, with
   `<public_base_url>/api/v1/mcp-connections/callback` as the client's redirect
   URI. [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
-  walks through it in the dashboard.
+  walks through it in the dashboard. A client secret goes to the token
+  endpoint as a form field when the authorization server's metadata lists
+  `client_secret_post`, and with HTTP Basic when it lists only
+  `client_secret_basic` or lists no method at all.
 - **What it needs.** `public_base_url`, because the redirect URI is derived
   from it, `OTARI_SECRET_KEY`, because the tokens are encrypted with it, and an
   `https://` server URL. The authorization server must say it supports S256
@@ -282,6 +288,14 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   and secret a manager entered were issued for the old host, so a URL change
   to another scheme or host clears them, unless the same change names a new
   client. A change of path on the same host keeps them.
+- **A saved OAuth client stays with its sign-in server.** The first sign-in
+  through a client a manager saved records the authorization server (its
+  issuer) the MCP server named. If the MCP server later names another one,
+  sign-in is refused with `mcp_oauth_issuer_changed` (`400`) before the
+  client's secret is sent anywhere, until a manager saves the client again:
+  a `PATCH` that sends `oauth_client_id` or `oauth_client_secret` clears the
+  record, and the next sign-in records the new server. A client Otari
+  registered itself is registered again with the new server instead.
 - **The access list still comes first.** A key the ACL denies is told the
   server does not exist, whether or not its user has signed in.
 
@@ -457,6 +471,11 @@ tools the server marks with MCP's `readOnlyHint`, as its last recorded tool
 listing reported them in `health.read_only_hinted_tools`, and
 `read_tools_from_server` is `true`. A server whose tools are not known yet has
 none, so `@read` allows nothing until a check or a request lists them.
+
+On upgrade, a server stored with no labels starts following the server too,
+unless its default policy or one of its grants already used `@read`. That one
+keeps its empty list, so `@read` there still allows nothing until a manager
+edits the labels, and nobody's access grows on upgrade.
 
 A `PATCH` that sets `read_tools`, an empty list included, makes the labels the
 manager's: `read_tools_from_server` turns `false` and no later check changes
