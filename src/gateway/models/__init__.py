@@ -18,6 +18,7 @@ from gateway.models import (  # noqa: F401
     identity,
     inference,
     mcp_catalog,
+    organizations,
     platform,
     playground,
     pricing,

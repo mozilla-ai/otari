@@ -34,9 +34,12 @@ it was priced under before tools had a kind; only the operator's price or
 override sets either, since the deployment pays for the call. A search a
 workspace's organization key served is priced under ``otari:web_search``, which
 the organization's own override may set, since a deployment cannot price a
-tenant's key. With ``require_pricing`` on, a search whose rate is missing is
-refused with a 402 after the budget checks, even from a provider that reports
-its own cost; a key exempt from budgets is still served.
+tenant's key. A search on the legacy settings, which a deployment with no
+search tool serves, is priced under ``otari:web_search`` too, and only the
+operator's price or override counts, since the deployment pays for it. With
+``require_pricing`` on, a search whose rate is missing is refused with a 402
+after the budget checks, even from a provider that reports its own cost; a key
+exempt from budgets is still served.
 """
 
 from typing import Annotated
@@ -66,7 +69,8 @@ async def create_search(
     The tool is taken from ``search_tool_name``, which may be omitted when the
     deployment's ``web_search_default_tool`` names one, or when exactly one
     tool is configured. Such a call runs on the workspace's organization search
-    key when it has one.
+    key when it has one. A deployment with no search tool serves the backend its
+    legacy search settings describe, named after its provider.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
