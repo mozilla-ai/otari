@@ -8,11 +8,13 @@ transport is what proves a *templated message actually sends* without one.
 
 import ast
 import logging
+import random
 import smtplib
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from email import message_from_string, policy
+from email.utils import parseaddr
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -208,11 +210,21 @@ def test_a_real_transport_warns_about_nothing(gateway_logs: pytest.LogCaptureFix
     assert gateway_logs.text == ""
 
 
-def test_an_explicit_smtp_transport_refuses_a_from_address_that_is_not_one() -> None:
-    """A typo would otherwise surface as a recipient server rejecting the envelope."""
-    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com", mail_from_email="not-an-address")
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "not-an-address",
+        "<otari@example.com>",
+        "Otari <otari@example.com>",
+        "otari@example.com(ops)",
+        "otari@[127.0.0.1]",
+        '"otari"@example.com',
+    ],
+)
+def test_an_explicit_smtp_transport_refuses_a_from_address_that_is_not_a_plain_address(sender: str) -> None:
+    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com", mail_from_email=sender)
 
-    with pytest.raises(ValueError, match="not a valid email address"):
+    with pytest.raises(ValueError, match="mail_from_email is not a plain email address"):
         config.validate_mail_transport()
 
 
@@ -849,6 +861,65 @@ def test_normalized_address_refuses_an_empty_domain_label() -> None:
     assert normalized_address("x@.example.test") is None
     assert normalized_address("x@example..test") is None
     assert normalized_address("x@sub.example.test") == "x@sub.example.test"
+
+
+_ACCEPTED_SPELLINGS = {
+    "grace@example.test": "grace@example.test",
+    "grace+otari@example.test": "grace+otari@example.test",
+    "grace.hopper@mail.eu.example.test": "grace.hopper@mail.eu.example.test",
+    "  Grace@Example.TEST\t": "grace@example.test",
+    "o'brien_x-y=z!#$%&*/?^`{|}~@example.test": "o'brien_x-y=z!#$%&*/?^`{|}~@example.test",
+}
+
+_REFUSED_SPELLINGS = [
+    "grace@example.test(x.y)",
+    "(x.y)grace@example.test",
+    "x<grace@example.test>",
+    "<grace@example.test>",
+    '"grace"@example.test',
+    '"grace hopper"@example.test',
+    "grace@example.test,ada@example.test",
+    "grace@example.test;ada@example.test",
+    "team:grace@example.test;",
+    "a@[127.0.0.1]",
+    "grace\\hopper@example.test",
+    "grace\x00@example.test",
+    "\x00grace@example.test",
+    "grace\thopper@example.test",
+    "grace@example.test\x7f",
+    "grace@exa\x85mple.test",
+    "grace\u200b@example.test",
+    "grace@\u202eexample.test",
+    "=?utf-8?q?ada=40example.test=2C?=grace@example.test",
+    "grace@=?utf-8?q?example?=.test",
+]
+
+
+@pytest.mark.parametrize(("spelling", "address"), _ACCEPTED_SPELLINGS.items())
+def test_an_accepted_address_is_the_address_an_email_to_it_goes_to(spelling: str, address: str) -> None:
+    assert normalized_address(spelling) == address
+    assert parseaddr(address) == ("", address)
+
+
+@pytest.mark.parametrize("spelling", _REFUSED_SPELLINGS)
+def test_text_that_is_more_than_a_plain_address_is_not_an_address(spelling: str) -> None:
+    assert normalized_address(spelling) is None
+
+
+def test_every_address_accepted_from_generated_text_is_the_address_an_email_to_it_goes_to() -> None:
+    extras = "ab.@+-_'!=? \t\x00\x7f()<>[],;:\\\"\u00f6"
+    generator = random.Random(20240)
+    accepted = 0
+    for _ in range(20_000):
+        characters = list("grace@example.test")
+        for _ in range(generator.randint(0, 3)):
+            characters.insert(generator.randint(0, len(characters)), generator.choice(extras))
+        text = "".join(characters)
+        address = normalized_address(text)
+        if address is not None:
+            accepted += 1
+            assert parseaddr(address) == ("", address), text
+    assert accepted > 1_000
 
 
 def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:

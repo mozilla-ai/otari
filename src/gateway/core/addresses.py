@@ -7,21 +7,23 @@ cycle. Same reasoning as ``core/sql.py``, which exists so a route and a service
 can share a condition without either importing the other.
 """
 
-import re
+# The two characters that start an encoded word, which a header reader decodes into other text.
+_ENCODED_WORD = "=?"
+_NOT_IN_A_PLAIN_ADDRESS = frozenset(' "(),:;<>[\\]')
 
-_WHITESPACE = re.compile(r"\s")
 
-
-# Deliberately permissive (there is no useful regex for RFC 5322, and the SMTP
-# server is the real authority): it rejects the shapes that are certainly not
-# addresses, which is what an operator typing into a form needs, and nothing
-# more. Shared with tenancy's member and invitation addresses rather than kept
-# per caller, so "an address Otari will accept" has one answer.
-# Not a regex: this runs on unauthenticated input, and a pattern for "a dot
-# inside the domain" backtracks quadratically on a long run of dots.
+# NOTE: Every check must stay linear in the length of the text, because the text can be any length.
+# A regular expression that backtracks is not linear, so the shape of the domain is checked without one.
 def normalized_address(value: str) -> str | None:
-    """Lower-case and trim an address, or return ``None`` if it cannot be one."""
+    """Return ``value`` trimmed and in lower case if it is a plain email address, or ``None`` if it is not.
+
+    A plain address is one address and nothing else.
+    It has no display name, comment, quoted text, list, domain literal, encoded word, space or invisible character.
+    Its domain has two or more labels, and no label is empty.
+    """
     candidate = value.strip().lower()
+    if not candidate.isprintable() or not _NOT_IN_A_PLAIN_ADDRESS.isdisjoint(candidate) or _ENCODED_WORD in candidate:
+        return None
     local, at, domain = candidate.partition("@")
     if not local or not at or "@" in domain or "." not in domain[1:-1]:
         return None
@@ -29,7 +31,7 @@ def normalized_address(value: str) -> str | None:
     # take one, and the send would fail where nobody sees it.
     if "" in domain.split("."):
         return None
-    return None if _WHITESPACE.search(candidate) else candidate
+    return candidate
 
 
 __all__ = ["normalized_address"]

@@ -1691,6 +1691,10 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
+`mail_from_email` is the address alone, with no display name, comment or quoted text.
+`mail_from_name` sets the name shown beside it.
+With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
