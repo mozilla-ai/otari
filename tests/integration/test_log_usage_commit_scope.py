@@ -26,6 +26,12 @@ class StubLogWriter:
         self.logs.append(log)
         return True
 
+    async def stage(self, _db: object, logs: list[UsageLog]) -> None:
+        self.logs.extend(logs)
+
+    async def after_commit(self, _logs: list[UsageLog]) -> None:
+        pass
+
     async def start(self) -> None:  # pragma: no cover - not used
         return None
 

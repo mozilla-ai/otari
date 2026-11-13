@@ -453,7 +453,9 @@ def test_retrieve_batch_results(
         results=[
             BatchResultItem(custom_id="req-1", result=completion, error=None),
             BatchResultItem(
-                custom_id="req-2", result=None, error=BatchResultError(code="rate_limit", message="Rate limit exceeded")
+                custom_id="req-2",
+                result=None,
+                error=BatchResultError(code="rate_limit", message="Quota exceeded; retry after 60 seconds"),
             ),
         ]
     )
@@ -480,7 +482,7 @@ def test_retrieve_batch_results(
     assert data["results"][1]["custom_id"] == "req-2"
     assert data["results"][1]["result"] is None
     assert data["results"][1]["error"]["code"] == "rate_limit"
-    assert data["results"][1]["error"]["message"] == "Rate limit exceeded"
+    assert data["results"][1]["error"]["message"] == "Quota exceeded; retry after 60 seconds"
 
 
 def test_retrieve_batch_results_not_complete(
@@ -1006,6 +1008,87 @@ def test_recorded_batch_results_accounted_once(
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
 
 
+def test_recorded_batch_results_log_each_item_and_redact_errors(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A mixed batch writes one safe, correctly priced usage row per item exactly once."""
+    user_id = api_key_obj["user_id"]
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    completion = MagicMock()
+    completion.model = "gpt-4o-mini"
+    completion.usage = CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    raw_error = "Model not found at https://provider.example/v1 using key sk-proj-AAAAAAAAAAAAAAAA"
+    mock_result = BatchResult(
+        results=[
+            BatchResultItem(custom_id="success", result=completion, error=None),
+            BatchResultItem(
+                custom_id="failure",
+                result=None,
+                error=BatchResultError(code="model_not_found", message=raw_error),
+            ),
+        ]
+    )
+
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        with (
+            patch(
+                "gateway.api.routes.batches.record_external_spend",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("spend fold failed"),
+            ),
+            pytest.raises(RuntimeError, match="spend fold failed"),
+        ):
+            client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        first = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        second = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    public_error = first.json()["results"][1]["error"]
+    assert public_error["code"] == "model_not_found"
+    assert "sk-proj-AAAAAAAAAAAAAAAA" not in public_error["message"]
+    assert "https://provider.example/v1" not in public_error["message"]
+    assert "[redacted]" in public_error["message"]
+
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 2
+    success_log = next(log for log in results_logs if log["status"] == "success")
+    error_log = next(log for log in results_logs if log["status"] == "error")
+    expected_cost = 100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0
+    assert success_log["prompt_tokens"] == 100
+    assert success_log["completion_tokens"] == 50
+    assert success_log["cost"] == pytest.approx(expected_cost)
+    assert error_log["error_message"] == public_error["message"]
+    assert "sk-proj-AAAAAAAAAAAAAAAA" not in error_log["error_message"]
+    assert error_log["cost"] is None
+
+    user_resp = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header)
+    assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
 def test_batch_lines_are_priced_one_request_at_a_time(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1043,12 +1126,12 @@ def test_batch_lines_are_priced_one_request_at_a_time(
 
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
-    assert len(results_logs) == 1
-    assert results_logs[0]["prompt_tokens"] == 300_000
+    assert len(results_logs) == 3
+    assert sum(log["prompt_tokens"] or 0 for log in results_logs) == 300_000
 
     # Base rates, three times over: 100k input at $1/M plus 1k output at $2/M.
     expected_cost = 3 * (100_000 / 1_000_000 * 1.0 + 1_000 / 1_000_000 * 2.0)
-    assert results_logs[0]["cost"] == pytest.approx(expected_cost)
+    assert sum(log["cost"] or 0 for log in results_logs) == pytest.approx(expected_cost)
 
 
 def test_batch_lines_keep_their_cached_token_discount(
@@ -1134,7 +1217,7 @@ def test_a_batch_is_rounded_once_not_once_per_line(
 
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
-    assert results_logs[0]["cost"] == pytest.approx(0.000094)
+    assert sum(log["cost"] or 0 for log in results_logs) == pytest.approx(0.000094)
 
 
 def test_recorded_batch_results_defers_accounting_until_pricing_exists(

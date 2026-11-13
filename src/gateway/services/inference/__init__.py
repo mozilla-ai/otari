@@ -1,6 +1,7 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
 from gateway.services.inference._audio_length import audio_seconds
+from gateway.services.inference._batch_results import BatchResultsService
 from gateway.services.inference._client_country import (
     CountryDatabaseError,
     client_country,
@@ -150,6 +151,7 @@ __all__ = [
     "VIDEO_BILLING",
     "PassthroughBilling",
     "Admission",
+    "BatchResultsService",
     "BlockedCaller",
     "Claimed",
     "CountryDatabaseError",
