@@ -443,7 +443,7 @@ The first provider whose old gateway client sent an option the provider leaves o
   with `include_domains=["example.com"]` and words no page there holds (a domain that does not
   exist is a 400); `error` with a made-up `tvly-` key.
 
-### 2026-11-01, You.com (any-search)
+### 2026-11-11, You.com (any-search)
 
 The first provider that sends defaults on options that have a list of values.
 

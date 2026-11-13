@@ -178,12 +178,12 @@ class YouDotComProvider(AnySearch):
                 type="object",
                 default={"extraction_mode": "highlights"},
                 description=(
-                    "Sent as given. highlights, sent by default, returns the query relevant passages"
+                    "highlights, sent by default, returns the query relevant passages"
                     " that are joined and returned as the snippet;"
                     " full_page returns Markdown as the text and bills per page fetched;"
-                    "Markdown is always included by default in full_page.extraction_formats."
+                    " Markdown is always included by default in full_page.extraction_formats."
                     " HTML copy, when also listed here, is contained in raw."
-                    "null sends none."
+                    " null sends none."
                 ),
             ),
             OptionSpec(
