@@ -97,7 +97,9 @@ class OAuthAppService:
     async def exchange(self, request: AppTokenRequest) -> str:
         """Consume the approval and mint its key atomically, under current membership and restrictions."""
         if request.client_id not in self.apps:
-            logger.warning("OAuth app exchange refused: client_id=%s reason=unknown_client", request.client_id)
+            # An unregistered client_id is whatever an unauthenticated caller sent, line breaks and
+            # Rich markup included, so it never reaches the log.
+            logger.warning("OAuth app exchange refused: reason=unknown_client")
             raise OAuthAppGrantError("invalid_client", "Unknown app")
         try:
             self.require_registered_redirect(request.client_id, request.redirect_uri)
