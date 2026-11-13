@@ -52866,8 +52866,37 @@
     },
     "/api/v1/search-tools/catalog": {
       "get": {
-        "description": "List the search tools a direct search may name, with what one search costs the caller.\n\nEach entry is a tool ``POST /api/v1/search/{tool}`` serves, with its\nprovider, a display name, its price per search for the caller's\norganization, and whether it is the deployment's default. Tools a direct\nsearch cannot run on are left out, and no key, endpoint or option is\nreturned.\n\nCalled with an API key whose workspace does not allow web search, the list\nis empty; ``GET /api/v1/tools`` says why. A master key or a dashboard\nsession gets the deployment's list.",
+        "description": "List the search tools a direct search may name, with what one search costs the caller.\n\nEach entry is a tool ``POST /api/v1/search/{tool}`` serves, with its\nprovider, a display name, its price per search for the caller's\norganization, and whether it is the deployment's default. Tools a direct\nsearch cannot run on are left out, and no key, endpoint or option is\nreturned.\n\nCalled with an API key, a tool the key's ``allowed_tools`` does not grant is\nleft out, and the list is empty when its workspace does not allow web\nsearch; ``GET /api/v1/tools`` says why. A master key or a dashboard session\ngets the deployment's list.",
         "operationId": "search-tools-list_search_tool_catalog",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -52878,6 +52907,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

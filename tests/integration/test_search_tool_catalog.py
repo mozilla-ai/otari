@@ -125,6 +125,35 @@ def test_a_workspace_with_web_search_off_lists_nothing_to_its_key(
     assert [entry["id"] for entry in _entries(client, master_key_header)] == ["fake-fast", "fake-search"]
 
 
+def test_a_key_sees_only_the_tools_its_allowed_tools_grants(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "narrow", "allowed_tools": ["fake-search"]}, headers=master_key_header
+    )
+    assert created.status_code == 200, created.text
+    narrow = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    assert [entry["id"] for entry in _entries(client, narrow)] == ["fake-search"]
+
+    denied = client.patch(
+        f"{API_ROOT}/keys/{created.json()['id']}", json={"allowed_tools": []}, headers=master_key_header
+    )
+    assert denied.status_code == 200, denied.text
+    assert _entries(client, narrow) == []
+
+
+def test_the_catalog_pages_with_skip_and_limit(client: TestClient, api_key_header: dict[str, str]) -> None:
+    first = client.get(CATALOG, params={"limit": 1}, headers=api_key_header)
+    second = client.get(CATALOG, params={"skip": 1, "limit": 1}, headers=api_key_header)
+
+    assert [entry["id"] for entry in first.json()["data"]] == ["fake-fast"]
+    assert [entry["id"] for entry in second.json()["data"]] == ["fake-search"]
+    assert client.get(CATALOG, params={"limit": 0}, headers=api_key_header).status_code == 422
+    assert client.get(CATALOG, params={"limit": 1001}, headers=api_key_header).status_code == 422
+    assert client.get(CATALOG, params={"skip": -1}, headers=api_key_header).status_code == 422
+
+
 def test_the_catalog_needs_a_credential_and_the_operator_listing_stays_operator_only(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:

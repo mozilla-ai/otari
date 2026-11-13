@@ -10,7 +10,7 @@ and on the others within the refresh interval.
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
@@ -40,6 +40,7 @@ from gateway.schemas.tools import (
     ToolPriceSource,
     UpdateSearchToolRequest,
 )
+from gateway.services.model_access import is_tool_allowed
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -87,6 +88,18 @@ class ToolRateInForce(NamedTuple):
 # The rate in force for an instance's rate key, or None when no row prices it: the organization's override
 # when one is named and has one, else the deployment's price list.
 ReadToolRate = Callable[[InstanceRateKey, uuid.UUID | None], Awaitable[ToolRateInForce | None]]
+
+
+class SearchCatalogCaller(Protocol):
+    """An API key reading the search tool catalog: what its workspace and its own lists let it name."""
+
+    async def web_search_allowed(self) -> bool:
+        """Whether the key's workspace allows web search."""
+        ...
+
+    async def tool_allowlist(self) -> list[str] | None:
+        """The search tools the key may name, as a direct search decides; ``None`` for every one."""
+        ...
 
 
 def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
@@ -195,12 +208,25 @@ class SearchToolService:
                 )
         return SearchToolsResponse(stored=listed, config=configured)
 
-    async def catalog(self, organization_id: uuid.UUID | None) -> SearchToolCatalogResponse:
-        """The search tools a direct search may name, each priced for ``organization_id``."""
+    async def catalog(
+        self, organization_id: uuid.UUID | None, caller: SearchCatalogCaller | None, *, skip: int, limit: int
+    ) -> SearchToolCatalogResponse:
+        """The page of search tools ``caller`` may name in a direct search, each priced for ``organization_id``.
+
+        ``caller`` is ``None`` for the master key or a dashboard session, which see the deployment's list.
+        An API key sees nothing when its workspace has web search off, and otherwise only the tools a
+        direct search would not refuse it with ``403``.
+        """
+        servable = servable_direct_search_instances(self.config)
+        if caller is not None:
+            if not await caller.web_search_allowed():
+                return SearchToolCatalogResponse(data=[])
+            allowlist = await caller.tool_allowlist()
+            servable = [instance for instance in servable if is_tool_allowed(allowlist, instance.name)]
         default = unnamed_direct_search_tool(self.config)
         entries: list[SearchToolCatalogEntry] = []
         async with self.uow:
-            for instance in servable_direct_search_instances(self.config):
+            for instance in servable[skip : skip + limit]:
                 rate_key = instance_rate_key("search", instance.name, instance.provider)
                 rate = await self.read_rate(rate_key, organization_id)
                 entries.append(

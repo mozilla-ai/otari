@@ -794,14 +794,19 @@ key this gateway cannot call, carries none of them.
 The completion routes send the same headers when a provider fails a completion;
 see [Provider failures](#provider-failures).
 
-**Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools a
-call may name, for any API key, as `GET /api/v1/models` lists models. Each entry
-carries the tool's name as `id`, its `provider`, a display `label`, its
-`price_per_call` in USD for the caller's organization (its override, else the
-deployment's price list; `null` when nothing prices it), and `default`, true for
-the tool a call that names none runs on. A tool a direct search cannot run on is
-left out, and no key, endpoint or option is returned. An API key whose workspace
-has web access off gets an empty list; `GET /api/v1/tools` says why.
+**Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools the
+calling key may name, as `GET /api/v1/models` lists the models it may call: a
+tool its `allowed_tools` does not grant is left out. Each entry carries the
+tool's name as `id`, its `provider`, a display `label`, its `price_per_call` in
+USD for the caller's organization (its override, else the deployment's price
+list; `null` when nothing prices it), and `default`, true for the deployment's
+default tool. A call that names no tool runs on the default, unless the
+workspace has an organization search key, which then serves it; a call that
+names the default tool runs on that tool's own key and price. A tool a direct
+search cannot run on is left out, and no key, endpoint or option is returned.
+An API key whose workspace has web access off gets an empty list;
+`GET /api/v1/tools` says why. The list takes `skip` and `limit` (at most 1000,
+100 by default).
 
 ```json
 {

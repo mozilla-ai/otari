@@ -228,6 +228,7 @@ from gateway.services.tools import (
     DirectToolService,
     DirectToolUsage,
     McpGrantMembershipListener,
+    SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
     WebSearchKeyService,
@@ -2112,6 +2113,45 @@ def get_search_tool_service(
 SearchToolServiceDep = Annotated[SearchToolService, Depends(get_search_tool_service)]
 
 
+class _KeySearchCatalogCaller:
+    """An API key reading the search tool catalog, answered by its workspace's web policy and its tool lists."""
+
+    def __init__(
+        self,
+        config: GatewayConfig,
+        api_key: APIKey,
+        web_policies: WorkspaceWebSearchPolicies,
+        api_keys: ApiKeyService,
+    ) -> None:
+        self._config = config
+        self._api_key = api_key
+        self._web_policies = web_policies
+        self._api_keys = api_keys
+
+    async def web_search_allowed(self) -> bool:
+        allowed, _policy = await self._web_policies.access(self._api_key.workspace_id)
+        return allowed
+
+    async def tool_allowlist(self) -> list[str] | None:
+        return await self._api_keys.tool_allowlist(self._config, self._api_key)
+
+
+def get_search_catalog_caller(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    web_policies: Annotated[WorkspaceWebSearchPolicies, Depends(get_workspace_web_search_policies)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+) -> SearchCatalogCaller | None:
+    """The API key reading the search tool catalog, or ``None`` for the master key or a dashboard session."""
+    api_key, _ = auth
+    if api_key is None:
+        return None
+    return _KeySearchCatalogCaller(config, api_key, web_policies, api_keys)
+
+
+SearchCatalogCallerDep = Annotated[SearchCatalogCaller | None, Depends(get_search_catalog_caller)]
+
+
 async def get_search_tool_tester(
     uow: UnitOfWorkDep,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -3133,6 +3173,7 @@ __all__ = [
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",
     "PlatformConnectServiceDep",
+    "SearchCatalogCallerDep",
     "SearchToolServiceDep",
     "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
