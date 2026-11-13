@@ -288,16 +288,24 @@ def _owner_label(url_or_host: str | None) -> str | None:
     return domain.split(".")[0] if domain else None
 
 
+def _github_owner(name: str) -> str | None:
+    """The GitHub account a server is published under, when its namespace is ``io.github.<account>``."""
+    labels = name.partition("/")[0].split(".")
+    if len(labels) >= 3 and labels[:2] == ["io", "github"]:
+        return labels[2]
+    return None
+
+
 def publisher_from_name(name: str) -> str:
     """Who publishes a server, from its registry namespace.
 
     ``com.stripe/mcp`` is ``stripe.com``, ``com.paypal.mcp/mcp`` is ``paypal.com``, and
     ``io.github.getsentry/x`` is ``github.com/getsentry``.
     """
-    labels = name.partition("/")[0].split(".")
-    if len(labels) >= 3 and labels[:2] == ["io", "github"]:
-        return f"github.com/{labels[2]}"
-    domain = list(reversed(labels))
+    owner = _github_owner(name)
+    if owner is not None:
+        return f"github.com/{owner}"
+    domain = list(reversed(name.partition("/")[0].split(".")))
     while len(domain) > 2 and domain[0] == "mcp":
         domain = domain[1:]
     return ".".join(domain)
@@ -338,13 +346,13 @@ def publisher_kind(name: str, title: str, url: str, website_url: str | None) -> 
     label, _, suffix = domain.partition(".")
     if len(label) < 3 or suffix in _HOSTING_SUFFIXES:
         return "community"
-    publisher = publisher_from_name(name)
     owned = {_owner_label(website_url)}
-    if publisher.startswith("github.com/"):
-        if label in _letters(publisher.removeprefix("github.com/")):
+    github_owner = _github_owner(name)
+    if github_owner is not None:
+        if label in _letters(github_owner):
             owned.add(label)
     else:
-        owned.add(_owner_label(publisher))
+        owned.add(_owner_label(publisher_from_name(name)))
     return "vendor" if label in owned and _is_named(title, domain) else "community"
 
 
@@ -365,7 +373,8 @@ def catalog_logo_sources(name: str, website_url: str | None, icon_url: str | Non
     """
     sources: list[str] = [icon_url] if icon_url else []
     publisher = publisher_from_name(name)
-    on_github = publisher.startswith("github.com/")
+    github_owner = _github_owner(name)
+    on_github = github_owner is not None
     if not on_github and "." in publisher:
         sources += _site_icons(publisher)
     website_host = _host(website_url)
@@ -376,10 +385,8 @@ def catalog_logo_sources(name: str, website_url: str | None, icon_url: str | Non
             sources += _site_icons(domain)
     if not on_github and "." in publisher:
         sources.append(_site_page(publisher))
-    if on_github:
-        owner = publisher.removeprefix("github.com/")
-        if re.fullmatch(r"[A-Za-z0-9-]{1,39}", owner):
-            sources.append(f"https://github.com/{owner}.png?size=128")
+    if github_owner is not None and re.fullmatch(r"[A-Za-z0-9-]{1,39}", github_owner):
+        sources.append(f"https://github.com/{github_owner}.png?size=128")
     return list(dict.fromkeys(sources))
 
 
