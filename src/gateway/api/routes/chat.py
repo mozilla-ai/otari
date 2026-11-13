@@ -481,6 +481,21 @@ def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | N
     return max_completion_tokens
 
 
+def _held_output_tokens(output_cap: int | None, n: int | None, *, default_output_tokens: int) -> int | None:
+    """The output tokens a request's budget hold must cover, one cap per choice.
+
+    A request for ``n`` choices asks the provider for ``n`` completions of up to
+    ``output_cap`` tokens each, and the provider bills every one, so a hold
+    sized for a single completion admits a request that settles for ``n`` times
+    the budget. An unset cap with ``n`` above one is held at the deployment's
+    default output tokens per choice; an unset cap with a single choice stays
+    unset, as before.
+    """
+    if n is None or n <= 1:
+        return output_cap
+    return (output_cap if output_cap is not None else default_output_tokens) * n
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
@@ -629,7 +644,9 @@ async def run_chat_completion(
             safety_identifier=request.safety_identifier,
             price_facts=PriceFacts(service_tier=request.service_tier),
             estimate_prompt_chars=len(str(request.messages)),
-            estimate_max_output_tokens=output_cap,
+            estimate_max_output_tokens=_held_output_tokens(
+                output_cap, request.n, default_output_tokens=config.budget_estimate_default_output_tokens
+            ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,

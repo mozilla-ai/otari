@@ -47,7 +47,8 @@ token, plus its whole output token limit (`max_tokens`, or `max_output_tokens` o
 Responses; a deployment default of 1024 tokens when the request sets none). A
 request with `max_tokens: 8192` holds the price of 8192 output tokens however few
 the model writes, so a user near the cap is refused once that hold no longer
-fits. A client that sends a realistic output limit keeps more of its allowance
+fits. A chat request for `n` choices holds `n` times that output limit, because
+the provider bills every choice. A client that sends a realistic output limit keeps more of its allowance
 usable near the cap.
 
 The prompt side is an estimate, so a request can settle a little past its hold
