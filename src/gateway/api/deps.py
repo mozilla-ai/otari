@@ -174,7 +174,6 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
-    resolve_tool_rates,
 )
 from gateway.services.providers import (
     HostedCatalogUpdate,
@@ -1259,15 +1258,10 @@ class _CodeExecutionEnvironmentPrices:
     async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
         return await organization_for_key_id(self._db, api_key_id)
 
-    async def unit_rates(
-        self, rate_key_sets: Collection[Sequence[str]], *, organization_id: uuid.UUID | None
-    ) -> dict[tuple[str, ...], Decimal | None]:
+    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
         # The sandbox is the deployment's, so a run is deployment-paid and only the operator's rate counts.
-        rates = await resolve_tool_rates(self._db, rate_key_sets, deployment_paid=True, organization_id=organization_id)
-        return {
-            tuple(rate_keys): rate.unit_rate if (rate := rates[tuple(rate_keys)]) is not None else None
-            for rate_keys in rate_key_sets
-        }
+        rate = await resolve_tool_rate(self._db, rate_keys, deployment_paid=True, organization_id=organization_id)
+        return rate.unit_rate if rate is not None else None
 
 
 def get_code_execution_environment_service(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Protocol
 
@@ -24,13 +24,8 @@ class CodeExecutionEnvironmentPrices(Protocol):
         """The organization whose prices apply to the key's runs."""
         ...
 
-    async def unit_rates(
-        self, rate_key_sets: Collection[Sequence[str]], *, organization_id: uuid.UUID | None
-    ) -> dict[tuple[str, ...], Decimal | None]:
-        """The deployment-paid price of one run under each set of rate keys, first match winning, read in one batch.
-
-        Keyed by the set as a tuple; ``None`` where none of its keys is priced.
-        """
+    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
+        """The deployment-paid price of one run under these rate keys, the first priced one winning."""
         ...
 
 
@@ -55,11 +50,16 @@ class CodeExecutionEnvironmentService:
 
         A workspace whose policy is off, or leaves no tool the sandbox serves, is offered none; one that pins an
         environment is offered that one alone, and none once the pin is off the operator's list. A deployment with
-        no sandbox offers none, and one that names no image has none to choose.
+        no sandbox offers none, and one that names no image has none to choose. With no key, a master key or a
+        dashboard session, which belongs to no single workspace, is offered the deployment's whole list.
         """
         if not self._config.sandbox_configured():
             return CodeExecutionEnvironmentList(data=[])
-        policy = await self._policies.for_request(await self._prices.workspace_of(api_key_id))
+        policy = (
+            await self._policies.for_request(await self._prices.workspace_of(api_key_id))
+            if api_key_id is not None
+            else None
+        )
         offered = self._config.pinnable_sandbox_images()
         default = self._config.effective_sandbox_image()
         if policy is not None:
@@ -71,13 +71,12 @@ class CodeExecutionEnvironmentService:
         page = offered[skip : skip + limit]
         if not page:
             return CodeExecutionEnvironmentList(data=[])
-        organization_id = await self._prices.organization_of(api_key_id)
-        rate_keys = {image: code_execution_rate_keys(image) for image in page}
-        unit_rates = await self._prices.unit_rates(list(rate_keys.values()), organization_id=organization_id)
+        organization_id = await self._prices.organization_of(api_key_id) if api_key_id is not None else None
         environments: list[CodeExecutionEnvironment] = []
         for image in page:
             described = self._config.sandbox_environments.get(image)
-            unit_rate = unit_rates.get(rate_keys[image])
+            # One lookup per environment: the page is the operator's own image list, a handful of entries.
+            unit_rate = await self._prices.unit_rate(code_execution_rate_keys(image), organization_id=organization_id)
             environments.append(
                 CodeExecutionEnvironment(
                     name=image,

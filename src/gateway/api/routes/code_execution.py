@@ -465,8 +465,10 @@ async def list_code_execution_environments(
     ``label`` and ``description``, ``price_per_run`` for the caller's
     organization, and whether it is the ``default`` a run that names none gets.
     A workspace whose code execution policy is off lists none, and one that
-    pins an environment lists that one alone. So does a gateway with no sandbox,
-    or one that names no image, whose runs go to the backend's own default.
+    pins an environment lists that one alone. A gateway with no sandbox lists
+    none, as does one that names no image, whose runs go to the backend's own
+    default. A master key or a dashboard session belongs to no single workspace,
+    so it gets the deployment's whole list at the deployment's prices.
     ``skip`` and ``limit`` page the list in the operator's order.
     """
     api_key, _ = auth_result

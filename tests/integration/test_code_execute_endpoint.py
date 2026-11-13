@@ -682,6 +682,19 @@ def test_the_listing_follows_the_workspaces_pin_and_its_switch(
     assert off == []
 
 
+def test_a_master_key_lists_the_deployments_environments_whatever_a_workspace_sets(
+    client: TestClient,
+    port: _FakePort,
+    environments: None,
+    master_key_header: dict[str, str],
+) -> None:
+    _set_policy(client, master_key_header, enabled=False)
+
+    data = client.get(_ENVIRONMENTS, headers=master_key_header).json()["data"]
+
+    assert [(env["name"], env["default"]) for env in data] == [("python", True), ("python-data", False)]
+
+
 def test_a_gateway_with_no_sandbox_lists_no_environment(
     client: TestClient, environments: None, api_key_header: dict[str, str]
 ) -> None:

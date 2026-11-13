@@ -1081,20 +1081,6 @@ async def resolve_tool_rate(
     return (await _tool_rates(db, {lookup}, as_of=as_of, organization_id=organization_id))[lookup]
 
 
-async def resolve_tool_rates(
-    db: AsyncSession,
-    rate_key_sets: Collection[Sequence[RateKey]],
-    *,
-    deployment_paid: bool,
-    as_of: datetime | None = None,
-    organization_id: uuid.UUID | None = None,
-) -> dict[tuple[RateKey, ...], ToolRate | None]:
-    """:func:`resolve_tool_rate` for several calls with one payer, keyed by their rate keys, read in one batch."""
-    lookups = {tuple(rate_keys): ToolRateLookup(tuple(rate_keys), deployment_paid) for rate_keys in rate_key_sets}
-    rates = await _tool_rates(db, set(lookups.values()), as_of=as_of, organization_id=organization_id)
-    return {rate_keys: rates[lookup] for rate_keys, lookup in lookups.items()}
-
-
 async def _tool_rates(
     db: AsyncSession,
     lookups: Collection[ToolRateLookup],
