@@ -68,6 +68,18 @@ def test_a_key_reaches_only_the_groups_it_holds(client: TestClient, master_key_h
     assert "'agents:write'" in _refusal(client.post(f"{API_ROOT}/hooks/check", json={}, headers=headers))
 
 
+def test_a_refusal_names_the_scope_in_the_bearer_challenge(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """RFC 6750 section 3.1: a client reads the scope it lacks from the challenge, not from the prose."""
+    headers = _header(_create(client, master_key_header, scopes=["inference:run"]))
+
+    refused = client.get(f"{API_ROOT}/key/budget", headers=headers)
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    assert refused.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="usage:read"'
+
+
 def test_the_catalog_reads_are_open_to_every_key(client: TestClient, master_key_header: dict[str, str]) -> None:
     headers = _header(_create(client, master_key_header, scopes=["usage:read"]))
 
