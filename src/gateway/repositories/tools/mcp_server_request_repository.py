@@ -97,24 +97,53 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         return list(rows.scalars().all())
 
     async def pending_in_workspace(
-        self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], limit: int
+        self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], per_server: int
     ) -> list[McpServerRequest]:
-        """A workspace's pending requests for these catalog servers, grouped as :meth:`pending_servers` orders them.
+        """A workspace's pending requests for these catalog servers, the first ``per_server`` of each, oldest first.
 
-        Each server's requests come oldest first, after those of every server waited for longer, so
-        ``limit`` cuts the last servers short rather than every one.
+        Bounded per server, so one server's many requests never crowd another out of the page.
         """
         if not catalog_names:
             return []
-        first = func.min(McpServerRequest.created_at).over(partition_by=McpServerRequest.catalog_name)
+        waiting = (
+            McpServerRequest.workspace_id == workspace_id,
+            McpServerRequest.status == _PENDING,
+            McpServerRequest.catalog_name.in_(list(catalog_names)),
+        )
+        ranked = (
+            select(
+                McpServerRequest.id,
+                func.row_number()
+                .over(
+                    partition_by=McpServerRequest.catalog_name,
+                    order_by=(McpServerRequest.created_at, McpServerRequest.id),
+                )
+                .label("rank"),
+            )
+            .where(*waiting)
+            .subquery()
+        )
+        rows = await self.db.execute(
+            select(McpServerRequest)
+            .join(ranked, ranked.c.id == McpServerRequest.id)
+            .where(ranked.c.rank <= per_server)
+            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+        )
+        return list(rows.scalars().all())
+
+    async def pending_for_name(
+        self, workspace_id: uuid.UUID, catalog_name: str, *, skip: int, limit: int
+    ) -> list[McpServerRequest]:
+        """A page of the pending requests for one catalog server, oldest first."""
         rows = await self.db.execute(
             select(McpServerRequest)
             .where(
                 McpServerRequest.workspace_id == workspace_id,
                 McpServerRequest.status == _PENDING,
-                McpServerRequest.catalog_name.in_(list(catalog_names)),
+                McpServerRequest.catalog_name == catalog_name,
             )
-            .order_by(first, McpServerRequest.catalog_name, McpServerRequest.created_at, McpServerRequest.id)
+            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+            .offset(skip)
             .limit(limit)
         )
         return list(rows.scalars().all())

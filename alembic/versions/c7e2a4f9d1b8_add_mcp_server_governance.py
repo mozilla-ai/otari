@@ -52,6 +52,7 @@ def _connection_columns() -> list[sa.Column[object]]:
         sa.Column("token_endpoint", sa.Text(), nullable=False),
         sa.Column("revocation_endpoint", sa.Text(), nullable=True),
         sa.Column("resource", sa.Text(), nullable=True),
+        sa.Column("server_url", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     ]

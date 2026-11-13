@@ -25,7 +25,7 @@ import uuid
 from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from any_llm import LLMProvider
 from sqlalchemy import select
@@ -42,12 +42,7 @@ from gateway.core.settings.tools import (
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import (
-    McpOAuthFlowRepository,
-    McpUserConnectionRepository,
-    WorkspaceMcpServerGrantRepository,
-    WorkspaceMcpServerRepository,
-)
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository, WorkspaceMcpServerRepository
 from gateway.repositories.users_repository import DEFAULT_USER_ID
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
@@ -60,9 +55,6 @@ from gateway.services.tenancy.org_provider_key_service import (
     cached_org_provider_kwargs,
     cached_org_slug_provider,
 )
-
-if TYPE_CHECKING:
-    from gateway.services.tools import McpRevocation
 
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
@@ -453,24 +445,13 @@ async def resolve_request_mcp_access(
     )
 
 
-async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> "tuple[list[McpRevocation], int]":
-    """Stage the removal of a deleted user's MCP grants, connections and pending sign-ins.
+async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> None:
+    """Stage the removal of a deleted user's MCP grants, which a soft delete leaves behind otherwise.
 
-    A soft delete leaves all three behind otherwise. Returns what to ask the authorization servers
-    to end once the caller has committed, read while the servers still hold the clients, and how
-    many connections it ends past the page it reads.
+    Their connections and pending sign-ins are the tools service's to end
+    (``McpConnectionService.end_for_deleted_user``).
     """
-    # Imported here: the tools package reaches back into this module while it loads.
-    from gateway.services.tools import McpConnectionService
-
-    connections = McpUserConnectionRepository(db)
-    revocations = await McpConnectionService.collect_revocations(
-        connections, WorkspaceMcpServerRepository(db), user_id=user_id
-    )
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
-    await connections.remove_for_user(user_id)
-    await McpOAuthFlowRepository(db).remove_for_user(user_id)
-    return revocations
 
 
 def tool_not_allowed_detail(

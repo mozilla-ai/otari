@@ -179,6 +179,7 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         token_endpoint: str,
         revocation_endpoint: str | None,
         resource: str | None,
+        server_url: str,
     ) -> McpUserConnection:
         """Stage a user's connection to a server, replacing the tokens of one they already hold.
 
@@ -196,6 +197,7 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
             "token_endpoint": token_endpoint,
             "revocation_endpoint": revocation_endpoint,
             "resource": resource,
+            "server_url": server_url,
         }
         insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
         await self.db.execute(
@@ -246,6 +248,7 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         token_endpoint: str,
         revocation_endpoint: str | None,
         resource: str | None,
+        server_url: str,
     ) -> McpSharedConnection:
         """Stage a shared server's account, in place of the one it holds.
 
@@ -267,6 +270,7 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
             token_endpoint=token_endpoint,
             revocation_endpoint=revocation_endpoint,
             resource=resource,
+            server_url=server_url,
         )
         self.db.add(created)
         await self.db.flush()

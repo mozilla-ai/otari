@@ -4311,6 +4311,14 @@ async def prepare_gateway_tools(
         with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
+    except asyncio.CancelledError:
+        # The client disconnected during an admission step's I/O. Released as a database failure is,
+        # rolling back first, because an interrupted statement leaves the session unusable.
+        with contextlib.suppress(*DATABASE_ERRORS):
+            await ctx.db.rollback()
+        with contextlib.suppress(*DATABASE_ERRORS):
+            await release_reservation(ctx)
+        raise
 
     admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
     if backends.billing is not None:

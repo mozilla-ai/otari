@@ -102,18 +102,23 @@ class McpServerLogoService:
         self._workspaces = workspaces
         self._source = source
 
-    async def _server_url(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> str:
-        """The URL of a server in this workspace. Inside a block. A server of another workspace is not found."""
-        server = await self._servers.find(server_id)
+    async def _server_url(self, workspace_id: uuid.UUID, server_id: uuid.UUID, *, lock: bool = False) -> str:
+        """The URL of a server in this workspace. Inside a block. A server of another workspace is not found.
+
+        ``lock`` holds the server's row until the block commits, so two first uploads store one after the other.
+        """
+        server = await self._servers.find(server_id, lock=lock)
         if server is None or server.workspace_id != workspace_id:
             raise WorkspaceMcpServerNotFoundError(server_id)
         return server.url
 
-    async def list_logos(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceMcpServerLogosPublic:
-        """The logo of each of the workspace's servers. Starts no look for one."""
+    async def list_logos(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = 100
+    ) -> WorkspaceMcpServerLogosPublic:
+        """The logo of a page of the workspace's servers, paged as the server list is. Starts no look for one."""
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         async with self._uow:
-            urls = await self._servers.urls_in_workspace(workspace.id)
+            urls = await self._servers.url_page(workspace.id, skip=skip, limit=limit)
             rows = await self._logos.facts_for_servers(list(urls))
         refs = await self._source.logo_refs(list(urls.values()))
         return WorkspaceMcpServerLogosPublic(
@@ -150,7 +155,7 @@ class McpServerLogoService:
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
         async with self._uow:
-            url = await self._server_url(workspace.id, server_id)
+            url = await self._server_url(workspace.id, server_id, lock=True)
             row = await self._logos.save(
                 server_id,
                 tile=tile,

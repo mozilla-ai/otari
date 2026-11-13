@@ -366,6 +366,31 @@ async def test_the_shared_accounts_token_is_renewed_before_it_expires_and_after_
     assert await resolved.renew_token("renewed-1") == "renewed-2"
 
 
+async def test_the_revision_holds_across_a_renewal_and_moves_when_another_account_signs_in(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """An operation an application approved under one account is not run under another."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    servers = WorkspaceMcpServers(async_db, tokens)
+    anyone = McpAccess(user_id="anyone")
+
+    first = await servers.resolve_one(world.workspace.id, world.server.id, anyone)
+    now = datetime.now(UTC)
+    await async_db.execute(
+        update(McpSharedConnection).values(expires_at=now - timedelta(minutes=1), updated_at=now - timedelta(hours=1))
+    )
+    await async_db.commit()
+    renewed = await servers.resolve_one(world.workspace.id, world.server.id, anyone)
+    await _sign_in_for_everyone(async_db, config, world)
+    replaced = await servers.resolve_one(world.workspace.id, world.server.id, anyone)
+
+    assert first is not None and renewed is not None and replaced is not None
+    assert renewed.authorization_token != first.authorization_token
+    assert renewed.revision == first.revision
+    assert replaced.revision != first.revision
+
+
 async def test_a_shared_account_whose_grant_ended_is_removed_and_the_server_goes_back_to_waiting(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
 ) -> None:
@@ -414,7 +439,8 @@ async def test_deleting_the_workspace_revokes_its_shared_account_and_a_member_le
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+        # The manager who signed the account in, leaving: everyone else still uses it.
+        await McpGrantMembershipListener(uow).member_lost_workspaces(world.owner.id, [world.workspace.id])
     await base._drain_revocations()
     assert wire.revoked == []
     assert await _account(async_db, world) is not None

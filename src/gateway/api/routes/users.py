@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     ApiKeyServiceDep,
     CallerOrganization,
+    McpConnectionServiceDep,
     TelemetryStoragePortDep,
     TraceServiceDep,
     get_config,
@@ -36,7 +37,6 @@ from gateway.repositories.users_repository import (
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
-from gateway.services.tools import McpConnectionService
 
 router = APIRouter(
     prefix="/users",
@@ -436,6 +436,7 @@ async def delete_user(
     storage: TelemetryStoragePortDep,
     traces: TraceServiceDep,
     organization_id: CallerOrganization,
+    connections: McpConnectionServiceDep,
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
@@ -458,16 +459,15 @@ async def delete_user(
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
-    revocations, unread = await revoke_user_mcp_grants(db, user_id)
+    await revoke_user_mcp_grants(db, user_id)
     user.deleted_at = datetime.now(UTC)
 
     try:
-        await db.commit()
+        # Its block commits the deletion staged above with the connections it removes, and asks the
+        # authorization servers to end them only once that has committed.
+        await connections.end_for_deleted_user(user_id)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("delete user", exc) from None
-    # Only once the deletion has committed: a rolled-back one keeps the connections it would have ended.
-    McpConnectionService.revoke_in_background(revocations, unread=unread)
 
 
 @router.get("/{user_id}/usage")

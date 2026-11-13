@@ -70,6 +70,28 @@ async def test_a_refused_token_is_renewed_and_the_session_opened_once_more(monke
     assert (tried, renew.asked) == (["stale", "renewed"], ["stale"])
 
 
+async def test_a_refusal_screened_as_a_check_screens_it_is_renewed_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A manual check screens answers, so its 401 arrives already named rather than as an HTTP error."""
+    tried: list[str] = []
+
+    async def enter(stack: AsyncExitStack, server: ResolvedMcpServer, *, screen_answers: bool) -> Any:
+        assert screen_answers
+        tried.append(server.authorization_token or "")
+        if server.authorization_token == "stale":
+            raise BaseExceptionGroup(
+                "transport", [mcp_stateless._UnusableAnswer(mcp_stateless.CheckFailure.UNAUTHORIZED, 401)]
+            )
+        return object()
+
+    monkeypatch.setattr(mcp_stateless, "_enter_session", enter)
+    renew = _Renewer()
+
+    async with mcp_stateless.open_session(_server(renew), screen_answers=True):
+        pass
+
+    assert (tried, renew.asked) == (["stale", "renewed"], ["stale"])
+
+
 async def test_a_second_refusal_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     tried = _stateless_network(monkeypatch, refuse={"stale", "renewed"})
 

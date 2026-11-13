@@ -2027,6 +2027,26 @@ async def test_successful_admission_releases_the_database_connection(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_a_client_that_disconnects_during_mcp_admission_has_its_reservation_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+
+    async def disconnected(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise asyncio.CancelledError
+
+    db = AsyncMock()
+    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(asyncio.CancelledError):
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(disconnected), mcp_server_ids=[uuid.uuid4()])
+
+    db.rollback.assert_awaited_once()
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
 async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)

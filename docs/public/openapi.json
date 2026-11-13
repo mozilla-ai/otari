@@ -13912,7 +13912,7 @@
             "type": "integer"
           },
           "requesters": {
-            "description": "Who asked, earliest first. Shorter than requester_count when the page's request cap cut it",
+            "description": "Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest",
             "items": {
               "$ref": "#/components/schemas/McpServerRequesterPublic"
             },
@@ -14143,6 +14143,30 @@
           "requested_at"
         ],
         "title": "McpServerRequesterPublic",
+        "type": "object"
+      },
+      "McpServerRequestersPublic": {
+        "description": "A page of the members waiting for one catalog server in a workspace.",
+        "properties": {
+          "count": {
+            "description": "How many pending requests ask for this server in all",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "description": "Who asked, earliest first",
+            "items": {
+              "$ref": "#/components/schemas/McpServerRequesterPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpServerRequestersPublic",
         "type": "object"
       },
       "McpServerRequestsDeclined": {
@@ -60504,7 +60528,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
       "get": {
-        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names who asked and\ncarries their notes, and the catalog's entry for the server as it is now. A page holds `limit`\nservers after the first `skip`, and at most 500 requests; `count` says how many wait in all.",
+        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names the first five\nwho asked, with their notes, and `requester_count` says how many asked in all; the\n`requesters` list pages through the rest. Each also carries the catalog's entry for the server\nas it is now. A page holds `limit` servers after the first `skip`; `count` says how many\nrequests wait in all.",
         "operationId": "mcp-servers-list_mcp_server_requests",
         "parameters": [
           {
@@ -60536,9 +60560,9 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 500,
+              "default": 100,
               "description": "Maximum number of catalog servers to return",
-              "maximum": 500,
+              "maximum": 100,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -60789,6 +60813,98 @@
           }
         ],
         "summary": "List My Mcp Server Requests",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters": {
+      "get": {
+        "description": "Everyone waiting for one catalog server, a page at a time, the earliest first.\n\nOrganization owners/admins or this workspace's owners/admins. For a server whose entry in the\nlist above names fewer requesters than its `requester_count`.",
+        "operationId": "mcp-servers-list_mcp_server_requesters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The catalog server asked for",
+            "in": "query",
+            "name": "catalog_name",
+            "required": true,
+            "schema": {
+              "description": "The catalog server asked for",
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Catalog Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Server Requesters",
         "tags": [
           "mcp-servers"
         ]
@@ -61184,7 +61300,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/logos": {
       "get": {
-        "description": "The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.\n\nReadable by any member who can see the workspace, as the servers are. A logo is\nan admin's upload, else the catalog's for the server's URL, else one the gateway\nfound on the server's host. Listing them makes the gateway fetch nothing.",
+        "description": "The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.\n\nPaged as the server list is, oldest server first. Readable by any member who can\nsee the workspace, as the servers are. A logo is an admin's upload, else the\ncatalog's for the server's URL, else one the gateway found on the server's host.\nListing them makes the gateway fetch nothing.",
         "operationId": "mcp-servers-list_workspace_mcp_server_logos",
         "parameters": [
           {
@@ -61195,6 +61311,33 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

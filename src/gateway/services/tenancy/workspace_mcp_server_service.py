@@ -35,6 +35,7 @@ configuration rather than a narrowing of one.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
@@ -56,6 +57,7 @@ from gateway.exceptions import TenancyError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpCheckSignInRequiredError,
+    McpConnectionFlowError,
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpSignInRequiredError,
@@ -105,6 +107,7 @@ from gateway.schemas.tools import (
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
 from gateway.services import mcp_stateless
+from gateway.services.mcp_client import ATTACHED_CONNECT_BUDGET_S
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.model_access import (
     MCP_READ_PRESET,
@@ -357,11 +360,11 @@ def _needs_setup(server: WorkspaceMcpServer, *, has_account: bool) -> bool:
 
 
 def _caller_access(server: WorkspaceMcpServer, tools: Sequence[str]) -> McpCallerAccess:
-    """What a rule's tool patterns come to on a server, in one word."""
-    if not server.enabled or not tools:
+    """What a rule's tool patterns come to on a server, in one word, under the server's own allow-list."""
+    if not server.enabled or not tools or server.allowed_tools == []:
         return "none"
     if "*" in tools:
-        return "all"
+        return "all" if server.allowed_tools is None else "some"
     return "read" if list(tools) == [MCP_READ_PRESET] else "some"
 
 
@@ -709,11 +712,13 @@ class WorkspaceMcpConnectionEligibility:
         workspaces: WorkspaceRepository,
         members: WorkspaceMemberRepository,
         organization_members: OrganizationMemberRepository,
+        accounts: UserRepository,
     ) -> None:
         self._uow = uow
         self._workspaces = workspaces
         self._members = members
         self._organization_members = organization_members
+        self._accounts = accounts
 
     async def hold(self, workspace_id: uuid.UUID) -> None:
         """Take the workspace lock a member's removal and the workspace's deletion take first."""
@@ -733,6 +738,10 @@ class WorkspaceMcpConnectionEligibility:
         except ValueError:
             return True
         if str(identity) != user_id:
+            return True
+        # A dashboard account is a request-plane user under its own id. A UUID-shaped id with no
+        # account behind it is a request-plane user like any other.
+        if not await self._accounts.get_by_ids([identity]):
             return True
         # Locked as read: an organization's removal of the person changes these rows without the
         # workspace lock, and must wait for this sign-in, or be seen by it.
@@ -968,12 +977,29 @@ async def _resolve_for_request(
         planned.append((config, McpServerRef.of(row) if per_user else None, need))
 
     resolved = RequestMcpServers()
+    # The attached servers' renewals share the budget their connections get, from the first of
+    # them: an expired token on several attached servers cannot hold a completion past it.
+    loop = asyncio.get_running_loop()
+    attached_by: float | None = None
     for config, ref, need in planned:
+        bound: asyncio.Timeout | None = None
+        if config.attached and (ref is not None or need.server_id in accounts):
+            attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
+            bound = asyncio.timeout_at(attached_by)
         if ref is not None:
             try:
                 if access.user_id is None:
                     raise WorkspaceMcpServerNotFoundError(need.server_id)
-                config.authorization_token = await tokens.token_for(ref, access.user_id)
+                if bound is None:
+                    config.authorization_token = await tokens.token_for(ref, access.user_id)
+                else:
+                    async with bound:
+                        config.authorization_token = await tokens.token_for(ref, access.user_id)
+            except TimeoutError:
+                if bound is None or not bound.expired():
+                    raise
+                resolved.sign_in.append(dataclasses.replace(need, reason=McpSignInReason.RENEWAL_FAILED))
+                continue
             except (McpSignInRequiredError, WorkspaceMcpServerNotFoundError):
                 if not defer:
                     raise
@@ -992,7 +1018,18 @@ async def _resolve_for_request(
         elif need.server_id in accounts:
             shared_ref, unset = accounts[need.server_id]
             try:
-                account_token = await tokens.shared_token_for(shared_ref)
+                if bound is None:
+                    account_token = await tokens.shared_token_for(shared_ref)
+                else:
+                    async with bound:
+                        account_token = await tokens.shared_token_for(shared_ref)
+            except TimeoutError:
+                if bound is None or not bound.expired():
+                    raise
+                logger.warning(
+                    "Attached MCP server left out: its token was not renewed in time server_id=%s", need.server_id
+                )
+                continue
             except (SecretDecryptionError, SecretBoxUnavailableError, McpConnectionUnavailableError):
                 if not config.attached:
                     raise
@@ -1124,12 +1161,13 @@ async def resolve_workspace_mcp_server(
     if per_user:
         resolved.authorization_token = await _caller_token(ref, access, tokens)
     elif resolved.authorization_token is None:
-        account_token = await tokens.shared_token_for(ref)
-        if account_token is not None:
-            resolved.authorization_token = account_token
+        account = await tokens.shared_account_for(ref)
+        if account is not None:
+            resolved.authorization_token, generation = account
             resolved.renew_token = partial(tokens.renew_rejected_shared, ref)
-            # As a user's token does, the account's changes at every renewal.
-            resolved.credential_revision = "shared_account"
+            # The account's token changes at every renewal, which changes nothing an application
+            # authorized; a manager signing in to another account does.
+            resolved.credential_revision = f"shared_account:{generation}"
         elif unset and access is not None:
             return None
     return resolved
@@ -1404,7 +1442,13 @@ class WorkspaceMcpServerService:
             await self.db.commit()
             logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
             return True
-        server.health = WorkspaceMcpServerHealth.from_check(server.allowed_tools, check).model_dump(mode="json")
+        health = WorkspaceMcpServerHealth.from_check(server.allowed_tools, check)
+        if check.failure is not None and server.health is not None:
+            # What '@read' stands for until a manager labels tools: one failed check, possibly with one
+            # user's token, must not empty it for everyone, as one failed contact does not.
+            previous = WorkspaceMcpServerHealth.model_validate(server.health)
+            health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
+        server.health = health.model_dump(mode="json")
         await self.db.commit()
         await self.db.refresh(server)
         logger.info("MCP server checked server_id=%s outcome=%s", server.id, check.failure or "ok")
@@ -1609,6 +1653,9 @@ class WorkspaceMcpServerService:
         """Apply a partial update. See :class:`WorkspaceMcpServerUpdate` for the token's three states."""
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
+        # Locked and read again: an edit that moved the URL meanwhile must be what this one decides
+        # against, or a secret saved here would land on a client the move had dropped.
+        await self.db.refresh(server, with_for_update=True)
         fields = request.model_dump(exclude_unset=True)
 
         new_token = fields.pop("authorization_token", _UNSET)
@@ -2193,6 +2240,9 @@ class WorkspaceMcpServerService:
         """
         try:
             server = await self._get_or_404(done.workspace_id, done.server_id)
+            if server.url != done.server_url:
+                # Edited since the sign-in: that edit ended the sign-in and runs its own check.
+                return
             if done.shared:
                 await self._record_check(server)
             elif done.user_id is not None:
@@ -2228,6 +2278,10 @@ class WorkspaceMcpServerService:
                 # Asked again: the caller may have lost the right to manage the workspace while signing in.
                 resolved_workspace_id = await self._require_management(user, done.workspace_id)
                 server = await self._get_or_404(resolved_workspace_id, done.server_id)
+                if server.url != done.server_url:
+                    # The URL was edited after the sign-in was approved: its token goes nowhere else.
+                    logger.info("MCP check sign-in dropped server_id=%s reason=url_changed", done.server_id)
+                    raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
                 recorded = await self._record_check(server, required=True, check_token=done.check_token)
             finally:
                 if done.revocation is not None:

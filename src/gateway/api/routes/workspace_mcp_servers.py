@@ -148,15 +148,20 @@ async def get_workspace_mcp_key_access(
 
 @router.get("/logos")
 async def list_workspace_mcp_server_logos(
-    service: McpServerLogoServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+    service: McpServerLogoServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> WorkspaceMcpServerLogosPublic:
     """The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.
 
-    Readable by any member who can see the workspace, as the servers are. A logo is
-    an admin's upload, else the catalog's for the server's URL, else one the gateway
-    found on the server's host. Listing them makes the gateway fetch nothing.
+    Paged as the server list is, oldest server first. Readable by any member who can
+    see the workspace, as the servers are. A logo is an admin's upload, else the
+    catalog's for the server's URL, else one the gateway found on the server's host.
+    Listing them makes the gateway fetch nothing.
     """
-    return await service.list_logos(user=current_identity, workspace_id=workspace_id)
+    return await service.list_logos(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @router.get("/{server_id}")

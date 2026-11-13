@@ -268,6 +268,8 @@ class McpUserConnection(Base):
     token_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     revocation_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
     resource: Mapped[str | None] = mapped_column(Text, default=None)
+    # The server URL the sign-in was made for. A token is only ever sent to that URL.
+    server_url: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),
@@ -304,6 +306,8 @@ class McpSharedConnection(Base):
     token_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     revocation_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
     resource: Mapped[str | None] = mapped_column(Text, default=None)
+    # The server URL the sign-in was made for. A token is only ever sent to that URL.
+    server_url: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),

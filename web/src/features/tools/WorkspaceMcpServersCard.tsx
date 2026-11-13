@@ -2,10 +2,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
-import type {
-  CreateWorkspaceMcpServerRequest,
-  WorkspaceMcpServer,
-} from "@/client"
+import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -207,8 +204,9 @@ export function WorkspaceMcpServersCard({
     create.mutate(
       {
         workspaceId: selected.workspace_id,
-        // The fields this form does not have are left to the gateway's defaults.
-        body: draft as CreateWorkspaceMcpServerRequest,
+        // This form adds a shared server that waits to be attached, which is what the gateway
+        // defaults to; sent rather than left out, so the request matches its type.
+        body: { ...draft, attach_by_default: false, credential_mode: "shared" },
       },
       { onSuccess: (server) => openServer(server.id) },
     )

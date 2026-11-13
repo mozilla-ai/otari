@@ -122,6 +122,7 @@ def _connect(test_db: Session, server_id: str, user_id: str) -> None:
             client_id="dynamic",
             client_auth_method=AUTH_METHOD_NONE,
             token_endpoint=f"{ISSUER}/token",
+            server_url=PUBLIC_URL,
         )
     )
     test_db.commit()

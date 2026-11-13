@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -63,6 +64,7 @@ from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable,
 from gateway.services.model_access import McpAccess, revoke_user_mcp_grants
 from gateway.services.organizations import UserAccess
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
+from gateway.services.tenancy import workspace_mcp_server_service
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
     WorkspaceMcpServerCheckRequest,
@@ -81,6 +83,8 @@ from gateway.services.tools import (
     _mcp_oauth,
 )
 from gateway.services.tools._mcp_connections import (
+    CompletedConnection,
+    McpServerRef,
     checked_return_to,
     client_metadata,
     sign_in_link,
@@ -240,7 +244,11 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
         McpOAuthFlowRepository(uow),
         config,
         eligibility=WorkspaceMcpConnectionEligibility(
-            uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            uow,
+            WorkspaceRepository(uow),
+            WorkspaceMemberRepository(uow),
+            OrganizationMemberRepository(uow),
+            UserRepository(uow),
         ),
         users=UserAccess(OrganizationRepositories.on(uow)),
     )
@@ -419,6 +427,86 @@ async def test_a_per_user_server_is_checked_through_a_sign_in_that_connects_noth
     assert after is not None and after.encrypted_access_token == own_token, "the owner's connection is untouched"
     await asyncio.sleep(0)
     assert wire.revoked == ["check-refresh"], "the check's tokens are revoked, not kept"
+
+
+async def test_a_check_sign_in_whose_server_moved_after_the_callback_sends_its_token_nowhere(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, checks: list[ResolvedMcpServer]
+) -> None:
+    """The sign-in was approved for one URL; an edit landing before the check must not get the token."""
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    started = await service.start_check_sign_in(user=world.owner, return_to=None, **ids)
+    connections = service._connection_service()
+    complete = connections.complete
+
+    async def complete_then_move(**kwargs: Any) -> CompletedConnection:
+        done = await complete(**kwargs)
+        await async_db.execute(
+            update(WorkspaceMcpServer).where(col(WorkspaceMcpServer.id) == world.server.id).values(url=OTHER_PUBLIC_URL)
+        )
+        await async_db.commit()
+        return done
+
+    connections.complete = complete_then_move  # type: ignore[method-assign]
+    service._connection_service = lambda: connections  # type: ignore[method-assign]
+    before = len(checks)
+
+    with pytest.raises(McpConnectionFlowError):
+        await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="code")
+
+    assert len(checks) == before, "no check ran with the token"
+
+
+async def test_a_token_signed_in_for_another_url_than_the_request_resolved_is_withheld(
+    async_db: AsyncSession, config: GatewayConfig, tokens: McpUserTokens
+) -> None:
+    """The request read the old URL; a URL edit and a new sign-in landed before it read the token."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    resolved = McpServerRef.of(await _row(async_db, world.server.id))
+    await async_db.execute(
+        update(McpUserConnection)
+        .where(McpUserConnection.server_id == world.server.id)
+        .values(server_url=OTHER_PUBLIC_URL)
+    )
+    await async_db.commit()
+
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.token_for(resolved, str(world.member.id))
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.renew_rejected(resolved, str(world.member.id), "access-1")
+
+
+async def test_a_failed_listing_after_one_users_sign_in_keeps_the_read_hints_for_everyone(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With unset labels, '@read' follows the hints; one user's 403 must not take '@read' from everyone."""
+    world = await _world(async_db, config)
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(col(WorkspaceMcpServer.id) == world.server.id)
+        .values(
+            health={
+                "status": "healthy",
+                "checked_at": datetime.now(UTC).isoformat(),
+                "tools": ["list_files", "delete_file"],
+                "read_only_hinted_tools": ["list_files"],
+                "tool_count": 2,
+            }
+        )
+    )
+    await async_db.commit()
+
+    async def refused(server: ResolvedMcpServer) -> ServerCheck:
+        return ServerCheck(tool_names=[], failure=CheckFailure.FORBIDDEN, http_status=403)
+
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", refused)
+    await _sign_in(async_db, config, world, world.member)
+
+    row = await _row(async_db, world.server.id)
+    assert row.health is not None and row.health["status"] == "failing"
+    assert row.health["read_only_hinted_tools"] == ["list_files"]
 
 
 async def test_a_check_sign_in_never_becomes_a_connection(
@@ -745,6 +833,44 @@ async def test_a_renewal_sends_no_secret_to_a_token_endpoint_the_client_is_no_lo
     assert wire.refreshes == []
 
 
+async def test_an_edit_waits_for_another_that_moved_the_url_and_decides_against_the_moved_server(
+    async_db: AsyncSession, config: GatewayConfig, postgres_url: str
+) -> None:
+    """Otherwise a secret rotated on the old client lands beside the new URL, and is sent there."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    service = _service(async_db, config)
+    server_id = world.server.id
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as other:
+            await other.execute(
+                select(WorkspaceMcpServer).where(col(WorkspaceMcpServer.id) == server_id).with_for_update()
+            )
+            rotating = asyncio.create_task(
+                service.update_server(
+                    user=world.owner,
+                    workspace_id=world.workspace.id,
+                    server_id=server_id,
+                    request=WorkspaceMcpServerUpdate(oauth_client_secret="rotated"),
+                )
+            )
+            await asyncio.sleep(0.2)
+            assert not rotating.done(), "the edit waits for the row"
+            await other.execute(
+                update(WorkspaceMcpServer)
+                .where(col(WorkspaceMcpServer.id) == server_id)
+                .values(url=OTHER_PUBLIC_URL, oauth_client=None, oauth_client_issuer=None)
+            )
+            await other.commit()
+            await asyncio.gather(rotating, return_exceptions=True)
+    finally:
+        await engine.dispose()
+
+    row = await _row(async_db, server_id)
+    assert row.url == OTHER_PUBLIC_URL
+    assert row.oauth_client is None or row.oauth_client.get("client_id") != "my-client"
+
+
 async def test_a_client_otari_registered_is_registered_again_with_a_new_authorization_server(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire
 ) -> None:
@@ -1057,6 +1183,22 @@ async def test_an_expired_or_refused_sign_in_connects_nothing(async_db: AsyncSes
         await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="refused")
 
     assert await _connection(async_db, world.server.id, str(world.owner.id)) is None
+
+
+async def test_a_request_plane_user_whose_id_is_a_uuid_but_no_dashboard_account_connects(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """``create_user`` takes any id. A UUID-shaped one with no account behind it belongs to no workspace."""
+    world = await _world(async_db, config)
+    user_id = str(uuid.uuid4())
+    async_db.add(BillingUser(user_id=user_id))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+
+    url = await connections.start(server_id=world.server.id, user_id=user_id)
+    await connections.complete(state=_state(url), code="code")
+
+    assert await _connection(async_db, world.server.id, user_id) is not None
 
 
 async def test_a_sign_in_started_outside_a_session_finishes_on_its_state_alone(
@@ -1545,7 +1687,7 @@ async def test_deleting_a_user_ends_their_connections_and_pending_sign_ins(
     )
 
     await revoke_user_mcp_grants(async_db, str(world.member.id))
-    await async_db.commit()
+    await _connections(async_db, config).end_for_deleted_user(str(world.member.id))
 
     assert await _connection(async_db, world.server.id, str(world.member.id)) is None
     assert await _connection(async_db, world.server.id, str(world.owner.id)) is not None
@@ -1861,10 +2003,11 @@ async def test_deleting_a_user_revokes_their_connections_once_committed(
     world = await _world(async_db, config)
     await _sign_in(async_db, config, world, world.member)
 
-    revocations, unread = await revoke_user_mcp_grants(async_db, str(world.member.id))
+    await _connections(async_db, config).end_for_deleted_user(str(world.member.id))
+    await _drain_revocations()
 
-    assert ([revocation.token for revocation in revocations], unread) == (["refresh-1"], 0)
-    assert wire.revoked == [], "nothing is sent before the caller commits"
+    assert await _connection(async_db, world.server.id, str(world.member.id)) is None
+    assert wire.revoked == ["refresh-1"]
 
 
 async def test_a_failed_revocation_fails_nothing(async_db: AsyncSession, config: GatewayConfig, wire: _Wire) -> None:
@@ -2226,6 +2369,7 @@ async def _put(
         token_endpoint=f"{ISSUER}/token",
         revocation_endpoint=None,
         resource=None,
+        server_url=PUBLIC_URL,
     )
 
 
@@ -2429,6 +2573,28 @@ async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_neve
     # A named one it may not reach still answers as unknown, as it always has.
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
+
+
+async def test_attached_renewals_share_the_attached_budget(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renewal that hangs on an attached server cannot hold the request past the attached servers' budget."""
+    world = await _world(async_db, config, attach_by_default=True)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    wire.refresh_gate = asyncio.Event()
+    monkeypatch.setattr(workspace_mcp_server_service, "ATTACHED_CONNECT_BUDGET_S", 0.1)
+    servers = WorkspaceMcpServers(async_db, tokens)
+
+    started = asyncio.get_running_loop().time()
+    resolved = await servers.resolve_for_request(world.workspace.id, [], _access(str(world.member.id)), attach=True)
+    waited = asyncio.get_running_loop().time() - started
+    wire.refresh_gate.set()
+    await asyncio.sleep(0.05)
+
+    assert waited < 2
+    assert resolved.servers == []
+    assert [(need.reason, need.attached) for need in resolved.sign_in] == [(McpSignInReason.RENEWAL_FAILED, True)]
 
 
 async def test_a_named_per_user_server_is_a_sign_in_for_a_user_and_a_no_user_note_for_a_key_without_one(
