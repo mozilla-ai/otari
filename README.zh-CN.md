@@ -40,8 +40,8 @@ Otari 位于你的应用和模型提供商之间。它为请求做身份验证�
 [any-llm](https://github.com/mozilla-ai/any-llm) 完成。
 
 你可以用自己的数据库和提供商密钥运行 Otari，也可以调用 [otari.ai](https://otari.ai)
-上的托管网关：它的[快速入门](docs/quickstart.md)介绍了基础 URL
-（`https://api.otari.ai/api/v1`）、应用发送的 `otk_` 令牌，以及在哪里复制模型 ID。
+上的托管网关：它的[快速入门](docs/quickstart.md)介绍了适合你的 SDK 和地区的
+[基础 URL](docs/api-reference.md#base-url)、应用发送的 `otk_` 令牌，以及在哪里复制模型 ID。
 
 ## 为什么选择 Otari
 

@@ -40,8 +40,8 @@ records usage afterwards. Provider calls go through
 
 Run Otari with your own database and provider keys, or call the hosted gateway
 at [otari.ai](https://otari.ai): its [quickstart](docs/quickstart.md) covers the
-base URL (`https://api.otari.ai/api/v1`), the `otk_` token your app sends, and
-where to copy a model id.
+[base URL](docs/api-reference.md#base-url) for your SDK and region, the `otk_`
+token your app sends, and where to copy a model id.
 
 ## Why Otari
 
