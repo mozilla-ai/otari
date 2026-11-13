@@ -66,7 +66,8 @@ An API key reaches:
 
 - the inference routes;
 - `GET /api/v1/usage/requests/{request_id}` for its own requests;
-- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
+- `GET /api/v1/key/budget`, `/api/v1/key/usage/summary` and `/api/v1/key/usage/series`
+  for [its own budget and usage](#a-keys-own-budget-and-usage);
 - the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
   `/providers/catalog`, `/tool-settings/guardrails/catalog`,
   `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
@@ -77,7 +78,9 @@ and everything under `/api/v1/organizations/me`, takes the master key or a
 dashboard session cookie. A request that carries an API key is never read as a
 session, so those routes answer it `401` with
 `{"detail": "Invalid master key"}`, on otari.ai too (where a tenant has no
-master key and manages that part in the dashboard).
+master key and manages that part in the dashboard). An application reads what
+its own key has spent and may still spend from `GET /api/v1/key/budget` and
+`GET /api/v1/key/usage/summary`, not from `/api/v1/usage`.
 
 ## Core inference APIs
 
@@ -146,7 +149,11 @@ balancer in front of the gateway, such as a `502` or `504` page on a timeout,
 since the gateway did not send it. The gateway mints the id, sends it on its own
 refusals as well, and records it on the request's usage rows, so
 [`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
-finds the request's cost by it.
+finds the request's cost by it. That is the header, not the `id` in the response
+body (`chatcmpl-…`, `msg_…`, `resp_…`), which the provider assigns and Otari does
+not record. An SDK that hides headers exposes them through its raw response, such
+as `client.chat.completions.with_raw_response.create(...)` in the OpenAI Python
+SDK, whose `.headers` carries `Otari-Request-ID`.
 
 The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
 `Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
@@ -399,7 +406,8 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   The field is null on any row whose stream was not cut.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
-looked up by its `Otari-Request-ID`:
+looked up by its `Otari-Request-ID` response header (not the response body's
+`id`):
 
 ```json
 {
@@ -419,7 +427,7 @@ looked up by its `Otari-Request-ID`:
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
 | `status` | `error` if any row is an error, `incomplete` for a stream the client abandoned before the provider reported any usage (billed on an estimate), otherwise `success`. |
 | Access | An API key sees only its own requests; the master key sees any. |
-| `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
+| `404` | Until the request has settled (usage rows are written in the background), for an unknown id (a response body's `id` among them), for another key's id, and for a request that wrote no row. |
 
 ### A key's own budget and usage
 
