@@ -160,3 +160,63 @@ def test_the_catalog_needs_a_credential_and_the_operator_listing_stays_operator_
     assert client.get(CATALOG).status_code == 401
     assert client.get(CATALOG, headers={API_KEY_HEADER: "Bearer not-a-key"}).status_code == 401
     assert client.get(f"{API_ROOT}/search-tools", headers=api_key_header).status_code == 401
+
+
+@pytest.fixture
+def legacy_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A deployment with no search tool, searching only through the legacy settings' Tavily key."""
+    legacy = {"search_tools": {}, "web_search_provider": "tavily", "web_search_provider_api_key": "tvly-secret-key"}
+    yield from build_test_client(test_config.model_copy(update=legacy))
+
+
+def test_a_deployment_with_only_the_legacy_settings_lists_their_engine_at_the_web_search_price(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = legacy_client
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "legacy"}, headers=master_key_header)
+    assert created.status_code == 200, created.text
+    api_key_header = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+    assert _entries(client, api_key_header) == [
+        {
+            "id": "tavily",
+            "object": "search_tool",
+            "provider": "tavily",
+            "label": "Tavily",
+            "price_per_call": None,
+            "default": True,
+        }
+    ]
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "otari:web_search", "input_price_per_million": 3000.0, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    assert priced.status_code in (200, 201), priced.text
+
+    [entry] = _entries(client, api_key_header)
+    assert entry["price_per_call"] == pytest.approx(0.003)
+    assert "tvly-secret-key" not in client.get(CATALOG, headers=api_key_header).text
+
+
+def test_a_key_lists_the_legacy_engine_only_when_its_allowed_tools_grants_it_by_name(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = legacy_client
+    listed: dict[str, list[str]] = {}
+    for allowed in (["tavily"], ["builtin_fetch"]):
+        created = client.post(
+            f"{API_ROOT}/keys", json={"key_name": allowed[0], "allowed_tools": allowed}, headers=master_key_header
+        )
+        assert created.status_code == 200, created.text
+        headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+        listed[allowed[0]] = [entry["id"] for entry in _entries(client, headers)]
+
+    assert listed == {"tavily": ["tavily"], "builtin_fetch": []}
+
+
+def test_a_search_tool_hides_the_legacy_engine_from_the_catalog(
+    test_config: GatewayConfig, clean_database: None, master_key_header: dict[str, str]
+) -> None:
+    legacy = {"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-secret-key"}
+    for client in build_test_client(test_config.model_copy(update=legacy)):
+        assert [entry["id"] for entry in _entries(client, master_key_header)] == ["fake-fast", "fake-search"]
