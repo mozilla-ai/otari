@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.models.usage import UsageLog
-from gateway.services.log_writer import BatchLogWriter, LogWriter, SignalingLogWriter, SingleLogWriter, TracingLogWriter
+from gateway.services.log_writer import LogWriter, SignalingLogWriter, SingleLogWriter, TracingLogWriter
 
 
 @pytest.mark.asyncio
@@ -29,22 +29,10 @@ async def test_single_log_writer_rolls_back_on_failure(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("writer", [SingleLogWriter(), BatchLogWriter()])
-async def test_stage_keeps_usage_rows_in_the_request_transaction(writer: LogWriter) -> None:
-    usage_logs = AsyncMock()
-    logs = [UsageLog(id="batch-row", model="test-model", endpoint="/v1/batches/results", status="success")]
-
-    await writer.stage(usage_logs, logs)
-
-    usage_logs.add_many.assert_awaited_once_with(logs)
-
-
-@pytest.mark.asyncio
-async def test_staged_usage_is_signaled_after_commit() -> None:
+async def test_usage_is_signaled_after_commit() -> None:
     signal = AsyncMock()
     inner = AsyncMock(spec=LogWriter)
     writer = SignalingLogWriter(inner, signal)
-    usage_logs = AsyncMock()
     logs = [
         UsageLog(
             id="batch-row",
@@ -55,10 +43,6 @@ async def test_staged_usage_is_signaled_after_commit() -> None:
         )
     ]
 
-    await writer.stage(usage_logs, logs)
-    inner.stage.assert_awaited_once_with(usage_logs, logs)
-    signal.usage_recorded.assert_not_awaited()
-
     await writer.after_commit(logs)
 
     inner.after_commit.assert_awaited_once_with(logs)
@@ -66,13 +50,12 @@ async def test_staged_usage_is_signaled_after_commit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_staged_usage_is_traced_only_after_commit() -> None:
+async def test_usage_is_traced_after_commit() -> None:
     inner = AsyncMock(spec=LogWriter)
     traces = MagicMock()
     trace = MagicMock()
     traces.get.return_value = trace
     writer = TracingLogWriter(inner, traces)
-    usage_logs = AsyncMock()
     logs = [
         UsageLog(
             id="batch-row",
@@ -84,7 +67,6 @@ async def test_staged_usage_is_traced_only_after_commit() -> None:
         )
     ]
 
-    await writer.stage(usage_logs, logs)
     trace.record_llm_call.assert_not_called()
 
     await writer.after_commit(logs)

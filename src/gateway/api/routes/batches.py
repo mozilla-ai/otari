@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    RequestUsageLogRepositoryDep,
+    BatchResultsServiceDep,
     billing_port_on,
     get_config,
     get_db,
@@ -48,12 +48,11 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import BatchRecord
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
 from gateway.services.api_keys import resolve_user_id
 from gateway.services.batch_service import (
-    claim_batch_accounting,
     get_batch_record,
     get_batch_records,
     record_batch,
@@ -61,7 +60,6 @@ from gateway.services.batch_service import (
 from gateway.services.budgets import (
     BudgetScopeRequest,
     reconcile_reservation,
-    record_external_spend,
     refund_reservation,
     reserve_budget,
 )
@@ -71,7 +69,7 @@ from gateway.services.inference import (
     deferred_charge,
     describe_port_error,
 )
-from gateway.services.log_writer import LogWriter, UsageLogStager
+from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
     is_model_allowed,
     model_not_allowed_detail,
@@ -183,7 +181,6 @@ class CreateBatchRequest(BaseModel):
 
 async def log_batch_usage(
     db: AsyncSession,
-    log_writer: LogWriter,
     api_key_id: str | None,
     model: str,
     provider: str,
@@ -201,7 +198,6 @@ async def log_batch_usage(
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
-    usage_log_stager: UsageLogStager | None = None,
 ) -> UsageLog:
     """Log batch API usage, including token counts and cost when derivable.
 
@@ -236,10 +232,6 @@ async def log_batch_usage(
         counts_toward_budget=counts_toward_budget,
         deployment_paid=deployment_paid,
     )
-    if usage_log_stager is not None:
-        await log_writer.stage(usage_log_stager, [usage_log])
-    else:
-        await log_writer.put(usage_log)
     return usage_log
 
 
@@ -576,17 +568,18 @@ async def create_batch(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
-        await log_batch_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=resolved.instance,
-            endpoint=USAGE_ENDPOINT,
-            user_id=user_id,
-            error=str(e),
-            status_code=failure_status_code(e),
-            counts_toward_budget=not budget_exempt,
+        await log_writer.put(
+            await log_batch_usage(
+                db=db,
+                api_key_id=api_key_id,
+                model=model,
+                provider=resolved.instance,
+                endpoint=USAGE_ENDPOINT,
+                user_id=user_id,
+                error=str(e),
+                status_code=failure_status_code(e),
+                counts_toward_budget=not budget_exempt,
+            )
         )
         await refund_reservation(db, reservation)
         logger.error("Batch create failed for %s: %s", provider, e)
@@ -597,18 +590,19 @@ async def create_batch(
         except OSError:
             logger.warning("Failed to remove temp file %s", tmp_path)
 
-    await log_batch_usage(
-        db=db,
-        log_writer=log_writer,
-        api_key_id=api_key_id,
-        model=model,
-        provider=resolved.instance,
-        endpoint=USAGE_ENDPOINT,
-        user_id=user_id,
-        prompt_tokens=0,
-        completion_tokens=0,
-        total_tokens=0,
-        counts_toward_budget=not budget_exempt,
+    await log_writer.put(
+        await log_batch_usage(
+            db=db,
+            api_key_id=api_key_id,
+            model=model,
+            provider=resolved.instance,
+            endpoint=USAGE_ENDPOINT,
+            user_id=user_id,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            counts_toward_budget=not budget_exempt,
+        )
     )
     await reconcile_reservation(db, reservation, 0.0)
 
@@ -794,7 +788,7 @@ async def retrieve_batch_results(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    request_usage_logs: RequestUsageLogRepositoryDep,
+    batch_results: BatchResultsServiceDep,
 ) -> dict[str, Any]:
     """Retrieve the results of a completed batch."""
     api_key, is_master_key = auth_result
@@ -959,36 +953,18 @@ async def retrieve_batch_results(
                 )
             cost, line_costs = BatchPricingService.allocate_costs(line_costs)
 
-    # Recorded batches are accounted exactly once: the first completed retrieval
-    # claims the accounting slot, logs usage, and folds the cost into the owner's
-    # spend; later retrievals (retries, polling clients) return results without
-    # re-billing. The claim and the spend fold commit together (below), so if the
-    # spend fold fails or the process dies mid-flight the claim rolls back and a
-    # later retrieval re-accounts, rather than marking the batch accounted but
-    # never billing it.
-    #
     # A retrieval that finds billable tokens but no pricing row (cost is None)
     # does not claim the slot, so once pricing exists a later retrieval still
-    # folds the spend once. Legacy batches with no record keep the prior behavior
-    # (log every retrieval, no spend fold), since they cannot be deduplicated.
-    # Exempt batches never fold spend, so there is nothing to defer for: they
-    # claim and log immediately with cost null, like every other exempt path.
+    # accounts it. Legacy batches with no record keep the prior behavior (log
+    # every retrieval, no spend fold), since they cannot be deduplicated.
     pricing_missing = record is not None and bool(total_tokens) and cost is None and not batch_exempt
-    if pricing_missing:
-        should_account = False
-    elif record is not None:
-        should_account = await claim_batch_accounting(db, batch_id)
-    else:
-        should_account = True
-
-    if should_account:
+    if not pricing_missing:
         batch_usage_logs: list[UsageLog] = []
         if result_lines:
             for line, line_cost in zip(result_lines, line_costs, strict=True):
                 batch_usage_logs.append(
                     await log_batch_usage(
                         db=db,
-                        log_writer=log_writer,
                         api_key_id=api_key_id,
                         model=line.model,
                         provider=provider,
@@ -1003,7 +979,6 @@ async def retrieve_batch_results(
                         counts_toward_budget=not batch_exempt,
                         workspace_id=origin_workspace_id,
                         deployment_paid=deployment_paid,
-                        usage_log_stager=request_usage_logs if record is not None else None,
                     )
                 )
         else:
@@ -1012,7 +987,6 @@ async def retrieve_batch_results(
             batch_usage_logs.append(
                 await log_batch_usage(
                     db=db,
-                    log_writer=log_writer,
                     api_key_id=api_key_id,
                     model=batch_model,
                     provider=provider,
@@ -1026,10 +1000,9 @@ async def retrieve_batch_results(
                     counts_toward_budget=not batch_exempt,
                     workspace_id=origin_workspace_id,
                     deployment_paid=deployment_paid,
-                    usage_log_stager=request_usage_logs if record is not None else None,
                 )
             )
-        # Charged once, with the claim that accounts a recorded batch once.
+        charge = None
         if deployment_paid and record is not None and origin_organization_id is not None:
             charge = deferred_charge(
                 billing_port_on(raw_request, db),
@@ -1039,23 +1012,18 @@ async def retrieve_batch_results(
                 provider=provider_enum,
                 model=record.model,
             )
-            await charge.settle(
-                cost,
-                tools=NO_TOOLS,
-                model=batch_model,
-                description=f"{provider}:{batch_model}",
-                expects_cost=bool(total_tokens),
-                savepoint=db.begin_nested,
-            )
-        if record is not None:
-            if cost and user_id and not batch_exempt:
-                # Folds the spend and commits the claim in one transaction.
-                await record_external_spend(db, user_id, cost)
-            else:
-                # Nothing to fold (no cost/owner, or the originating key is
-                # budget-exempt); still persist the one-time accounting claim.
-                await db.commit()
-            await log_writer.after_commit(batch_usage_logs)
+        await batch_results.account(
+            batch_id=batch_id,
+            recorded=record is not None,
+            logs=batch_usage_logs,
+            writer=log_writer,
+            cost=cost,
+            total_tokens=total_tokens,
+            user_id=user_id,
+            batch_exempt=batch_exempt,
+            charge=charge,
+            model=batch_model,
+        )
 
     return {
         "results": [

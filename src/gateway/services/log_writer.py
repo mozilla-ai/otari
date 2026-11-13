@@ -45,10 +45,6 @@ ROWS = Counter(
 )
 
 
-class UsageLogStager(Protocol):
-    async def add_many(self, logs: list[UsageLog]) -> None: ...
-
-
 class LogWriter(Protocol):
     async def put(self, log: UsageLog) -> bool:
         """Hand the writer a row, returning whether it accepted it.
@@ -56,10 +52,6 @@ class LogWriter(Protocol):
         Accepted means committed for an inline writer and queued for a batching one,
         which can still drop a queued row when a flush fails.
         """
-        ...
-
-    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
-        """Stage rows through the repository in the transaction that owns their accounting claim."""
         ...
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
@@ -87,9 +79,6 @@ class SingleLogWriter:
                 logger.error("SingleLogWriter failed: %s", e)
                 ROWS.labels(writer="single", result="dropped").inc()
                 return False
-
-    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
-        await usage_logs.add_many(logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         ROWS.labels(writer="single", result="written").inc(len(logs))
@@ -144,9 +133,6 @@ class BatchLogWriter:
         finally:
             QUEUE_DEPTH.set(self._queue.qsize())
         return True
-
-    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
-        await usage_logs.add_many(logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         ROWS.labels(writer="batch", result="written").inc(len(logs))
@@ -301,9 +287,6 @@ class TracingLogWriter:
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
         return await self._inner.put(log)
 
-    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
-        await self._inner.stage(usage_logs, logs)
-
     async def after_commit(self, logs: list[UsageLog]) -> None:
         for log in logs:
             trace = self._traces.get(log.request_group_id)
@@ -381,9 +364,6 @@ class SignalingLogWriter:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
         return accepted
-
-    async def stage(self, usage_logs: UsageLogStager, logs: list[UsageLog]) -> None:
-        await self._inner.stage(usage_logs, logs)
 
     async def after_commit(self, logs: list[UsageLog]) -> None:
         await self._inner.after_commit(logs)
