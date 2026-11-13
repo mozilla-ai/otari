@@ -544,10 +544,19 @@ async def _enter_session(stack: AsyncExitStack, server: ResolvedMcpServer, *, sc
 
 
 async def closed_with(stack: AsyncExitStack, failure: BaseException) -> BaseException:
-    """Close a half-opened session's stack, and return what failed: the group closing raises carries the cause."""
+    """Close a half-opened session's stack, and return what failed: the group closing raises carries the cause.
+
+    Bounded by ``CLEANUP_TIMEOUT_S`` as a session that opened is, and a close that runs past it leaves
+    ``failure`` as the answer.
+    """
+    bound = asyncio.timeout(CLEANUP_TIMEOUT_S)
     try:
-        await stack.aclose()
+        async with bound:
+            await stack.aclose()
     except BaseException as closed:
+        if bound.expired():
+            logger.warning("Stateless MCP cleanup timed out after a failed open error_class=%s", failure_class(failure))
+            return failure
         return closed
     return failure
 

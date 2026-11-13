@@ -201,7 +201,7 @@ async def admit_mcp_servers(
         stored_servers = [
             server for server in resolved.servers if not (server.attached and server.name in inline_names)
         ]
-        sign_in = resolved.sign_in
+        sign_in = [need for need in resolved.sign_in if not (need.attached and need.name in inline_names)]
         named_servers = [server for server in stored_servers if not server.attached]
         await _validate_mcp_server_urls(named_servers, stored=True, workspace_id=workspace_id)
         stored_servers = named_servers + await _safe_attached(

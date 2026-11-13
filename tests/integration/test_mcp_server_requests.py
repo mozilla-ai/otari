@@ -14,7 +14,7 @@ from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import Engine, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -400,6 +400,60 @@ async def test_a_member_lists_and_withdraws_only_their_own(async_db: AsyncSessio
     await _reload(async_db, team)
     # Withdrawn, so the server can be asked for again.
     assert (await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())).id != adas.id
+
+
+@pytest.mark.asyncio
+async def test_both_lists_page_and_a_managers_page_keeps_each_servers_requests_together(
+    async_db: AsyncSession,
+) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    for who, name in ((team.ada, SENTRY[0]), (team.ada, LINEAR[0]), (team.grace, SENTRY[0])):
+        await world.requests.create(user=who, workspace_id=team.workspace.id, request=_ask(name))
+
+    first = await world.requests.pending(user=team.owner, workspace_id=team.workspace.id, limit=1)
+    second = await world.requests.pending(user=team.owner, workspace_id=team.workspace.id, skip=1, limit=1)
+    past = await world.requests.pending(user=team.owner, workspace_id=team.workspace.id, skip=2, limit=1)
+
+    assert [(group.catalog_name, len(group.requesters)) for group in first.data] == [(SENTRY[0], 2)]
+    assert [(group.catalog_name, len(group.requesters)) for group in second.data] == [(LINEAR[0], 1)]
+    assert past.data == []
+    assert first.count == second.count == past.count == 3
+
+    newest = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, limit=1)
+    older = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, skip=1, limit=1)
+    assert [entry.catalog_name for entry in newest.data + older.data] == [LINEAR[0], SENTRY[0]]
+
+
+@pytest.mark.asyncio
+async def test_a_withdrawal_locks_the_request_an_approval_would_change(async_db: AsyncSession) -> None:
+    """The withdrawal reads the row as the approval does, locked, so the later of the two sees the other's answer."""
+    team = await _team(async_db)
+    world = _World(async_db)
+    made = await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, statement: str, *_args: object) -> None:
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", record)
+    try:
+        await world.requests.withdraw(user=team.ada, workspace_id=team.workspace.id, request_id=made.id)
+    finally:
+        event.remove(Engine, "before_cursor_execute", record)
+
+    reads = [statement for statement in statements if statement.lstrip().startswith("SELECT mcp_server_requests")]
+    assert reads and all("FOR UPDATE" in statement for statement in reads)
+
+
+def test_the_request_lists_take_a_bounded_page(client: TestClient) -> None:
+    workspace_id = client.get(f"{API_ROOT}/workspaces", headers=_MASTER).json()["data"][0]["id"]
+    base = f"{API_ROOT}/workspaces/{workspace_id}/mcp-server-requests"
+
+    assert client.get(f"{base}?limit=501", headers=_MASTER).status_code == 422
+    assert client.get(f"{base}/mine?limit=101", headers=_MASTER).status_code == 422
+    assert client.get(f"{base}?skip=-1", headers=_MASTER).status_code == 422
+    assert client.get(f"{base}?skip=5&limit=5", headers=_MASTER).json() == {"data": [], "count": 0}
 
 
 @pytest.mark.asyncio

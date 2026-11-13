@@ -8064,8 +8064,8 @@ export interface paths {
          * @description The workspace's pending requests, one entry per catalog server, the longest-waiting first.
          *
          *     Organization owners/admins or this workspace's owners/admins. Each entry names who asked and
-         *     carries their notes, and the catalog's entry for the server as it is now. At most 500
-         *     requests are listed; `count` says how many wait in all.
+         *     carries their notes, and the catalog's entry for the server as it is now. A page holds `limit`
+         *     servers after the first `skip`, and at most 500 requests; `count` says how many wait in all.
          */
         get: operations["mcp-servers-list_mcp_server_requests"];
         put?: never;
@@ -37533,7 +37533,12 @@ export interface operations {
     };
     "mcp-servers-list_mcp_server_requests": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of catalog servers to skip */
+                skip?: number;
+                /** @description Maximum number of catalog servers to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -37662,7 +37667,12 @@ export interface operations {
     };
     "mcp-servers-list_my_mcp_server_requests": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;

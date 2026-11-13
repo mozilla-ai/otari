@@ -963,6 +963,7 @@ async def _resolve_for_request(
             purpose_hint=row.purpose_hint,
             user_id=access.user_id,
             reason=McpSignInReason.NOT_SIGNED_IN if access.user_id else McpSignInReason.NO_USER,
+            attached=config.attached,
         )
         planned.append((config, McpServerRef.of(row) if per_user else None, need))
 

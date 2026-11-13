@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -88,6 +88,19 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             .limit(1)
         )
         return found.first() is not None
+
+    async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
+        """Whether a workspace stores a server at ``url``, a trailing slash and surrounding spaces aside."""
+        bare = url.strip().rstrip("/")
+        rows = await self.db.execute(
+            select(WorkspaceMcpServer.id)
+            .where(
+                WorkspaceMcpServer.workspace_id == workspace_id,
+                func.rtrim(func.trim(WorkspaceMcpServer.url), "/") == bare,
+            )
+            .limit(1)
+        )
+        return rows.first() is not None
 
     async def urls_in_workspace(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, str]:
         """Each of a workspace's stored servers' URL, by server id."""

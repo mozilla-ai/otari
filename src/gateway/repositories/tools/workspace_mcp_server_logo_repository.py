@@ -2,6 +2,7 @@
 
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass
 from typing import Never
 
 from sqlalchemy import select
@@ -10,6 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import WorkspaceMcpServerLogo
 from gateway.repositories.base_repository import BaseRepository
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceMcpServerLogoFacts:
+    """What a list of logos shows of one row, without the uploaded image itself."""
+
+    tile: str
+    etag: str | None
+    luminance: float | None
+    has_content: bool
 
 
 class WorkspaceMcpServerLogoRepository(BaseRepository[WorkspaceMcpServerLogo, Never, Never]):
@@ -21,13 +32,25 @@ class WorkspaceMcpServerLogoRepository(BaseRepository[WorkspaceMcpServerLogo, Ne
     async def find(self, server_id: uuid.UUID) -> WorkspaceMcpServerLogo | None:
         return await self.db.get(WorkspaceMcpServerLogo, server_id, populate_existing=True)
 
-    async def for_servers(self, server_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, WorkspaceMcpServerLogo]:
+    async def facts_for_servers(
+        self, server_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, WorkspaceMcpServerLogoFacts]:
+        """Each server's row as a list shows it. The image bytes are not read."""
         if not server_ids:
             return {}
         rows = await self.db.execute(
-            select(WorkspaceMcpServerLogo).where(WorkspaceMcpServerLogo.server_id.in_(list(server_ids)))
+            select(
+                WorkspaceMcpServerLogo.server_id,
+                WorkspaceMcpServerLogo.tile,
+                WorkspaceMcpServerLogo.etag,
+                WorkspaceMcpServerLogo.luminance,
+                WorkspaceMcpServerLogo.content.is_not(None),
+            ).where(WorkspaceMcpServerLogo.server_id.in_(list(server_ids)))
         )
-        return {row.server_id: row for row in rows.scalars().all()}
+        return {
+            server_id: WorkspaceMcpServerLogoFacts(tile=tile, etag=etag, luminance=luminance, has_content=bool(held))
+            for server_id, tile, etag, luminance, held in rows.all()
+        }
 
     async def save(
         self,

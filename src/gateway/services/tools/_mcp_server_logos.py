@@ -19,7 +19,11 @@ from gateway.exceptions.tools_exceptions import McpLogoInvalidError, WorkspaceMc
 from gateway.log_config import logger
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import WorkspaceMcpServerLogo
-from gateway.repositories.tools import WorkspaceMcpServerLogoRepository, WorkspaceMcpServerRepository
+from gateway.repositories.tools import (
+    WorkspaceMcpServerLogoFacts,
+    WorkspaceMcpServerLogoRepository,
+    WorkspaceMcpServerRepository,
+)
 from gateway.schemas.tools import WorkspaceMcpServerLogoPublic, WorkspaceMcpServerLogosPublic
 from gateway.services.mcp_catalog import Logo, LogoRef, LogoTile
 
@@ -52,15 +56,23 @@ def _uploaded(row: WorkspaceMcpServerLogo | None) -> Logo | None:
     return Logo(row.content, "image/png", row.etag, row.luminance)
 
 
+def _facts(row: WorkspaceMcpServerLogo | None) -> WorkspaceMcpServerLogoFacts | None:
+    if row is None:
+        return None
+    return WorkspaceMcpServerLogoFacts(
+        tile=row.tile, etag=row.etag, luminance=row.luminance, has_content=row.content is not None
+    )
+
+
 def _public(
-    workspace_id: uuid.UUID, server_id: uuid.UUID, row: WorkspaceMcpServerLogo | None, ref: LogoRef | None
+    workspace_id: uuid.UUID, server_id: uuid.UUID, row: WorkspaceMcpServerLogoFacts | None, ref: LogoRef | None
 ) -> WorkspaceMcpServerLogoPublic:
     tile = cast(LogoTile, row.tile if row is not None and row.tile in _TILES else "auto")
     path = server_logo_path(workspace_id, server_id)
-    uploaded = _uploaded(row)
-    if uploaded is not None:
-        url: str | None = f"{path}?v={uploaded.etag}"
-        luminance = uploaded.luminance
+    uploaded = row is not None and row.has_content and row.etag is not None
+    if row is not None and uploaded:
+        url: str | None = f"{path}?v={row.etag}"
+        luminance = row.luminance
     else:
         url = ref.url(path) if ref is not None else None
         luminance = ref.luminance if ref is not None else None
@@ -69,7 +81,7 @@ def _public(
         logo_url=url,
         logo_tone=Logo.tone(luminance, tile) if url is not None else None,
         logo_tile=tile,
-        has_logo_override=uploaded is not None,
+        has_logo_override=uploaded,
     )
 
 
@@ -102,7 +114,7 @@ class McpServerLogoService:
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         async with self._uow:
             urls = await self._servers.urls_in_workspace(workspace.id)
-            rows = await self._logos.for_servers(list(urls))
+            rows = await self._logos.facts_for_servers(list(urls))
         refs = await self._source.logo_refs(list(urls.values()))
         return WorkspaceMcpServerLogosPublic(
             data=[
@@ -168,4 +180,4 @@ class McpServerLogoService:
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, row: WorkspaceMcpServerLogo | None, url: str
     ) -> WorkspaceMcpServerLogoPublic:
         refs = await self._source.logo_refs([url])
-        return _public(workspace_id, server_id, row, refs.get(url))
+        return _public(workspace_id, server_id, _facts(row), refs.get(url))

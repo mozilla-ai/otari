@@ -72,7 +72,8 @@ def test_the_membership_origins_inviter_column_is_indexed(sqlite_at_head: tuple[
 def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
     config, engine = sqlite_at_head
 
-    command.downgrade(config, "-1")
+    # To the revision before it by name: later revisions sit above it on head.
+    command.downgrade(config, "c6e8a0b2d4f1")
     assert not (_TABLES & set(inspect(engine).get_table_names()))
 
     command.upgrade(config, _REVISION)

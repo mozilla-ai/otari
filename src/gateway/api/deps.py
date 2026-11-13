@@ -243,6 +243,7 @@ from gateway.services.tools import (
     McpGrantMembershipListener,
     McpServerLogoService,
     McpServerRequestService,
+    McpSignedInServers,
     McpUserTokens,
     SearchCatalogCaller,
     SearchToolService,
@@ -1262,6 +1263,14 @@ WorkspaceCodeExecutionPoliciesDep = Annotated[
 ]
 
 
+def get_mcp_signed_in_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> McpSignedInServers:
+    """Build the read of which per-user MCP servers a user has signed in to, on the request's session."""
+    return McpSignedInServers(McpUserConnectionRepository(db))
+
+
+McpSignedInServersDep = Annotated[McpSignedInServers, Depends(get_mcp_signed_in_servers)]
+
+
 class _CodeExecutionEnvironmentPrices:
     """The environment listing's scope and price lookups, on the request's session."""
 
@@ -1810,6 +1819,7 @@ def get_mcp_connection_service(
         eligibility=WorkspaceMcpConnectionEligibility(
             uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
         ),
+        users=get_user_access(uow),
     )
 
 
