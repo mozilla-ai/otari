@@ -10,7 +10,7 @@ The list is written out here rather than imported, so this revision keeps
 granting what it granted when it was written whatever the enum later holds.
 
 Revision ID: c3f8a1d6e2b9
-Revises: ed6311bc29a0
+Revises: c6e8a0b2d4f1
 Create Date: 2026-11-11
 """
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c3f8a1d6e2b9"
-down_revision: str | Sequence[str] | None = "ed6311bc29a0"
+down_revision: str | Sequence[str] | None = "c6e8a0b2d4f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
