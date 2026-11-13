@@ -18,9 +18,8 @@ from gateway.api.deps import (
     require_deployment_operator,
 )
 from gateway.api.routes._helpers import database_error
-from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
-from gateway.core.config import GatewayConfig
+from gateway.core.config import TOTAL_COUNT_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey, DisabledReason

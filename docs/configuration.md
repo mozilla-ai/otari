@@ -332,6 +332,11 @@ An origin listed in `cors_allow_origins` keeps that list's policy on every
 path, the model endpoints included. With `*` there, every origin does, and
 this setting changes nothing.
 
+Under either setting, a page can read every `Otari-*` header a response carries
+(such as `Otari-Request-ID`, `Otari-Model` and `Otari-Guardrails`), along with
+`Retry-After` and the `X-RateLimit-*` headers. A browser hides any other response
+header from a page on another origin.
+
 ## Budgets and API keys in config
 
 A deployment can declare its budgets and API keys in config.yml instead of

@@ -96,7 +96,6 @@ from gateway.api.routes._guardrail_answers import finish_result, guarded_stream
 from gateway.api.routes._guardrail_targets import RequestTarget
 from gateway.api.routes._guardrails import RequestGuardrails
 from gateway.api.routes._helpers import (
-    GUARDRAILS_RESULT_HEADER,
     country_gate_for,
     country_not_supported,
 )
@@ -116,8 +115,11 @@ from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
+    CONTAINER_EXPIRES_AT_HEADER,
+    CONTAINER_ID_HEADER,
     END_USER_BUDGET_HEADER,
     FALLBACK_HEADER,
+    GUARDRAILS_RESULT_HEADER,
     MODEL_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
@@ -5254,8 +5256,8 @@ def _container_headers(lease: ContainerLease | None) -> dict[str, str]:
     if lease is None:
         return {}
     return {
-        "Otari-Container-Id": lease.container_id,
-        "Otari-Container-Expires-At": lease.expires_at.isoformat(),
+        CONTAINER_ID_HEADER: lease.container_id,
+        CONTAINER_EXPIRES_AT_HEADER: lease.expires_at.isoformat(),
     }
 
 

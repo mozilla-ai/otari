@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, Response, status
 
 from gateway.api.routes._guardrail_targets import AnswerPart, RequestTarget
-from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
+from gateway.core.config import GUARDRAILS_RESULT_HEADER
 from gateway.core.env import otari_env
 from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
 from gateway.exceptions.guardrails_exceptions import AnswerRefused

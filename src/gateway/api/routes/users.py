@@ -18,7 +18,7 @@ from gateway.api.deps import (
     require_deployment_operator,
 )
 from gateway.api.routes._helpers import database_error, erase_user_records
-from gateway.core.config import GatewayConfig
+from gateway.core.config import TOTAL_COUNT_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -302,7 +302,6 @@ _PARENT_DESC = "Only the end users of this owner: the user a service key belongs
 _EXTERNAL_DESC = "Only the end user a service key names with this `user` value."
 _BLOCKED_DESC = "Only blocked users (true) or only unblocked ones (false)."
 _TOTAL_DESC = "Also count every matching user, in the Otari-Total-Count response header."
-TOTAL_COUNT_HEADER = "Otari-Total-Count"
 
 
 @router.get("")

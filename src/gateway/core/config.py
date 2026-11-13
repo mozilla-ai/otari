@@ -103,6 +103,16 @@ USAGE_UNITS_HEADER = "Otari-Usage-Units"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
+# Response header carrying a compact JSON summary of guardrail verdicts when a
+# ``monitor``-mode (or otherwise non-blocking) check ran.
+GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
+# Response header marking a response replayed for a repeated ``Idempotency-Key``.
+IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
+# Response headers naming the code execution sandbox a run holds, and when it lapses.
+CONTAINER_ID_HEADER = "Otari-Container-Id"
+CONTAINER_EXPIRES_AT_HEADER = "Otari-Container-Expires-At"
+# Response header carrying a list route's total match count when asked for.
+TOTAL_COUNT_HEADER = "Otari-Total-Count"
 # Request header carrying request tags as comma-separated ``key=value`` pairs,
 # for clients that can add a header but not a body field (Claude Code's
 # ANTHROPIC_CUSTOM_HEADERS). See ``api/routes/_request_tags.py``.

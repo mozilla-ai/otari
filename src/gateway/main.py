@@ -46,10 +46,22 @@ from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    CONTAINER_EXPIRES_AT_HEADER,
+    CONTAINER_ID_HEADER,
     CONVERSATION_HEADER,
     COST_USD_HEADER,
+    END_USER_BUDGET_HEADER,
+    FALLBACK_HEADER,
+    GUARDRAILS_RESULT_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
+    MODEL_HEADER,
     PRICING_SOURCE_HEADER,
+    PROVIDER_HEADER,
+    REQUEST_ID_HEADER,
+    RESPONSE_DURATION_HEADER,
     TAGS_HEADER,
+    TOTAL_COUNT_HEADER,
     USAGE_UNIT_HEADER,
     USAGE_UNITS_HEADER,
     X_API_KEY_HEADER,
@@ -65,7 +77,20 @@ from gateway.core.database import (
     release_session,
     sqlite_database_file,
 )
-from gateway.core.error_codes import ERROR_CODE_HEADER, INVALID_REQUEST, body_fields_of, error_code_of, error_headers
+from gateway.core.error_codes import (
+    BUDGET_SCOPE_HEADER,
+    ERROR_CODE_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    INVALID_REQUEST,
+    RATE_LIMIT_EXCEEDED_HEADER,
+    RATE_LIMIT_RULE_HEADER,
+    body_fields_of,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -711,14 +736,39 @@ _CORS_ALLOW_HEADERS = (
     "Otari-Region",
     *_SDK_CORS_HEADERS,
 )
-# A speech response carries its cost on headers, which a browser on
-# another origin reads only when they are exposed.
+# A browser on another origin reads a response header only when it is exposed,
+# so every response header Otari sets is, along with the rate-limit headers a
+# client backs off by. tests/unit/test_cors_expose_headers.py fails on an
+# ``Otari-*`` header this leaves out.
 _CORS_EXPOSE_HEADERS = (
+    REQUEST_ID_HEADER,
+    PROVIDER_HEADER,
+    MODEL_HEADER,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
+    RESPONSE_DURATION_HEADER,
+    GUARDRAILS_RESULT_HEADER,
+    END_USER_BUDGET_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
+    CONTAINER_ID_HEADER,
+    CONTAINER_EXPIRES_AT_HEADER,
+    TOTAL_COUNT_HEADER,
     COST_USD_HEADER,
-    ERROR_CODE_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
     USAGE_UNITS_HEADER,
+    ERROR_CODE_HEADER,
+    BUDGET_SCOPE_HEADER,
+    RATE_LIMIT_RULE_HEADER,
+    RATE_LIMIT_EXCEEDED_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    "Retry-After",
+    "X-RateLimit-Limit",
+    "X-RateLimit-Remaining",
+    "X-RateLimit-Reset",
 )
 # The model endpoints ``cors_inference_origins`` opens to a browser: each one
 # takes an API key and calls a model, except the model list a page reads to

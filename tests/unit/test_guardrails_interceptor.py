@@ -19,9 +19,15 @@ import pytest
 from fastapi import HTTPException, Response
 
 from gateway.api.routes._guardrail_targets import AnswerPart, chat_targets
+<<<<<<< HEAD
 from gateway.api.routes._guardrails import RequestGuardrails
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER, text_from_content
 from gateway.exceptions.guardrails_exceptions import AnswerRefused
+=======
+from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
+from gateway.api.routes._helpers import text_from_content
+from gateway.core.config import GUARDRAILS_RESULT_HEADER
+>>>>>>> 1d7aa7f66 (fix(cors): expose every Otari response header to browsers)
 from gateway.log_config import logger as gateway_logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailResult, GuardrailsNotReachableError, GuardrailVerdict

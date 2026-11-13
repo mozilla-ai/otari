@@ -73,9 +73,8 @@ from gateway.api.routes.keys import (
     _load_key_in_organization,
     _organization_service_key,
 )
-from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
-from gateway.core.config import GatewayConfig
+from gateway.core.config import TOTAL_COUNT_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey

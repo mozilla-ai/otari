@@ -7,8 +7,8 @@ import pytest
 from fastapi import Response
 from starlette.datastructures import Headers
 
-from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.api.routes._idempotency import IdempotencyGuard
+from gateway.core.config import GUARDRAILS_RESULT_HEADER
 from gateway.services.inference import Claimed, IdempotentRequest
 
 

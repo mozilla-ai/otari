@@ -29,8 +29,7 @@ from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
 from openai.types.responses import ResponseCompletedEvent
 
-from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, GUARDRAILS_RESULT_HEADER, GatewayConfig
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
