@@ -170,7 +170,10 @@ def declared_icons(html: str, base_url: str) -> list[str]:
         href = attributes.get("href", "").strip()
         if "icon" not in rel and "apple-touch-icon" not in rel or not href or href.startswith("data:"):
             continue
-        absolute = urljoin(base_url, href)
+        try:
+            absolute = urljoin(base_url, href)
+        except ValueError:  # a malformed host, such as ``https://[``
+            continue
         if not absolute.startswith("https://"):
             continue
         sizes = re.findall(r"(\d{1,4})x\d{1,4}", attributes.get("sizes", ""))

@@ -18,6 +18,7 @@ from gateway.services.model_access import (
 from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers, WorkspaceMcpServers
 from gateway.services.tools import admit_mcp_servers
 from gateway.services.tools._mcp_admission import INLINE_MCP_SERVER_REFUSED_DETAIL
+from gateway.services.tools._mcp_sign_in import McpSignInNeeded, McpSignInReason
 
 GITHUB = uuid.UUID(int=1)
 JIRA = uuid.UUID(int=2)
@@ -209,6 +210,43 @@ async def test_an_attached_server_gives_way_to_a_request_server_of_the_same_name
 
     assert admitted.servers is not None
     assert [server.url for server in admitted.servers] == ["https://93.184.216.35/mcp"]
+
+
+@pytest.mark.asyncio
+async def test_an_attached_sign_in_gives_way_to_a_request_server_of_the_same_name() -> None:
+    """No sign-in tool is offered for a name the request's own server already answers to; a named one stays."""
+
+    def need(name: str, *, attached: bool) -> McpSignInNeeded:
+        return McpSignInNeeded(
+            server_id=uuid.uuid4(),
+            name=name,
+            purpose_hint=None,
+            user_id="u",
+            reason=McpSignInReason.NOT_SIGNED_IN,
+            attached=attached,
+        )
+
+    class _SignIns:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                sign_in=[need("mine", attached=True), need("drive", attached=True), need("named", attached=False)]
+            )
+
+    admitted = await admit_mcp_servers(
+        [
+            McpServerConfig(name="mine", url="https://93.184.216.35/mcp"),
+            McpServerConfig(name="named", url="https://93.184.216.36/mcp"),
+        ],
+        [uuid.uuid4()],
+        servers=cast(WorkspaceMcpServers, _SignIns()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert [entry.name for entry in admitted.sign_in] == ["drive", "named"]
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col
 
@@ -34,6 +34,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionSetupError,
     McpConnectionUnavailableError,
     McpConnectionUpstreamError,
+    McpOAuthIssuerChangedError,
     McpSignInLinkOtherUserError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
@@ -43,6 +44,7 @@ from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, User, Workspace, WorkspaceMember
 from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpUserConnection, WorkspaceMcpServer
 from gateway.models.users import User as BillingUser
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -59,6 +61,7 @@ from gateway.repositories.tools import (
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.model_access import McpAccess, revoke_user_mcp_grants
+from gateway.services.organizations import UserAccess
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
@@ -84,6 +87,7 @@ from gateway.services.tools._mcp_connections import (
     stored_oauth_client,
 )
 from gateway.services.tools._mcp_oauth import (
+    AUTH_METHOD_BASIC,
     AUTH_METHOD_POST,
     McpOAuthClient,
     McpOAuthMetadata,
@@ -238,6 +242,7 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
         eligibility=WorkspaceMcpConnectionEligibility(
             uow, WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
         ),
+        users=UserAccess(OrganizationRepositories.on(uow)),
     )
 
 
@@ -656,6 +661,52 @@ async def test_the_public_shape_never_carries_a_secret(async_db: AsyncSession, c
         assert secret not in dumped
 
 
+async def test_a_managers_client_is_never_sent_to_another_authorization_server_until_it_is_saved_again(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
+
+    # The server now names another authorization server, which would be sent the secret.
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    with pytest.raises(McpOAuthIssuerChangedError) as refused:
+        await service.start_connection(user=world.owner, return_to=None, **ids)
+    assert refused.value.error_code == "mcp_oauth_issuer_changed"
+    assert "save the OAuth client again" in str(refused.value)
+    assert len(wire.exchanges) == 1
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
+
+    # Saving the client again, even unchanged, approves the server the next sign-in finds.
+    await service.update_server(
+        user=world.owner, request=WorkspaceMcpServerUpdate(oauth_client_secret="my-secret"), **ids
+    )
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer is None
+    await _sign_in(async_db, config, world, world.owner)
+    assert (await _row(async_db, world.server.id)).oauth_client_issuer == moved
+    assert wire.registrations == []
+
+
+async def test_a_client_otari_registered_is_registered_again_with_a_new_authorization_server(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+
+    await _sign_in(async_db, config, world, world.owner)
+
+    row = await _row(async_db, world.server.id)
+    assert len(wire.registrations) == 2
+    assert row.oauth_client_issuer == moved
+    assert row.oauth_client is not None and row.oauth_client["client_id"] == "dynamic-2"
+    assert wire.exchanges[-1]["client"].client_id == "dynamic-2"  # type: ignore[attr-defined]
+
+
 async def test_a_managers_own_client_is_used_and_none_is_registered(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire
 ) -> None:
@@ -664,7 +715,8 @@ async def test_a_managers_own_client_is_used_and_none_is_registered(
     await _sign_in(async_db, config, world, world.member)
 
     assert wire.registrations == []
-    assert wire.exchanges[0]["client"] == McpOAuthClient("my-client", "my-secret", AUTH_METHOD_POST)
+    # The metadata lists no methods, which RFC 8414 section 2 reads as client_secret_basic.
+    assert wire.exchanges[0]["client"] == McpOAuthClient("my-client", "my-secret", AUTH_METHOD_BASIC)
 
 
 async def test_a_server_that_registers_no_client_asks_for_a_client_id(
@@ -1273,6 +1325,48 @@ async def test_a_refused_client_otari_registered_ends_its_grants_and_is_register
     assert (await _row(async_db, world.server.id)).oauth_client is None
     await _sign_in(async_db, config, world, world.member)
     assert len(wire.registrations) == 2
+
+
+async def test_a_refused_client_is_dropped_only_after_the_connection_lock_is_released(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens, postgres_url: str
+) -> None:
+    """A disconnection locks the server row, then the connection; the renewal must not hold them the other way round."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id)
+    user_id = str(world.member.id)
+    row = await _row(async_db, world.server.id)
+    await async_db.commit()
+    wire.refresh_error = McpOAuthTokenError("refused", status_code=401, error_code="invalid_client")
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with AsyncSession(engine) as holder, AsyncSession(engine) as prober:
+            # Holds the server row, as a disconnection does before it locks the connection.
+            await holder.execute(select(WorkspaceMcpServer.id).where(WorkspaceMcpServer.id == row.id).with_for_update())
+            renewal = asyncio.create_task(tokens.token_for(row, user_id))
+            await prober.execute(text("SET lock_timeout = '2s'"))
+            for _ in range(100):
+                # Before the fix, this waits on the connection row the renewal holds and times out.
+                held = (
+                    await prober.execute(
+                        select(McpUserConnection.id)
+                        .where(McpUserConnection.server_id == row.id, McpUserConnection.user_id == user_id)
+                        .with_for_update()
+                    )
+                ).first()
+                await prober.rollback()
+                if held is None:
+                    break
+                await asyncio.sleep(0.05)
+            assert held is None, "the connection's removal committed while the server row was held"
+            assert not renewal.done(), "the client is dropped under the server row's lock, after the connection's"
+            await holder.rollback()
+            with pytest.raises(McpSignInRequiredError):
+                await renewal
+    finally:
+        await engine.dispose()
+
+    assert (await _row(async_db, world.server.id)).oauth_client is None
 
 
 async def test_a_renewal_that_fails_for_now_keeps_the_connection(

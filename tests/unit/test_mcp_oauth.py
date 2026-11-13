@@ -7,6 +7,7 @@ DNS resolver, and the HTTP client is one on a mock transport.
 from __future__ import annotations
 
 import asyncio
+import base64
 import gzip
 import json
 import zlib
@@ -181,7 +182,8 @@ async def test_a_supplied_client_authenticates_by_what_it_holds_and_the_server_t
         return McpOAuthMetadata(authorization_endpoint="a", token_endpoint="t", token_auth_methods=methods)
 
     assert _mcp_oauth.auth_method_for(None, metadata("client_secret_basic")) == AUTH_METHOD_NONE
-    assert _mcp_oauth.auth_method_for("s", metadata()) == AUTH_METHOD_POST
+    # RFC 8414 section 2: metadata that lists no methods takes client_secret_basic.
+    assert _mcp_oauth.auth_method_for("s", metadata()) == AUTH_METHOD_BASIC
     assert _mcp_oauth.auth_method_for("s", metadata("client_secret_basic")) == AUTH_METHOD_BASIC
     assert _mcp_oauth.auth_method_for("s", metadata("client_secret_basic", "client_secret_post")) == AUTH_METHOD_POST
 
@@ -662,6 +664,55 @@ async def test_a_basic_client_sends_its_secret_in_the_header_and_a_public_one_se
     assert basic.headers["Authorization"].startswith("Basic ")
     assert "client_secret" not in _form(basic) and "client_id" not in _form(basic)
     assert _form(public) == {"grant_type": "refresh_token", "refresh_token": "rt", "client_id": "c1"}
+
+
+async def test_a_basic_client_form_encodes_its_id_and_secret_before_the_header(wire: _Wire) -> None:
+    """RFC 6749 section 2.3.1: a ``+``, ``%`` or ``:`` in either half must not change what the server reads."""
+    wire.on("POST", f"{ISSUER}/token", httpx.Response(200, json={"access_token": "at"}))
+    wire.on("POST", f"{ISSUER}/revoke", httpx.Response(200))
+    client = McpOAuthClient(client_id="app:1 x", client_secret="s+e%c:r/t", auth_method=AUTH_METHOD_BASIC)
+
+    await _mcp_oauth.refresh(f"{ISSUER}/token", client, refresh_token="rt", resource=None)
+    await _mcp_oauth.revoke(f"{ISSUER}/revoke", client, token="rt")
+
+    expected = "Basic " + base64.b64encode(b"app%3A1+x:s%2Be%25c%3Ar%2Ft").decode()
+    assert [request.headers["Authorization"] for request in wire.requests] == [expected, expected]
+
+
+async def test_discovery_registration_and_the_code_exchange_have_a_total_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server that sends its answer a few bytes at a time cannot hold a sign-in open past the deadline."""
+
+    class Drip(httpx.AsyncByteStream):
+        async def __aiter__(self) -> Any:
+            while True:
+                await asyncio.sleep(0.01)
+                yield b" "
+
+    monkeypatch.setattr(_mcp_oauth, "_REQUEST_DEADLINE_SECONDS", 0.1)
+    monkeypatch.setattr(
+        _mcp_oauth,
+        "_http_client",
+        lambda timeout: httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Drip())),
+            follow_redirects=False,
+        ),
+    )
+
+    with pytest.raises(McpOAuthDiscoveryError, match="in time"):
+        await _mcp_oauth.discover(SERVER_URL)
+    with pytest.raises(McpOAuthDiscoveryError, match="in time"):
+        await _mcp_oauth.register_client(f"{ISSUER}/register", "https://o/cb")
+    with pytest.raises(McpOAuthTokenError, match="in time"):
+        await _mcp_oauth.exchange_code(
+            f"{ISSUER}/token",
+            McpOAuthClient(client_id="c1"),
+            code="c",
+            redirect_uri="https://o/cb",
+            verifier="v",
+            resource=None,
+        )
 
 
 async def test_a_refresh_keeps_the_token_it_sent_when_none_is_issued(wire: _Wire) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import AsyncExitStack
 from typing import Any, cast
@@ -173,3 +174,26 @@ async def test_a_request_cannot_send_its_own_renewer() -> None:
         )
 
     assert admitted.servers is not None and admitted.servers[0].renew_token is None
+
+
+async def test_a_failed_open_whose_transport_never_closes_still_answers_with_its_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The close after a failed open is bounded as the close after a finished call is."""
+    monkeypatch.setattr(mcp_stateless, "CLEANUP_TIMEOUT_S", 0.05)
+
+    async def never_closes(*_exc: object) -> None:
+        await asyncio.Event().wait()
+
+    async def enter(stack: AsyncExitStack, server: ResolvedMcpServer, *, screen_answers: bool) -> Any:
+        stack.push_async_exit(never_closes)
+        raise _refused(500)
+
+    monkeypatch.setattr(mcp_stateless, "_enter_session", enter)
+
+    async with asyncio.timeout(2):
+        with pytest.raises(BaseExceptionGroup) as raised:
+            async with mcp_stateless.open_session(_server(None)):
+                pass
+
+    assert not mcp_stateless.refused_token(raised.value)

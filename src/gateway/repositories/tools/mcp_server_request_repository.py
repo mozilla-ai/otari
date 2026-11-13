@@ -49,12 +49,11 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
             requester_id=requester_id,
             note=note,
         )
+        self.db.add(row)
         try:
-            # A savepoint, so losing to the unique index leaves the caller's transaction usable.
-            async with self.db.begin_nested():
-                self.db.add(row)
-                await self.db.flush()
+            await self.db.flush()
         except IntegrityError:
+            # The step ends here, and its block rolls the transaction back.
             raise McpServerRequestConflict from None
         return row
 
@@ -70,20 +69,46 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         )
         return rows.first() is not None
 
-    async def find(self, workspace_id: uuid.UUID, request_id: uuid.UUID) -> McpServerRequest | None:
-        """One request of a workspace, or ``None`` when the id names none there."""
-        rows = await self.db.execute(
-            select(McpServerRequest).where(
-                McpServerRequest.id == request_id, McpServerRequest.workspace_id == workspace_id
-            )
-        )
-        return rows.scalar_one_or_none()
+    async def find(
+        self, workspace_id: uuid.UUID, request_id: uuid.UUID, *, lock: bool = False
+    ) -> McpServerRequest | None:
+        """One request of a workspace, or ``None`` when the id names none there.
 
-    async def pending_in_workspace(self, workspace_id: uuid.UUID, *, limit: int) -> list[McpServerRequest]:
-        """A workspace's pending requests, oldest first."""
+        With ``lock`` the row is locked, as :meth:`pending_for_server` locks the rows an answer changes.
+        """
+        query = select(McpServerRequest).where(
+            McpServerRequest.id == request_id, McpServerRequest.workspace_id == workspace_id
+        )
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return (await self.db.execute(query)).scalar_one_or_none()
+
+    async def pending_servers(self, workspace_id: uuid.UUID, *, skip: int, limit: int) -> list[str]:
+        """The catalog names a workspace's pending requests ask for, the one waited for longest first."""
+        first = func.min(McpServerRequest.created_at)
+        rows = await self.db.execute(
+            select(McpServerRequest.catalog_name)
+            .where(McpServerRequest.workspace_id == workspace_id, McpServerRequest.status == _PENDING)
+            .group_by(McpServerRequest.catalog_name)
+            .order_by(first, McpServerRequest.catalog_name)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(rows.scalars().all())
+
+    async def pending_in_workspace(
+        self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], limit: int
+    ) -> list[McpServerRequest]:
+        """A workspace's pending requests for these catalog servers, oldest first."""
+        if not catalog_names:
+            return []
         rows = await self.db.execute(
             select(McpServerRequest)
-            .where(McpServerRequest.workspace_id == workspace_id, McpServerRequest.status == _PENDING)
+            .where(
+                McpServerRequest.workspace_id == workspace_id,
+                McpServerRequest.status == _PENDING,
+                McpServerRequest.catalog_name.in_(list(catalog_names)),
+            )
             .order_by(McpServerRequest.created_at, McpServerRequest.id)
             .limit(limit)
         )
@@ -121,6 +146,7 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         workspace_id: uuid.UUID,
         requester_id: uuid.UUID,
         *,
+        skip: int = 0,
         limit: int,
     ) -> list[McpServerRequest]:
         """A requester's pending requests in a workspace, and the answers they have not acknowledged, newest first.
@@ -142,6 +168,7 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
                 ),
             )
             .order_by(McpServerRequest.created_at.desc(), McpServerRequest.id)
+            .offset(skip)
             .limit(limit)
         )
         return list(rows.scalars().all())

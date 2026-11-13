@@ -57,6 +57,8 @@ class McpSignInNeeded:
     # The user a link would be minted for: the request's own, ``None`` for a key with no user.
     user_id: str | None
     reason: McpSignInReason
+    # Reached because the workspace attaches it to every request, not because the request named it.
+    attached: bool = False
 
 
 # Mints a sign-in link for ``(server_id, user_id)``. ``sign_in_link`` bound to the deployment's config.

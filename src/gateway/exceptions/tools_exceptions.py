@@ -5,7 +5,12 @@ from enum import StrEnum
 
 from fastapi import status
 
-from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED, PRICING_REQUIRED, WEB_ACCESS_DISABLED
+from gateway.core.error_codes import (
+    MCP_OAUTH_ISSUER_CHANGED,
+    MCP_SIGN_IN_REQUIRED,
+    PRICING_REQUIRED,
+    WEB_ACCESS_DISABLED,
+)
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -209,6 +214,24 @@ class McpConnectionModeError(TenancyConflictError):
 
 class McpConnectionSetupError(TenancyValidationError):
     """Per-user sign-in cannot be set up on a server as it is configured, or on this deployment."""
+
+
+class McpOAuthIssuerChangedError(McpConnectionSetupError):
+    """A server's sign-ins now go to another authorization server than the one its saved OAuth client was used with.
+
+    Refused before the client's secret is sent anywhere: a server that names a new authorization
+    server could be pointing it at one that collects secrets. A manager approves the move by saving
+    the client again.
+    """
+
+    error_code = MCP_OAUTH_ISSUER_CHANGED
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This server now sends sign-ins to a different authorization server than the one its OAuth client "
+            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
+            "page, to approve the new sign-in server."
+        )
 
 
 class McpConnectionFlowError(TenancyValidationError):

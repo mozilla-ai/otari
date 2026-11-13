@@ -48,12 +48,11 @@ from gateway.models.playground import (
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.users import User
-from gateway.repositories.tools import McpUserConnectionRepository
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import mcp_read_tools, resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
+from gateway.services.tools import McpSignedInServers, WorkspaceCodeExecutionPolicies, web_search_configured
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -273,6 +272,7 @@ async def resolve_tool_availability(
     config: GatewayConfig,
     offer: PlaygroundToolOffer,
     code_execution_policies: WorkspaceCodeExecutionPolicies,
+    signed_in: McpSignedInServers,
     workspace_id: uuid.UUID,
     user_id: str,
 ) -> PlaygroundToolAvailability:
@@ -307,7 +307,7 @@ async def resolve_tool_availability(
     )
     access = await resolve_request_mcp_access(db, None, workspace_id, session_user_id=user_id)
     per_user = [server.id for server in servers if server.credential_mode == McpCredentialMode.PER_USER]
-    connected = await McpUserConnectionRepository(db).connected_server_ids(user_id, per_user)
+    connected = await signed_in.signed_in(user_id, per_user)
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(

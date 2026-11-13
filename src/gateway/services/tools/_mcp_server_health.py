@@ -166,7 +166,11 @@ def health_after_contact(
         if recent and previous is not None and previous.error == contact.failure:
             return None
         failed = ServerCheck(tool_names=[], failure=contact.failure, http_status=contact.http_status)
-        return server_health(allowed_tools, failed).model_dump(mode="json")
+        health = server_health(allowed_tools, failed)
+        if previous is not None:
+            # What '@read' stands for until a manager labels tools: one failed contact must not empty it.
+            health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
+        return health.model_dump(mode="json")
     was_healthy = previous is not None and previous.status == "healthy"
     if contact.listing is not None:
         listed = server_health(allowed_tools, contact.listing)
@@ -183,7 +187,11 @@ def health_after_contact(
         if recent:
             return None
         return previous.model_copy(update={"checked_at": datetime.now(UTC).isoformat()}).model_dump(mode="json")
-    return WorkspaceMcpServerHealth(status="healthy", checked_at=datetime.now(UTC).isoformat()).model_dump(mode="json")
+    return WorkspaceMcpServerHealth(
+        status="healthy",
+        checked_at=datetime.now(UTC).isoformat(),
+        read_only_hinted_tools=previous.read_only_hinted_tools if previous is not None else [],
+    ).model_dump(mode="json")
 
 
 def _is_recent(checked_at: str, interval_s: float) -> bool:

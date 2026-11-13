@@ -87,6 +87,20 @@ def test_a_change_is_written_at_once() -> None:
     assert recovered is not None and recovered["status"] == "healthy"
 
 
+def test_a_failed_contact_keeps_the_read_hints_that_read_labels_follow() -> None:
+    """``@read`` follows these hints until a manager labels tools, so one failure must not empty it."""
+    fresh = server_health(None, LISTING).model_dump(mode="json")
+
+    failed = _after(fresh, McpServerContact(SERVER, URL, failure=CheckFailure.UNREACHABLE))
+    assert failed is not None and failed["status"] == "failing"
+    assert failed["tools"] == [] and failed["tool_count"] is None
+    assert mcp_read_tools(None, failed) == ["list_issues"]
+
+    answered = _after(failed, McpServerContact(SERVER, URL))
+    assert answered is not None and answered["status"] == "healthy"
+    assert mcp_read_tools(None, answered) == ["list_issues"]
+
+
 def test_an_old_answer_is_refreshed() -> None:
     stale = server_health(None, LISTING).model_dump(mode="json")
     stale["checked_at"] = (datetime.now(UTC) - timedelta(seconds=CONTACT_WRITE_INTERVAL_S + 1)).isoformat()
