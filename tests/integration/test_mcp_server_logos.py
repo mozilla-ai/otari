@@ -5,6 +5,7 @@ rules that matter (a plain member refused, another organization's workspace not
 found) need identities at roles the API's one operator identity never has.
 """
 
+import asyncio
 import io
 import uuid
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 from PIL import Image
 from sqlalchemy import Engine, event
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -34,6 +35,8 @@ from gateway.services.mcp_catalog import Logo, LogoLookBudget, McpCatalogService
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tools import McpServerLogoService
+
+from .conftest import _to_async_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -209,6 +212,59 @@ async def test_only_a_png_is_accepted_as_an_upload(async_db: AsyncSession) -> No
         await service.set_logo(
             user=owner, workspace_id=workspace.id, server_id=server_id, tile="sometimes", content=None
         )
+
+
+async def test_a_png_whose_pixels_do_not_decode_is_refused(async_db: AsyncSession) -> None:
+    """Its signature and header read fine, so only decoding it finds the damage."""
+    workspace, owner, _ = await _setup(async_db)
+    service = _service(async_db, _Fetcher())
+    server_id = await _server(async_db, workspace, "https://mcp.example.com/mcp")
+    whole = _png((0, 0, 0, 255), size=64)
+    truncated = whole[: len(whole) // 2]
+    assert Logo.sniff(truncated) == "image/png"
+
+    with pytest.raises(McpLogoInvalidError):
+        await service.set_logo(
+            user=owner, workspace_id=workspace.id, server_id=server_id, tile="auto", content=truncated
+        )
+
+
+async def test_the_logo_list_pages_as_the_server_list_does(async_db: AsyncSession) -> None:
+    workspace, _, member = await _setup(async_db)
+    service = _service(async_db, _Fetcher())
+    first = await _server(async_db, workspace, "https://one.example.com/mcp", name="one")
+    second = await _server(async_db, workspace, "https://two.example.com/mcp", name="two")
+
+    page_one = await service.list_logos(user=member, workspace_id=workspace.id, limit=1)
+    page_two = await service.list_logos(user=member, workspace_id=workspace.id, skip=1, limit=1)
+
+    assert [row.server_id for row in page_one.data + page_two.data] == [first, second]
+
+
+async def test_two_first_uploads_for_one_server_both_land(async_db: AsyncSession, postgres_url: str) -> None:
+    """The server row is locked first, so the second upload finds the first one's logo row instead of inserting."""
+    workspace, owner, _ = await _setup(async_db)
+    server_id = await _server(async_db, workspace, "https://mcp.example.com/mcp")
+    workspace_id, owner_id = workspace.id, owner.id
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as one, factory() as two:
+
+            async def upload(db: AsyncSession, tile: str) -> None:
+                user = await db.get(User, owner_id)
+                assert user is not None
+                await _service(db, _Fetcher()).set_logo(
+                    user=user, workspace_id=workspace_id, server_id=server_id, tile=tile, content=_png((0, 0, 0, 255))
+                )
+
+            await asyncio.gather(upload(one, "always"), upload(two, "never"))
+    finally:
+        await engine.dispose()
+
+    async with UnitOfWork(async_db) as uow:
+        row = await WorkspaceMcpServerLogoRepository(uow).find(server_id)
+    assert row is not None and row.tile in ("always", "never")
 
 
 async def test_a_member_reads_logos_but_may_not_change_one(async_db: AsyncSession) -> None:

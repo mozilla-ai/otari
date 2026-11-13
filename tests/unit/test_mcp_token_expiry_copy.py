@@ -28,6 +28,7 @@ class _Row:
             "encrypted_access_token": encrypt_secret("still-good"),
             "expires_at": now + expires_in,
             "updated_at": now - timedelta(hours=1),
+            "created_at": now - timedelta(hours=1),
         }
         self.released = False
 

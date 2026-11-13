@@ -217,7 +217,8 @@ async def admit_mcp_servers(
             )
             raise McpServerConfigurationError(MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL)
         # Gotcha: the detail does not repeat a stored name, but a caller can still guess one by probing.
-        if inline_names & stored_name_counts.keys():
+        # A named server waiting on a sign-in collides as a connected one does; an attached one was dropped above.
+        if inline_names & (stored_name_counts.keys() | {need.name for need in sign_in}):
             raise McpServerDeclarationError(MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL)
         if stored_servers or mcp_servers:
             mcp_servers = (mcp_servers or []) + stored_servers

@@ -97,22 +97,71 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         return list(rows.scalars().all())
 
     async def pending_in_workspace(
-        self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], limit: int
+        self, workspace_id: uuid.UUID, *, catalog_names: Collection[str], per_server: int
     ) -> list[McpServerRequest]:
-        """A workspace's pending requests for these catalog servers, oldest first."""
+        """A workspace's pending requests for these catalog servers, the first ``per_server`` of each, oldest first.
+
+        Bounded per server, so one server's many requests never crowd another out of the page.
+        """
         if not catalog_names:
             return []
+        waiting = (
+            McpServerRequest.workspace_id == workspace_id,
+            McpServerRequest.status == _PENDING,
+            McpServerRequest.catalog_name.in_(list(catalog_names)),
+        )
+        ranked = (
+            select(
+                McpServerRequest.id,
+                func.row_number()
+                .over(
+                    partition_by=McpServerRequest.catalog_name,
+                    order_by=(McpServerRequest.created_at, McpServerRequest.id),
+                )
+                .label("rank"),
+            )
+            .where(*waiting)
+            .subquery()
+        )
+        rows = await self.db.execute(
+            select(McpServerRequest)
+            .join(ranked, ranked.c.id == McpServerRequest.id)
+            .where(ranked.c.rank <= per_server)
+            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+        )
+        return list(rows.scalars().all())
+
+    async def pending_for_name(
+        self, workspace_id: uuid.UUID, catalog_name: str, *, skip: int, limit: int
+    ) -> list[McpServerRequest]:
+        """A page of the pending requests for one catalog server, oldest first."""
         rows = await self.db.execute(
             select(McpServerRequest)
             .where(
                 McpServerRequest.workspace_id == workspace_id,
                 McpServerRequest.status == _PENDING,
-                McpServerRequest.catalog_name.in_(list(catalog_names)),
+                McpServerRequest.catalog_name == catalog_name,
             )
             .order_by(McpServerRequest.created_at, McpServerRequest.id)
+            .offset(skip)
             .limit(limit)
         )
         return list(rows.scalars().all())
+
+    async def count_pending_by_server(self, workspace_id: uuid.UUID, catalog_names: Collection[str]) -> dict[str, int]:
+        """How many requests wait for each of these catalog servers, in one query."""
+        if not catalog_names:
+            return {}
+        rows = await self.db.execute(
+            select(McpServerRequest.catalog_name, func.count())
+            .where(
+                McpServerRequest.workspace_id == workspace_id,
+                McpServerRequest.status == _PENDING,
+                McpServerRequest.catalog_name.in_(list(catalog_names)),
+            )
+            .group_by(McpServerRequest.catalog_name)
+        )
+        return {name: count for name, count in rows.all()}
 
     async def count_pending_in_workspace(self, workspace_id: uuid.UUID) -> int:
         counted = (

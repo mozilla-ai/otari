@@ -408,6 +408,15 @@ def _sign_in_url(config: GatewayConfig | None, server_id: uuid.UUID, user_id: st
         return None
 
 
+def _with_sign_in_link(
+    exc: McpExecutionError, config: GatewayConfig, server_id: uuid.UUID, user_id: str | None
+) -> McpExecutionError:
+    """``exc`` with the caller's sign-in link when a renewal during the call found the sign-in gone."""
+    if exc.code == CODE_SIGN_IN_REQUIRED and exc.sign_in_url is None:
+        exc.sign_in_url = _sign_in_url(config, server_id, user_id)
+    return exc
+
+
 async def _resolve_server(
     principal: _Principal,
     servers: WorkspaceMcpServers,
@@ -686,9 +695,12 @@ async def list_mcp_tools(
             await _require_safe_url(server)
             track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
             patterns = _caller_patterns(principal, server)
-            catalog = await discover_stored_tools(
-                server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
-            )
+            try:
+                catalog = await discover_stored_tools(
+                    server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
+                )
+            except McpExecutionError as failed:
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
             visible, warnings = catalog.tools, catalog.warnings
 
             response = McpToolsResponse(
@@ -824,6 +836,8 @@ async def execute_mcp_tool(
                     timings=timings,
                     contacts=mcp_server_contacts,
                 )
+            except McpExecutionError as failed:
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
             finally:
                 # A finally rather than an except, so a call the deadline cancels is recorded as failed too.
                 if trace is not None:

@@ -8063,9 +8063,11 @@ export interface paths {
          * List Mcp Server Requests
          * @description The workspace's pending requests, one entry per catalog server, the longest-waiting first.
          *
-         *     Organization owners/admins or this workspace's owners/admins. Each entry names who asked and
-         *     carries their notes, and the catalog's entry for the server as it is now. A page holds `limit`
-         *     servers after the first `skip`, and at most 500 requests; `count` says how many wait in all.
+         *     Organization owners/admins or this workspace's owners/admins. Each entry names the first five
+         *     who asked, with their notes, and `requester_count` says how many asked in all; the
+         *     `requesters` list pages through the rest. Each also carries the catalog's entry for the server
+         *     as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
+         *     requests wait in all.
          */
         get: operations["mcp-servers-list_mcp_server_requests"];
         put?: never;
@@ -8126,6 +8128,29 @@ export interface paths {
          *     server again or the server is added, and an approved one when its server is deleted.
          */
         get: operations["mcp-servers-list_my_mcp_server_requests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Requesters
+         * @description Everyone waiting for one catalog server, a page at a time, the earliest first.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. For a server whose entry in the
+         *     list above names fewer requesters than its `requester_count`.
+         */
+        get: operations["mcp-servers-list_mcp_server_requesters"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8279,9 +8304,10 @@ export interface paths {
          * List Workspace Mcp Server Logos
          * @description The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.
          *
-         *     Readable by any member who can see the workspace, as the servers are. A logo is
-         *     an admin's upload, else the catalog's for the server's URL, else one the gateway
-         *     found on the server's host. Listing them makes the gateway fetch nothing.
+         *     Paged as the server list is, oldest server first. Readable by any member who can
+         *     see the workspace, as the servers are. A logo is an admin's upload, else the
+         *     catalog's for the server's URL, else one the gateway found on the server's host.
+         *     Listing them makes the gateway fetch nothing.
          */
         get: operations["mcp-servers-list_workspace_mcp_server_logos"];
         put?: never;
@@ -15603,8 +15629,13 @@ export interface components {
              */
             first_requested_at: string;
             /**
+             * Requester Count
+             * @description How many pending requests ask for this server in all
+             */
+            requester_count: number;
+            /**
              * Requesters
-             * @description Who asked, earliest first
+             * @description Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest
              */
             requesters: components["schemas"]["McpServerRequesterPublic"][];
             /** Title */
@@ -15705,6 +15736,22 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /**
+         * McpServerRequestersPublic
+         * @description A page of the members waiting for one catalog server in a workspace.
+         */
+        McpServerRequestersPublic: {
+            /**
+             * Count
+             * @description How many pending requests ask for this server in all
+             */
+            count: number;
+            /**
+             * Data
+             * @description Who asked, earliest first
+             */
+            data: components["schemas"]["McpServerRequesterPublic"][];
         };
         /** McpServerRequestsDeclined */
         McpServerRequestsDeclined: {
@@ -37701,6 +37748,44 @@ export interface operations {
             };
         };
     };
+    "mcp-servers-list_mcp_server_requesters": {
+        parameters: {
+            query: {
+                /** @description The catalog server asked for */
+                catalog_name: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-withdraw_mcp_server_request": {
         parameters: {
             query?: never;
@@ -37929,7 +38014,12 @@ export interface operations {
     };
     "mcp-servers-list_workspace_mcp_server_logos": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;

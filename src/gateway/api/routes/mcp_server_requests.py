@@ -15,6 +15,7 @@ from gateway.api.deps import CurrentIdentity, McpServerRequestServiceDep, verify
 from gateway.schemas.tools import (
     McpServerRequestCreate,
     McpServerRequestDecline,
+    McpServerRequestersPublic,
     McpServerRequestGroupsPublic,
     McpServerRequestPublic,
     McpServerRequestsDeclined,
@@ -47,11 +48,35 @@ async def list_mcp_server_requests(
 ) -> McpServerRequestGroupsPublic:
     """The workspace's pending requests, one entry per catalog server, the longest-waiting first.
 
-    Organization owners/admins or this workspace's owners/admins. Each entry names who asked and
-    carries their notes, and the catalog's entry for the server as it is now. A page holds `limit`
-    servers after the first `skip`, and at most 500 requests; `count` says how many wait in all.
+    Organization owners/admins or this workspace's owners/admins. Each entry names the first five
+    who asked, with their notes, and `requester_count` says how many asked in all; the
+    `requesters` list pages through the rest. Each also carries the catalog's entry for the server
+    as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
+    requests wait in all.
     """
     return await service.pending(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
+
+
+@router.get("/requesters")
+async def list_mcp_server_requesters(
+    service: McpServerRequestServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    catalog_name: Annotated[str, Query(min_length=1, max_length=512, description="The catalog server asked for")],
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=McpServerRequestService.MAX_REQUESTERS_PAGE, description="Maximum number of records to return"),
+    ] = McpServerRequestService.MAX_REQUESTERS_PAGE,
+) -> McpServerRequestersPublic:
+    """Everyone waiting for one catalog server, a page at a time, the earliest first.
+
+    Organization owners/admins or this workspace's owners/admins. For a server whose entry in the
+    list above names fewer requesters than its `requester_count`.
+    """
+    return await service.requesters(
+        user=current_identity, workspace_id=workspace_id, catalog_name=catalog_name, skip=skip, limit=limit
+    )
 
 
 @router.get("/mine")

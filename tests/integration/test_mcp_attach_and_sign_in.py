@@ -713,6 +713,7 @@ def test_a_named_server_that_refuses_an_ended_sign_in_offers_a_new_one_instead_o
             client_id="dynamic",
             client_auth_method=AUTH_METHOD_NONE,
             token_endpoint=f"{ISSUER}/token",
+            server_url=PUBLIC_URL,
         )
     )
     test_db.commit()

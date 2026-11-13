@@ -715,6 +715,36 @@ async def test_discovery_registration_and_the_code_exchange_have_a_total_deadlin
         )
 
 
+async def test_discovery_and_registration_have_a_deadline_over_all_their_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each request answers inside its own deadline, and the operation still ends at its total one."""
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.05)
+        return httpx.Response(400 if request.method == "POST" else 404)
+
+    monkeypatch.setattr(_mcp_oauth, "_OPERATION_DEADLINE_SECONDS", 0.08)
+    monkeypatch.setattr(
+        _mcp_oauth,
+        "_http_client",
+        lambda timeout: httpx.AsyncClient(transport=httpx.MockTransport(slow), follow_redirects=False),
+    )
+
+    with pytest.raises(McpOAuthDiscoveryError, match="in time"):
+        await _mcp_oauth.discover(SERVER_URL)
+    with pytest.raises(McpOAuthDiscoveryError, match="in time"):
+        await _mcp_oauth.register_client(f"{ISSUER}/register", "https://o/cb")
+
+
+async def test_the_production_client_does_not_follow_redirects() -> None:
+    client = _mcp_oauth._http_client(httpx.Timeout(1.0))
+    try:
+        assert client.follow_redirects is False
+    finally:
+        await client.aclose()
+
+
 async def test_a_refresh_keeps_the_token_it_sent_when_none_is_issued(wire: _Wire) -> None:
     wire.on("POST", f"{ISSUER}/token", httpx.Response(200, json={"access_token": "new"}))
     client = McpOAuthClient(client_id="c1")

@@ -15,6 +15,9 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.base_repository import BaseRepository
 
+# The whitespace a stored URL may carry around it: Python's ``str.strip`` drops these too.
+_WHITESPACE = " \t\n\r\f\v"
+
 
 class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Never]):
     """Read stored MCP server rows."""
@@ -90,17 +93,30 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         return found.first() is not None
 
     async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
-        """Whether a workspace stores a server at ``url``, a trailing slash and surrounding spaces aside."""
+        """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.
+
+        SQL ``trim`` takes spaces alone, so the whitespace a stored URL can carry (a tab, a line
+        break) is named; ``ltrim`` and ``rtrim`` with a set read the same on PostgreSQL and SQLite.
+        """
         bare = url.strip().rstrip("/")
+        stored = func.rtrim(func.ltrim(WorkspaceMcpServer.url, _WHITESPACE), _WHITESPACE + "/")
         rows = await self.db.execute(
             select(WorkspaceMcpServer.id)
-            .where(
-                WorkspaceMcpServer.workspace_id == workspace_id,
-                func.rtrim(func.trim(WorkspaceMcpServer.url), "/") == bare,
-            )
+            .where(WorkspaceMcpServer.workspace_id == workspace_id, stored == bare)
             .limit(1)
         )
         return rows.first() is not None
+
+    async def url_page(self, workspace_id: uuid.UUID, *, skip: int, limit: int) -> dict[uuid.UUID, str]:
+        """A page of a workspace's stored servers' URLs, by server id, oldest first as the server list pages."""
+        rows = await self.db.execute(
+            select(WorkspaceMcpServer.id, WorkspaceMcpServer.url)
+            .where(WorkspaceMcpServer.workspace_id == workspace_id)
+            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+            .offset(skip)
+            .limit(limit)
+        )
+        return {row.id: row.url for row in rows}
 
     async def urls_in_workspace(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, str]:
         """Each of a workspace's stored servers' URL, by server id."""
