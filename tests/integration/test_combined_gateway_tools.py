@@ -940,6 +940,40 @@ def test_a_key_without_a_tools_scope_cannot_run_it_through_a_completion(
     assert not _ran(backends)
 
 
+# A declaration in a provider's own words, which a provider may run itself.
+_PROVIDER_TOOL_SCOPES = {
+    "search": ({"type": "web_search_20250305", "name": "web_search"}, "web:search"),
+    "code": ({"type": "code_execution_20250522", "name": "code_execution"}, "code:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_PROVIDER_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_ask_a_provider_to_run_it_either(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    """The scope is what the caller may ask for, so a provider-named declaration needs it too.
+
+    Who runs the tool is settled per candidate from headers and policy, which no
+    caller chooses, so a key that may not search cannot reach a search by asking
+    a provider for one.
+    """
+    entry, scope = _PROVIDER_TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    with _scripted("gateway.services.mcp_loop_messages.amessages", [_done_message()]) as sent:
+        refused = client.post(f"{API_ROOT}/messages", json=_messages_body([entry], False), headers=headers)
+
+    assert refused.status_code == 403, refused.text
+    assert f"'{scope}'" in refused.json()["error"]["message"]
+    assert not sent
+
+
 _CHAT_TOOL_SCOPES = {
     "search": ({"tools": [{"type": "otari_web_search"}]}, "web:search"),
     "MCP": ({"mcp_servers": [_MCP_SERVER]}, "mcp:execute"),

@@ -383,6 +383,7 @@ from gateway.services.tool_usage import (
     ToolUsageTally,
 )
 from gateway.services.tools import (
+    BUILTIN_TOOLS,
     CONTAINER_GONE_DETAIL_TEMPLATE,
     NO_WEB_TOOLS,
     WEB_FETCH_TOOL_NAME,
@@ -3678,6 +3679,7 @@ async def prepare_gateway_tools(
     web_policy = _RequestWebPolicy(backends.ports.web_search_policy, ctx.workspace_id)
     unpriced_tool: PricedTool | None = None
     try:
+        _require_declared_tool_scopes(adapter, ctx, declared)
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
@@ -3862,13 +3864,6 @@ async def _admit_candidates(
     return answers
 
 
-# Each managed web tool needs the scope its own endpoint needs.
-_WEB_TOOL_SCOPES: tuple[tuple[WebTool, KeyScope, str], ...] = (
-    (WebTool.SEARCH, KeyScope.WEB_SEARCH, "searching the web"),
-    (WebTool.FETCH, KeyScope.WEB_FETCH, "fetching a web page"),
-)
-
-
 async def _declare_claims(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
@@ -3885,16 +3880,11 @@ async def _declare_claims(
         admitted = await code.admit(claimed=CODE_EXECUTION_TOOL_NAME in claimed, beside_sandbox=beside_sandbox)
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         return _ToolRefusal(domain_error(adapter, exc))
-    if admitted.use_sandbox and (missing := _missing_scope(ctx, KeyScope.CODE_EXECUTE, "running code")):
-        return _refuse_after_admission(adapter, admitted, missing)
     web_claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
         return _refuse_after_admission(adapter, admitted, exc)
-    for tool, scope, what in _WEB_TOOL_SCOPES:
-        if tool in web.requested_tools and (missing := _missing_scope(ctx, scope, what)):
-            return _refuse_after_admission(adapter, admitted, missing)
     return _DeclaredClaims(code=admitted, web=web)
 
 
@@ -3930,6 +3920,30 @@ async def _release_unused_claims(claims: Iterable[_DeclaredClaims | _ToolRefusal
             await admitted.containers.release(container_id)
         except DATABASE_ERRORS as exc:
             logger.warning("could not release container claim %s: %s", container_id, describe_database_error(exc))
+
+
+def _declares_mcp(declared: DeclaredTools) -> bool:
+    """Whether the request asks to reach an MCP server, its own or one its IDs name."""
+    return bool(declared.mcp_servers or declared.mcp_server_ids or declares_provider_mcp(declared.tools))
+
+
+def _require_declared_tool_scopes(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
+) -> None:
+    """Hold the request's key to a scope for each tool it declared.
+
+    A scope says what the caller may ask for. Which candidate ends up running the
+    tool is this deployment's answer, settled per attempt from headers and policy,
+    so a key that may not search the web may not ask for a search at all.
+
+    Raises:
+        TenancyError: the key lacks the scope one of the declared tools needs.
+    """
+    for tool in BUILTIN_TOOLS:
+        if tool.declares(declared.tools) and (missing := _missing_scope(ctx, tool.key_scope, f"the {tool.name} tool")):
+            raise domain_error(adapter, missing)
+    if _declares_mcp(declared) and (missing := _missing_scope(ctx, KeyScope.MCP_EXECUTE, "calling MCP tools")):
+        raise domain_error(adapter, missing)
 
 
 def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
@@ -4170,9 +4184,7 @@ async def _admit_mcp_servers(
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
     provider_mcp = declares_provider_mcp(declared.tools)
-    declares_mcp = bool(declared.mcp_servers or declared.mcp_server_ids or provider_mcp)
-    if declares_mcp and (missing := _missing_scope(ctx, KeyScope.MCP_EXECUTE, "calling MCP tools")):
-        raise domain_error(adapter, missing)
+    declares_mcp = _declares_mcp(declared)
     try:
         access = (
             await resolve_request_mcp_access(
