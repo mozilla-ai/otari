@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from decimal import Decimal
 from typing import Protocol
 
@@ -24,8 +24,13 @@ class CodeExecutionEnvironmentPrices(Protocol):
         """The organization whose prices apply to the key's runs."""
         ...
 
-    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
-        """The deployment-paid price of one run under ``rate_keys``, first match winning, or ``None`` when unpriced."""
+    async def unit_rates(
+        self, rate_key_sets: Collection[Sequence[str]], *, organization_id: uuid.UUID | None
+    ) -> dict[tuple[str, ...], Decimal | None]:
+        """The deployment-paid price of one run under each set of rate keys, first match winning, read in one batch.
+
+        Keyed by the set as a tuple; ``None`` where none of its keys is priced.
+        """
         ...
 
 
@@ -67,10 +72,12 @@ class CodeExecutionEnvironmentService:
         if not page:
             return CodeExecutionEnvironmentList(data=[])
         organization_id = await self._prices.organization_of(api_key_id)
+        rate_keys = {image: code_execution_rate_keys(image) for image in page}
+        unit_rates = await self._prices.unit_rates(list(rate_keys.values()), organization_id=organization_id)
         environments: list[CodeExecutionEnvironment] = []
         for image in page:
             described = self._config.sandbox_environments.get(image)
-            unit_rate = await self._prices.unit_rate(code_execution_rate_keys(image), organization_id=organization_id)
+            unit_rate = unit_rates.get(rate_keys[image])
             environments.append(
                 CodeExecutionEnvironment(
                     name=image,

@@ -497,8 +497,9 @@ own default. `skip` and `limit` (at most `1000`, default `100`) page the list.
 
 A direct run names one in `environment`. One the deployment does not offer is a
 `400`, and one other than the workspace's pin a `403`. A held sandbox keeps the
-environment it was created in: resuming it while naming another is a `400`, and
-a resume that names none runs, and is priced, in the one it has.
+environment it was created in: resuming it while naming another is a `400`, as
+is naming any on a sandbox held from before environments were recorded, and a
+resume that names none runs, and is priced, in the one it has.
 
 ### Reusing a sandbox across requests
 

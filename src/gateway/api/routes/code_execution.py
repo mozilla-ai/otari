@@ -45,6 +45,7 @@ from gateway.api.deps import (
     get_db,
     get_log_writer,
     verify_api_key_or_master_key,
+    verify_catalog_reader,
 )
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS
@@ -109,6 +110,9 @@ from gateway.services.workspace_scope import organization_for_key_id, workspace_
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
 
 router = APIRouter(prefix="/code", tags=["code-execution"])
+# The environment listing describes the deployment and bills nothing, so a dashboard session reads it as it reads
+# ``GET /models``; a run stays on the router above, which takes a key or the master key only.
+catalog_router = APIRouter(prefix="/code", tags=["code-execution"], dependencies=[Depends(verify_catalog_reader)])
 
 CODE_EXECUTE_ENDPOINT = "/v1/code/execute"
 SANDBOX_NOT_CONFIGURED_DETAIL = "code execution is not available: no sandbox is configured on this gateway"
@@ -447,9 +451,9 @@ async def execute_code(
     )
 
 
-@router.get("/environments")
+@catalog_router.get("/environments")
 async def list_code_execution_environments(
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     environments: CodeExecutionEnvironmentServiceDep,
     skip: Annotated[int, Query(ge=0, description="Number of environments to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of environments to return")] = 100,
