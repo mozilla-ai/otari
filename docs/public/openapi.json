@@ -6352,7 +6352,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -6730,7 +6730,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference' alone, which calls models and nothing else. The end_users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -12739,24 +12739,25 @@
         "type": "object"
       },
       "KeyScope": {
-        "description": "One group of endpoints an API key may be granted.",
+        "description": "One group of endpoints an API key may be granted, named ``resource:action``.\n\nOrdered by resource, not A-Z: the order is what a stored list is normalized\nto and what the dashboard renders, and the end-user scopes come last because\nonly a service key may hold them.",
         "enum": [
-          "inference",
+          "inference:run",
           "files:read",
           "files:write",
           "batches:read",
           "batches:write",
-          "web",
+          "web:search",
+          "web:fetch",
           "code:execute",
           "mcp:read",
           "mcp:execute",
           "telemetry:write",
-          "agents",
+          "agents:write",
           "usage:read",
           "usage:write",
-          "end_users:read",
-          "end_users:write",
-          "end_users:delete"
+          "end-users:read",
+          "end-users:write",
+          "end-users:delete"
         ],
         "title": "KeyScope",
         "type": "string"
@@ -25936,7 +25937,7 @@
                 "type": "null"
               }
             ],
-            "description": "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.",
             "title": "Scopes"
           }
         },
@@ -26120,7 +26121,7 @@
                 "type": "null"
               }
             ],
-            "description": "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end_users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.",
             "title": "Scopes"
           }
         },
@@ -32562,7 +32563,7 @@
           "audio"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -32687,7 +32688,7 @@
           "audio"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -35072,7 +35073,7 @@
           "chat"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -35262,7 +35263,7 @@
           "decisions"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -35315,7 +35316,7 @@
           "embeddings"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -35352,7 +35353,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:read"
+          "end-users:read"
         ]
       }
     },
@@ -35449,7 +35450,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:delete"
+          "end-users:delete"
         ]
       },
       "get": {
@@ -35586,7 +35587,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:read"
+          "end-users:read"
         ]
       },
       "patch": {
@@ -35651,7 +35652,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:write"
+          "end-users:write"
         ]
       },
       "put": {
@@ -35726,7 +35727,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:write"
+          "end-users:write"
         ]
       }
     },
@@ -35775,7 +35776,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:delete"
+          "end-users:delete"
         ]
       },
       "get": {
@@ -35829,7 +35830,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:read"
+          "end-users:read"
         ]
       },
       "patch": {
@@ -35893,7 +35894,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:write"
+          "end-users:write"
         ]
       },
       "put": {
@@ -35967,7 +35968,7 @@
           "end-users"
         ],
         "x-otari-key-scopes": [
-          "end_users:write"
+          "end-users:write"
         ]
       }
     },
@@ -36108,7 +36109,7 @@
           "fetch"
         ],
         "x-otari-key-scopes": [
-          "web"
+          "web:fetch"
         ]
       }
     },
@@ -36188,7 +36189,7 @@
           "fetch"
         ],
         "x-otari-key-scopes": [
-          "web"
+          "web:fetch"
         ]
       }
     },
@@ -36989,7 +36990,7 @@
           "hooks"
         ],
         "x-otari-key-scopes": [
-          "agents"
+          "agents:write"
         ]
       }
     },
@@ -37045,7 +37046,7 @@
           "hooks"
         ],
         "x-otari-key-scopes": [
-          "agents"
+          "agents:write"
         ]
       }
     },
@@ -38145,7 +38146,7 @@
           "images"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -38196,7 +38197,7 @@
           "images"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -40560,7 +40561,7 @@
           "messages"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -40623,7 +40624,7 @@
           "messages"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -41007,7 +41008,7 @@
           "moderations"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -52336,7 +52337,7 @@
           "rerank"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -52425,7 +52426,7 @@
           "responses"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -52732,7 +52733,7 @@
           "routing"
         ],
         "x-otari-key-scopes": [
-          "agents"
+          "agents:write"
         ]
       }
     },
@@ -53291,7 +53292,7 @@
           "search"
         ],
         "x-otari-key-scopes": [
-          "web"
+          "web:search"
         ]
       }
     },
@@ -53854,7 +53855,7 @@
           "search"
         ],
         "x-otari-key-scopes": [
-          "web"
+          "web:search"
         ]
       }
     },
@@ -54278,7 +54279,7 @@
           "decisions"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -58088,7 +58089,7 @@
           "videos"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       },
       "post": {
@@ -58139,7 +58140,7 @@
           "videos"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -58193,7 +58194,7 @@
           "videos"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },
@@ -58249,7 +58250,7 @@
           "videos"
         ],
         "x-otari-key-scopes": [
-          "inference"
+          "inference:run"
         ]
       }
     },

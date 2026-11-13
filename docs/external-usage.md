@@ -26,7 +26,7 @@ Through the API, the same key is
 `{"key_name": "importer", "scopes": ["telemetry:write", "usage:write"], "exclude_from_budget": true}`
 on `POST /api/v1/keys`.
 
-Use the key for importing only, and do not give it `inference`: the exemption
+Use the key for importing only, and do not give it `inference:run`: the exemption
 also applies to any request sent with it. And do not import usage you also route through Otari, or it is
 counted twice.
 

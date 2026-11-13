@@ -18,7 +18,7 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   key_prefix: "gw-secret…",
   key_suffix: "cret",
   metadata: {},
-  scopes: ["inference"],
+  scopes: ["inference:run"],
   reject_user_mismatch: null,
   is_service_key: false,
   is_organization_service_key: false,

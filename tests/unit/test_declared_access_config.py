@@ -202,21 +202,21 @@ def test_a_key_naming_no_scopes_holds_what_keys_held_before_scopes() -> None:
     plain = ApiKeyConfig(secret=SecretStr(SECRET))
     service = ApiKeyConfig(secret=SecretStr(SECRET), is_service_key=True)
 
-    assert "end_users:read" not in plain.held_scopes()
-    assert plain.held_scopes() == [scope for scope in service.held_scopes() if not scope.startswith("end_users:")]
-    assert {"end_users:read", "end_users:write", "end_users:delete"} <= set(service.held_scopes())
+    assert "end-users:read" not in plain.held_scopes()
+    assert plain.held_scopes() == [scope for scope in service.held_scopes() if not scope.startswith("end-users:")]
+    assert {"end-users:read", "end-users:write", "end-users:delete"} <= set(service.held_scopes())
 
 
 def test_a_key_holds_the_scopes_it_names() -> None:
-    key = ApiKeyConfig.model_validate({"secret": SECRET, "scopes": ["usage:read", "inference", "inference"]})
+    key = ApiKeyConfig.model_validate({"secret": SECRET, "scopes": ["usage:read", "inference:run", "inference:run"]})
 
-    assert key.held_scopes() == ["inference", "usage:read"]
+    assert key.held_scopes() == ["inference:run", "usage:read"]
 
 
 @pytest.mark.parametrize(
     ("scopes", "message"),
     [
-        (["end_users:read"], "Only a service key may hold end_users:read"),
+        (["end-users:read"], "Only a service key may hold end-users:read"),
         (["admin"], "scopes.0"),
         ([], "at least 1 item"),
     ],
@@ -244,6 +244,6 @@ def test_an_entry_naming_no_scopes_keeps_the_digest_it_had() -> None:
 
 
 def test_naming_scopes_changes_the_digest() -> None:
-    scoped = ApiKeyConfig.model_validate({**_PINNED_ENTRY, "scopes": ["inference"]})
+    scoped = ApiKeyConfig.model_validate({**_PINNED_ENTRY, "scopes": ["inference:run"]})
 
     assert scoped.declaration_digest() != _DIGEST_BEFORE_SCOPES

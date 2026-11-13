@@ -27,7 +27,7 @@ router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify
             "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
         }
     },
-    openapi_extra=key_scope(KeyScope.AGENTS),
+    openapi_extra=key_scope(KeyScope.AGENTS_WRITE),
 )
 async def record_guardrail_definition(
     request: GuardrailDefinitionRequest,

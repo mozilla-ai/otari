@@ -47,7 +47,7 @@ FETCH_ENDPOINT = "/v1/fetch"
 @router.post(
     "/fetch",
     responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
-    openapi_extra=key_scope(KeyScope.WEB),
+    openapi_extra=key_scope(KeyScope.WEB_FETCH),
 )
 async def create_fetch(
     raw_request: Request,
@@ -92,7 +92,7 @@ async def create_fetch(
 @router.post(
     "/fetch/{fetch_tool_name}",
     responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
-    openapi_extra=key_scope(KeyScope.WEB),
+    openapi_extra=key_scope(KeyScope.WEB_FETCH),
 )
 async def create_fetch_for_tool(
     raw_request: Request,

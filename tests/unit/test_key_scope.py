@@ -30,11 +30,11 @@ def _migration() -> ModuleType:
 
 
 def test_new_keys_call_models_and_nothing_else() -> None:
-    assert DEFAULT_KEY_SCOPES == (KeyScope.INFERENCE,)
+    assert DEFAULT_KEY_SCOPES == (KeyScope.INFERENCE_RUN,)
 
 
 def test_scopes_are_stored_once_each_in_one_order() -> None:
-    assert normalize_scopes(["usage:read", KeyScope.INFERENCE, "usage:read"]) == ["inference", "usage:read"]
+    assert normalize_scopes(["usage:read", KeyScope.INFERENCE_RUN, "usage:read"]) == ["inference:run", "usage:read"]
 
 
 def test_an_unknown_scope_is_refused() -> None:
@@ -50,7 +50,7 @@ def test_a_key_needs_a_scope() -> None:
 @pytest.mark.parametrize("scope", sorted(END_USER_SCOPES))
 def test_only_a_service_key_holds_an_end_user_scope(scope: KeyScope) -> None:
     with pytest.raises(ValueError, match=f"Only a service key may hold {scope.value}"):
-        checked_scopes([KeyScope.INFERENCE, scope], is_service_key=False)
+        checked_scopes([KeyScope.INFERENCE_RUN, scope], is_service_key=False)
 
     assert checked_scopes([scope], is_service_key=True) == [scope.value]
 
@@ -70,30 +70,32 @@ def test_no_scope_lets_a_key_manage_keys() -> None:
 
 
 def test_an_update_checks_scopes_against_what_the_key_becomes() -> None:
-    granted = updated_scopes(["inference"], ["inference", "end_users:read"], was_service_key=False, is_service_key=True)
+    granted = updated_scopes(
+        ["inference:run"], ["inference:run", "end-users:read"], was_service_key=False, is_service_key=True
+    )
 
-    assert granted == ["inference", "end_users:read"]
+    assert granted == ["inference:run", "end-users:read"]
 
 
 def test_an_update_naming_no_scopes_leaves_them() -> None:
-    assert updated_scopes(["inference", "web"], None, was_service_key=False, is_service_key=False) == [
-        "inference",
-        "web",
+    assert updated_scopes(["inference:run", "web:search"], None, was_service_key=False, is_service_key=False) == [
+        "inference:run",
+        "web:search",
     ]
-    service = ["inference", "end_users:read"]
+    service = ["inference:run", "end-users:read"]
     assert updated_scopes(service, None, was_service_key=False, is_service_key=True) == service
 
 
 def test_a_key_that_stops_being_a_service_key_loses_its_end_user_scopes() -> None:
-    held = updated_scopes(["inference", "end_users:delete"], None, was_service_key=True, is_service_key=False)
+    held = updated_scopes(["inference:run", "end-users:delete"], None, was_service_key=True, is_service_key=False)
 
-    assert held == ["inference"]
+    assert held == ["inference:run"]
 
 
 def test_a_service_key_holding_only_end_user_scopes_cannot_simply_stop_being_one() -> None:
     with pytest.raises(ValueError, match="at least one scope"):
-        updated_scopes(["end_users:read"], None, was_service_key=True, is_service_key=False)
+        updated_scopes(["end-users:read"], None, was_service_key=True, is_service_key=False)
 
 
 def test_a_scope_this_gateway_does_not_know_is_left_out_when_read() -> None:
-    assert known_scopes(["inference", "from:a-newer-gateway"]) == [KeyScope.INFERENCE]
+    assert known_scopes(["inference:run", "from:a-newer-gateway"]) == [KeyScope.INFERENCE_RUN]

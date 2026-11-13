@@ -66,13 +66,13 @@ An API key reaches the routes its [scopes](api-keys.md#scopes) name, and is
 refused the others with `403` naming the scope it lacks (the MCP routes answer
 with a fixed `forbidden` error that names none):
 
-- the inference routes (`inference`), files, batches, search, fetch, code
+- the inference routes (`inference:run`), files, batches, search, fetch, code
   execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
   scope of its own;
 - `GET /api/v1/usage/requests/{request_id}` and
   [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
   usage (`usage:read`);
-- for a [service key](end-users.md), the end-user routes (the `end_users`
+- for a [service key](end-users.md), the end-user routes (the `end-users`
   scopes).
 
 Every key, whatever its scopes, reaches the catalog reads: `GET /api/v1/models`,

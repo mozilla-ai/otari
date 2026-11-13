@@ -61,7 +61,7 @@ SEARCH_ENDPOINT = "/v1/search"
 @router.post(
     "/search",
     responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
-    openapi_extra=key_scope(KeyScope.WEB),
+    openapi_extra=key_scope(KeyScope.WEB_SEARCH),
 )
 async def create_search(
     raw_request: Request,
@@ -103,7 +103,7 @@ async def create_search(
 @router.post(
     "/search/{search_tool_name}",
     responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
-    openapi_extra=key_scope(KeyScope.WEB),
+    openapi_extra=key_scope(KeyScope.WEB_SEARCH),
 )
 async def create_search_for_tool(
     raw_request: Request,

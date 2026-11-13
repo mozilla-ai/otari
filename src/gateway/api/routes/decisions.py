@@ -21,7 +21,7 @@ from gateway.types.key_scope import KeyScope
 router = APIRouter(tags=["decisions"])
 
 
-@router.post("/decisions", openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/decisions", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_decision(
     raw_request: Request,
     response: Response,
@@ -42,7 +42,7 @@ async def create_decision(
     return await scaffold.run(raw_request=raw_request, response=response, request=request, auth_result=auth_result)
 
 
-@router.post("/systemone", openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/systemone", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_systemone_decision(
     raw_request: Request,
     response: Response,

@@ -44,7 +44,7 @@ class RerankRequest(BaseModel):
     user: str | None = Field(default=None, description="User ID for usage attribution")
 
 
-@router.post("/rerank", openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/rerank", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_rerank(
     raw_request: Request,
     response: Response,

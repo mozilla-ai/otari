@@ -21,7 +21,7 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
 **Access** sets what the key may call: one checkbox per scope, grouped by
 area (Models, Files, Batches, Tools, Coding agents, Usage, and End users on a
 service key). A group's own box checks or clears the whole group. A new key
-starts with **Call models** alone, the `inference` scope; the Claude Code
+starts with **Call models** alone, the `inference:run` scope; the Claude Code
 plugin's hooks, routing and telemetry need the **Coding agents** group too. See
 [Scopes](#scopes). Edit a key to change its access later.
 
@@ -173,42 +173,43 @@ owner can do.
 
 | Scope | Lets the key |
 | --- | --- |
-| `inference` | Call models: chat completions, messages, responses, embeddings, moderations, rerank, audio, images, video, and decisions |
+| `inference:run` | Call models: chat completions, messages, responses, embeddings, moderations, rerank, audio, images, video, and decisions |
 | `files:read` | List and download files, attach a stored file to a model request by its `file_id`, and stage one into a code run |
 | `files:write` | Upload and delete files |
 | `batches:read` | List batches and read their results |
 | `batches:write` | Create and cancel batches |
-| `web` | Search and fetch the web, directly or as a tool Otari runs during a model call |
+| `web:search` | Search the web, directly or as a tool Otari runs during a model call |
+| `web:fetch` | Fetch a web page, directly or as a tool Otari runs during a model call |
 | `code:execute` | Run code, directly or as a tool Otari runs during a model call |
 | `mcp:read` | List MCP servers and their tools |
 | `mcp:execute` | Call MCP tools, directly or during a model call |
 | `telemetry:write` | Send OpenTelemetry traces, logs and metrics |
-| `agents` | Coding-agent hooks and subagent model recommendations |
+| `agents:write` | Coding-agent hooks and subagent model recommendations |
 | `usage:read` | Read its own budget, usage and request records |
 | `usage:write` | Report usage it observed elsewhere |
-| `end_users:read` | List its end users and their budgets (service keys only) |
-| `end_users:write` | Create, move and block its end users (service keys only) |
-| `end_users:delete` | Delete its end users and erase their records (service keys only) |
+| `end-users:read` | List its end users and their budgets (service keys only) |
+| `end-users:write` | Create, move and block its end users (service keys only) |
+| `end-users:delete` | Delete its end users and erase their records (service keys only) |
 
 Every key may read the model, tool, price and provider catalogs, whatever its
 scopes. No scope lets a key create or manage keys: that takes a dashboard
 session or the master key, so revoking a key always ends what it can do.
 
 A key created through the API or the dashboard without naming any scopes gets
-`inference` alone. (A key declared in the config file has a
+`inference:run` alone. (A key declared in the config file has a
 [different default](configuration.md#budgets-and-api-keys-in-config).) Name
 them in `scopes` when you create the key, through `POST /api/v1/keys` or
 `POST /api/v1/organizations/me/keys`:
 
 ```json
-{"key_name": "pipeline", "scopes": ["inference", "files:write", "batches:write", "batches:read"]}
+{"key_name": "pipeline", "scopes": ["inference:run", "files:write", "batches:write", "batches:read"]}
 ```
 
 `PATCH /api/v1/keys/{key_id}` or `PATCH /api/v1/organizations/me/keys/{key_id}`
 replaces a key's scopes. The change applies from the
 key's next request, so narrowing a key you suspect has leaked takes effect
 without rotating its secret. A key needs at least one scope, and only a service
-key may hold the `end_users` scopes.
+key may hold the `end-users` scopes.
 
 A request whose key lacks the scope an endpoint needs is refused with `403`,
 and the message names the scope, except on the MCP routes, which answer every

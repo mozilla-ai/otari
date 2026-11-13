@@ -50,7 +50,7 @@ def _map_unsupported_moderation(e: Exception) -> HTTPException | None:
     return None
 
 
-@router.post("/moderations", response_model=ModerationResponse, openapi_extra=key_scope(KeyScope.INFERENCE))
+@router.post("/moderations", response_model=ModerationResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_moderation(
     raw_request: Request,
     response: Response,

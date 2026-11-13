@@ -106,7 +106,7 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
         },
     },
     openapi_extra=key_scope(
-        KeyScope.INFERENCE,
+        KeyScope.INFERENCE_RUN,
         requestBody={
             "required": True,
             "content": {"multipart/form-data": {"schema": _TRANSCRIPTION_BODY_SCHEMA}},
@@ -261,7 +261,7 @@ _SPEECH_COST_HEADERS: dict[str, Any] = {
             },
         },
     },
-    openapi_extra=key_scope(KeyScope.INFERENCE),
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def create_speech(
     raw_request: Request,

@@ -341,7 +341,7 @@ def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
     )
     assert up.status_code == 200, up.text
     narrowed = client.patch(
-        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference"]}, headers=master_key_header
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
     )
     assert narrowed.status_code == 200, narrowed.text
     assert client.get(f"{API_ROOT}/files/{up.json()['id']}/content", headers=api_key_header).status_code == 403
@@ -378,7 +378,7 @@ def test_a_key_without_files_read_still_sends_back_a_code_execution_result(
     the first succeeded.
     """
     narrowed = client.patch(
-        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference"]}, headers=master_key_header
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
     )
     assert narrowed.status_code == 200, narrowed.text
 

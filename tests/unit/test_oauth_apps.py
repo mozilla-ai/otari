@@ -146,14 +146,14 @@ def test_dashboard_consent_has_its_own_workspace_and_extra_field_contract() -> N
 
 
 def test_an_app_key_calls_models_alone_unless_its_registration_says_more() -> None:
-    assert OAuthAppConfig(name="App", redirect_uris=["https://app.example/cb"]).scopes == [KeyScope.INFERENCE]
+    assert OAuthAppConfig(name="App", redirect_uris=["https://app.example/cb"]).scopes == [KeyScope.INFERENCE_RUN]
     widened = OAuthAppConfig.model_validate(
-        {"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": ["usage:read", "inference"]}
+        {"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": ["usage:read", "inference:run"]}
     )
-    assert widened.scopes == [KeyScope.INFERENCE, KeyScope.USAGE_READ]
+    assert widened.scopes == [KeyScope.INFERENCE_RUN, KeyScope.USAGE_READ]
 
 
-@pytest.mark.parametrize("scopes", [[], ["end_users:read"], ["keys:write"]], ids=["none", "end-users", "unknown"])
+@pytest.mark.parametrize("scopes", [[], ["end-users:read"], ["keys:write"]], ids=["none", "end-users", "unknown"])
 def test_an_app_registration_refuses_scopes_an_app_key_cannot_hold(scopes: list[str]) -> None:
     with pytest.raises(ValidationError):
         OAuthAppConfig.model_validate({"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": scopes})

@@ -55,7 +55,7 @@ beforeEach(() => {
       return {
         name: "Thunderbolt",
         issuer: "https://auth.otari.example",
-        scopes: ["inference"],
+        scopes: ["inference:run"],
         redirect_uri: params.get("redirect_uri"),
       }
     if (path.startsWith("/oauth/apps/workspaces?"))

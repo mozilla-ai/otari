@@ -3862,6 +3862,13 @@ async def _admit_candidates(
     return answers
 
 
+# Each managed web tool needs the scope its own endpoint needs.
+_WEB_TOOL_SCOPES: tuple[tuple[WebTool, KeyScope, str], ...] = (
+    (WebTool.SEARCH, KeyScope.WEB_SEARCH, "searching the web"),
+    (WebTool.FETCH, KeyScope.WEB_FETCH, "fetching a web page"),
+)
+
+
 async def _declare_claims(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
@@ -3885,8 +3892,9 @@ async def _declare_claims(
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
         return _refuse_after_admission(adapter, admitted, exc)
-    if web.declared_any and (missing := _missing_scope(ctx, KeyScope.WEB, "searching or fetching the web")):
-        return _refuse_after_admission(adapter, admitted, missing)
+    for tool, scope, what in _WEB_TOOL_SCOPES:
+        if tool in web.requested_tools and (missing := _missing_scope(ctx, scope, what)):
+            return _refuse_after_admission(adapter, admitted, missing)
     return _DeclaredClaims(code=admitted, web=web)
 
 
