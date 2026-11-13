@@ -167,7 +167,10 @@ otari:web_search
 otari:web_fetch
 ```
 
-- `otari:code_execution` prices code execution.
+- `otari:code_execution` prices code execution. A run in an
+  [environment](#sandbox-environments) with a price of its own,
+  `otari:code_execution:<image>`, is priced at that one instead, in the tool
+  loop and on a direct run alike.
 - `otari:web_search` and `otari:web_fetch` price the calls on a workspace's
   [organization search or fetch key](#organization-search-keys).
   `otari:web_search` also prices a search on the legacy settings.
@@ -190,7 +193,8 @@ Where the prices are set and read:
   organization's calls instead.
 - An organization's owner or admin may override `otari:web_search` and
   `otari:web_fetch` on `/api/v1/organizations/me/pricing`, for the calls on the
-  organization's own keys. Overriding `otari:code_execution` or a price of kind
+  organization's own keys. Overriding `otari:code_execution`, an environment's
+  `otari:code_execution:<image>`, or a price of kind
   `search` or `fetch` is refused with `403`, since those calls run on the
   deployment's account.
 
@@ -462,8 +466,10 @@ sandbox but no model, such as rerunning a script to check its output:
 
 The code reaches the sandbox exactly as sent. The run is admitted as an
 `otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
-can turn it off, and its `exec_timeout_s` and pinned image apply. It is priced
-under `otari:code_execution` and held against the caller's budgets. Every run
+can turn it off, and its `exec_timeout_s` and pinned image apply. `environment`
+names the [sandbox environment](#sandbox-environments) to run in. It is priced
+at the environment's own price, else `otari:code_execution`, and held against
+the caller's budgets. Every run
 that reached the sandbox is billed, including code that failed, unlike a model's
 failed call in the tool loop: here the caller asked for the run and reads its
 exit status itself. `file_ids` puts uploads from the [Files API](files.md) in the
@@ -471,6 +477,28 @@ working directory, and each file the code writes comes back in `files` with a
 `file_id` to download. `container` works as on the completion routes (below),
 with the id in `Otari-Container-Id`. The request, the response and the errors
 are in the [API reference](api-reference.md#code-execution).
+
+### Sandbox environments
+
+An environment is the image a sandbox runs, so a caller can choose one for what
+it contains and how big it is. The deployment's `sandbox_session_image` is the
+default, and `sandbox_allowed_session_images` lists the others
+([Sandbox environments](configuration.md#sandbox-environments)). On `e2b`, each
+is the name or id of a template in the provider's account, and the sandbox is
+created from it.
+
+`GET /api/v1/code/environments` lists the environments the caller's workspace
+may run code in, for any API key, as `GET /api/v1/models` lists models: each
+one's `name`, a `label` and `description`, its `price_per_run` for the caller's
+organization (null when unpriced), and whether it is the `default`. A workspace
+whose policy is off lists none, and one that pins an image lists that one alone.
+A deployment that names no image lists none either: its runs go to the backend's
+own default.
+
+A direct run names one in `environment`. One the deployment does not offer is a
+`400`, and one other than the workspace's pin a `403`. A held sandbox keeps the
+environment it was created in: resuming it while naming another is a `400`, and
+a resume that names none runs, and is priced, in the one it has.
 
 ### Reusing a sandbox across requests
 
@@ -668,7 +696,8 @@ Manage it under
 execution page sets `enabled` and `executor`; every other field is set through the API. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
-`sandbox_allowed_session_images` or the deployment's own session image.
+`sandbox_allowed_session_images` or the deployment's own session image, as
+[environments](#sandbox-environments) a direct run names must.
 
 The authenticating API key determines the workspace. A workspace with no policy
 gets what `code_execution_workspace_default` says: `true`, deployment defaults
@@ -1225,6 +1254,16 @@ The request, the response and the errors are in the
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.46: E2B creates each sandbox from the session image
+
+With `sandbox_provider: e2b`, a `sandbox_session_image`, or an image a workspace
+pinned, used to be logged as ignored, and every sandbox was E2B's default. Each
+is now the name or id of the E2B template the sandbox is created from, so one
+that names a container image, such as `mzdotai/otari-sandbox-container:latest`,
+fails every run with a `502`. Before upgrading, clear it or set it to a template
+in your E2B account, and do the same with `sandbox_allowed_session_images` and
+any workspace policy's `image`.
 
 ### From 0.38: only the operator prices code execution
 

@@ -1737,6 +1737,8 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
+- `sandbox_session_image`, `sandbox_allowed_session_images` and
+  `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
 - `web_search_provider` and `web_search_provider_api_key`
@@ -1753,6 +1755,27 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails-reference.md) for behavior and security boundaries.
+
+### Sandbox environments
+
+An environment is the image a sandbox runs: a container image on a `protocol`
+backend, a template's name or id on `e2b`. `sandbox_session_image` is the
+default, and `sandbox_allowed_session_images` lists the others a workspace may
+pin and a direct run may name. `sandbox_environments` describes them for
+`GET /api/v1/code/environments`; an image with no entry is listed under its own
+name.
+
+```yaml
+sandbox_session_image: python
+sandbox_allowed_session_images: python-data
+sandbox_environments:
+  python-data:
+    label: Python data
+    description: pandas, numpy and matplotlib, 2 vCPU, 4 GB
+```
+
+Each environment may have a price of its own, `otari:code_execution:<image>`;
+see [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
 
 ### What a workspace with no tool policy gets
 

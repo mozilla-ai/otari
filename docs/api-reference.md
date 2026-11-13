@@ -950,6 +950,7 @@ output, with no model involved. It is admitted, priced and budgeted as an
 | `code` | string | Python source to run. Required, and sent to the sandbox unchanged. Code that is empty or only whitespace is a `422`. |
 | `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
 | `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
+| `environment` | string | The sandbox environment to run in, a `name` from `GET /api/v1/code/environments`. Omitted, the workspace's pinned environment, else the deployment's default. A held `container` keeps the environment it was created in. |
 | `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
 | `user` | string | The billed user, as on the completion routes ([the `user` field](#the-user-field)). Required with the master key. |
 
@@ -977,12 +978,39 @@ it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
 
 | Status | When |
 |---|---|
-| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, or a `file_ids` entry is not an upload the caller can read (or the Files API is off). |
-| `402` | `require_pricing` is on and `otari:code_execution` has no price (`pricing_required`), or the organization's funds are exhausted. |
-| `403` | The workspace's code execution policy is off, or the billed user's budget is spent. |
+| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, a `file_ids` entry is not an upload the caller can read (or the Files API is off), `environment` is not one the gateway offers, or `container` names a sandbox created in another environment. |
+| `402` | `require_pricing` is on and neither the environment's `otari:code_execution:<image>` nor `otari:code_execution` has a price (`pricing_required`), or the organization's funds are exhausted. |
+| `403` | The workspace's code execution policy is off or pins another environment, or the billed user's budget is spent. |
 | `409` | The named container is running another request. |
 | `502` | The sandbox could not be reached. |
 | `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |
+
+### Environments
+
+`GET /api/v1/code/environments` lists the sandbox environments the caller's
+workspace may run code in, for any API key or the master key; see
+[Sandbox environments](tools.md#sandbox-environments).
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "code_execution.environment",
+      "name": "python-data",
+      "label": "Python data",
+      "description": "pandas, numpy and matplotlib, 2 vCPU, 4 GB",
+      "price_per_run": 0.05,
+      "default": false
+    }
+  ]
+}
+```
+
+`price_per_run` is USD per run for the caller's organization, the
+environment's own price else `otari:code_execution`'s, and null when neither is
+set. The list is empty where no sandbox is configured, the deployment names no
+image, or the workspace's code execution policy is off.
 
 ## Decisions
 

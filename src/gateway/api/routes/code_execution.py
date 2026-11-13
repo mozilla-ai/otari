@@ -3,8 +3,9 @@
 ``otari_code_execution`` runs a model's code mid-completion. This endpoint runs
 the caller's, as ``POST /api/v1/search`` runs a query, under the same
 admission: the workspace's code execution policy (the switch, the timeout
-ceiling, the pinned image), the held-container rules, the
-``otari:code_execution`` rate and the budgets.
+ceiling, the pinned image), the held-container rules, the rate of the
+environment it runs in and the budgets. ``GET /code/environments`` lists the
+environments a caller may name.
 
 Every run that reached the sandbox is billed, whatever the code did: the
 sandbox ran it either way, and a caller here, unlike a model in the tool loop,
@@ -70,7 +71,13 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
-from gateway.schemas.tools import CodeExecuteRequest, CodeExecuteResponse, CodeExecutionOutputFile
+from gateway.schemas.tools import (
+    CodeExecuteRequest,
+    CodeExecuteResponse,
+    CodeExecutionEnvironment,
+    CodeExecutionEnvironmentList,
+    CodeExecutionOutputFile,
+)
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.api_keys import names_end_user
 from gateway.services.budgets import (
@@ -85,7 +92,13 @@ from gateway.services.files import FileScope
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
+from gateway.services.sandbox_backend import (
+    CODE_EXECUTION_TOOL_NAME,
+    DEFAULT_EXEC_TIMEOUT_S,
+    SERVED_TOOL_NAMES,
+    SandboxBackend,
+    code_execution_rate_keys,
+)
 from gateway.services.tools import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     Tool,
@@ -127,8 +140,10 @@ async def execute_code(
 
     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
     code execution policy is off is refused, and its execution ceiling and pinned
-    image apply. It is priced under ``otari:code_execution`` and reserved against
-    the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+    image apply. ``environment`` names one of the environments
+    ``GET /api/v1/code/environments`` lists. The run is priced under
+    ``otari:code_execution:<environment>``, else ``otari:code_execution``, and
+    reserved against the caller's budgets. ``file_ids`` puts uploads in the working directory, and
     each file the code writes comes back with a ``file_id``. ``container: "auto"``
     holds the sandbox after the run and names it in ``Otari-Container-Id``;
     sending that id back runs in the same sandbox, with its files and
@@ -222,7 +237,7 @@ async def execute_code(
                 config=config, uow=uow, user_id=user_id, workspace_id=workspace_id, port=port
             ),
         )
-        admitted = await declared.admit(claimed=False, beside_sandbox=False)
+        admitted = await declared.admit(claimed=False, beside_sandbox=False, environment=request.environment)
     except TenancyError as exc:
         raise await refuse(exc.message, exc.status_code) from exc
 
@@ -241,7 +256,9 @@ async def execute_code(
     try:
         # The sandbox is the deployment's, so the run is deployment-paid and only the operator's rate counts.
         organization_id = await organization_for_key_id(db, api_key_id)
-        rate = await resolve_tool_rate(db, (_PRICING_KEY,), deployment_paid=True, organization_id=organization_id)
+        rate = await resolve_tool_rate(
+            db, code_execution_rate_keys(admitted.session_image), deployment_paid=True, organization_id=organization_id
+        )
         unit_rate = rate.unit_rate if rate is not None else Decimal(0)
         rate_limit_grant = await admit_rate_limit_rules(
             raw_request,
@@ -429,6 +446,56 @@ async def execute_code(
             for filename, file_id in execution.file_ids.items()
         ],
     )
+
+
+@router.get("/environments")
+async def list_code_execution_environments(
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    policies: WorkspaceCodeExecutionPoliciesDep,
+) -> CodeExecutionEnvironmentList:
+    """List the sandbox environments the caller's workspace may run code in, with their prices.
+
+    The code execution counterpart of ``GET /api/v1/models``: each environment's
+    ``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a
+    ``label`` and ``description``, ``price_per_run`` for the caller's
+    organization, and whether it is the ``default`` a run that names none gets.
+    A workspace whose code execution policy is off lists none, and one that
+    pins an environment lists that one alone. So does a gateway with no sandbox,
+    or one that names no image, whose runs go to the backend's own default.
+    """
+    api_key, _ = auth_result
+    api_key_id = api_key.id if api_key else None
+    if not config.sandbox_configured():
+        return CodeExecutionEnvironmentList(data=[])
+    workspace_id = await workspace_for_key_id(db, api_key_id)
+    policy = await policies.for_request(workspace_id)
+    offered = config.pinnable_sandbox_images()
+    default = config.effective_sandbox_image()
+    if policy is not None:
+        if not policy.enabled or (policy.tools is not None and not set(policy.tools) & set(SERVED_TOOL_NAMES)):
+            offered = ()
+        elif policy.image is not None:
+            offered = (policy.image,) if policy.image in offered else ()
+            default = policy.image
+    organization_id = await organization_for_key_id(db, api_key_id)
+    environments: list[CodeExecutionEnvironment] = []
+    for image in offered:
+        described = config.sandbox_environments.get(image)
+        rate = await resolve_tool_rate(
+            db, code_execution_rate_keys(image), deployment_paid=True, organization_id=organization_id
+        )
+        environments.append(
+            CodeExecutionEnvironment(
+                name=image,
+                label=(described.label if described is not None else None) or image,
+                description=described.description if described is not None else None,
+                price_per_run=float(rate.unit_rate) if rate is not None else None,
+                default=image == default,
+            )
+        )
+    return CodeExecutionEnvironmentList(data=environments)
 
 
 def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) -> dict[str, Any]:

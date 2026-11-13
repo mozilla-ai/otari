@@ -684,11 +684,14 @@ async def test_only_the_operator_sets_a_search_tools_rate(async_db: AsyncSession
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["owner", "admin"])
-@pytest.mark.parametrize("model_key", ["otari:code_execution", "otari/code_execution"])
+@pytest.mark.parametrize(
+    "model_key",
+    ["otari:code_execution", "otari/code_execution", "otari:code_execution:python-data", "otari/code_execution:python"],
+)
 async def test_only_the_operator_prices_code_execution(async_db: AsyncSession, role: str, model_key: str) -> None:
     """Every run is on the deployment's sandbox, so an organization's own rate would price none of them.
 
-    Both spellings, since a rate lookup reads either.
+    Both spellings, since a rate lookup reads either, and an environment's own row too.
     """
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug=f"acme-code-execution-{role}", created_by_user_id=None

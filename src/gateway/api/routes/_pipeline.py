@@ -4614,6 +4614,7 @@ async def _admit_claims(
         return _ToolRefusal(exc)
     priced = tools_to_price(
         code_execution=admitted.use_sandbox,
+        code_execution_image=admitted.session_image,
         web=web_access,
         require_pricing=ctx.config.require_pricing,
         budget_exempt=ctx.reservation is not None and not ctx.reservation.counts_toward_budget,

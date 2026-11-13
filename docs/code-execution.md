@@ -10,3 +10,8 @@ To configure code execution for a workspace:
 4. Configure **Who runs provider code tools** to control whether supported provider-native code tools or the Otari sandbox handle execution.
 
 ![A workspace's Code execution page, with the switch and who runs provider code tools.](assets/screenshots/code-execution.png)
+
+Where the operator offers more than one sandbox environment, such as Python with
+or without data libraries, a workspace can be pinned to one through the
+workspace policy API, and a direct run can choose one. See
+[Sandbox environments](tools.md#sandbox-environments).

@@ -361,6 +361,7 @@ POST /api/v1/search/{search_tool_name}              # not yet wrapped
 POST /api/v1/fetch                                  # not yet wrapped
 POST /api/v1/fetch/{fetch_tool_name}                # not yet wrapped
 POST /api/v1/code/execute                           # not yet wrapped
+GET /api/v1/code/environments                       # not yet wrapped
 # Search tools (runtime search-tool management)
 GET /api/v1/search-tools                            # not yet wrapped
 GET /api/v1/search-tools/providers                  # not yet wrapped

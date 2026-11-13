@@ -1343,6 +1343,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/environments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Code Execution Environments
+         * @description List the sandbox environments the caller's workspace may run code in, with their prices.
+         *
+         *     The code execution counterpart of ``GET /api/v1/models``: each environment's
+         *     ``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a
+         *     ``label`` and ``description``, ``price_per_run`` for the caller's
+         *     organization, and whether it is the ``default`` a run that names none gets.
+         *     A workspace whose code execution policy is off lists none, and one that
+         *     pins an environment lists that one alone. So does a gateway with no sandbox,
+         *     or one that names no image, whose runs go to the backend's own default.
+         */
+        get: operations["code-execution-list_code_execution_environments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/code/execute": {
         parameters: {
             query?: never;
@@ -1358,8 +1386,10 @@ export interface paths {
          *
          *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
          *     code execution policy is off is refused, and its execution ceiling and pinned
-         *     image apply. It is priced under ``otari:code_execution`` and reserved against
-         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     image apply. ``environment`` names one of the environments
+         *     ``GET /api/v1/code/environments`` lists. The run is priced under
+         *     ``otari:code_execution:<environment>``, else ``otari:code_execution``, and
+         *     reserved against the caller's budgets. ``file_ids`` puts uploads in the working directory, and
          *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
          *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
          *     sending that id back runs in the same sandbox, with its files and
@@ -10948,6 +10978,11 @@ export interface components {
              */
             container?: string | null;
             /**
+             * Environment
+             * @description The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the workspace's pinned environment, else the deployment's default. A held container keeps the environment it was created in.
+             */
+            environment?: string | null;
+            /**
              * File Ids
              * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
              */
@@ -10988,6 +11023,57 @@ export interface components {
             stderr: string;
             /** Stdout */
             stdout: string;
+        };
+        /**
+         * CodeExecutionEnvironment
+         * @description A sandbox environment a direct code execution may name: what it contains, and what a run in it costs.
+         */
+        CodeExecutionEnvironment: {
+            /**
+             * Default
+             * @description Whether a run that names no environment runs in this one.
+             */
+            default: boolean;
+            /**
+             * Description
+             * @description What it contains and how big it is, when the operator said.
+             */
+            description: string | null;
+            /**
+             * Label
+             * @description A display name; the name itself when the operator gave none.
+             */
+            label: string;
+            /**
+             * Name
+             * @description What POST /api/v1/code/execute's environment field takes.
+             */
+            name: string;
+            /**
+             * Object
+             * @default code_execution.environment
+             * @constant
+             */
+            object: "code_execution.environment";
+            /**
+             * Price Per Run
+             * @description USD per run for the caller's organization: the environment's own price, else code execution's. Null when unpriced.
+             */
+            price_per_run: number | null;
+        };
+        /**
+         * CodeExecutionEnvironmentList
+         * @description The sandbox environments the caller's workspace may run code in.
+         */
+        CodeExecutionEnvironmentList: {
+            /** Data */
+            data: components["schemas"]["CodeExecutionEnvironment"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * CodeExecutionOutputFile
@@ -24612,6 +24698,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "code-execution-list_code_execution_environments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecutionEnvironmentList"];
                 };
             };
         };
