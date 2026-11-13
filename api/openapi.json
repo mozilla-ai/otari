@@ -22770,6 +22770,81 @@
         "title": "SearchResultItem",
         "type": "object"
       },
+      "SearchToolCatalogEntry": {
+        "description": "One search tool a direct search may name, as any caller may see it: never its key, endpoint or options.",
+        "properties": {
+          "default": {
+            "description": "True for the deployment's default, the tool a direct search that names none runs on unless the caller's organization brings its own search key.",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "A display name for the tool: its provider's name, capitalized.",
+            "title": "Label",
+            "type": "string"
+          },
+          "object": {
+            "const": "search_tool",
+            "default": "search_tool",
+            "title": "Object",
+            "type": "string"
+          },
+          "price_per_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD the caller's organization is charged for one search on the tool when the provider reports no cost of its own: the organization's override, else the deployment's price list. Null when no row prices it.",
+            "title": "Price Per Call"
+          },
+          "provider": {
+            "description": "The search provider the tool runs on.",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "label",
+          "price_per_call",
+          "default"
+        ],
+        "title": "SearchToolCatalogEntry",
+        "type": "object"
+      },
+      "SearchToolCatalogResponse": {
+        "description": "The search tools a direct search may name.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SearchToolCatalogEntry"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "SearchToolCatalogResponse",
+        "type": "object"
+      },
       "SearchToolTestRequest": {
         "description": "An unsaved search or fetch instance to test, and what to test it with.",
         "example": {
@@ -52784,6 +52859,75 @@
           }
         ],
         "summary": "Create Search Tool",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
+    "/api/v1/search-tools/catalog": {
+      "get": {
+        "description": "List the search tools a direct search may name, with what one search costs the caller.\n\nEach entry is a tool ``POST /api/v1/search/{tool}`` serves, with its\nprovider, a display name, its price per search for the caller's\norganization, and whether it is the deployment's default. Tools a direct\nsearch cannot run on are left out, and no key, endpoint or option is\nreturned.\n\nCalled with an API key, a tool the key's ``allowed_tools`` does not grant is\nleft out, and the list is empty when its workspace does not allow web\nsearch; ``GET /api/v1/tools`` says why. A master key or a dashboard session\ngets the deployment's list.",
+        "operationId": "search-tools-list_search_tool_catalog",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchToolCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Search Tool Catalog",
         "tags": [
           "search-tools"
         ]

@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a88aa7e516b39ed92f6b3e78d503719ba8185894/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/640098438dbf5d300d91423ae3011177499aa0bb/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -69,7 +69,8 @@ An API key reaches:
 - [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
 - the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
   `/providers/catalog`, `/tool-settings/guardrails/catalog`,
-  `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
+  `/tool-settings/guardrails/profiles`, `/search-tools/providers` and
+  `/search-tools/catalog`;
 - for a [service key](https://docs.otari.ai/guides/control/end-users), the end-user routes.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
@@ -792,6 +793,32 @@ provider. A 502 for a failure that is not the provider's, such as an organizatio
 key this gateway cannot call, carries none of them.
 The completion routes send the same headers when a provider fails a completion;
 see [Provider failures](#provider-failures).
+
+**Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools the
+calling key may name, as `GET /api/v1/models` lists the models it may call: a
+tool its `allowed_tools` does not grant is left out. Each entry carries the
+tool's name as `id`, its `provider`, a display `label`, its `price_per_call`,
+and `default`, true for the deployment's default tool. `price_per_call` is the
+configured rate in USD for the caller's organization (its override, else the
+deployment's price list), not what a call is charged: a provider that reports a
+search's cost, such as Exa, is charged that cost, and the rate prices only a
+call whose provider reports none. It is `null` when no rate row prices the
+tool, which says nothing of whether its provider reports a cost. A call that
+names no tool runs on the default, unless the workspace has an organization
+search key, which then serves it; a call that names the default tool runs on that tool's own key and price. A tool a direct
+search cannot run on is left out, and no key, endpoint or option is returned.
+An API key whose workspace has web access off gets an empty list;
+`GET /api/v1/tools` says why. The list takes `skip` and `limit` (at most 1000,
+100 by default).
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "exa", "object": "search_tool", "provider": "exa", "label": "Exa", "price_per_call": 0.008, "default": true}
+  ]
+}
+```
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
