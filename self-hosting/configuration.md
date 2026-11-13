@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/640098438dbf5d300d91423ae3011177499aa0bb/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/22f1f131dade3a6c4aae119c804fb44ddb2d03e7/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -853,7 +853,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/640098438dbf5d300d91423ae3011177499aa0bb/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/22f1f131dade3a6c4aae119c804fb44ddb2d03e7/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1737,6 +1737,8 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
+- `sandbox_session_image`, `sandbox_allowed_session_images` and
+  `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
 - `web_search_provider` and `web_search_provider_api_key`
@@ -1753,6 +1755,27 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 See [Built-in tools](https://docs.otari.ai/reference/gateway/tools), [MCP](https://docs.otari.ai/reference/gateway/mcp), and
 [Guardrails](https://docs.otari.ai/reference/gateway/guardrails-reference) for behavior and security boundaries.
+
+### Sandbox environments
+
+An environment is the image a sandbox runs: a container image on a `protocol`
+backend, a template's name or id on `e2b`. `sandbox_session_image` is the
+default, and `sandbox_allowed_session_images` lists the others a workspace may
+pin and a direct run may name. `sandbox_environments` describes them for
+`GET /api/v1/code/environments`; an image with no entry is listed under its own
+name.
+
+```yaml
+sandbox_session_image: python
+sandbox_allowed_session_images: python-data
+sandbox_environments:
+  python-data:
+    label: Python data
+    description: pandas, numpy and matplotlib, 2 vCPU, 4 GB
+```
+
+Each environment may have a price of its own, `otari:code_execution:<image>`;
+see [Pricing a gateway-run tool](https://docs.otari.ai/reference/gateway/tools#pricing-a-gateway-run-tool).
 
 ### What a workspace with no tool policy gets
 
@@ -1846,7 +1869,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/640098438dbf5d300d91423ae3011177499aa0bb/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/22f1f131dade3a6c4aae119c804fb44ddb2d03e7/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
