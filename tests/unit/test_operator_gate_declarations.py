@@ -42,6 +42,7 @@ from gateway.api.routes import (
     budgets,
     calling_key,
     catalog,
+    code_execution,
     country_database,
     end_users,
     health_checks,
@@ -102,6 +103,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # to be added by hand.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("catalog", catalog.router, verify_catalog_reader_or_public),
+    ("code_execution.catalog", code_execution.catalog_router, verify_catalog_reader),
     ("end_users", end_users.router, verify_service_key),
     ("end_users.budgets", end_users.budgets_router, verify_service_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),

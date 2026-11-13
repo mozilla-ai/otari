@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from gateway.core.config import API_ROOT
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
@@ -68,7 +69,8 @@ SANDBOX_TOOLS_EXCLUDED_DETAIL = (
 # boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
 SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 ENVIRONMENT_NOT_OFFERED_DETAIL_TEMPLATE = (
-    "Environment '{environment}' is not offered on this gateway. GET /api/v1/code/environments lists those it offers."
+    "Environment '{environment}' is not offered on this gateway. "
+    f"GET {API_ROOT}/code/environments lists those it offers."
 )
 ENVIRONMENT_PINNED_DETAIL_TEMPLATE = (
     "this workspace's code-execution policy runs code in the environment '{pinned}' only; "
@@ -77,6 +79,13 @@ ENVIRONMENT_PINNED_DETAIL_TEMPLATE = (
 CONTAINER_ENVIRONMENT_MISMATCH_DETAIL_TEMPLATE = (
     "Container '{container_id}' runs in the environment '{held}', not '{environment}'. A held sandbox keeps the "
     "environment it was created in: drop environment, or drop container to start a new sandbox."
+)
+# A sandbox held from before environments were recorded, or started with no image named, runs in a template the
+# gateway cannot name, so it cannot be priced as the environment a request names.
+CONTAINER_ENVIRONMENT_UNKNOWN_DETAIL_TEMPLATE = (
+    "Container '{container_id}' was created without a recorded environment, so it cannot run as '{environment}'. "
+    "A held sandbox keeps the environment it was created in: drop environment, or drop container to start a new "
+    "sandbox."
 )
 # One detail for an unknown, expired, foreign or other-provider container, so an
 # id never reveals which. The phrasing is the one clients of Anthropic's and
@@ -357,13 +366,16 @@ class DeclaredCodeExecution:
             elif container_request != CONTAINER_AUTO:
                 sandbox_container_lease = await self._lease(container_request)
                 held = sandbox_container_lease.image
-                if held is not None and environment is not None and environment != held:
+                if environment is not None and environment != held:
                     await self._give_back(container_request, sandbox_container_lease)
+                    template = (
+                        CONTAINER_ENVIRONMENT_UNKNOWN_DETAIL_TEMPLATE
+                        if held is None
+                        else CONTAINER_ENVIRONMENT_MISMATCH_DETAIL_TEMPLATE
+                    )
                     raise CodeExecutionDeclarationError(
-                        CONTAINER_ENVIRONMENT_MISMATCH_DETAIL_TEMPLATE.format(
-                            container_id=sandbox_container_lease.container_id,
-                            held=held,
-                            environment=environment,
+                        template.format(
+                            container_id=sandbox_container_lease.container_id, held=held, environment=environment
                         )
                     )
                 # A resumed sandbox runs in the image it was created in, whatever this request would start one in.

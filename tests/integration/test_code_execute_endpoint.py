@@ -534,7 +534,7 @@ def test_an_environment_the_gateway_does_not_offer_is_a_400(
 
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == (
-        "Environment 'ruby' is not offered on this gateway. GET /api/v1/code/environments lists those it offers."
+        f"Environment 'ruby' is not offered on this gateway. GET {API_ROOT}/code/environments lists those it offers."
     )
     assert port.opened == []
 
@@ -583,6 +583,38 @@ def test_a_held_container_keeps_its_environment_and_refuses_another(
     assert resumed.status_code == 200, "the refusal gave the container back"
     assert resumed.headers[COST_USD_HEADER] == "0.009000", "a resumed sandbox is priced as the environment it runs"
     assert len(port.opened) == 2
+
+
+def test_a_held_container_with_no_recorded_environment_refuses_a_named_one(
+    client: TestClient,
+    port: _FakePort,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+) -> None:
+    """A sandbox started with no image runs in a template the gateway cannot name, so it cannot be priced as one."""
+    _price(client, master_key_header, 5000.0)
+    _price(client, master_key_header, 9000.0, key="otari:code_execution:python-data")
+    first = client.post(_ENDPOINT, json={"code": "x = 2", "container": "auto"}, headers=api_key_header)
+    container_id = first.headers["Otari-Container-Id"]
+    monkeypatch.setattr(test_config, "sandbox_allowed_session_images", "python-data")
+
+    named = client.post(
+        _ENDPOINT,
+        json={"code": "print(x)", "container": container_id, "environment": "python-data"},
+        headers=api_key_header,
+    )
+    resumed = client.post(_ENDPOINT, json={"code": "print(x)", "container": container_id}, headers=api_key_header)
+
+    assert named.status_code == 400, named.text
+    assert named.json()["detail"].startswith(
+        f"Container '{container_id}' was created without a recorded environment, so it cannot run as 'python-data'."
+    )
+    assert "None" not in named.json()["detail"]
+    assert resumed.status_code == 200, "the refusal gave the container back"
+    assert resumed.headers[COST_USD_HEADER] == "0.005000"
+    assert [opened["image"] for opened in port.opened] == [None, None]
 
 
 def test_the_environment_listing_describes_and_prices_each_offered_environment(

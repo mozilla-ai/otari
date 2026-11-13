@@ -161,6 +161,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     search.router,
     fetch.router,
     code_execution.router,
+    code_execution.catalog_router,
     batches.router,
     videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
+import gateway.services.pricing_service as pricing_service
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import OrganizationPricingOverlapError
@@ -44,6 +45,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
     resolve_tool_rate,
+    resolve_tool_rates,
 )
 from gateway.types.tool_charges import LabelCalls, instance_rate_key
 
@@ -1192,6 +1194,41 @@ def test_one_calls_rate_keys_resolve_through_the_same_lookup() -> None:
         assert (overridden.unit_rate, overridden.source) == (Decimal("0.03"), "organization")
         assert unpriced is None
         assert nothing is None
+
+    _run(scenario)
+
+
+def test_several_calls_rate_keys_resolve_in_one_lookup() -> None:
+    """Each set resolves as it would alone: its own row, else the fallback, the operator's override ahead of both."""
+    own = ("otari:code_execution:python-data", "otari:code_execution")
+    fallback = ("otari:code_execution:python", "otari:code_execution")
+    overridden = ("otari:code_execution:python-gpu", "otari:code_execution")
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _tool_price(session, "otari:code_execution", 5_000.0)
+        await _tool_price(session, "otari:code_execution:python-data", 9_000.0)
+        await _tool_price(session, "otari:code_execution:python-gpu", 50_000.0)
+        await _override(
+            session, organization_id, rate=40_000.0, model_key="otari:code_execution:python-gpu", origin=OPERATOR_ORIGIN
+        )
+        # A deployment-paid run does not take the organization's own rate.
+        await _override(session, organization_id, rate=0.0, model_key="otari:code_execution:python-data")
+
+        with patch.object(pricing_service, "_tool_rates", wraps=pricing_service._tool_rates) as lookups:
+            rates = await resolve_tool_rates(
+                session, [own, fallback, overridden], deployment_paid=True, as_of=_NOW, organization_id=organization_id
+            )
+
+        assert lookups.call_count == 1
+        assert {keys: rate.unit_rate if rate else None for keys, rate in rates.items()} == {
+            own: Decimal("0.009"),
+            fallback: Decimal("0.005"),
+            overridden: Decimal("0.04"),
+        }
+        assert await resolve_tool_rates(session, [("tabstack:tabstack",)], deployment_paid=True, as_of=_NOW) == {
+            ("tabstack:tabstack",): None
+        }
 
     _run(scenario)
 

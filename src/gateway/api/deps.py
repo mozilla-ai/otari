@@ -174,6 +174,7 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
+    resolve_tool_rates,
 )
 from gateway.services.providers import (
     HostedCatalogUpdate,
@@ -921,7 +922,8 @@ async def verify_catalog_reader(
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
     variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
     ``GET /api/v1/tool-settings/guardrails/profiles``,
-    ``GET /api/v1/search-tools/providers`` and ``GET /api/v1/search-tools/catalog``. The
+    ``GET /api/v1/search-tools/providers``, ``GET /api/v1/search-tools/catalog`` and
+    ``GET /api/v1/code/environments``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
@@ -940,7 +942,7 @@ async def verify_catalog_reader(
     who reaches no operator route still has to read all four.
 
     Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie. The six
+    adding a route to this plane defaults to refusing the cookie. The seven
     routers that serve these reads declare it on the router for the same reason,
     so admitting a session is spelled where the route is mounted rather than in
     one route's decorator.
@@ -1257,10 +1259,15 @@ class _CodeExecutionEnvironmentPrices:
     async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
         return await organization_for_key_id(self._db, api_key_id)
 
-    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
+    async def unit_rates(
+        self, rate_key_sets: Collection[Sequence[str]], *, organization_id: uuid.UUID | None
+    ) -> dict[tuple[str, ...], Decimal | None]:
         # The sandbox is the deployment's, so a run is deployment-paid and only the operator's rate counts.
-        rate = await resolve_tool_rate(self._db, rate_keys, deployment_paid=True, organization_id=organization_id)
-        return rate.unit_rate if rate is not None else None
+        rates = await resolve_tool_rates(self._db, rate_key_sets, deployment_paid=True, organization_id=organization_id)
+        return {
+            tuple(rate_keys): rate.unit_rate if (rate := rates[tuple(rate_keys)]) is not None else None
+            for rate_keys in rate_key_sets
+        }
 
 
 def get_code_execution_environment_service(
