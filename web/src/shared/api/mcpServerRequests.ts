@@ -131,6 +131,7 @@ export function useWithdrawMcpServerRequest() {
 export function useAcknowledgeMcpServerRequest() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: [MCP_SERVER_REQUESTS, "acknowledge"],
     mutationFn: ({
       workspaceId,
       requestId,
@@ -142,17 +143,45 @@ export function useAcknowledgeMcpServerRequest() {
         `${requestsPath(workspaceId)}/${encodeURIComponent(requestId)}/acknowledge`,
         { method: "POST" },
       ),
-    onMutate: ({ workspaceId, requestId }) => {
+    onMutate: async ({ workspaceId, requestId }) => {
+      const key = [...requestsKey(workspaceId), "mine"]
+      // A read already on its way would land with the answer still in it.
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<McpServerRequests>(key)
+      const index = previous?.data.findIndex((entry) => entry.id === requestId)
+      if (!previous || index === undefined || index < 0) return undefined
+      queryClient.setQueryData<McpServerRequests>(key, {
+        ...previous,
+        data: previous.data.filter((entry) => entry.id !== requestId),
+      })
+      return { removed: previous.data[index], index }
+    },
+    onError: (_error, { workspaceId }, context) => {
+      if (!context) return
+      // Only this answer comes back: another dismissed meanwhile stays gone.
       queryClient.setQueryData<McpServerRequests>(
         [...requestsKey(workspaceId), "mine"],
-        (previous) =>
-          previous && {
-            ...previous,
-            data: previous.data.filter((entry) => entry.id !== requestId),
-          },
+        (current) => {
+          if (
+            !current ||
+            current.data.some((entry) => entry.id === context.removed.id)
+          )
+            return current
+          const data = [...current.data]
+          data.splice(Math.min(context.index, data.length), 0, context.removed)
+          return { ...current, data }
+        },
       )
     },
     onSettled: (_data, _error, { workspaceId }) => {
+      // The last of several dismissals reads the list again; an earlier one
+      // would bring back an answer whose own dismissal is still on its way.
+      if (
+        queryClient.isMutating({
+          mutationKey: [MCP_SERVER_REQUESTS, "acknowledge"],
+        }) > 1
+      )
+        return
       void queryClient.invalidateQueries({ queryKey: requestsKey(workspaceId) })
     },
   })

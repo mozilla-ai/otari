@@ -217,7 +217,19 @@ export function McpRequestServerDialog({
       ) : null}
       <DialogSection>
         <ErrorBanner error={sync.error} />
-        <ErrorBanner error={mine.error} />
+        {mine.isError && !mine.data ? (
+          // Nothing can be asked for until this is read, so it needs a way back.
+          <div className="flex flex-col items-start gap-2">
+            <ErrorBanner error={mine.error} />
+            <Button
+              onPress={() => void mine.refetch()}
+              isPending={mine.isFetching}
+              className="min-h-11 md:min-h-0"
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
         {status === undefined ? (
           sync.isPending ? (
             <EmptyMessage>Reading the catalog.</EmptyMessage>
