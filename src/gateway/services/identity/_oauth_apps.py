@@ -76,13 +76,23 @@ class OAuthAppService:
         return self.ui_link("/#/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
-        """Record explicit consent without leaving an active key for an abandoned approval."""
+        """Record explicit consent without leaving an active key for an abandoned approval.
+
+        The key holds what the consent screen showed and the registration still
+        names, so a registration widened since the screen was drawn cannot
+        exceed what the person approved, and one narrowed since takes effect.
+
+        Raises:
+            OAuthAppGrantError: the registration and the screen now share no scope.
+        """
         self.require_registered_redirect(request.client_id, request.redirect_uri)
-        approved = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
-        # The caller's list is compared, never validated: a rule it breaks is a
-        # mismatch with the registration, which is this refusal, not a 500.
-        if set(approved) != set(request.scopes):
+        registered = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
+        # The caller's own list is read, never checked as a key's: a rule it
+        # breaks is a scope the registration does not name, which narrows it.
+        still_granted = set(request.scopes) & set(registered)
+        if not still_granted:
             raise OAuthAppGrantError("invalid_request", "The app's access changed while you were approving it")
+        approved = KeyScopeSet.checked(still_granted, is_service_key=False)
         now = self.clock()
         code = secrets.token_urlsafe(32)
         async with self.uow:
