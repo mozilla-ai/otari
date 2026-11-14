@@ -54,7 +54,7 @@ pnpm test
 master key. To develop against a gateway running elsewhere:
 
 ```bash
-OTARI_DEV_API=https://your-app.up.railway.app pnpm run dev
+OTARI_DEV_API=https://otari.example.com pnpm run dev
 ```
 
 If the source is edited through a bind mount (an agent working in a container,

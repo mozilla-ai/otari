@@ -4,7 +4,7 @@ import { useId, useState } from "react"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 
 // Active filters shown as removable pills, with the pickers tucked behind an
-// "Add filter" toggle. This is the log-tool convention (CloudWatch, Railway):
+// "Add filter" toggle. This is the log-tool convention (CloudWatch):
 // keep the applied filters visible at all times (especially on mobile, where the
 // picker row is otherwise hidden), and let a chip's ✕ clear just that filter.
 
