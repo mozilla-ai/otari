@@ -63,6 +63,8 @@ export function McpServerSignIn({
   if (canManage) {
     return (
       <ConnectedUsers
+        // Its page starts over on another server.
+        key={server.id}
         workspaceId={workspaceId}
         server={server}
         own={connection}
@@ -168,29 +170,27 @@ function ConnectedUsers({
     total === undefined ? page : Math.max(0, Math.ceil(total / pageSize) - 1)
   if (page > lastPage) setPage(lastPage)
   // A connection is held by the dashboard account's own id, so the admin
-  // looking finds their row by it. Theirs goes first, marked.
+  // looking finds their row by it, marked. The gateway lists it first.
   const caller = useOrganizationContext().data?.caller
   const callerId = caller?.user_id ?? ""
   const isOwn = (row: McpServerConnection) =>
     callerId !== "" && row.user_id === callerId
   const listed = connections.data?.data ?? []
-  // The manager's own row heads the first page wherever the list has it, and
-  // before the list has caught up with a sign-in that just finished.
-  const ownRow: McpServerConnection[] =
-    page > 0
-      ? []
-      : listed.some(isOwn) || !own || callerId === ""
-        ? listed.filter(isOwn)
-        : [
-            {
-              user_id: callerId,
-              email: caller?.email ?? null,
-              full_name: caller?.full_name ?? null,
-              connected_at: own.connected_at,
-              updated_at: own.updated_at,
-            },
-          ]
-  const rows = [...ownRow, ...listed.filter((row) => !isOwn(row))]
+  // Until the list catches up with a sign-in that just finished, the manager's
+  // own row is added at the head of the first page.
+  const rows: McpServerConnection[] =
+    page === 0 && own && callerId !== "" && !listed.some(isOwn)
+      ? [
+          {
+            user_id: callerId,
+            email: caller?.email ?? null,
+            full_name: caller?.full_name ?? null,
+            connected_at: own.connected_at,
+            updated_at: own.updated_at,
+          },
+          ...listed,
+        ]
+      : listed
   const describeUser = (row: McpServerConnection) =>
     row.full_name ?? row.email ?? row.user_id
 

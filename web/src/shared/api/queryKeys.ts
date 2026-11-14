@@ -71,7 +71,7 @@ export const MCP_CATALOG = "mcp-catalog"
 // running or waiting to start.
 export const MCP_CATALOG_SYNC_POLL_MS = 5_000
 // Members' requests for a catalog server, the segment after a workspace's own
-// key: `[WORKSPACES, id, MCP_SERVER_REQUESTS, "mine" | "pending"]`.
+// key: `[WORKSPACES, id, MCP_SERVER_REQUESTS, "mine" | "pending", ...page]`.
 export const MCP_SERVER_REQUESTS = "mcp-server-requests"
 export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"

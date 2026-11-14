@@ -163,6 +163,13 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         )
         return {name: count for name, count in rows.all()}
 
+    async def count_pending_servers(self, workspace_id: uuid.UUID) -> int:
+        """How many catalog servers a workspace's pending requests ask for."""
+        counted = select(func.count(func.distinct(McpServerRequest.catalog_name))).where(
+            McpServerRequest.workspace_id == workspace_id, McpServerRequest.status == _PENDING
+        )
+        return (await self.db.execute(counted)).scalar_one()
+
     async def count_pending_in_workspace(self, workspace_id: uuid.UUID) -> int:
         counted = (
             select(func.count())

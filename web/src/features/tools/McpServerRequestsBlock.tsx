@@ -2,6 +2,10 @@ import { useState } from "react"
 
 import type { McpServerRequester, McpServerRequestGroup } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { TextArea } from "@/design-system/forms/TextArea"
@@ -72,10 +76,21 @@ export function McpServerRequestsBlock({
   /** Opens the catalog's confirm step for the server a request names. */
   onAdd: (pick: CatalogPick) => void
 }) {
-  const requests = useMcpServerRequests(workspaceId, true)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
+  const requests = useMcpServerRequests(workspaceId, { page, pageSize }, true)
   const decline = useDeclineMcpServerRequests()
   const [declining, setDeclining] = useState<McpServerRequestGroup>()
   const [reason, setReason] = useState("")
+
+  // A page counts servers, not requests. One emptied by an answer is left for
+  // the last one that still has servers.
+  const servers = requests.data?.server_count
+  const lastPage =
+    servers === undefined
+      ? page
+      : Math.max(0, Math.ceil(servers / pageSize) - 1)
+  if (page > lastPage) setPage(lastPage)
 
   const groups = requests.data?.data ?? []
   if (groups.length === 0) return <ErrorBanner error={requests.error} />
@@ -160,6 +175,22 @@ export function McpServerRequestsBlock({
             </SettingsBlock>
           )
         })}
+        {servers !== undefined && servers > PAGE_SIZE_OPTIONS[0] ? (
+          <SettingsBlock>
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={servers}
+              rowsOnPage={groups.length}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size)
+                setPage(0)
+              }}
+              isFetching={requests.isFetching}
+            />
+          </SettingsBlock>
+        ) : null}
       </SettingsGroup>
 
       {declining ? (

@@ -105,14 +105,16 @@ function Page({
   canManage,
   onLeave,
   openWindow,
+  server = SERVER,
 }: {
   canManage: boolean
   onLeave: (url: string) => void
   openWindow: () => Window | undefined
+  server?: typeof SERVER
 }) {
   const own = useOwnMcpAccount({
     workspaceId: WORKSPACE,
-    server: SERVER,
+    server,
     onLeave,
     openWindow,
   })
@@ -126,7 +128,7 @@ function Page({
       <McpOwnAccountNotes own={own} />
       <McpServerSignIn
         workspaceId={WORKSPACE}
-        server={SERVER}
+        server={server}
         canManage={canManage}
         own={own}
       />
@@ -514,6 +516,114 @@ describe("McpServerSignIn", () => {
     )
   })
 
+  it("shows each page of connected users as the gateway returns it, the pager agreeing", async () => {
+    const callerId = organizationContext().caller?.user_id ?? ""
+    const others: McpServerConnection[] = [
+      { ...ALICE, user_id: callerId, email: null, full_name: "Operator" },
+      ...Array.from({ length: 25 }, (_, index) => ({
+        ...ALICE,
+        user_id: `user-${index + 1}`,
+        email: `user${index + 1}@example.com`,
+        full_name: `User ${index + 1}`,
+      })),
+    ]
+    mockApi({ mine: [MINE], others })
+    const user = userEvent.setup()
+    renderSignIn(true)
+
+    const table = await screen.findByRole("grid", {
+      name: "Users connected to drive",
+    })
+    await waitFor(() =>
+      expect(within(table).getAllByRole("rowheader")[0]).toHaveTextContent(
+        "Operator (you)",
+      ),
+    )
+    expect(within(table).getAllByRole("rowheader")).toHaveLength(25)
+    expect(screen.getByText("1–25 of 26")).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    expect(await screen.findByText("User 25")).toBeVisible()
+    expect(screen.queryByText("Operator")).not.toBeInTheDocument()
+    expect(screen.getByText("26–26 of 26")).toBeVisible()
+  })
+
+  it("starts another server's connected users on their first page", async () => {
+    const others: McpServerConnection[] = Array.from(
+      { length: 30 },
+      (_, index) => ({
+        ...ALICE,
+        user_id: `user-${index + 1}`,
+        email: `user${index + 1}@example.com`,
+        full_name: `User ${index + 1}`,
+      }),
+    )
+    const calls = mockApi({ others })
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const page = (server: typeof SERVER) => (
+      <QueryClientProvider client={client}>
+        <Page
+          canManage
+          onLeave={() => {}}
+          openWindow={() => undefined}
+          server={server}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(page(SERVER))
+    await screen.findByText("User 25")
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+    await screen.findByText("User 26")
+
+    const mail = { ...SERVER, id: "mail-id", name: "mail" }
+    rerender(page(mail))
+
+    await waitFor(() =>
+      expect(
+        calls.some((call) =>
+          call.url.includes("/mcp-servers/mail-id/connections?skip=0&"),
+        ),
+      ).toBe(true),
+    )
+    expect(
+      calls.some((call) =>
+        call.url.includes("/mcp-servers/mail-id/connections?skip=25&"),
+      ),
+    ).toBe(false)
+  })
+
+  it("keeps the manager's own row wherever the gateway's page has it", async () => {
+    const callerId = organizationContext().caller?.user_id ?? ""
+    const others: McpServerConnection[] = [
+      ...Array.from({ length: 25 }, (_, index) => ({
+        ...ALICE,
+        user_id: `user-${index + 1}`,
+        email: `user${index + 1}@example.com`,
+        full_name: `User ${index + 1}`,
+      })),
+      { ...ALICE, user_id: callerId, email: null, full_name: "Operator" },
+    ]
+    // The manager's own connection read says nothing, so only the list knows the row.
+    mockApi({ others })
+    const user = userEvent.setup()
+    renderSignIn(true)
+
+    await screen.findByText("User 25")
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    expect(await screen.findByText("(you)")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Disconnect your account" }),
+    ).toBeVisible()
+    expect(
+      screen.queryByText("Nobody has connected yet."),
+    ).not.toBeInTheDocument()
+  })
+
   it("puts the manager's own connection first among the connected users, marked", async () => {
     const own: McpServerConnection = {
       // The fixture caller's id: a connection is held by the dashboard account's own.
@@ -523,8 +633,8 @@ describe("McpServerSignIn", () => {
       connected_at: "2026-11-05T10:00:00+00:00",
       updated_at: "2026-11-05T10:00:00+00:00",
     }
-    // Oldest first, as the gateway lists them, so the manager's is last.
-    mockApi({ others: [ALICE, own] })
+    // The gateway lists the caller's own connection first.
+    mockApi({ others: [own, ALICE] })
     renderSignIn(true)
 
     const table = await screen.findByRole("grid", {

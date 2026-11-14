@@ -47,20 +47,32 @@ export function useMyMcpServerRequests(
   })
 }
 
-/** Every waiting request of a workspace, one entry per server. Workspace managers only. */
+/** One page of a workspace's waiting requests, one entry per server. Workspace managers only. */
 export function useMcpServerRequests(
   workspaceId: string | null,
+  { page, pageSize }: { page: number; pageSize: number },
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: [...requestsKey(workspaceId), "pending"],
+    queryKey: [...requestsKey(workspaceId), "pending", page, pageSize],
     meta: workspaceMeta(workspaceId),
     enabled: enabled && workspaceId !== null,
     staleTime: REQUESTS_STALE_MS,
-    queryFn: ({ signal }) =>
-      apiFetch<McpServerRequestGroups>(requestsPath(workspaceId as string), {
-        signal,
-      }),
+    // Kept across a page change, never across a workspace change.
+    placeholderData: (
+      previous: McpServerRequestGroups | undefined,
+      previousQuery,
+    ) => (previousQuery?.queryKey[1] === workspaceId ? previous : undefined),
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<McpServerRequestGroups>(
+        `${requestsPath(workspaceId as string)}?${params}`,
+        { signal },
+      )
+    },
   })
 }
 

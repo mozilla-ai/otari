@@ -1038,6 +1038,7 @@ class McpServerRequestGroupsPublic(pydantic.BaseModel):
 
     data: list[McpServerRequestGroupPublic]
     count: int = pydantic.Field(description="How many requests are pending in all")
+    server_count: int = pydantic.Field(description="How many catalog servers have a request pending, for paging `data`")
 
 
 class McpServerRequestDecline(pydantic.BaseModel):
