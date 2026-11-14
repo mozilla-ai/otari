@@ -1,0 +1,10 @@
+{
+  "status": 401,
+  "body": {
+    "error": {
+      "code": "invalid_token",
+      "message": "SpecStream didn't accept this API key or token. Create a key under Agents & API, or connect again.",
+      "details": {}
+    }
+  }
+}

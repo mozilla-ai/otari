@@ -22,6 +22,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
     from any_search.providers.perplexity import PerplexityProvider
     from any_search.providers.searxng import SearxngProvider
     from any_search.providers.serply import SerplyProvider
+    from any_search.providers.specstream import SpecStreamProvider
     from any_search.providers.synthetic import SyntheticProvider
 
     return {
@@ -34,6 +35,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
             PerplexityProvider,
             SearxngProvider,
             SerplyProvider,
+            SpecStreamProvider,
             SyntheticProvider,
         )
     }

@@ -52,6 +52,8 @@ EXPECTED: dict[str, Expected] = {
     # scraping engines meet CAPTCHAs. Neither has a time filter, so a search with one comes back empty.
     "searxng": Expected(dated={}, snippets=True, options={"engines": "wikinews,arxiv"}),
     "serply": Expected(snippets=True),
+    # SpecStream returns snippets, page text only with passages, and dates every news item.
+    "specstream": Expected(dated={"news": True}, snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
     "synthetic": Expected(dated={}),
 }

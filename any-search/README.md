@@ -331,6 +331,42 @@ is dropped rather than failing the search, and the count is filled from the item
 knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
 does not read, so a field Serply adds breaks nothing.
 
+## SpecStream
+
+`specstream` calls SpecStream's [Search API](https://specstream.ai/docs/search-api),
+`POST /v1/web-search`, with the key read from `SPECSTREAM_API_KEY` when not passed. The key
+travels as a Bearer token in the `Authorization` header, and the query in the JSON body:
+SpecStream takes the same parameters as a GET's query string or a POST's body, and the adapter
+sends the POST so neither reaches a URL.
+
+| `SearchHit` | From SpecStream |
+|---|---|
+| `url`, `title`, `snippet` | `url`, `title`, `snippet` of each item in `data.sources` |
+| `text` | `excerpt`, the page's text closest to the query, sent with `passages=true`; none when it is absent or empty |
+| `published` | `published_at`, a news item's time, else `published`, the day the page states, both ISO 8601; a date without a zone is UTC |
+
+SpecStream reports what each search was charged, `data.price_usd`, which becomes the result's
+`cost`; a search that returns no results reports 0. `max_results` becomes `num`, at most 100, and
+10 when it is not passed, since without `num` SpecStream returns every result its answer read and
+charges by the results returned; the hits are cut to the count as well. SpecStream has no recency
+parameter, so `time_range` adds its `after:` operator to the query, with the day the range starts
+on in UTC; SpecStream leaves out a result shown to break it and keeps an undated one. Native
+options, under SpecStream's own names: `speed` (`default` or `fast`, the cost tier), `news`,
+`passages`, `pages_wait_ms`, `language`, `country`, `safe`, `engines` and `page`. The answer and
+rows SpecStream composes with `speed=default` stay in `raw`, and image search is not offered. An
+option set to `None` is not sent.
+
+SpecStream signals every failure with an HTTP status and an `error` object. Any status from 400
+raises `ProviderError`, tagged with `error.code` (`missing_api_key`, `invalid_token`,
+`insufficient_balance`, `bad_request`, `rate_limited`), else `http_error`; the message never
+reaches the error.
+
+Every field read from a successful answer is checked: an answer without `data`, `data.sources` or
+a `data.price_usd` that is a number of at least 0, or with an item lacking `url`, `title` or
+`snippet`, or with one of them not a string, or with an `excerpt`, `published` or `published_at`
+that is neither a string nor null, or a date that does not parse, raises `ProviderError` with the
+tag `unexpected_response`. Fields the adapter does not read are ignored.
+
 ## Synthetic
 
 `synthetic` calls Synthetic's [search API](https://dev.synthetic.new/docs/synthetic/search),

@@ -1,0 +1,38 @@
+{
+  "status": 200,
+  "body": {
+    "data": {
+      "id": "req_4c81d2a9e035",
+      "request_id": "req_4c81d2a9e035",
+      "query": "latest stable python release",
+      "kind": "fact",
+      "columns": [],
+      "answer": {
+        "value": "Python 3.14",
+        "page": "https://www.python.org/downloads/",
+        "seen_at": "2026-11-12"
+      },
+      "rows": [],
+      "sources": [
+        {
+          "url": "https://www.python.org/downloads/",
+          "title": "Download Python | Python.org",
+          "site": "www.python.org",
+          "snippet": "The official home of the Python Programming Language.",
+          "cited": true
+        },
+        {
+          "url": "https://docs.python.org/3/whatsnew/3.14.html",
+          "title": "What's new in Python 3.14",
+          "site": "docs.python.org",
+          "snippet": "This article explains the new features in Python 3.14, compared to 3.13.",
+          "cited": false,
+          "published": "2025-10-07"
+        }
+      ],
+      "handoff": null,
+      "took_ms": 2210,
+      "price_usd": 0.005
+    }
+  }
+}

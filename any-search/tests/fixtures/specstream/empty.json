@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "body": {
+    "data": {
+      "id": "req_7b2e4f0c1d9a",
+      "request_id": "req_7b2e4f0c1d9a",
+      "query": "zqxjv wpkfh grtlm site:nonexistent-domain-example.org",
+      "kind": "fact",
+      "columns": [],
+      "answer": null,
+      "rows": [],
+      "sources": [],
+      "handoff": null,
+      "took_ms": 1384,
+      "price_usd": 0.0
+    }
+  }
+}
