@@ -730,6 +730,31 @@ async def test_a_manager_reads_how_many_users_connected_and_a_member_does_not(
     assert await counts(world.member) == [None, None]
 
 
+async def test_a_managers_own_connection_heads_the_first_page_of_who_is_connected(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _sign_in(async_db, config, world, world.owner)
+    # The owner connected last, so oldest-first alone would put them on the second page.
+    members = await _connection(async_db, world.server.id, str(world.member.id))
+    owners = await _connection(async_db, world.server.id, str(world.owner.id))
+    assert members is not None and owners is not None
+    owners.created_at = members.created_at + timedelta(minutes=1)
+    await async_db.commit()
+
+    async def page(skip: int) -> list[str]:
+        listed = await service.server_connections(
+            user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, skip=skip, limit=1
+        )
+        assert listed.count == 2
+        return [row.user_id for row in listed.data]
+
+    assert await page(0) == [str(world.owner.id)]
+    assert await page(1) == [str(world.member.id)]
+
+
 async def test_the_public_shape_never_carries_a_secret(async_db: AsyncSession, config: GatewayConfig) -> None:
     world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
     service = _service(async_db, config)
