@@ -68,7 +68,9 @@ redirects without saying where they led, so a caller cannot check a redirect it 
 deployment's operator should set, and `cost_tier`, for the option whose values are the provider's
 cost tiers, each billed at a price per call of its own; the library accepts both from anyone, and
 acting on them is the host's job). A cost tier option's `enum` lists the tiers and its `default` is
-the one the provider uses when the option is not sent; the metadata records no amount.
+the one a call is billed at when the option is not passed: the provider's own, unless the adapter
+sends another. For example `youdotcom`'s any-fetch adapter sends `lite` by default, even though the API default
+is `standard`. The metadata records no amount.
 
 ## The builtin provider
 
@@ -208,6 +210,40 @@ or whose `url` is not a non-empty string, raises `ProviderError` with the tag
 `unexpected_response`, and so does a `metadata` that is not an object or a `metadata.title` that
 is not a string. Tabstack documents those two as optional, and without them the title is empty.
 Fields the adapter does not read are ignored, so a field Tabstack adds breaks nothing.
+
+## You.com
+
+`youdotcom` calls You.com's [Extract API](https://you.com/docs/api-reference/extract),
+`POST /v1/extract`, with the key in the `X-API-Key` header, read from `YDC_API_KEY` when not
+passed. One web page or PDF per call, returned as Markdown. `parse_effort` is `lite` unless
+passed: You.com's default, `standard`, bills each PDF page on top of the URL, and the option is
+the cost tier.
+
+You.com has no length cap, so `max_chars` cuts the text and sets `text_truncated`. Native options:
+`full_page` (Markdown is always requested by the adapter; an HTML copy, when additionally requested, stays in `raw`), 
+`extraction_source` (`blend`, `cache`, `fetch`), `timeout` (2 to 100 seconds) and `parse_effort` (`lite`, `standard`).
+`None` counts as not passed. You.com's `timeout` is longer than the fetcher's own 15 seconds, and
+`afetch`'s `timeout` argument is the fetcher's, so pass You.com's through `fetch` and give the
+fetcher a longer one. `blend` can serve a cached copy that differs from the live page, so pass
+`extraction_source="fetch"` where the page as it is now matters.
+
+`final_url` is the URL as asked, even after a redirect, so `reports_final_url` is false.
+`content_type` is empty, `published` is `None`, and You.com reports no cost.
+
+A body without `contents` is `FetchedPage.error`: `not_cached` when the fetch asked for the cache
+only, else `nothing_extracted`. A site's own error page, such as a 404, comes back as that page's
+text, which can be empty.
+
+A failed call raises `ProviderError`. 401 is `unauthorized` and a refused key's 403 is
+`forbidden`, by status, since those bodies are the gateway's. Any other status is tagged with
+`error.code` when it carries one (`invalid_url`, `site_blocked`, `site_unreachable`,
+`unsupported_content`, `timeout`); the message and details are not read. A 402 without one takes
+the code in its flat `error`, else `payment_required`. Anything else is `http_error`.
+
+A `url` or `title` that is not a string, or `contents` that does not hold `full_page.markdown` as
+a string, raises `ProviderError` with the tag `unexpected_response`. Both are optional: without
+them the URL is the one asked for and the title is empty. An empty `markdown` is an empty page.
+Unread fields are ignored.
 
 ## The fake provider
 

@@ -36,8 +36,9 @@ class OptionSpec(BaseModel):
     # The option's values are the provider's cost tiers: a call made with one
     # value is billed at that tier's own price per call, as the provider's
     # pricing lists. It records no amount; the adapter's pricing note has those.
-    # ``enum`` lists the tiers and ``default`` is the one the provider uses when
-    # the option is not sent.
+    # ``enum`` lists the tiers and ``default`` is the one a call is billed at
+    # when the option is not passed: the provider's own, unless the adapter
+    # sends another.
     cost_tier: bool = False
 
     @model_validator(mode="after")

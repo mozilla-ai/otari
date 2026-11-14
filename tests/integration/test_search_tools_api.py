@@ -453,7 +453,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "perplexity", "searxng", "serply", "synthetic"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "perplexity", "searxng", "serply", "synthetic", "youdotcom"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -508,7 +508,7 @@ def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_k
 def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
     # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
-    assert list(catalog) == ["deepseek", "exa", "tabstack"]
+    assert list(catalog) == ["deepseek", "exa", "tabstack", "youdotcom"]
     exa = catalog["exa"]
     metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
     assert exa["kind"] == "fetch"
@@ -517,9 +517,10 @@ def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_h
     assert exa["max_urls_per_call"] == metadata.max_urls_per_call
     assert exa["renders_javascript"] is False
     assert exa["formats"] == metadata.formats
-    # Exa answers with the URL as asked even after a redirect, as Tabstack does.
+    # Exa answers with the URL as asked even after a redirect, as Tabstack and You.com do.
     assert exa["reports_final_url"] is False
     assert catalog["tabstack"]["reports_final_url"] is False
+    assert catalog["youdotcom"]["reports_final_url"] is False
     assert exa["options"] == [option.model_dump() for option in metadata.options]
     assert exa["instances"] == ["exa-fetch"]
     assert exa["max_results"] is None

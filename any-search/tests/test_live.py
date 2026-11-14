@@ -54,6 +54,9 @@ EXPECTED: dict[str, Expected] = {
     "serply": Expected(snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
     "synthetic": Expected(dated={}),
+    # You.com returns highlights, the snippet, by default and page text only on request; it dates the hits it
+    # knows a page age for.
+    "youdotcom": Expected(dated={}, snippets=True),
 }
 
 

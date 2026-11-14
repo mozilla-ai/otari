@@ -73,7 +73,8 @@ the library accepts both from anyone, and acting on them is the host's job).
 
 A provider's cost tiers are the values of one option for which its pricing lists a price per call
 of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
-`default` is the tier the provider uses when the option is not sent. The metadata records no
+`default` is the tier a call is billed at when the option is not passed: the provider's own,
+unless the adapter sends another. The metadata records no
 amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
 that bills searches at a price per call for a provider that does not report its cost can let only
 whoever set that price choose the tier.
@@ -356,6 +357,46 @@ Every field read from a successful answer is checked: an answer without `results
 lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
 neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
 tag `unexpected_response`. Fields the adapter does not read are ignored.
+
+## You.com
+
+`youdotcom` calls You.com's [Search API](https://you.com/docs/api-reference/search/v1-search),
+`POST /v1/search`, with the key in the `X-API-Key` header, read from `YDC_API_KEY` when not
+passed. The query travels in the JSON body.
+
+It sends what You.com's SDK sends unless told otherwise: `language` `EN`, `knowledge` `core` and
+highlights extraction. `None` is not sent, so `knowledge=None` or `extraction=None` turns that
+default off. Highlights share 8,192 tokens across the results, so few results come back long; pass
+`extraction` to ask for less, for the whole page, or for none:
+
+```python
+await engine.search(query, extraction={"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}})
+await engine.search(query, extraction={"extraction_mode": "full_page"})  # Markdown, billed per page crawled live
+await engine.search(query, extraction=None)  # each result's description as its snippet
+```
+
+| `SearchHit` | From You.com |
+|---|---|
+| `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
+| `snippet` | `contents.highlights`, joined; `description` when there are none |
+| `text` | `contents.markdown`, only when `extraction_mode` is `full_page`; `markdown` is added to the `full_page.extraction_formats` array by default and an HTML copy, when listed there, is available in `raw` |
+| `published` | `page_age` when it is ISO 8601, taken as UTC; another form stays in `raw` |
+
+You.com reports no cost. `max_results` becomes `count`, 10 when unset, at most 100, and at most 50
+under highlights. `time_range` becomes `freshness` and wins over that option. The other native
+options are `offset`, `country`, `safesearch`, `include_domains`, `exclude_domains`,
+`boost_domains`, `strict_operators` and `crawl_timeout`; `--describe youdotcom` lists them.
+Knowledge results and the snippets of a search without highlights stay in `raw`.
+
+Any status from 400 raises `ProviderError`: `unauthorized`, `forbidden` (a refused key) and
+`invalid_request` by status, since those bodies are not a code. A 402 takes the code in `error`,
+else `payment_required`. Any other status is `http_error`.
+
+`results` must be an object, and `web` a list when present. Each item read must have `url` and
+`page_age` as a string or null, `title` and `description` as strings, and, when present,
+`contents` whose `highlights` is a list of strings and whose `markdown` is a string. A `page_age`
+that looks like ISO 8601 but does not parse fails too. Anything else raises `ProviderError` with
+the tag `unexpected_response`. Unread fields are ignored.
 
 ## The fake provider
 

@@ -48,6 +48,7 @@ jobs:
       HAS_PERPLEXITY_KEY: ${{ secrets.PERPLEXITY_API_KEY != '' }}
       HAS_SERPLY_KEY: ${{ secrets.SERPLY_API_KEY != '' }}
       HAS_SYNTHETIC_KEY: ${{ secrets.SYNTHETIC_API_KEY != '' }}
+      HAS_YDC_KEY: ${{ secrets.YDC_API_KEY != '' }}
       HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
       HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
@@ -97,6 +98,16 @@ jobs:
     - name: Say so when the Synthetic key is absent
       if: env.HAS_SYNTHETIC_KEY != 'true'
       run: echo "::notice::The SYNTHETIC_API_KEY secret is not available to this run; the Synthetic live tests skip."
+
+    - name: Say so when the You.com key is absent
+      if: env.HAS_YDC_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The YDC_API_KEY secret is not available to this run; the You.com live searches and fetches skip."
+
+    - name: Fail a scheduled or manual run without the You.com key
+      if: env.HAS_YDC_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The YDC_API_KEY secret is not set, so the You.com live searches and fetches cannot run."
+        exit 1
 
     - name: Say so when the Tabstack key is absent
       if: env.HAS_TABSTACK_KEY != 'true' && github.event_name == 'pull_request'
@@ -157,6 +168,7 @@ jobs:
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         SERPLY_API_KEY: ${{ secrets.SERPLY_API_KEY }}
         SYNTHETIC_API_KEY: ${{ secrets.SYNTHETIC_API_KEY }}
+        YDC_API_KEY: ${{ secrets.YDC_API_KEY }}
         SEARXNG_BASE_URL: http://127.0.0.1:8080
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
@@ -166,4 +178,5 @@ jobs:
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         TABSTACK_API_KEY: ${{ secrets.TABSTACK_API_KEY }}
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        YDC_API_KEY: ${{ secrets.YDC_API_KEY }}
       run: uv run pytest -v -rs any-fetch/tests/test_live.py

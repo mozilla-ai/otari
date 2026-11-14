@@ -9,7 +9,7 @@ async with AnySearch.create("fake", timeout=15.0) as provider:
 
 # The library's own version, bumped in the PR that changes the library. Set
 # before the imports: ``_http`` reads it while this package is still importing.
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from any_search._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnySearch, asearch, shared_parameter_problems
 from any_search._errors import (

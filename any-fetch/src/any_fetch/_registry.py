@@ -20,6 +20,7 @@ def _providers() -> dict[str, type["AnyFetch"]]:
     from any_fetch.providers.exa import ExaProvider
     from any_fetch.providers.fake import FakeProvider
     from any_fetch.providers.tabstack import TabstackProvider
+    from any_fetch.providers.youdotcom import YouDotComProvider
 
     return {
         provider.METADATA.name: provider
@@ -29,6 +30,7 @@ def _providers() -> dict[str, type["AnyFetch"]]:
             ExaProvider,
             FakeProvider,
             TabstackProvider,
+            YouDotComProvider,
         )
     }
 

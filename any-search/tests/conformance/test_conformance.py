@@ -101,6 +101,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("synthetic", "empty")),
         "error": Scenario(handler=_replay("synthetic", "error")),
     },
+    "youdotcom": {
+        "normal": Scenario(handler=_replay("youdotcom", "normal")),
+        "empty": Scenario(handler=_replay("youdotcom", "empty")),
+        "error": Scenario(handler=_replay("youdotcom", "error")),
+    },
 }
 
 PROVIDERS = AnySearch.get_supported_providers()
