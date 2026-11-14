@@ -129,8 +129,10 @@ an owner/admin of that workspace.
   request body fails with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 - `everyone_tools` (default `["*"]`) is the server's default policy, and
-  `read_tools` the tools labeled read, left out (or `null`) to follow the tools
-  the server marks read-only; see [Server access](#server-access).
+  `read_tools` the tools labeled read. On create, leaving it out (or sending
+  `null`) follows the tools the server marks read-only. On `PATCH`, leaving it
+  out keeps the labels as they are, and only an explicit `null` goes back to
+  following the server; see [Server access](#server-access).
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
 - `credential_mode` (default `shared`) says whose credential a call carries;
   see [Credential mode](#credential-mode). On a shared server, `shared_account`
@@ -145,8 +147,9 @@ an owner/admin of that workspace.
   acknowledged, `POST /{request_id}/acknowledge` records that the caller has
   seen an answer, `DELETE /{request_id}` withdraws one, and for a manager `GET`
   lists everyone waiting, `GET /requesters` lists everyone waiting for one
-  server, and `POST /decline` declines. Storing a server at a requested URL
-  approves the requests for it. Every list takes `skip` and `limit`: `GET
+  server, and `POST /decline` declines. Creating a server at a requested URL
+  approves the requests for it; editing an existing server to that URL does
+  not, and those requests stay pending. Every list takes `skip` and `limit`: `GET
   /mine` pages the caller's requests (50 by default, at most 100); `GET` pages
   the servers asked for (100 by default and at most), naming the first five
   requesters of each with `requester_count` for how many asked, `count` for
@@ -286,7 +289,9 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   [sign-in link](#signing-in-from-the-conversation) instead.
 - **What ends a connection.** The user disconnecting, a manager removing it,
   deleting the server, deleting the user, the user leaving the workspace, and a
-  change to the server's URL, its OAuth client or its credential mode. For
+  change to the server's URL, its OAuth client ID or its credential mode. A
+  new secret for the same client ID is the same client: it ends no connection
+  and revokes no token. For
   each of these, Otari also asks the authorization server to revoke the
   tokens, best effort and only after the removal has committed; a removal
   that rolls back revokes nothing. One removal asks for at most 500
