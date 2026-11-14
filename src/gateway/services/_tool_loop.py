@@ -206,14 +206,18 @@ def _released_tool_choice(choice: Any) -> Any:
     A forced choice (``required``, Messages' ``any``, a named tool) is met by the
     round that ran it, and the loop only reaches another round after one did. Sent
     again, it would make the model call a tool every round and only answer on the
-    last one. Messages keeps ``disable_parallel_tool_use`` and Responses keeps its
-    ``allowed_tools`` list, since neither is a force.
+    last one. Messages keeps ``disable_parallel_tool_use`` and an ``allowed_tools``
+    choice keeps its list, since neither is a force.
     """
     if choice == "required":
         return None
     if not isinstance(choice, dict) or choice.get("type") in {"auto", "none"}:
         return choice
     if choice.get("type") == "allowed_tools":
+        # Chat Completions nests the mode and the list; Responses has them at the top level.
+        nested = choice.get("allowed_tools")
+        if isinstance(nested, dict):
+            return {**choice, "allowed_tools": {**nested, "mode": "auto"}}
         return {**choice, "mode": "auto"}
     if "disable_parallel_tool_use" in choice:
         return {"type": "auto", "disable_parallel_tool_use": choice["disable_parallel_tool_use"]}

@@ -2287,6 +2287,16 @@ async def test_a_forced_tool_choice_runs_the_tool_once_when_streaming(
             {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "fetch_url"}]},
             {"type": "allowed_tools", "mode": "auto", "tools": [{"type": "function", "name": "fetch_url"}]},
         ),
+        (
+            {
+                "type": "allowed_tools",
+                "allowed_tools": {"mode": "required", "tools": [{"type": "function", "function": {"name": "f"}}]},
+            },
+            {
+                "type": "allowed_tools",
+                "allowed_tools": {"mode": "auto", "tools": [{"type": "function", "function": {"name": "f"}}]},
+            },
+        ),
     ],
 )
 def test_a_released_tool_choice_lifts_only_the_force(choice: Any, released: Any) -> None:

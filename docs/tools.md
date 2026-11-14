@@ -397,8 +397,9 @@ an answer rather than a failed request ([MCP](mcp.md) says the same of its loop)
 
 A `tool_choice` that forces a tool (`required`, or one tool by name, such as
 `code_execution` for Otari's sandbox) applies to the first round only. Once that
-round has run the tool, the model is free to answer, so forcing the sandbox runs it
-once rather than on every round.
+round has run the tool, the model is free to answer, so forcing the sandbox no
+longer makes it run on every round. A later round may still call the sandbox or
+another tool if the model chooses to.
 
 A tool declared in a provider's own words is still [decided per
 attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the
