@@ -349,6 +349,8 @@ class McpOAuthFlow(Base):
     resource: Mapped[str | None] = mapped_column(Text, default=None)
     redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str | None] = mapped_column(Text, default=None)
+    # The server URL the sign-in was started for: its tokens are stored for this URL or not at all.
+    server_url: Mapped[str] = mapped_column(Text, nullable=False)
     # The authorization server the sign-in went to, and whether it said it sends ``iss`` back
     # (RFC 9207): what tells this sign-in's answer from another server's on the one redirect URI.
     issuer: Mapped[str | None] = mapped_column(Text, default=None)

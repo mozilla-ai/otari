@@ -534,6 +534,7 @@ class _Pending:
     revocation_endpoint: str | None
     resource: str | None
     redirect_uri: str
+    server_url: str
     issuer: str | None
     requires_iss: bool
     return_to: str | None
@@ -827,6 +828,7 @@ class McpConnectionService:
                 resource=metadata.resource,
                 redirect_uri=redirect_uri,
                 scope=metadata.scope,
+                server_url=url,
                 issuer=metadata.issuer,
                 requires_iss=metadata.sends_iss,
                 return_to=return_to,
@@ -1047,6 +1049,7 @@ class McpConnectionService:
                     revocation_endpoint=flow.revocation_endpoint,
                     resource=flow.resource,
                     redirect_uri=flow.redirect_uri,
+                    server_url=flow.server_url,
                     issuer=flow.issuer,
                     requires_iss=flow.requires_iss,
                     return_to=flow.return_to,
@@ -1082,6 +1085,10 @@ class McpConnectionService:
             logger.warning("MCP sign-in secrets unreadable server_id=%s", pending.server_id)
             raise McpConnectionFlowError("This sign-in can no longer be finished. Start it again.") from None
         if server is None or client is None:
+            raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
+        if server.url != pending.server_url:
+            # Its tokens are for the URL the sign-in was started for, whatever an edit kept of the client.
+            logger.warning("MCP sign-in refused reason=url_changed server_id=%s", pending.server_id)
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
         if (server.oauth_client_token_endpoint, server.oauth_client_revocation_endpoint) != (
             pending.token_endpoint,

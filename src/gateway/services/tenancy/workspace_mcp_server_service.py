@@ -1739,7 +1739,7 @@ class WorkspaceMcpServerService:
         sign_ins_moved = mode_changed or url_changed or another_client
         # A server sends one credential: a token set on a shared server takes its account's place.
         ends_account = has_account and (sign_ins_moved or (isinstance(new_token, str) and bool(new_token)))
-        ends_connections = (was_per_user and sign_ins_moved) or ends_account
+        ends_connections = sign_ins_moved or ends_account
         connection_changed = connection_changed or ends_account
         revocations, unread = await self._revocations(server) if ends_connections else ([], 0)
         if store_client:
