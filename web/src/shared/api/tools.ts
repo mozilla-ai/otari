@@ -1,5 +1,4 @@
 import {
-  keepPreviousData,
   useMutation,
   useQueries,
   useQuery,
@@ -1145,6 +1144,11 @@ export function useDisconnectMcp() {
       void queryClient.invalidateQueries({
         queryKey: mcpMyToolsKey(workspaceId, serverId),
       })
+      // The list's `connected_users`; exact, as the keys under it are handled above.
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+        exact: true,
+      })
     },
   })
 }
@@ -1165,7 +1169,15 @@ export function useMcpServerConnections(
     enabled,
     // Other people connect without this page hearing of it, so it is read again sooner.
     staleTime: 30_000,
-    placeholderData: keepPreviousData,
+    // Kept across a page change, never across a change of server.
+    placeholderData: (
+      previous: McpServerConnections | undefined,
+      previousQuery,
+    ) =>
+      previousQuery?.queryKey[1] === workspaceId &&
+      previousQuery.queryKey[3] === serverId
+        ? previous
+        : undefined,
     queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         skip: String(page * pageSize),
@@ -1205,6 +1217,11 @@ export function useRemoveMcpServerConnection() {
       })
       void queryClient.invalidateQueries({
         queryKey: playgroundToolsKey(workspaceId),
+      })
+      // The list's `connected_users`; exact, as the keys under it are handled above.
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+        exact: true,
       })
     },
   })
