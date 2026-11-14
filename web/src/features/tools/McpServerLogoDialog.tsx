@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FileTrigger } from "react-aria-components"
 import { FiUpload } from "react-icons/fi"
 
@@ -102,7 +102,19 @@ export function McpServerLogoDialog({
     [upload],
   )
 
+  // The selection being prepared. A preparation that finishes after another
+  // selection, a close or an unmount owns its preview alone, so it frees it.
+  const latestPick = useRef(0)
+  useEffect(
+    () => () => {
+      latestPick.current += 1
+    },
+    [],
+  )
+
   const close = () => {
+    latestPick.current += 1
+    setPreparing(false)
     setUpload(undefined)
     setUploadError("")
     setTile(current)
@@ -113,14 +125,21 @@ export function McpServerLogoDialog({
 
   const pick = async (file: File | undefined) => {
     if (!file) return
+    latestPick.current += 1
+    const id = latestPick.current
     setPreparing(true)
     try {
-      setUpload(await prepareLogo(file))
+      const prepared = await prepareLogo(file)
+      if (id !== latestPick.current) {
+        URL.revokeObjectURL(prepared.previewUrl)
+        return
+      }
+      setUpload(prepared)
       setUploadError("")
     } catch (error) {
-      setUploadError(errorMessage(error))
+      if (id === latestPick.current) setUploadError(errorMessage(error))
     } finally {
-      setPreparing(false)
+      if (id === latestPick.current) setPreparing(false)
     }
   }
 
