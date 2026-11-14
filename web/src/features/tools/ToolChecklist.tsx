@@ -173,7 +173,12 @@ export function ToolChecklist({
             {allowPatterns ? " or patterns" : ""} below.
           </p>
           {onCheck ? (
-            <Button size="sm" onPress={onCheck} isPending={isChecking}>
+            <Button
+              size="sm"
+              onPress={onCheck}
+              isPending={isChecking}
+              isDisabled={isDisabled}
+            >
               Check
             </Button>
           ) : null}

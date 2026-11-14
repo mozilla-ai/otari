@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQueries,
   useQuery,
@@ -907,9 +908,6 @@ export function useMcpServerProbes(workspaceId: string, urls: string[]) {
   })
 }
 
-// One page of who is connected. The section says so when there are more.
-const MCP_CONNECTIONS_PAGE_SIZE = 200
-
 function mcpConnectionsKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "mcp-connections"] as const
 }
@@ -1151,22 +1149,33 @@ export function useDisconnectMcp() {
   })
 }
 
-/** Who is connected to a per-user server. Workspace managers only. */
+/** One page of who is connected to a per-user server. Workspace managers only. */
 export function useMcpServerConnections(
   workspaceId: string,
   serverId: string,
+  { page, pageSize }: { page: number; pageSize: number },
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+    queryKey: [
+      ...mcpServerConnectionsKey(workspaceId, serverId),
+      page,
+      pageSize,
+    ],
     enabled,
     // Other people connect without this page hearing of it, so it is read again sooner.
     staleTime: 30_000,
-    queryFn: ({ signal }) =>
-      apiFetch<McpServerConnections>(
-        `${mcpServerPath(workspaceId, serverId)}/connections?limit=${MCP_CONNECTIONS_PAGE_SIZE}`,
+    placeholderData: keepPreviousData,
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<McpServerConnections>(
+        `${mcpServerPath(workspaceId, serverId)}/connections?${params}`,
         { signal },
-      ),
+      )
+    },
   })
 }
 

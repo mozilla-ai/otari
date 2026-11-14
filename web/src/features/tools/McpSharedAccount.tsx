@@ -16,21 +16,28 @@ import { useEndMcpSharedAccount } from "@/shared/api/tools"
 import { formatDate } from "@/shared/helpers/format"
 
 /** What a Shared server's one credential is, for the list and the server's page. */
-export type SharedAccountState = "signed_in" | "token" | "not_set_up" | "open"
+export type SharedAccountState =
+  | "signed_in"
+  | "token"
+  | "not_set_up"
+  | "open"
+  | "unchecked"
 
 /**
  * Which credential a Shared server sends: an account an admin signed in to, a
- * pasted token, none though the server asked for one, or none and none asked.
+ * pasted token, none though the server asked for one, none and the last check
+ * got an answer without one, or none and no check has said either way.
  */
 export function sharedAccountState(
   server: Pick<
     WorkspaceMcpServer,
-    "shared_account" | "has_token" | "needs_setup"
+    "shared_account" | "has_token" | "needs_setup" | "health"
   >,
 ): SharedAccountState {
   if (server.shared_account) return "signed_in"
   if (server.has_token) return "token"
-  return server.needs_setup ? "not_set_up" : "open"
+  if (server.needs_setup) return "not_set_up"
+  return server.health?.status === "healthy" ? "open" : "unchecked"
 }
 
 const MEANING =
@@ -84,7 +91,9 @@ export function McpSharedAccount({
               ? "An admin has not set up an account yet, so requests skip this server until one is."
               : state === "open"
                 ? "The server answered without an account, so there is nothing for you to connect."
-                : "An admin set it up, so there is nothing for you to connect."}
+                : state === "unchecked"
+                  ? "No account is set up, so there is nothing for you to connect."
+                  : "An admin set it up, so there is nothing for you to connect."}
           </p>
         </SettingsBlock>
       </SettingsGroup>
@@ -140,7 +149,7 @@ export function McpSharedAccount({
               className={
                 state === "not_set_up"
                   ? "bg-warning"
-                  : state === "open"
+                  : state === "open" || state === "unchecked"
                     ? "bg-text-subtle"
                     : "bg-success"
               }
@@ -200,9 +209,11 @@ export function McpSharedAccount({
             ? "This server asks for an account, so requests skip it until one is set up. Sign in for everyone, or paste a token. "
             : state === "open"
               ? "The server answered without an account. Set one up if its tools need it. "
-              : state === "token"
-                ? "Signing in for everyone replaces the token. "
-                : ""}
+              : state === "unchecked"
+                ? "Requests reach the server without an account. Set one up if its tools need it. "
+                : state === "token"
+                  ? "Signing in for everyone replaces the token. "
+                  : ""}
           {state === "token"
             ? null
             : "Everyone in the workspace acts as the account you sign in with, so use a service account rather than your own."}

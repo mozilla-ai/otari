@@ -93,6 +93,7 @@ export function McpServerLogoDialog({
   const [tile, setTile] = useState<McpLogoTile>(current)
   const [upload, setUpload] = useState<PreparedLogo>()
   const [uploadError, setUploadError] = useState("")
+  const [isPreparing, setPreparing] = useState(false)
 
   useEffect(
     () => () => {
@@ -112,11 +113,14 @@ export function McpServerLogoDialog({
 
   const pick = async (file: File | undefined) => {
     if (!file) return
+    setPreparing(true)
     try {
       setUpload(await prepareLogo(file))
       setUploadError("")
     } catch (error) {
       setUploadError(errorMessage(error))
+    } finally {
+      setPreparing(false)
     }
   }
 
@@ -158,7 +162,7 @@ export function McpServerLogoDialog({
           </Button>
           <Button
             variant="primary"
-            isDisabled={!hasChanges || remove.isPending}
+            isDisabled={!hasChanges || isPreparing || remove.isPending}
             isPending={save.isPending}
             onPress={() =>
               save.mutate(

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { McpConnection, McpServerConnection } from "@/client"
 import {
+  hasSignInExpired,
   McpOwnAccountControl,
   McpOwnAccountNotes,
   useOwnMcpAccount,
@@ -66,7 +67,13 @@ function mockApi({
       })
     }
     if (url.includes("/connections?")) {
-      return Response.json({ data: others, count: others.length })
+      const params = new URL(url, "http://localhost").searchParams
+      const skip = Number(params.get("skip") ?? 0)
+      const limit = Number(params.get("limit") ?? others.length)
+      return Response.json({
+        data: others.slice(skip, skip + limit),
+        count: others.length,
+      })
     }
     if (url.endsWith("/organizations/me")) {
       return Response.json(organizationContext())
@@ -282,6 +289,79 @@ describe("McpServerSignIn", () => {
     expect(
       await screen.findByText(/connect again when this sign-in expires/),
     ).toBeVisible()
+  })
+
+  it("asks for a new sign-in once one that cannot renew itself has expired", async () => {
+    mockApi({
+      mine: [{ ...MINE, renewable: false, expires_at: "2020-01-01T00:00:00Z" }],
+    })
+    const onLeave = renderSignIn()
+
+    expect(await screen.findByText("Your sign-in has expired")).toBeVisible()
+    expect(screen.queryByText(/^Connected since /)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/connect again when this sign-in expires/),
+    ).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Sign in again" }))
+    await waitFor(() =>
+      expect(onLeave).toHaveBeenCalledWith(
+        "https://auth.example.com/authorize?state=s",
+      ),
+    )
+  })
+
+  it("gives a manager Sign in again in the page heading once their sign-in has expired", async () => {
+    mockApi({
+      mine: [{ ...MINE, renewable: false, expires_at: "2020-01-01T00:00:00Z" }],
+    })
+    renderSignIn(true)
+
+    const heading = screen.getByRole("region", { name: "Page heading" })
+    expect(
+      await within(heading).findByRole("button", { name: "Sign in again" }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", {
+        name: "Your account: connected. Reconnect or disconnect",
+      }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("reads a sign-in as over only when it is past its expiry and cannot renew", () => {
+    const past = "2020-01-01T00:00:00Z"
+    const future = "2999-01-01T00:00:00Z"
+    expect(hasSignInExpired({ renewable: false, expires_at: past })).toBe(true)
+    expect(hasSignInExpired({ renewable: true, expires_at: past })).toBe(false)
+    expect(hasSignInExpired({ renewable: false, expires_at: future })).toBe(
+      false,
+    )
+    expect(hasSignInExpired({ renewable: false, expires_at: null })).toBe(false)
+  })
+
+  it("pages through connected users from the server, never all at once", async () => {
+    const others: McpServerConnection[] = Array.from(
+      { length: 30 },
+      (_, index) => ({
+        ...ALICE,
+        user_id: `user-${index + 1}`,
+        email: `user${index + 1}@example.com`,
+        full_name: `User ${index + 1}`,
+      }),
+    )
+    const calls = mockApi({ others })
+    const user = userEvent.setup()
+    renderSignIn(true)
+
+    expect(await screen.findByText("User 25")).toBeVisible()
+    expect(screen.queryByText("User 26")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    expect(await screen.findByText("User 26")).toBeVisible()
+    expect(screen.queryByText("User 1")).not.toBeInTheDocument()
+    const reads = calls
+      .filter((call) => call.url.includes("/connections?"))
+      .map((call) => new URL(call.url, "http://localhost").search)
+    expect(reads).toEqual(["?skip=0&limit=25", "?skip=25&limit=25"])
   })
 
   it("lets a manager see who is connected and remove one of them", async () => {

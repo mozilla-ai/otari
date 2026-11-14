@@ -9,6 +9,10 @@ import type {
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Dot } from "@/design-system/indicators/Dot"
@@ -54,7 +58,7 @@ export function McpServerSignIn({
   /** Opens a connected user's access rule for this server. */
   onOpenUserRule?: (userId: string) => void
 }) {
-  const { connection, isKnown, isStarting } = own
+  const { connection, isKnown, isStarting, hasExpired } = own
 
   if (canManage) {
     return (
@@ -77,16 +81,26 @@ export function McpServerSignIn({
       <SettingsBlock>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-body">
-            <Dot className={connection ? "bg-success" : "bg-text-subtle"} />
-            {connection
-              ? `Connected since ${formatDate(connection.connected_at)}`
-              : isKnown
-                ? "Not connected"
-                : own.readError
-                  ? "Status unavailable"
-                  : "Checking…"}
+            <Dot
+              className={
+                hasExpired
+                  ? "bg-warning"
+                  : connection
+                    ? "bg-success"
+                    : "bg-text-subtle"
+              }
+            />
+            {hasExpired
+              ? "Your sign-in has expired"
+              : connection
+                ? `Connected since ${formatDate(connection.connected_at)}`
+                : isKnown
+                  ? "Not connected"
+                  : own.readError
+                    ? "Status unavailable"
+                    : "Checking…"}
           </span>
-          {connection ? (
+          {connection && !hasExpired ? (
             <div className="flex flex-wrap gap-2">
               <Button
                 onPress={own.connect}
@@ -110,7 +124,7 @@ export function McpServerSignIn({
               isDisabled={!isKnown}
               className="min-h-11 md:min-h-0"
             >
-              Connect your account
+              {hasExpired ? "Sign in again" : "Connect your account"}
             </Button>
           )}
         </div>
@@ -138,9 +152,21 @@ function ConnectedUsers({
   onOpenUserRule?: (userId: string) => void
   onDisconnect: () => void
 }) {
-  const connections = useMcpServerConnections(workspaceId, server.id, true)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
+  const connections = useMcpServerConnections(
+    workspaceId,
+    server.id,
+    { page, pageSize },
+    true,
+  )
   const remove = useRemoveMcpServerConnection()
   const [removing, setRemoving] = useState<McpServerConnection>()
+  const total = connections.data?.count
+  // A page emptied by a removal is left for the last one that still has rows.
+  const lastPage =
+    total === undefined ? page : Math.max(0, Math.ceil(total / pageSize) - 1)
+  if (page > lastPage) setPage(lastPage)
   // A connection is held by the dashboard account's own id, so the admin
   // looking finds their row by it. Theirs goes first, marked.
   const caller = useOrganizationContext().data?.caller
@@ -148,20 +174,22 @@ function ConnectedUsers({
   const isOwn = (row: McpServerConnection) =>
     callerId !== "" && row.user_id === callerId
   const listed = connections.data?.data ?? []
-  // The manager's own row is shown even past the page the list reads, and
+  // The manager's own row heads the first page wherever the list has it, and
   // before the list has caught up with a sign-in that just finished.
   const ownRow: McpServerConnection[] =
-    listed.some(isOwn) || !own || callerId === ""
-      ? listed.filter(isOwn)
-      : [
-          {
-            user_id: callerId,
-            email: caller?.email ?? null,
-            full_name: caller?.full_name ?? null,
-            connected_at: own.connected_at,
-            updated_at: own.updated_at,
-          },
-        ]
+    page > 0
+      ? []
+      : listed.some(isOwn) || !own || callerId === ""
+        ? listed.filter(isOwn)
+        : [
+            {
+              user_id: callerId,
+              email: caller?.email ?? null,
+              full_name: caller?.full_name ?? null,
+              connected_at: own.connected_at,
+              updated_at: own.updated_at,
+            },
+          ]
   const rows = [...ownRow, ...listed.filter((row) => !isOwn(row))]
   const describeUser = (row: McpServerConnection) =>
     row.full_name ?? row.email ?? row.user_id
@@ -247,11 +275,20 @@ function ConnectedUsers({
           onRowAction={onOpenUserRule}
         />
       )}
-      {connections.data && connections.data.count > listed.length ? (
+      {total !== undefined && total > PAGE_SIZE_OPTIONS[0] ? (
         <SettingsBlock>
-          <p className="text-caption">
-            Showing the first {listed.length} of {connections.data.count}.
-          </p>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            rowsOnPage={listed.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size)
+              setPage(0)
+            }}
+            isFetching={connections.isFetching}
+          />
         </SettingsBlock>
       ) : null}
       {removing ? (

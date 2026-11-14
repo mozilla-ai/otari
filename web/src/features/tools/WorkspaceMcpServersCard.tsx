@@ -96,6 +96,11 @@ function SharedAccountCell({ server }: { server: WorkspaceMcpServer }) {
       <span className="whitespace-nowrap text-muted">No account needed</span>
     )
   }
+  if (state === "unchecked") {
+    return (
+      <span className="whitespace-nowrap text-muted">No account set up</span>
+    )
+  }
   return (
     <span className="flex items-center gap-2 whitespace-nowrap">
       <Dot className="bg-success" />
@@ -440,10 +445,10 @@ export function WorkspaceMcpServersCard({
         onSubmit={submit}
       />
 
-      {hasCatalog ? (
+      {hasCatalog && isCatalogOpen ? (
         <McpCatalogDialog
           key={`catalog-${catalogOpenCount}`}
-          isOpen={isCatalogOpen}
+          isOpen
           onOpenChange={setCatalogOpen}
           workspaceId={selected.workspace_id}
           workspaceName={selected.name}

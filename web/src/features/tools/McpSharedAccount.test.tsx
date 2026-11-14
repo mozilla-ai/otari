@@ -19,6 +19,11 @@ const NOT_SET_UP = workspaceMcpServer({
     error: "unauthorized",
   }),
 })
+const OPEN = workspaceMcpServer({
+  name: "docs",
+  health: workspaceMcpServerHealth({ status: "healthy" }),
+})
+const UNCHECKED = workspaceMcpServer({ name: "docs", health: null })
 const SIGNED_IN = workspaceMcpServer({
   name: "github",
   shared_account: {
@@ -76,15 +81,47 @@ describe("McpSharedAccount", () => {
     forgetMcpConnectionNotice()
   })
 
-  it("reads a server's one credential in four states", () => {
+  it("reads a server's one credential in five states", () => {
     expect(sharedAccountState(SIGNED_IN)).toBe("signed_in")
     expect(sharedAccountState(workspaceMcpServer({ has_token: true }))).toBe(
       "token",
     )
     expect(sharedAccountState(NOT_SET_UP)).toBe("not_set_up")
-    expect(sharedAccountState(workspaceMcpServer({ has_token: false }))).toBe(
-      "open",
-    )
+    expect(sharedAccountState(OPEN)).toBe("open")
+    // No check has answered, or the last one failed for another reason: an
+    // answer without an account was never seen.
+    expect(sharedAccountState(UNCHECKED)).toBe("unchecked")
+    expect(
+      sharedAccountState(
+        workspaceMcpServer({
+          health: workspaceMcpServerHealth({
+            status: "failing",
+            error: "unreachable",
+          }),
+        }),
+      ),
+    ).toBe("unchecked")
+  })
+
+  it("claims no answer from a server that was never checked", () => {
+    mockApi()
+    renderAccount(UNCHECKED)
+
+    expect(screen.getByText("No account set up")).toBeVisible()
+    expect(
+      screen.getByText(/^Requests reach the server without an account\./),
+    ).toBeVisible()
+    expect(screen.queryByText(/answered without/)).not.toBeInTheDocument()
+  })
+
+  it("tells a member no account is set up on a server that was never checked", () => {
+    mockApi()
+    renderAccount(UNCHECKED, false)
+
+    expect(
+      screen.getByText(/No account is set up, so there is nothing for you/),
+    ).toBeVisible()
+    expect(screen.queryByText(/answered without/)).not.toBeInTheDocument()
   })
 
   it("offers a manager both ways to set up a server that is not set up yet", async () => {

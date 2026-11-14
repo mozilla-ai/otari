@@ -179,10 +179,13 @@ function ServerPageProbe() {
   return <p>Server page {serverId}</p>
 }
 
-function renderCard(variant?: "card" | "page", surfaces?: string[]) {
-  const client = new QueryClient({
+function renderCard(
+  variant?: "card" | "page",
+  surfaces?: string[],
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  })
+  }),
+) {
   return render(
     <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
       <QueryClientProvider client={client}>
@@ -347,6 +350,13 @@ describe("WorkspaceMcpServersCard", () => {
         id: "77777777-7777-7777-7777-777777777777",
         name: "docs",
         has_token: false,
+        health: health({ status: "healthy" }),
+      }),
+      workspaceMcpServer({
+        id: "88888888-8888-8888-8888-888888888888",
+        name: "wiki",
+        has_token: false,
+        health: null,
       }),
     ]
     mockApi({ servers })
@@ -358,6 +368,8 @@ describe("WorkspaceMcpServersCard", () => {
     expect(within(rowOf("linear")).getByText("Not set up")).toBeVisible()
     // A server that answers without an account has none to set up.
     expect(within(rowOf("docs")).getByText("No account needed")).toBeVisible()
+    // One never checked has said neither.
+    expect(within(rowOf("wiki")).getByText("No account set up")).toBeVisible()
   })
 
   it("reads an empty allow-list as admitting no tool, the way the gateway does", async () => {
@@ -1219,6 +1231,50 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       within(dialog).queryByRole("button", { name: "Back" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("unmounts the catalog when it closes, so its checks stop with it", async () => {
+    const sentry = mcpCatalogServer()
+    const calls = mockApi({
+      requests: [
+        {
+          catalog_name: sentry.name,
+          title: sentry.title,
+          url: sentry.url,
+          catalog_server: sentry,
+          requesters: [],
+          requester_count: 1,
+          first_requested_at: "2026-11-10T09:00:00+00:00",
+        },
+      ],
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const user = userEvent.setup()
+    renderCard(undefined, undefined, client)
+    const probes = () =>
+      client.getQueryCache().findAll({
+        predicate: (query) => query.queryKey.includes("mcp-server-probe"),
+      })
+
+    await user.click(await screen.findByRole("button", { name: "Add Sentry" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Add Sentry to Alpha",
+    })
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.url.endsWith("/mcp-servers/check")),
+      ).toBe(true),
+    )
+    expect(probes().map((query) => query.getObserversCount())).toEqual([1])
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+    expect(probes().map((query) => query.getObserversCount())).toEqual([0])
   })
 
   it("shows no Requests block while nobody is waiting, and asks for none without the catalog", async () => {
