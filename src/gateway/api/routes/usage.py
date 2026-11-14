@@ -310,6 +310,9 @@ async def get_request_settlement(
 ) -> RequestSettlement:
     """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
 
+    That is the response header, not the ``id`` in a response body
+    (``chatcmpl-...``), which the provider assigns and Otari does not record.
+
     This is how a caller recovers the cost of a request whose response never
     carried one: a stream that failed or was disconnected mid-response, or a
     request that errored. An API key sees only the requests it made; the master
