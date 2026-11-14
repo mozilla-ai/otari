@@ -10,8 +10,8 @@ function options(readTools: readonly string[]): RadioOption[] {
       label: "Read tools only",
       description:
         readTools.length > 0
-          ? `The tools labeled read on this server, now ${readTools.join(", ")}`
-          : "No tool is labeled read on this server yet, so this allows nothing until one is.",
+          ? `Allows the ${readTools.length} ${readTools.length === 1 ? "tool" : "tools"} labeled read on this server.`
+          : "Allows nothing yet: no tool is labeled read on this server.",
     },
     { value: "some", label: "Allow specific tools…" },
     { value: "none", label: "Deny" },
@@ -32,8 +32,12 @@ export function AccessChooser({
   picked,
   onChange,
   tools,
+  descriptions,
+  isKnown,
   readTools,
   isDisabled = false,
+  onCheck,
+  isChecking,
 }: {
   label: string
   mode: AccessMode
@@ -41,6 +45,12 @@ export function AccessChooser({
   onChange: (mode: AccessMode, picked: string[]) => void
   /** What the server's last check listed, to tick from. */
   tools: readonly string[]
+  descriptions?: Readonly<Record<string, string>>
+  /** Whether a passing check listed them; typed names only until one has. */
+  isKnown: boolean
+  /** Runs the server's check, offered while its tools are not known. */
+  onCheck?: () => void
+  isChecking?: boolean
   /** The tools labeled read on the server, which "read" stands for. */
   readTools: readonly string[]
   isDisabled?: boolean
@@ -59,6 +69,10 @@ export function AccessChooser({
           <ToolChecklist
             label={`${label}: tools matched`}
             tools={tools}
+            descriptions={descriptions}
+            isKnown={isKnown}
+            onCheck={onCheck}
+            isChecking={isChecking}
             selected={picked}
             onChange={(next) => onChange("some", next)}
             isDisabled={isDisabled}

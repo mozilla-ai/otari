@@ -740,6 +740,8 @@ export type GuardrailTestResult =
 // `src/gateway/services/tenancy/workspace_mcp_server_service.py`. The stored
 // bearer token is write-only, so the public shape reports only `has_token`.
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
+export type WorkspaceMcpServerLogo = Schemas["WorkspaceMcpServerLogoPublic"]
+export type WorkspaceMcpServerLogos = Schemas["WorkspaceMcpServerLogosPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
 export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
 // A stored server's access list (`everyone_tools` and the grants that override
@@ -752,6 +754,9 @@ export type CreateWorkspaceMcpServerGrantsRequest =
 export type WorkspaceMcpServerAccessCheck =
   Schemas["WorkspaceMcpServerAccessCheck"]
 export type WorkspaceMcpServerKeyAccess = Schemas["WorkspaceMcpServerKeyAccess"]
+// The tools the caller may use on one server, under their own access rule.
+export type WorkspaceMcpServerMyTools = Schemas["WorkspaceMcpServerMyTools"]
+export type McpToolSummary = Schemas["McpToolSummary"]
 export type McpServerCheckFailure = Schemas["CheckFailure"]
 export type CheckWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCheckRequest"]
@@ -759,6 +764,29 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+export type McpCredentialMode = Schemas["McpCredentialMode"]
+export type McpConnection = Schemas["McpConnectionPublic"]
+export type McpConnections = Schemas["McpConnectionsPublic"]
+export type McpConnectionStarted = Schemas["McpConnectionStarted"]
+export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
+export type McpServerConnection = Schemas["McpServerConnectionPublic"]
+export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+
+// The catalog of remote MCP servers a workspace can add, the logos it knows,
+// and the sync that fills it from the MCP Registry.
+export type McpCatalogServer = Schemas["McpCatalogServerPublic"]
+export type McpCatalogServers = Schemas["McpCatalogServersPublic"]
+export type McpCatalogSyncStatus = Schemas["McpCatalogSyncStatus"]
+
+// A member asking a workspace's admins for a catalog server: the member's own
+// requests, and everyone waiting for one server as an admin sees them.
+export type McpServerRequest = Schemas["McpServerRequestPublic"]
+export type McpServerRequests = Schemas["McpServerRequestsPublic"]
+export type McpServerRequester = Schemas["McpServerRequesterPublic"]
+export type McpServerRequestGroup = Schemas["McpServerRequestGroupPublic"]
+export type McpServerRequestGroups = Schemas["McpServerRequestGroupsPublic"]
+export type CreateMcpServerRequest = Schemas["McpServerRequestCreate"]
+export type DeclineMcpServerRequests = Schemas["McpServerRequestDecline"]
 
 // ---------------------------------------------------------------------------
 // Playground

@@ -35,6 +35,7 @@ import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-exec
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
+import { Route as McpConnectionsCallbackRouteImport } from './routes/mcp-connections.callback'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -187,6 +188,11 @@ const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
   path: '/admin/web-search',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpConnectionsCallbackRoute = McpConnectionsCallbackRouteImport.update({
+  id: '/mcp-connections/callback',
+  path: '/mcp-connections/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -326,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -369,6 +376,7 @@ export interface FileRoutesByTo {
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -419,6 +427,7 @@ export interface FileRoutesById {
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -471,6 +480,7 @@ export interface FileRouteTypes {
     | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/mcp-connections/callback'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -514,6 +524,7 @@ export interface FileRouteTypes {
     | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/mcp-connections/callback'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -563,6 +574,7 @@ export interface FileRouteTypes {
     | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/mcp-connections/callback'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -612,6 +624,7 @@ export interface RootRouteChildren {
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
   AdminRecommenderRoute: typeof AdminRecommenderRoute
   AdminWebSearchRoute: typeof AdminWebSearchRoute
+  McpConnectionsCallbackRoute: typeof McpConnectionsCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -796,6 +809,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/web-search'
       fullPath: '/admin/web-search'
       preLoaderRoute: typeof AdminWebSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-connections/callback': {
+      id: '/mcp-connections/callback'
+      path: '/mcp-connections/callback'
+      fullPath: '/mcp-connections/callback'
+      preLoaderRoute: typeof McpConnectionsCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -1095,6 +1115,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminHostedProvidersRoute: AdminHostedProvidersRoute,
   AdminRecommenderRoute: AdminRecommenderRoute,
   AdminWebSearchRoute: AdminWebSearchRoute,
+  McpConnectionsCallbackRoute: McpConnectionsCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

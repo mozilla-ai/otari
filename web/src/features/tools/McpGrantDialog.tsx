@@ -5,6 +5,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Chip } from "@/design-system/indicators/Chip"
 import { AccessChooser } from "@/features/tools/AccessChooser"
+import { McpNotice } from "@/features/tools/McpNotice"
 import {
   type AccessMode,
   accessDraft,
@@ -33,7 +34,15 @@ export function McpGrantDialog({
   onOpenChange,
   users,
   editing,
+  initialUserIds = [],
+  initialQuery = "",
   tools,
+  descriptions,
+  isKnown,
+  onCheck,
+  isChecking,
+  checkError = "",
+  onDismissCheckError,
   readTools,
   isPending,
   error,
@@ -45,8 +54,21 @@ export function McpGrantDialog({
   users: readonly GrantUser[]
   /** The grant being changed, by who it is for and what it allows now. */
   editing?: { name: string; tools: string[] }
+  /** Users already ticked when the dialog opens, such as one picked from Connected users. */
+  initialUserIds?: readonly string[]
+  /** What the search starts with, so a preselected user is the one in view. */
+  initialQuery?: string
   /** What the server's last check listed, to tick from. */
   tools: readonly string[]
+  descriptions?: Readonly<Record<string, string>>
+  /** Whether a passing check listed them; typed names only until one has. */
+  isKnown: boolean
+  /** Runs the server's check, offered while its tools are not known. */
+  onCheck?: () => void
+  isChecking?: boolean
+  /** Why the last check started here could not run; `""` when it did. */
+  checkError?: string
+  onDismissCheckError?: () => void
   /** The tools a manager labeled read, which "Read tools only" allows. */
   readTools: readonly string[]
   isPending: boolean
@@ -56,9 +78,9 @@ export function McpGrantDialog({
   const seed = accessDraft(editing?.tools ?? ["*"])
   const [mode, setMode] = useState<AccessMode>(seed.mode)
   const [picked, setPicked] = useState<string[]>(seed.picked)
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useState(initialQuery)
   const [keyIds, setKeyIds] = useState<readonly string[]>([])
-  const [userIds, setUserIds] = useState<readonly string[]>([])
+  const [userIds, setUserIds] = useState<readonly string[]>(initialUserIds)
 
   const toggle = (
     list: readonly string[],
@@ -80,7 +102,7 @@ export function McpGrantDialog({
       description={
         editing
           ? undefined
-          : "Pick the sources: single keys, or users, which covers every key they own. Each gets this rule; one that already has a rule gets this one instead."
+          : "Pick keys or users. A user covers every key they own."
       }
       submitLabel={editing ? "Save rule" : "Add rule"}
       onSubmit={() => {
@@ -94,7 +116,11 @@ export function McpGrantDialog({
       isPending={isPending}
       isSubmitDisabled={!isComplete}
       isDirty={
-        picks > 0 || mode !== seed.mode || picked.join() !== seed.picked.join()
+        keyIds.length > 0 ||
+        userIds.length !== initialUserIds.length ||
+        userIds.some((id) => !initialUserIds.includes(id)) ||
+        mode !== seed.mode ||
+        picked.join() !== seed.picked.join()
       }
       error={error}
     >
@@ -164,11 +190,21 @@ export function McpGrantDialog({
           )}
         </div>
       )}
+      {checkError ? (
+        <McpNotice
+          message={checkError}
+          onDismiss={() => onDismissCheckError?.()}
+        />
+      ) : null}
       <AccessChooser
         label="Action"
         mode={mode}
         picked={picked}
         tools={tools}
+        descriptions={descriptions}
+        isKnown={isKnown}
+        onCheck={onCheck}
+        isChecking={isChecking}
         readTools={readTools}
         onChange={(nextMode, nextPicked) => {
           setMode(nextMode)

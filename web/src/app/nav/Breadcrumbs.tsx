@@ -1,7 +1,13 @@
+import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
 
-import { navContextForPath, pageLabelForPath } from "@/app/nav/registry"
+import {
+  navContextForPath,
+  navPageForPath,
+  pageLabelForPath,
+} from "@/app/nav/registry"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { useBreadcrumbLeafValue } from "@/shared/hooks/BreadcrumbLeaf"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
@@ -18,6 +24,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 export function Breadcrumbs({ pathname }: { pathname: string }) {
   const organization = useOrganizationContext()
   const { selected } = useSelectedWorkspace()
+  const leaf = useBreadcrumbLeafValue()
 
   const page = pageLabelForPath(pathname)
   const organizationName = organization.data?.organization?.name
@@ -48,11 +55,20 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
   const segments = trail.filter((one, index) => trail.indexOf(one) === index)
   if (segments.length === 0) return null
 
+  // A record's own page (one MCP server) ends on the record's name, with the
+  // destination before it linking back to the list it was opened from.
+  const parent = navPageForPath(pathname)
+  const linkTo =
+    leaf !== "" && parent !== undefined && pathname !== parent.to
+      ? parent.to
+      : undefined
+  if (linkTo !== undefined) segments.push(leaf)
+
   return (
     <nav aria-label="Breadcrumb" className="flex min-w-0 items-center">
       <ol className="flex min-w-0 items-center gap-1.5 text-sm">
         {segments.map((segment, index) => (
-          <Fragment key={segment}>
+          <Fragment key={`${index}:${segment}`}>
             {index > 0 ? (
               <li aria-hidden="true" className="text-muted">
                 /
@@ -66,7 +82,13 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
               }
               aria-current={index === segments.length - 1 ? "page" : undefined}
             >
-              {segment}
+              {linkTo !== undefined && index === segments.length - 2 ? (
+                <Link to={linkTo} className="hover:text-foreground">
+                  {segment}
+                </Link>
+              ) : (
+                segment
+              )}
             </li>
           </Fragment>
         ))}

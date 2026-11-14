@@ -228,6 +228,13 @@ export function formatUsdHeadline(value: number): string {
     : usdCompact.format(value)
 }
 
+const wholeCount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+
+/** A count in full, grouped: 24,108. */
+export function formatCount(value: number): string {
+  return wholeCount.format(value)
+}
+
 // Compact token counts for aggregate tiles: 12.4M / 84.2k / 512.
 export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`

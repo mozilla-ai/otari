@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import {
   accessMode,
-  defaultPolicySummary,
   isLiteralToolName,
+  isToolPattern,
   keyAccessLabel,
   patternMatches,
   ruleAction,
   ruleTools,
   toolsFor,
+  toolsMatching,
   verdictLabel,
 } from "@/features/tools/mcpAccess"
 
@@ -30,21 +31,17 @@ describe("mcpAccess", () => {
     expect(ruleTools(["@read", "create_issue"])).toBe(
       "read tools, create_issue",
     )
-    expect(defaultPolicySummary(["@read"])).toBe("DEFAULT: READ TOOLS")
     // The preset is the server's labels, which a name cannot match by spelling.
     expect(patternMatches("@read", "@read")).toBe(false)
   })
 
-  it("reads a rule as its tools and action, and the default policy for the list", () => {
+  it("reads a rule as its tools and action", () => {
     expect([ruleTools(["*"]), ruleAction(["*"])]).toEqual(["Any", "ALLOW"])
     expect([ruleTools([]), ruleAction([])]).toEqual(["Any", "DENY"])
     expect([ruleTools(["a", "b"]), ruleAction(["a", "b"])]).toEqual([
       "a, b",
       "ALLOW",
     ])
-    expect(defaultPolicySummary(["*"])).toBe("DEFAULT: ALLOW")
-    expect(defaultPolicySummary([])).toBe("DEFAULT: DENY")
-    expect(defaultPolicySummary(["a"])).toBe("DEFAULT: ALLOW 1 TOOL")
   })
 
   it("matches names and prefix patterns", () => {
@@ -157,4 +154,20 @@ describe("isLiteralToolName", () => {
       expect(isLiteralToolName(name)).toBe(false)
     },
   )
+})
+
+describe("toolsMatching", () => {
+  const tools = ["create_issue", "create_pr", "list_issues"]
+
+  it("reads a pattern, a star and a name the way the gateway does", () => {
+    expect(toolsMatching("create_*", tools)).toEqual([
+      "create_issue",
+      "create_pr",
+    ])
+    expect(toolsMatching("*", tools)).toEqual(tools)
+    expect(toolsMatching("list_issues", tools)).toEqual(["list_issues"])
+    expect(toolsMatching("delete_*", tools)).toEqual([])
+    expect(isToolPattern("create_*")).toBe(true)
+    expect(isToolPattern("create")).toBe(false)
+  })
 })
