@@ -149,8 +149,8 @@ an owner/admin of that workspace.
   approves the requests for it. Every list takes `skip` and `limit`: `GET
   /mine` pages the caller's requests (50 by default, at most 100); `GET` pages
   the servers asked for (100 by default and at most), naming the first five
-  requesters of each with `requester_count` for how many asked, and `count` for
-  how many wait in all; and `GET /requesters?catalog_name=...` pages one
+  requesters of each with `requester_count` for how many asked, `count` for
+  how many wait in all and `server_count` for how many servers they ask for; and `GET /requesters?catalog_name=...` pages one
   server's requesters (100 by default and at most). See
   [Answer members' requests](mcp-servers.md#answer-members-requests).
 - `attach_by_default` (default `false`) adds the server to every model request
@@ -339,7 +339,7 @@ or the master key:
 | `POST /mcp-connections/{server_id}` | Starts your sign-in and returns `authorization_url`. Takes an optional `return_to`, a dashboard path to land on afterwards | Any member who can see the workspace |
 | `GET /mcp-connections` | Lists your own connections in the workspace | Any member who can see the workspace |
 | `DELETE /mcp-connections/{server_id}` | Ends your connection, and asks the authorization server to revoke its tokens | Any member who can see the workspace |
-| `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count` | Workspace or organization owners and admins |
+| `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count`: the caller's own connection first, then the rest oldest first | Workspace or organization owners and admins |
 | `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
 
 A sign-in started here is single-use, expires after ten minutes, and finishes
