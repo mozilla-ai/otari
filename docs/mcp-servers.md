@@ -81,7 +81,8 @@ Two columns say how each server signs in and what stands behind that:
 - **Sign-in** is **Shared account**, one account for the whole workspace, or
   **Personal accounts**, each member's own.
 - **Connections** depends on which. A shared server reads **Set up**, **Not set
-  up**, or **No account needed** when it answers without one. A personal server
+  up**, **No account needed** when its last check got an answer without one, or
+  **No account set up** while no check has. A personal server
   reads how many members connected their own account, such as **3 members** or
   **No one yet**, and ends in **including you** when you are one of them.
 

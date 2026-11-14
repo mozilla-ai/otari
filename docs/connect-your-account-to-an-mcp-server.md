@@ -237,3 +237,8 @@ connection is removed and the page says **Not connected** again. Click
 Otari only learns this when it next renews your sign-in. Until then the page can
 still say **Connected** while calls to the server fail. Click **Reconnect** to
 sign in again straight away.
+
+Some servers give Otari nothing to renew with. The server's page then says
+you'll need to connect again when the sign-in expires. Once it has, **Your
+account** reads **Your sign-in has expired**; click **Sign in again** there, or at
+the top of the server's page if you are an owner or admin.
