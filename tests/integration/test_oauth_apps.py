@@ -268,18 +268,48 @@ def test_an_approval_naming_scopes_a_key_could_not_hold_is_refused_not_a_server_
     assert refused.status_code == 400, refused.text
 
 
-def test_a_registration_that_moved_while_the_person_read_it_refuses_the_approval(
-    client: TestClient, world: _World, test_config: GatewayConfig
+def test_a_registration_widened_while_the_person_read_it_issues_what_they_saw(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
 ) -> None:
-    """The consent screen is served before Approve, so the approval says what it showed."""
+    """The consent screen is drawn before Approve, so a scope added in between was never consented to."""
     test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
         name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN, KeyScope.FILES_WRITE]
     )
 
-    refused = approve(client, world)
+    assert redeem(client, code_from(approve(client, world))).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
+
+
+def test_a_registration_narrowed_while_the_person_read_it_issues_what_is_left(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
+) -> None:
+    """Removing a scope from a registration is the operator narrowing the app, not breaking it."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN]
+    )
+
+    approved = approve(client, world, scopes=["inference:run", "usage:read"])
+
+    assert redeem(client, code_from(approved)).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
+
+
+def test_an_approval_sharing_no_scope_with_the_registration_is_refused(
+    client: TestClient, world: _World, test_config: GatewayConfig
+) -> None:
+    """Nothing is left to issue, and a key with no scope is not one."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.FILES_WRITE]
+    )
+
+    refused = approve(client, world, scopes=["inference:run"])
 
     assert refused.status_code == 400, refused.text
-    assert "changed while you were approving" in refused.text, refused.text
+    assert "changed while you were approving" in refused.text
 
 
 def test_widening_a_registration_does_not_widen_an_approval_already_given(
