@@ -180,6 +180,16 @@ def _is_any_web_fetch_tool_type(type_value: Any) -> bool:
     return _is_web_fetch_tool_type(type_value) or is_provider_web_fetch_tool_type(type_value)
 
 
+def declares_web_search(tools: list[dict[str, Any]] | None) -> bool:
+    """Whether ``tools`` asks for a web search in any vocabulary, the gateway's or a provider's."""
+    return any(isinstance(entry, dict) and _is_any_web_search_tool_type(entry.get("type")) for entry in tools or [])
+
+
+def declares_web_fetch(tools: list[dict[str, Any]] | None) -> bool:
+    """Whether ``tools`` asks for a web fetch in any vocabulary, the gateway's or a provider's."""
+    return any(isinstance(entry, dict) and _is_any_web_fetch_tool_type(entry.get("type")) for entry in tools or [])
+
+
 def first_provider_web_fetch_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The first provider-named web-fetch declaration in ``tools``, if any."""
     return first_matching_tool(tools, is_provider_web_fetch_tool_type)

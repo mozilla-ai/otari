@@ -720,6 +720,8 @@ _CORS_EXPOSE_HEADERS = (
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
     USAGE_UNITS_HEADER,
+    # The scope a refused key lacks, which a browser client cannot read unexposed.
+    "WWW-Authenticate",
 )
 # The model endpoints ``cors_inference_origins`` opens to a browser: each one
 # takes an API key and calls a model, except the model list a page reads to

@@ -14,6 +14,7 @@ import type {
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOwnKeyRequest,
+  KeyScope,
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
   User,
@@ -99,6 +100,11 @@ import {
   keyBudgetIncomplete,
   useKeyBudgets,
 } from "./KeyBudgetField"
+import {
+  DEFAULT_KEY_SCOPES,
+  heldScopes,
+  KeyScopeFields,
+} from "./KeyScopeFields"
 import {
   NO_SERVICE_KEY,
   ServiceKeyFields,
@@ -485,6 +491,13 @@ function CreateKeyDialog({
   const organizationContext = useOrganizationContext()
   const offersServiceKey =
     isDeploymentWide || canManage(organizationContext.data)
+  const [keyScopes, setKeyScopes] = useState<KeyScope[]>([
+    ...DEFAULT_KEY_SCOPES,
+  ])
+  const scopes = heldScopes(
+    keyScopes,
+    offersServiceKey && serviceKey.isServiceKey,
+  )
   const serviceKeyScope = isDeploymentWide ? "deployment" : "organization"
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
@@ -529,6 +542,7 @@ function CreateKeyDialog({
   const budgetIncomplete =
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
+    scopes.length === 0 ||
     !scopeValid ||
     !toolScopeValid ||
     !serviceKeyReady ||
@@ -554,6 +568,7 @@ function CreateKeyDialog({
     allowedTools,
     excludeFromBudget,
     serviceKey,
+    keyScopes,
     rejectUserMismatch,
     scopeValid,
     toolScopeValid,
@@ -570,6 +585,7 @@ function CreateKeyDialog({
     setToolScopeValid(true)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
+    setKeyScopes([...DEFAULT_KEY_SCOPES])
     setRejectUserMismatch("inherit")
     setScopeValid(true)
     setBudgetDraft(EMPTY_KEY_BUDGET)
@@ -602,6 +618,7 @@ function CreateKeyDialog({
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
       allowed_tools: allowedTools ?? null,
+      scopes,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface derives the owner and refuses a budget exemption, so
@@ -746,6 +763,11 @@ function CreateKeyDialog({
           isExempt={excludeFromBudget}
         />
       ) : null}
+      <KeyScopeFields
+        value={keyScopes}
+        onChange={setKeyScopes}
+        isServiceKey={offersServiceKey && serviceKey.isServiceKey}
+      />
       <button
         type="button"
         className="self-start text-xs font-medium text-link hover:text-link-hover"
@@ -900,6 +922,7 @@ function EditKeyForm({
     apiKey.exclude_from_budget,
   )
   const [serviceKey, setServiceKey] = useState(() => serviceKeyChoice(apiKey))
+  const [keyScopes, setKeyScopes] = useState<KeyScope[]>(apiKey.scopes)
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>(
       userMismatchChoice(apiKey.reject_user_mismatch),
@@ -917,6 +940,10 @@ function EditKeyForm({
     showsServiceKey ? serviceKey : NO_SERVICE_KEY,
     serviceKeyScope,
   )
+  const isServiceKey = showsServiceKey
+    ? serviceKey.isServiceKey
+    : apiKey.is_service_key
+  const scopes = heldScopes(keyScopes, isServiceKey)
   const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
     expiresAt,
@@ -924,6 +951,7 @@ function EditKeyForm({
     allowedTools,
     excludeFromBudget,
     serviceKey,
+    keyScopes,
     rejectUserMismatch,
     scopeValid,
     toolScopeValid,
@@ -943,6 +971,7 @@ function EditKeyForm({
       allowedTools: apiKey.allowed_tools ?? undefined,
       excludeFromBudget: apiKey.exclude_from_budget,
       serviceKey: serviceKeyChoice(apiKey),
+      keyScopes: apiKey.scopes,
       rejectUserMismatch: userMismatchChoice(apiKey.reject_user_mismatch),
       scopeValid: true,
       toolScopeValid: true,
@@ -956,6 +985,7 @@ function EditKeyForm({
     !excludeFromBudget &&
     budgetDraft.choice !== initialBudget?.choice
   const isBlocked =
+    scopes.length === 0 ||
     !scopeValid ||
     !toolScopeValid ||
     !serviceKeyReady ||
@@ -969,6 +999,7 @@ function EditKeyForm({
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
       allowed_tools: allowedTools ?? null,
+      scopes,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
@@ -1048,6 +1079,11 @@ function EditKeyForm({
           }
         />
       ) : null}
+      <KeyScopeFields
+        value={keyScopes}
+        onChange={setKeyScopes}
+        isServiceKey={isServiceKey}
+      />
       {isDeploymentWide && apiKey.user_id ? (
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}

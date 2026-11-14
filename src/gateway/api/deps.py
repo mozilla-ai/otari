@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import (
@@ -28,6 +29,7 @@ from gateway.core.database import DATABASE_ERRORS, create_session, describe_data
 from gateway.core.feature import CoreFeature
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
 from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
@@ -248,6 +250,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     workspace_for_key_id,
 )
+from gateway.types.key_scope import END_USER_SCOPES
 from gateway.types.tool_charges import RateKey
 from gateway.types.traces import (
     ContentCapture,
@@ -263,6 +266,9 @@ from gateway.types.traces import (
 # falls back to this shim for callers that set it directly (see ``set_config``).
 _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
+
+# How a key that is not a service key is refused where only a service key may go.
+SERVICE_KEY_REQUIRED_DETAIL = "This endpoint requires a service key."
 
 AUTH_FAILURES = Counter(
     "gateway_auth_failures",
@@ -544,14 +550,42 @@ async def _verify_credential(request: Request, db: AsyncSession, token: str, con
 
     With federation on, the prefix of an access token or the shape of a JWT routes it before anything is parsed:
     an access token, then a raw identity token, which only an operator's rule on an allow-listed issuer can match.
-    Everything else is a key secret.
+    Everything else is a key secret. A key that authenticates is then held to the scope the route declares.
     """
-    if config.federation_enabled:
-        if is_access_token(token):
-            return await _verify_access_token(db, token, config)
-        if config.federation_issuers and unverified_issuer(token) is not None:
-            return await _verify_federated_token(request, db, token, config)
-    return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
+    if config.federation_enabled and is_access_token(token):
+        api_key = await _verify_access_token(db, token, config)
+    elif config.federation_enabled and config.federation_issuers and unverified_issuer(token) is not None:
+        api_key = await _verify_federated_token(request, db, token, config)
+    else:
+        api_key = await _verify_and_update_api_key(db, token, _api_key_format(request, db))
+    _require_route_scope(request, api_key)
+    return api_key
+
+
+def _require_route_scope(request: Request, api_key: APIKey) -> None:
+    """Refuse ``api_key`` on the matched route unless it holds the scope the route declares.
+
+    A route that declares none is refused to every key: it was added without
+    saying which scope it needs, and failing closed is what keeps a new route
+    from being reachable by every key until someone notices.
+    """
+    route = request.scope.get("route")
+    required = declared_key_scope(route)
+    if isinstance(required, UndeclaredKeyScope):
+        record_auth_failure("undeclared_key_scope")
+        logger.error("Refused an API key on %s, which declares no key scope", getattr(route, "path", "?"))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This endpoint does not accept API keys.")
+    if required in END_USER_SCOPES and not api_key.is_service_key:
+        # Said this way because no scope would help: only a service key may hold this one.
+        record_auth_failure("not_service_key")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SERVICE_KEY_REQUIRED_DETAIL)
+    if required is not None and required not in api_key.scopes:
+        record_auth_failure("missing_key_scope")
+        logger.info(
+            "Refused API key %s on %s: it lacks the %s scope", api_key.id, getattr(route, "path", "?"), required
+        )
+        missing = KeyScopeMissingError(required, "this endpoint")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=missing.message, headers=missing.challenge)
 
 
 async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
@@ -742,10 +776,7 @@ async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]
     """
     if not api_key.is_service_key or not api_key.user_id:
         record_auth_failure("not_service_key")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires a service key.",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SERVICE_KEY_REQUIRED_DETAIL)
     return api_key
 
 

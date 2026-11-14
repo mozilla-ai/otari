@@ -19,6 +19,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import PassthroughOutcome, run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
@@ -34,6 +35,7 @@ from gateway.services.inference import InferenceService, image_billing, image_qu
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["images"])
 
@@ -64,7 +66,7 @@ class ImageGenerationRequest(derive_request_base(ImageGenerationParams)):  # typ
     response_format: str | None = None
 
 
-@router.post("/images/generations", response_model=None)
+@router.post("/images/generations", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_image(
     raw_request: Request,
     response: Response,
@@ -241,9 +243,10 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
         413: {"description": f"The upload is larger than {_MAX_EDIT_UPLOAD_BYTES // (1024 * 1024)} MB."},
         422: {"description": "A required field is missing, or a field is the wrong type."},
     },
-    openapi_extra={
-        "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": _EDIT_UPLOAD_SCHEMA}}}
-    },
+    openapi_extra=key_scope(
+        KeyScope.INFERENCE_RUN,
+        requestBody={"required": True, "content": {"multipart/form-data": {"schema": _EDIT_UPLOAD_SCHEMA}}},
+    ),
 )
 async def edit_image(
     raw_request: Request,

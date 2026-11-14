@@ -33,7 +33,7 @@ from gateway.core.database import release_session
 from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 
 @pytest.fixture
@@ -155,7 +155,9 @@ def test_files_are_user_scoped(
     # not per-key, and keys created without a user_id all share the "default" user
     # (see keys.py / get_or_create_default_user), so give this key its own owner.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
@@ -181,7 +183,9 @@ def test_no_owner_keys_share_default_user_files(
     up = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
-    sibling = client.post(f"{API_ROOT}/keys", json={"key_name": "sibling"}, headers=master_key_header)
+    sibling = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "sibling"}, headers=master_key_header
+    )
     sibling_header = {next(iter(api_key_header)): f"Bearer {sibling.json()['key']}"}
 
     assert client.get(f"{API_ROOT}/files/{file_id}", headers=sibling_header).status_code == 200
@@ -310,6 +314,99 @@ def test_file_id_extracted_reaches_provider(
     assert "report.txt" in sent
     # ...and the raw file block did not (it was replaced by a text block).
     assert "file_id" not in sent
+
+
+def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model given a file can repeat it, so attaching one reads it: an inference-only key is refused.
+
+    The refusal names the scope, as every other missing-scope refusal does, rather
+    than answering without the file and leaving the caller to notice.
+    """
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("report.txt", b"quarterly numbers", "text/plain")},
+    )
+    assert up.status_code == 200, up.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+    assert client.get(f"{API_ROOT}/files/{up.json()['id']}/content", headers=api_key_header).status_code == 403
+    reached_provider = False
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        nonlocal reached_provider
+        reached_provider = True
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": up.json()["id"]}}]}],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 403, resp.text
+    assert "files:read" in resp.json()["detail"]
+    assert not reached_provider
+
+
+def test_a_key_without_files_read_still_sends_back_a_code_execution_result(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """Otari names the files a code run produced by id, and a client echoes that turn back as history.
+
+    Those ids are output, not an attachment the model reads, so the refusal must
+    not fire on them: the second turn of a run would otherwise be refused where
+    the first succeeded.
+    """
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "code_execution_tool_result",
+                        "content": {
+                            "type": "code_execution_result",
+                            "content": [{"type": "code_execution_output", "file_id": "file_produced"}],
+                        },
+                    }
+                ],
+            },
+            {"role": "user", "content": "and now plot it"},
+        ],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 200, resp.text
 
 
 def test_budget_rejection_skips_normalization(
@@ -663,7 +760,9 @@ def test_anthropic_listing_pages_with_next_page(
 
     # A token issued to another user names a file this caller cannot see.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     other_headers = {next(iter(api_key_header)): f"Bearer {other.json()['key']}", **_ANTHROPIC}
     _upload_text_files(client, other_headers, 2)

@@ -33,16 +33,22 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request, Response
 
 from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS, answer_direct_tool_call
 from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import FetchRequest, FetchResponse
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["fetch"])
 
 FETCH_ENDPOINT = "/v1/fetch"
 
 
-@router.post("/fetch", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
+@router.post(
+    "/fetch",
+    responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
+    openapi_extra=key_scope(KeyScope.WEB_FETCH),
+)
 async def create_fetch(
     raw_request: Request,
     response: Response,
@@ -83,7 +89,11 @@ async def create_fetch(
     )
 
 
-@router.post("/fetch/{fetch_tool_name}", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
+@router.post(
+    "/fetch/{fetch_tool_name}",
+    responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
+    openapi_extra=key_scope(KeyScope.WEB_FETCH),
+)
 async def create_fetch_for_tool(
     raw_request: Request,
     response: Response,

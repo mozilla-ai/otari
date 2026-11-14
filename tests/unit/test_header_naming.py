@@ -59,6 +59,7 @@ INHERITED_HEADERS = {
 NOT_HEADERS = {
     "x-ai": "The xAI provider id.",
     "x-gzip": "A Content-Encoding token.",
+    "x-otari-key-scopes": "An OpenAPI specification extension, a prefix the specification requires.",
 }
 
 CLASSIFIED = INHERITED_HEADERS | NOT_HEADERS

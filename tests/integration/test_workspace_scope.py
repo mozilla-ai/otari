@@ -17,6 +17,8 @@ from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
 
+from .conftest import ALL_KEY_SCOPES
+
 
 def _default_workspace(client: TestClient, headers: dict[str, str]) -> str:
     context = client.get(f"{API_ROOT}/organizations/me", headers=headers).json()
@@ -30,7 +32,9 @@ def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> s
 
 
 def _create_key(client: TestClient, headers: dict[str, str], **body: Any) -> dict[str, Any]:
-    response = client.post(f"{API_ROOT}/keys", json={"key_name": "k", **body}, headers=headers)
+    response = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "k", **body}, headers=headers
+    )
     assert response.status_code == status.HTTP_200_OK, response.text
     payload: dict[str, Any] = response.json()
     return payload
@@ -174,7 +178,7 @@ def test_a_workspace_holding_request_plane_rows_cannot_be_deleted(
     ).json()
     client.post(
         f"{API_ROOT}/keys",
-        json={"user_id": "scoped-owner", "workspace_id": workspace["id"]},
+        json={"scopes": ALL_KEY_SCOPES, "user_id": "scoped-owner", "workspace_id": workspace["id"]},
         headers=master_key_header,
     )
 
@@ -196,6 +200,7 @@ def test_a_key_cannot_be_created_in_a_workspace_that_does_not_exist(
     response = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_KEY_SCOPES,
             "user_id": "no-such-workspace",
             "workspace_id": "00000000-0000-0000-0000-000000000000",
         },
@@ -351,13 +356,15 @@ def test_a_key_cannot_be_minted_into_another_organizations_workspace(
     _switch_to(client, master_key_header, other)
 
     response = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "cross-org", "workspace_id": home}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "cross-org", "workspace_id": home},
+        headers=master_key_header,
     )
 
     absent_id = "00000000-0000-0000-0000-000000000000"
     absent = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "no-such", "workspace_id": absent_id},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "no-such", "workspace_id": absent_id},
         headers=master_key_header,
     )
 

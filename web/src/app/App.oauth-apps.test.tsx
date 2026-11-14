@@ -55,6 +55,7 @@ beforeEach(() => {
       return {
         name: "Thunderbolt",
         issuer: "https://auth.otari.example",
+        scopes: ["inference:run"],
         redirect_uri: params.get("redirect_uri"),
       }
     if (path.startsWith("/oauth/apps/workspaces?"))
@@ -111,6 +112,7 @@ async function approveOriginalRequest() {
   expect(JSON.parse(String(request?.[1]?.body))).toEqual({
     ...Object.fromEntries(params),
     workspace_id: "workspace",
+    scopes: ["inference:run"],
   })
 }
 

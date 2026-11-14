@@ -12,14 +12,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 
 from gateway.api.deps import verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import DecisionScaffold, get_decision_scaffold
 from gateway.models.api_keys import APIKey
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["decisions"])
 
 
-@router.post("/decisions")
+@router.post("/decisions", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_decision(
     raw_request: Request,
     response: Response,
@@ -40,7 +42,7 @@ async def create_decision(
     return await scaffold.run(raw_request=raw_request, response=response, request=request, auth_result=auth_result)
 
 
-@router.post("/systemone")
+@router.post("/systemone", openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_systemone_decision(
     raw_request: Request,
     response: Response,

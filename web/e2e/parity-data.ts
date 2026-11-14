@@ -228,6 +228,7 @@ export async function seedParitySession(page: Page): Promise<void> {
       key_name: PARITY_SESSION.keyName,
       user_id: PARITY.users.light,
       exclude_from_budget: true,
+      scopes: ["telemetry:write"],
     },
   })
   await expectOk(key, "create the OTLP export key")

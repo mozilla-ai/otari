@@ -25,6 +25,7 @@ from gateway.rate_limit import RateLimiter
 from gateway.repositories.api_keys.api_key_repository import ApiKeyRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.types.key_scope import KeyScope
 
 from .conftest import shared_test_config
 from .test_organization_member_keys import _World
@@ -42,16 +43,21 @@ def test_config(postgres_url: str) -> GatewayConfig:
 
 
 def approve(
-    client: TestClient, world: _World, who: str = "alpha_member", workspace: str = "alpha_one", **changes: str
+    client: TestClient,
+    world: _World,
+    who: str = "alpha_member",
+    workspace: str = "alpha_one",
+    **changes: object,
 ) -> Response:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
-    body = dict(
+    body: dict[str, object] = dict(
         client_id="thunderbolt",
         redirect_uri=REDIRECT,
         state="s" * 43,
         code_challenge=pkce_challenge(VERIFIER),
         code_challenge_method="S256",
         workspace_id=str(world.workspaces[workspace]),
+        scopes=["inference:run"],
     )
     body.update(changes)
     return client.post(f"{API_ROOT}/oauth/apps/authorize", json=body, headers={"Sec-Fetch-Site": "same-origin"})
@@ -96,6 +102,8 @@ def test_approved_key_is_owned_budget_enforced_and_single_use(
         assert key.workspace_id == world.workspaces["alpha_one"]
         assert key.self_service and not key.exclude_from_budget and not key.is_service_key
         assert key.metadata_["oauth_client_id"] == "thunderbolt"
+        # The registration names no scopes, so the key calls models and nothing else.
+        assert key.scopes.stored == ["inference:run"]
         assert db.scalars(select(OAuthAppGrant)).first() is None
     assert redeem(client, code).status_code == 400
     headers = {"Authorization": f"Bearer {result.json()['access_token']}"}
@@ -252,6 +260,84 @@ def test_removed_app_cannot_exchange_a_pending_approval(
     code = code_from(approve(client, world))
     test_config.oauth_apps.clear()
     assert redeem(client, code).status_code == 400
+
+
+def test_an_approval_naming_no_scopes_is_refused_not_a_server_error(client: TestClient, world: _World) -> None:
+    """The approval's scopes are the caller's, so a list a key could not hold is a refusal, not a fault."""
+    refused = approve(client, world, scopes=[])
+
+    assert refused.status_code == 400, refused.text
+
+
+def test_an_approval_naming_a_scope_no_app_key_may_hold_drops_it(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """An end-user scope cannot survive the intersection, because no app registration may name one."""
+    approved = approve(client, world, scopes=["inference:run", "end-users:read"])
+
+    assert redeem(client, code_from(approved)).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
+
+
+def test_a_registration_widened_while_the_person_read_it_issues_what_they_saw(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
+) -> None:
+    """The consent screen is drawn before Approve, so a scope added in between was never consented to."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN, KeyScope.FILES_WRITE]
+    )
+
+    assert redeem(client, code_from(approve(client, world))).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
+
+
+def test_a_registration_narrowed_while_the_person_read_it_issues_what_is_left(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
+) -> None:
+    """Removing a scope from a registration is the operator narrowing the app, not breaking it."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN]
+    )
+
+    approved = approve(client, world, scopes=["inference:run", "usage:read"])
+
+    assert redeem(client, code_from(approved)).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
+
+
+def test_an_approval_sharing_no_scope_with_the_registration_is_refused(
+    client: TestClient, world: _World, test_config: GatewayConfig
+) -> None:
+    """Nothing is left to issue, and a key with no scope is not one."""
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.FILES_WRITE]
+    )
+
+    refused = approve(client, world, scopes=["inference:run"])
+
+    assert refused.status_code == 400, refused.text
+    assert "changed while you were approving" in refused.text
+
+
+def test_widening_a_registration_does_not_widen_an_approval_already_given(
+    client: TestClient, world: _World, test_config: GatewayConfig, db_session_factory: Callable[[], Session]
+) -> None:
+    """The grant carries the scopes the person approved, so the exchange cannot read newer ones."""
+    code = code_from(approve(client, world))
+    test_config.oauth_apps["thunderbolt"] = OAuthAppConfig(
+        name="Thunderbolt", redirect_uris=[REDIRECT], scopes=[KeyScope.INFERENCE_RUN, KeyScope.FILES_WRITE]
+    )
+
+    assert redeem(client, code).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
 
 
 def test_expired_approvals_are_pruned_without_creating_keys(

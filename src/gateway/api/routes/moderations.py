@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -17,6 +18,7 @@ from gateway.services.budgets import count_estimate
 from gateway.services.inference import MODERATION_BILLING
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
@@ -48,7 +50,7 @@ def _map_unsupported_moderation(e: Exception) -> HTTPException | None:
     return None
 
 
-@router.post("/moderations", response_model=ModerationResponse)
+@router.post("/moderations", response_model=ModerationResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_moderation(
     raw_request: Request,
     response: Response,

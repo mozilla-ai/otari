@@ -29,9 +29,13 @@ class NormalizationTarget:
     an attachment moved to the provider ahead of the call uses the same key.
     ``client_country`` is the country the request comes from, None when no source
     knows it, which keeps such a side-call within ``provider_supported_countries``.
+    ``file_user_id`` is the user whose stored files a ``file_id`` resolves among,
+    and ``None`` for a request with no resolved user, which owns none.
+    ``may_read_files`` is whether the caller may resolve one at all.
     """
 
-    user_id: str
+    file_user_id: str | None
+    may_read_files: bool
     provider: LLMProvider | None
     model: str
     instance: str | None

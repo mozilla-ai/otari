@@ -36,7 +36,11 @@ cannot be deleted.
    names in the `Otari-End-User-Budget` header instead.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
-7. Click **Create key** and copy the key.
+7. To manage end users with the key (step 4), check the scopes it needs in the
+   **End users** group under **Access**. With only **Call models** checked, the
+   key makes model calls for its end users but cannot list, change or delete
+   them.
+8. Click **Create key** and copy the key.
 
 The key belongs to the organization, not to you:
 
@@ -53,6 +57,12 @@ spend of all its end users together, give the key its own spend ceiling (see
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
 [OpenAPI specification](public/openapi.json).
+
+A service key created without naming scopes can make model calls for its end
+users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
+the `end-users` [scopes](api-keys.md#scopes). Give the key only those it uses.
+Most services need `end-users:read` and `end-users:write`; `end-users:delete`
+also erases an end user's records, so leave it off a key that never deletes.
 
 ## 3. Name the end user on each request
 
@@ -176,9 +186,13 @@ The cap holds across replicas.
 
 ## End-user routes
 
-All of these take only the service key. Another API key, the master key and a
-dashboard session are refused, and so is a service key whose own user is blocked
-or deleted.
+All of these take only the service key, holding the `end-users` scope each
+route names below. Another API key, the master key and a dashboard session are
+refused, and so is a service key whose own user is blocked or deleted.
+
+- `GET` routes need `end-users:read`.
+- `PUT` and `PATCH` routes need `end-users:write`.
+- `DELETE` routes need `end-users:delete`.
 
 | Request | Does |
 |---|---|

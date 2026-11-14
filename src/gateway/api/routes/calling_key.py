@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from gateway.api.deps import BudgetServiceDep, CallingKey, UsageServiceDep, get_config, verify_api_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes.usage import (
     _COUNTS_DESC,
     _DIMENSIONS_DESC,
@@ -46,6 +47,7 @@ from gateway.schemas.usage_and_telemetry import (
     UsageSummary,
 )
 from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, parse_tag_filters
+from gateway.types.key_scope import KeyScope
 
 # An API key and nothing else, declared on the router so a route added here inherits it.
 router = APIRouter(prefix="/key", tags=["key"], dependencies=[Depends(verify_api_key)])
@@ -56,7 +58,7 @@ def _own_rows(api_key: APIKey) -> UsageScope:
     return UsageScope(workspaces=[api_key.workspace_id], api_key_id=api_key.id)
 
 
-@router.get("/budget")
+@router.get("/budget", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_budget(
     api_key: CallingKey,
     budgets: BudgetServiceDep,
@@ -75,7 +77,7 @@ async def get_key_budget(
     return await budgets.key_budget(api_key, strategy=config.budget_strategy)
 
 
-@router.get("/usage/summary")
+@router.get("/usage/summary", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_usage_summary(
     api_key: CallingKey,
     usage: UsageServiceDep,
@@ -123,7 +125,7 @@ async def get_key_usage_summary(
     )
 
 
-@router.get("/usage/series")
+@router.get("/usage/series", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_usage_series(
     api_key: CallingKey,
     usage: UsageServiceDep,

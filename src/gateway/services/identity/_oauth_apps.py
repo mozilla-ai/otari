@@ -22,6 +22,7 @@ from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppDetails, AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
+from gateway.types.key_scope import KeyScopeSet
 
 
 def _code_hash(code: str) -> str:
@@ -60,8 +61,14 @@ class OAuthAppService:
         return self.apps[client_id].name
 
     def details(self, client_id: str, redirect_uri: str) -> AppDetails:
+        """What the consent screen shows: the app, where it returns, and what its keys will hold."""
         self.require_registered_redirect(client_id, redirect_uri)
-        return AppDetails(name=self._app_name(client_id), redirect_uri=redirect_uri, issuer=self.issuer)
+        return AppDetails(
+            name=self._app_name(client_id),
+            redirect_uri=redirect_uri,
+            issuer=self.issuer,
+            scopes=self.apps[client_id].scopes,
+        )
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
@@ -69,8 +76,22 @@ class OAuthAppService:
         return self.ui_link("/#/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
-        """Record explicit consent without leaving an active key for an abandoned approval."""
+        """Record explicit consent, for the scopes the screen showed that the registration still names.
+
+        Raises:
+            OAuthAppGrantError: the registration and the screen share no scope.
+        """
         self.require_registered_redirect(request.client_id, request.redirect_uri)
+        registered = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
+        approved = registered & request.scopes
+        if not approved:
+            raise OAuthAppGrantError("invalid_scope", "The app's access changed while you were approving it")
+        if approved != registered:
+            logger.info(
+                "OAuth app approval narrowed: client_id=%s dropped=%s",
+                request.client_id,
+                ",".join(scope.value for scope in registered if scope not in approved),
+            )
         now = self.clock()
         code = secrets.token_urlsafe(32)
         async with self.uow:
@@ -89,13 +110,19 @@ class OAuthAppService:
                 challenge=request.code_challenge,
                 user_id=user.id,
                 workspace_id=workspace.id,
+                scopes=approved,
                 expires_at=now + timedelta(minutes=2),
             )
             await self.grants.prune_expired(now)
         return request.redirect_uri + "?" + urlencode({"code": code, "state": request.state, "iss": self.issuer})
 
-    async def exchange(self, request: AppTokenRequest) -> str:
-        """Consume the approval and mint its key atomically, under current membership and restrictions."""
+    async def exchange(self, request: AppTokenRequest) -> tuple[str, KeyScopeSet]:
+        """Consume the approval and mint its key atomically, under current membership and restrictions.
+
+        Returns:
+            The key and the scopes it holds, which the token response names because they can be
+            fewer than the app's registration.
+        """
         if request.client_id not in self.apps:
             # An unregistered client_id is whatever an unauthenticated caller sent, line breaks and
             # Rich markup included, so it never reaches the log.
@@ -109,7 +136,7 @@ class OAuthAppService:
             logger.warning("OAuth app exchange refused: client_id=%s reason=%s", request.client_id, str(exc))
             raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant") from None
 
-    async def _exchange(self, request: AppTokenRequest) -> str:
+    async def _exchange(self, request: AppTokenRequest) -> tuple[str, KeyScopeSet]:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
@@ -121,18 +148,25 @@ class OAuthAppService:
             )
             if grant is None:
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
+            held = grant.scopes
+            if not held:
+                # A grant written by a newer worker naming only scopes this one
+                # does not know. A partial overlap narrows to the known ones.
+                raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
             user = await self.organizations.hold_delegated_workspace_access(
                 user_id=grant.user_id, workspace_id=grant.workspace_id
             )
             if not await self.grants.consume(grant.code_hash, now):
                 raise OAuthAppGrantError("invalid_grant", "Authorization grant was already consumed")
-            return await self.keys.issue_app_key(
+            key = await self.keys.issue_app_key(
                 user=user,
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
                 app_name=self._app_name(request.client_id),
+                scopes=held,
                 key_format=self.key_format,
             )
+            return key, held
 
     async def revoke(self, token: str) -> None:
         """Revoke only the presented API key; an unknown token is a successful no-op."""

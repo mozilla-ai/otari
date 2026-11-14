@@ -33,6 +33,7 @@ from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.files_exceptions import (
     AttachedFileUnavailableError,
     InlineAttachmentsTooLargeError,
@@ -45,6 +46,7 @@ from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.providers import CountryNotServedError
 from gateway.services.vision import describe_image
+from gateway.types.key_scope import KeyScope
 from gateway.types.provider_account import ResolvedCredential
 
 WireFormat = Literal["openai", "anthropic", "responses"]
@@ -277,6 +279,7 @@ async def _resolve_from_ref(
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
 ) -> _Resolved | None:
@@ -289,6 +292,8 @@ async def _resolve_from_ref(
     filename = ref.get("filename")
     file_id = ref.get("file_id")
     if file_id and files is not None:
+        if not may_read_files:
+            raise KeyScopeMissingError(KeyScope.FILES_READ, "attaching a stored file")
         # A request with no resolved user owns no file, so it resolves nothing.
         scope = None if user_id is None else FileScope(user_id, workspace_id)
         staged = None if scope is None else await files.staged_upload(str(file_id), scope)
@@ -312,6 +317,7 @@ async def _classify(
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
@@ -327,6 +333,7 @@ async def _classify(
             block,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             read_bytes=not sandbox_requested and not provider_container,
         )
@@ -342,7 +349,9 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                )
                 if resolved:
                     return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -350,7 +359,9 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(block, files=files, user_id=user_id, workspace_id=workspace_id)
+            resolved = await _resolve_from_ref(
+                block, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+            )
             if resolved:
                 return resolved.source(_IMAGE)
         if isinstance(url, str):
@@ -370,12 +381,16 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                )
                 if resolved:
                     return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
+        resolved = await _resolve_from_ref(
+            ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+        )
         if resolved:
             return resolved.attachment()
         return None
@@ -610,6 +625,7 @@ async def _normalize_block(
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     upstream_user: str | None,
     client_country: str | None = None,
@@ -625,10 +641,15 @@ async def _normalize_block(
             fmt,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
         )
+    except KeyScopeMissingError:
+        # The caller may not read the file this block names, which is their
+        # answer rather than a block this pass could not make sense of.
+        raise
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
         if provider_container and _is_container_block(block, fmt):
@@ -714,6 +735,7 @@ async def normalize_messages(
     fmt: WireFormat,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
     client_country: str | None = None,
@@ -771,6 +793,7 @@ async def normalize_messages(
             stats,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
             client_country=client_country,

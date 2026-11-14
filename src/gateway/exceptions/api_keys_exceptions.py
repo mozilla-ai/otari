@@ -7,6 +7,7 @@ from gateway.exceptions import (
     TenancyValidationError,
 )
 from gateway.models.api_keys import DisabledReason
+from gateway.types.key_scope import KeyScope
 
 
 class DeclaredKeySecretInUseError(TenancyConflictError):
@@ -20,6 +21,22 @@ class DeclaredKeySecretInUseError(TenancyConflictError):
             f"the secret of declared key '{config_name}' already belongs to another key; "
             "choose a new secret or delete that key"
         )
+
+
+class KeyScopeMissingError(TenancyForbiddenError):
+    """The request's API key lacks the scope something the request asked for requires."""
+
+    def __init__(self, scope: KeyScope, what: str):
+        super().__init__(f"This API key lacks the '{scope.value}' scope, which {what} requires.")
+        self.scope = scope
+
+    @property
+    def challenge(self) -> dict[str, str]:
+        """The ``WWW-Authenticate`` header naming the scope, as RFC 6750 section 3.1 shapes it.
+
+        NOTE: the value is quoted, which is safe only while every scope is drawn from ``KeyScope``.
+        """
+        return {"WWW-Authenticate": f'Bearer error="insufficient_scope", scope="{self.scope.value}"'}
 
 
 class FederationIssuerNotAllowedError(TenancyValidationError):

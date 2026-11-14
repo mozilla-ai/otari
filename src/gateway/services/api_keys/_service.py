@@ -36,6 +36,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 
 class KeySummary(NamedTuple):
@@ -66,9 +67,21 @@ class ApiKeyService:
         return await self._keys.get_workspace_id_for_key(key_id)
 
     async def issue_app_key(
-        self, *, user: User, workspace_id: uuid.UUID, client_id: str, app_name: str, key_format: ApiKeyFormatPort
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        app_name: str,
+        scopes: Iterable[KeyScope],
+        key_format: ApiKeyFormatPort,
     ) -> str:
-        """Mint a budget-enforced app credential inside the caller's authority transaction."""
+        """Mint a budget-enforced app credential inside the caller's authority transaction.
+
+        Raises:
+            ValueError: ``scopes`` is empty or names one an app key may not hold.
+        """
+        held = KeyScopeSet.checked(scopes, is_service_key=False)
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
             raise AppKeyOwnerInactiveError
         key = key_format.mint()
@@ -81,6 +94,7 @@ class ApiKeyService:
             user_id=str(user.id),
             workspace_id=workspace_id,
             client_id=client_id,
+            scopes=held,
         )
         return key
 

@@ -1126,7 +1126,8 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
         captured.update(kwargs)
         await kwargs["normalize_messages"](
             NormalizationTarget(
-                user_id="user",
+                file_user_id="user",
+                may_read_files=True,
                 provider=None,
                 model="model",
                 instance=None,

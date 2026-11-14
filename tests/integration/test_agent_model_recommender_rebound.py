@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 MODULE = "probe_rebound_recommender"
 PROBE_BOOTSTRAP = """
@@ -217,7 +217,7 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
 
 
 def _key(client: TestClient) -> dict[str, Any]:
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "probe"}, headers=MASTER)
+    created = client.post(f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "probe"}, headers=MASTER)
     assert created.status_code == status.HTTP_200_OK, created.text
     key: dict[str, Any] = created.json()
     return key

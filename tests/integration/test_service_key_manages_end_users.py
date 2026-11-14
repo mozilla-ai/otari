@@ -19,7 +19,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.traces import Trace
 from gateway.models.users import User
 
-from .conftest import MODEL_NAME
+from .conftest import ALL_SERVICE_KEY_SCOPES, MODEL_NAME, all_scopes
 
 END_USERS = f"{API_ROOT}/end-users"
 END_USER_BUDGETS = f"{API_ROOT}/end-user-budgets"
@@ -60,7 +60,14 @@ def _budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
 
 def _key(client: TestClient, master_key_header: dict[str, str], owner: str, **settings: Any) -> dict[str, str]:
     created = client.post(
-        f"{API_ROOT}/keys", json={"key_name": owner, "user_id": owner, **settings}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={
+            "scopes": all_scopes(settings),
+            "key_name": owner,
+            "user_id": owner,
+            **settings,
+        },
+        headers=master_key_header,
     )
     assert created.status_code == 200, created.text
     return {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
@@ -271,7 +278,9 @@ def test_only_a_service_key_authenticates(client: TestClient, master_key_header:
 def test_an_inactive_service_key_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     _budgets(client, master_key_header)
     created = client.post(
-        f"{API_ROOT}/keys", json={"user_id": "mlpa", "is_service_key": True}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_SERVICE_KEY_SCOPES, "user_id": "mlpa", "is_service_key": True},
+        headers=master_key_header,
     ).json()
     client.patch(f"{API_ROOT}/keys/{created['id']}", json={"is_active": False}, headers=master_key_header)
     mlpa = {API_KEY_HEADER: f"Bearer {created['key']}"}
@@ -452,6 +461,7 @@ def test_two_keys_of_one_owner_count_their_own_budgets(client: TestClient, maste
     guests = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "mlpa-guest",
             "user_id": "mlpa",
             "is_service_key": True,
@@ -485,6 +495,7 @@ def test_moving_an_end_user_onto_a_capped_keys_budget_takes_a_place(
     capped = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "mlpa-guest",
             "user_id": "mlpa",
             "is_service_key": True,
@@ -533,7 +544,13 @@ def test_the_cap_is_read_and_changed_through_the_keys_api(
     _budgets(client, master_key_header)
     created = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "mlpa", "user_id": "mlpa", "is_service_key": True, "max_end_users": 10},
+        json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
+            "key_name": "mlpa",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "max_end_users": 10,
+        },
         headers=master_key_header,
     ).json()
     raised = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": 20}, headers=master_key_header)

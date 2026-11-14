@@ -25,6 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._guardrail_targets import responses_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
@@ -84,6 +85,7 @@ from gateway.services.tools import (
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["responses"])
@@ -421,7 +423,7 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 _ADAPTER = _ResponsesAdapter()
 
 
-@router.post("/responses", response_model=None)
+@router.post("/responses", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_response(
     raw_request: Request,
     response: FastAPIResponse,
@@ -462,7 +464,8 @@ async def create_response(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,

@@ -1356,3 +1356,47 @@ def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
     for who in ("alpha_member", "beta_owner"):
         code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-users")
         assert code == status.HTTP_404_NOT_FOUND, (who, body)
+
+
+# =============================================================================
+# Scopes: the same rules on the member surface
+# =============================================================================
+
+
+def test_a_member_key_calls_models_alone_unless_it_names_more(client: TestClient, world: _World) -> None:
+    code, plain = _create(client, world, "alpha_member", {"key_name": "plain"})
+    assert code == status.HTTP_200_OK, plain
+    code, wider = _create(
+        client, world, "alpha_member", {"key_name": "wider", "scopes": ["usage:read", "inference:run"]}
+    )
+    assert code == status.HTTP_200_OK, wider
+
+    assert plain["scopes"] == ["inference:run"]
+    assert wider["scopes"] == ["inference:run", "usage:read"]
+
+
+def test_a_member_narrows_their_own_key(client: TestClient, world: _World) -> None:
+    code, created = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["inference:run", "usage:read"]})
+    assert code == status.HTTP_200_OK, created
+    headers = {API_KEY_HEADER: f"Bearer {created['key']}"}
+    assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_200_OK
+
+    code, updated = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["inference:run"]}
+    )
+
+    assert code == status.HTTP_200_OK, updated
+    assert updated["scopes"] == ["inference:run"]
+    assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_a_member_cannot_give_a_plain_key_an_end_user_scope(client: TestClient, world: _World) -> None:
+    code, refused = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["end-users:delete"]})
+    assert code == status.HTTP_400_BAD_REQUEST, refused
+
+    code, created = _create(client, world, "alpha_member", {"key_name": "k"})
+    assert code == status.HTTP_200_OK, created
+    code, refused = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["end-users:read"]}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, refused

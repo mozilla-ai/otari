@@ -70,6 +70,8 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
+from .conftest import ALL_KEY_SCOPES
+
 pytestmark = pytest.mark.asyncio
 
 # A public IP literal, so the safety check never reaches a DNS resolver.
@@ -1474,7 +1476,13 @@ async def test_an_empty_allow_list_admits_no_tools(async_db: AsyncSession, check
 async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None = None) -> APIKey:
     if user_id is not None and await db.get(BillingUser, user_id) is None:
         db.add(BillingUser(user_id=user_id))
-    key = APIKey(id=str(uuid.uuid4()), workspace_id=workspace_id, key_hash=uuid.uuid4().hex, user_id=user_id)
+    key = APIKey(
+        id=str(uuid.uuid4()),
+        workspace_id=workspace_id,
+        key_hash=uuid.uuid4().hex,
+        user_id=user_id,
+        scopes=ALL_KEY_SCOPES,
+    )
     db.add(key)
     await db.flush()
     return key

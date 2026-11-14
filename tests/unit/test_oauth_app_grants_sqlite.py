@@ -10,6 +10,7 @@ import gateway.models  # noqa: F401 (registers the shared metadata)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.types.key_scope import KeyScopeSet
 
 
 @pytest.mark.asyncio
@@ -37,6 +38,7 @@ async def test_sqlite_grants_round_trip_and_expire_at_the_boundary() -> None:
                     challenge="v" * 43,
                     user_id=user.id,
                     workspace_id=workspace.id,
+                    scopes=KeyScopeSet.checked(["inference:run"], is_service_key=False),
                     expires_at=now + timedelta(minutes=2),
                 )
             async with uow:
@@ -59,6 +61,7 @@ async def test_sqlite_grants_round_trip_and_expire_at_the_boundary() -> None:
                     challenge="v" * 43,
                     user_id=user.id,
                     workspace_id=workspace.id,
+                    scopes=KeyScopeSet.checked(["inference:run"], is_service_key=False),
                     expires_at=now,
                 )
                 assert not await grants.consume("e" * 64, now)

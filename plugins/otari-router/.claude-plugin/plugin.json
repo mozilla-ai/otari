@@ -1,6 +1,6 @@
 {
   "name": "otari-router",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Asks an Otari gateway which model each Claude Code subagent should run on, and starts it there.",
   "author": {
     "name": "Mozilla AI",
@@ -21,7 +21,7 @@
     "otari_api_key": {
       "type": "string",
       "title": "Otari API key",
-      "description": "The key each recommendation is billed to.",
+      "description": "The key each recommendation is billed to. It needs the agents scope.",
       "sensitive": true,
       "required": true
     }

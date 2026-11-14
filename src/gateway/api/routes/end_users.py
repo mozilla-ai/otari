@@ -25,6 +25,7 @@ from gateway.api.deps import (
     TraceServiceDep,
     verify_service_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import erase_user_records
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.models.api_keys import APIKey
@@ -38,6 +39,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.traces import TraceService
+from gateway.types.key_scope import KeyScope
 
 
 async def _require_available_owner(api_key: ServiceKey, budgets: BudgetServiceDep) -> None:
@@ -64,7 +66,7 @@ ExternalIdFilter = Annotated[
 ]
 
 
-@router.get("")
+@router.get("", openapi_extra=key_scope(KeyScope.END_USERS_READ))
 async def list_end_users(
     response: Response,
     api_key: ServiceKey,
@@ -97,6 +99,7 @@ async def list_end_users(
 @router.put(
     "",
     responses={status.HTTP_201_CREATED: {"model": EndUserPublic, "description": "The end user was created"}},
+    openapi_extra=key_scope(KeyScope.END_USERS_WRITE),
 )
 async def put_end_user_by_query(
     external_id: ExternalIdParam,
@@ -112,7 +115,7 @@ async def put_end_user_by_query(
     return await _put(external_id, request, response, api_key, budgets)
 
 
-@router.patch("")
+@router.patch("", openapi_extra=key_scope(KeyScope.END_USERS_WRITE))
 async def update_end_user_by_query(
     external_id: ExternalIdParam,
     request: EndUserUpdate,
@@ -126,7 +129,7 @@ async def update_end_user_by_query(
     return await _update(external_id, request, api_key, budgets)
 
 
-@router.delete("")
+@router.delete("", openapi_extra=key_scope(KeyScope.END_USERS_DELETE))
 async def delete_end_users(
     request: Request,
     api_key: ServiceKey,
@@ -173,7 +176,9 @@ async def delete_end_users(
     return EndUsersDeleted(deleted=await _delete(request, doomed, api_key, budgets, storage, traces))
 
 
-@router.delete("/{external_id:path}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{external_id:path}", status_code=status.HTTP_204_NO_CONTENT, openapi_extra=key_scope(KeyScope.END_USERS_DELETE)
+)
 async def delete_end_user(
     request: Request,
     external_id: ExternalId,
@@ -193,7 +198,7 @@ async def delete_end_user(
     await _delete(request, [end_user], api_key, budgets, storage, traces)
 
 
-@router.get("/{external_id:path}")
+@router.get("/{external_id:path}", openapi_extra=key_scope(KeyScope.END_USERS_READ))
 async def get_end_user(external_id: ExternalId, api_key: ServiceKey, budgets: BudgetServiceDep) -> EndUserPublic:
     """Get an end user of the calling service key by the id the service names it by.
 
@@ -207,6 +212,7 @@ async def get_end_user(external_id: ExternalId, api_key: ServiceKey, budgets: Bu
 @router.put(
     "/{external_id:path}",
     responses={status.HTTP_201_CREATED: {"model": EndUserPublic, "description": "The end user was created"}},
+    openapi_extra=key_scope(KeyScope.END_USERS_WRITE),
 )
 async def put_end_user(
     external_id: ExternalId,
@@ -226,7 +232,7 @@ async def put_end_user(
     return await _put(external_id, request, response, api_key, budgets)
 
 
-@router.patch("/{external_id:path}")
+@router.patch("/{external_id:path}", openapi_extra=key_scope(KeyScope.END_USERS_WRITE))
 async def update_end_user(
     external_id: ExternalId,
     request: EndUserUpdate,
@@ -244,7 +250,7 @@ async def update_end_user(
     return await _update(external_id, request, api_key, budgets)
 
 
-@budgets_router.get("")
+@budgets_router.get("", openapi_extra=key_scope(KeyScope.END_USERS_READ))
 async def list_end_user_budgets(api_key: ServiceKey, budgets: BudgetServiceDep) -> list[EndUserBudgetPublic]:
     """List the budgets the calling service key may put its end users on, with their limits and end user counts.
 

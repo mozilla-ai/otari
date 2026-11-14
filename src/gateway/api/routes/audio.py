@@ -20,6 +20,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
@@ -38,6 +39,7 @@ from gateway.services.budgets import report_estimate
 from gateway.services.inference import audio_seconds, speech_billing, speech_cost_headers, transcription_billing
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["audio"])
 
@@ -103,12 +105,13 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
         },
     },
-    openapi_extra={
-        "requestBody": {
+    openapi_extra=key_scope(
+        KeyScope.INFERENCE_RUN,
+        requestBody={
             "required": True,
             "content": {"multipart/form-data": {"schema": _TRANSCRIPTION_BODY_SCHEMA}},
-        }
-    },
+        },
+    ),
 )
 async def create_transcription(
     raw_request: Request,
@@ -258,6 +261,7 @@ _SPEECH_COST_HEADERS: dict[str, Any] = {
             },
         },
     },
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def create_speech(
     raw_request: Request,

@@ -277,12 +277,16 @@ key where the agent runs:
 
 ```bash
 export OTARI_URL="http://localhost:8000"     # your gateway's URL
-export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
+export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, with telemetry:write and agents
 ```
 
 - **The key must be budget-exempt.** Only a deployment's operator can create one
   (see [Enforcement boundary](../../docs/external-usage-reference.md#enforcement-boundary)), so
   reporting works on a gateway you run, not on otari.ai today.
+- **The key needs the `telemetry:write` and `agents` scopes**: the spans go to
+  `/otlp/v1/traces` and the gates to `/api/v1/hooks/guardrails`. In the key
+  form, choose **Custom** under **Access** and tick both. A key without them is
+  refused, and its reports wait in `~/.otari/outbox/` until they expire.
 - **Claude Code** does not pass these variables to its hooks; set them in the
   `env` block of `~/.claude/settings.json`, beside the exporter variables of
   [Send Claude Code sessions to Otari](../../docs/claude-code.md#send-claude-code-sessions-to-otari).
