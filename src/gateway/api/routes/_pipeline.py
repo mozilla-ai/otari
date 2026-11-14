@@ -4306,16 +4306,14 @@ async def prepare_gateway_tools(
     except DATABASE_ERRORS:
         # A database failure is not an HTTPException, so the reservation is released here too.
         # The rollback comes first, because a failed statement leaves the session unusable for the release.
-        with contextlib.suppress(*DATABASE_ERRORS):
-            await ctx.db.rollback()
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
     except asyncio.CancelledError:
         # The client disconnected during an admission step's I/O. Released as a database failure is,
         # rolling back first, because an interrupted statement leaves the session unusable.
-        with contextlib.suppress(*DATABASE_ERRORS):
-            await ctx.db.rollback()
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
@@ -4744,11 +4742,14 @@ async def _admit_mcp_servers(
             provider_mcp=provider_mcp,
             attach=attach,
         )
-    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError, McpSignInRequiredError) as exc:
+    except (
+        McpServerDeclarationError,
+        WorkspaceMcpServerNotFoundError,
+        McpSignInRequiredError,
+        McpServerConfigurationError,
+        McpConnectionUnavailableError,
+    ) as exc:
         raise domain_error(adapter, exc) from exc
-    except (McpServerConfigurationError, McpConnectionUnavailableError) as exc:
-        # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
-        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
 async def _web_declarations(
@@ -5953,7 +5954,7 @@ async def _open_tool_backends(
                 )
             )
         except McpConnectionUnavailableError as exc:
-            raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
+            raise domain_error(adapter, exc) from exc
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
         except McpServerDeclarationError as exc:

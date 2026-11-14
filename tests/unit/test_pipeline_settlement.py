@@ -60,9 +60,11 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
+    McpConnectionUnavailableError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceMcpServerNotFoundError,
@@ -178,11 +180,12 @@ def _ctx(
     rate_limit_info: RateLimitInfo | None = None,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
+    uow: UnitOfWork | None = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
         db=db,
-        uow=cast(Any, AsyncMock()),
+        uow=uow if uow is not None else cast(Any, AsyncMock()),
         log_writer=log_writer,
         api_key_id="key-1",
         user_id="user-1",
@@ -2038,7 +2041,9 @@ async def test_a_client_that_disconnects_during_mcp_admission_has_its_reservatio
         raise asyncio.CancelledError
 
     db = AsyncMock()
-    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4(), uow=UnitOfWork(db)
+    )
     with pytest.raises(asyncio.CancelledError):
         await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(disconnected), mcp_server_ids=[uuid.uuid4()])
 
@@ -2550,6 +2555,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError):
         await _call_prepare_gateway_tools(
@@ -2603,6 +2609,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError, match="connection reset"):
         await _call_prepare_gateway_tools(
@@ -3397,3 +3404,24 @@ def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_pr
     assert final is not None and final.usage == started
     unestimated = settle_abandoned_stream(**args, policy="allow_free", reported_usage=started, usage_is_final=False)
     assert unestimated is not None and unestimated.usage == started
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_stored_server_credential_is_a_503_with_no_detail_of_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendered through ``domain_error`` as every tenancy error here is: retryable, and the server stays in the log."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    server_id = uuid.uuid4()
+
+    async def unavailable(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise McpConnectionUnavailableError(server_id)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(unavailable), mcp_server_ids=[server_id])
+
+    assert exc_info.value.status_code == 503
+    assert str(server_id) not in str(exc_info.value.detail)
+    assert settlement.refunded == 1

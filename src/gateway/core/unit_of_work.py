@@ -111,6 +111,21 @@ class UnitOfWork:
                 await self._roll_back()
                 raise
 
+    async def abandon(self) -> None:
+        """Roll back what a step that ended outside any block left staged, so the session can be used again.
+
+        For a request whose step failed on the database or was cancelled mid-statement before it
+        could clean up: a failed statement leaves the session unusable for whatever runs next.
+        A database error from the rollback is logged, never raised.
+
+        Raises:
+            InsideUnitOfWorkError: a block is open, which rolls back as it ends.
+        """
+        if self._depth > 0:
+            msg = "A step cannot be abandoned while a block is open"
+            raise InsideUnitOfWorkError(msg)
+        await self._roll_back()
+
     async def _roll_back(self) -> None:
         """Roll back, leaving the error that ended the step as the one the caller sees."""
         try:
