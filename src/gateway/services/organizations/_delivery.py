@@ -1,12 +1,10 @@
 """Sending the invitation emails that are due."""
 
-import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.tokens import generate_token, hash_token
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.repositories.organizations import DueInvitation, OrganizationRepositories
 from gateway.services.mail import Mailer
@@ -14,6 +12,7 @@ from gateway.services.organizations._accept_link import accept_link
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_email import render_invitation_email
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+from gateway.services.organizations._poll import poll as background_poll
 
 # One more attempt follows each wait, in order.
 RETRY_WAITS = (timedelta(minutes=5), timedelta(minutes=10))
@@ -117,17 +116,4 @@ class InvitationDelivery:
         ``build`` receives a new Unit of Work for each invitation.
         An error is logged, and the next poll tries again.
         """
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                sent = True
-                while sent:
-                    async with create_unit_of_work() as uow:
-                        sent = await build(uow).send_due()
-            except DATABASE_ERRORS as exc:
-                logger.warning(
-                    "Invitation email poll failed: %s; retrying in %ss", describe_database_error(exc), interval
-                )
-            except Exception as exc:
-                # NOTE: Only the class is logged, because the message of an error can hold an address or a link.
-                logger.warning("Invitation email poll failed (%s); retrying in %ss", type(exc).__name__, interval)
+        await background_poll(lambda uow: build(uow).send_due(), interval=interval, name="Invitation email")
