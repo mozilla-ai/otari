@@ -2070,6 +2070,8 @@ class WorkspaceMcpServerService:
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
+        # The server before its connections, in the order a sign-in's completion takes them.
+        await self.db.refresh(server, with_for_update=True)
         revocations, unread = await self._revocations(server)
         # Staged here as well as cascaded by the foreign keys, so the tokens go where a database enforces none.
         connections = McpUserConnectionRepository(self.db)
