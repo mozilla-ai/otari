@@ -12,11 +12,13 @@ function Harness({
   isKnown = true,
   allowPatterns = true,
   onCheck,
+  isDisabled,
 }: {
   initial?: string[]
   isKnown?: boolean
   allowPatterns?: boolean
   onCheck?: () => void
+  isDisabled?: boolean
 }) {
   const [selected, setSelected] = useState<string[]>(initial)
   return (
@@ -30,6 +32,7 @@ function Harness({
         onChange={setSelected}
         allowPatterns={allowPatterns}
         onCheck={onCheck}
+        isDisabled={isDisabled}
       />
       <output aria-label="Selected">{selected.join(",")}</output>
     </>
@@ -130,5 +133,11 @@ describe("ToolChecklist", () => {
     )
     await user.click(screen.getByRole("button", { name: "Add" }))
     expect(selected()).toBe("list_*")
+  })
+
+  it("starts no check while the checklist is disabled", () => {
+    render(<Harness isKnown={false} onCheck={vi.fn()} isDisabled />)
+
+    expect(screen.getByRole("button", { name: "Check" })).toBeDisabled()
   })
 })

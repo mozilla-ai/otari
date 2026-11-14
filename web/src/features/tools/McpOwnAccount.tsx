@@ -48,6 +48,8 @@ export function useOwnMcpAccount({
     workspaceId,
     server,
     connection,
+    /** A stored connection that cannot work again without a new sign-in. */
+    hasExpired: connection !== undefined && hasSignInExpired(connection),
     /** Nothing is claimed either way until the read has answered, and not after it failed. */
     isKnown: mine.data !== undefined,
     readError: mine.error,
@@ -68,13 +70,27 @@ export function useOwnMcpAccount({
 export type OwnMcpAccount = ReturnType<typeof useOwnMcpAccount>
 
 /**
+ * Whether a connection's sign-in is over: past its expiry with nothing Otari
+ * can renew it with. The gateway keeps such a row until it is next used, so the
+ * list still returns it.
+ */
+export function hasSignInExpired(
+  connection: Pick<McpConnection, "expires_at" | "renewable">,
+  now = Date.now(),
+): boolean {
+  if (connection.renewable || connection.expires_at === null) return false
+  return new Date(connection.expires_at).getTime() <= now
+}
+
+/**
  * The heading's control for the viewer's own account, worded so it cannot be
  * read as connecting someone else: "Connect your account" until they have, then
- * "Your account: connected", which opens Reconnect and Disconnect.
+ * "Your account: connected", which opens Reconnect and Disconnect, and "Sign in
+ * again" once a sign-in that cannot renew itself has expired.
  */
 export function McpOwnAccountControl({ own }: { own: OwnMcpAccount }) {
   if (!own.isKnown) return null
-  if (!own.connection) {
+  if (!own.connection || own.hasExpired) {
     return (
       <Button
         variant="primary"
@@ -83,7 +99,7 @@ export function McpOwnAccountControl({ own }: { own: OwnMcpAccount }) {
         isPending={own.isStarting}
         className="min-h-11 md:min-h-0"
       >
-        Connect your account
+        {own.hasExpired ? "Sign in again" : "Connect your account"}
       </Button>
     )
   }
@@ -155,7 +171,7 @@ export function McpOwnAccountNotes({
           Finish signing in in the window that opened.
         </p>
       ) : null}
-      {own.connection && !own.connection.renewable ? (
+      {own.connection && !own.connection.renewable && !own.hasExpired ? (
         <p className="text-caption">
           You'll need to connect again when this sign-in expires.
         </p>

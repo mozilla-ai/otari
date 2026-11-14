@@ -83,9 +83,18 @@ export function useMcpSignIn({
   }>()
   const [error, setError] = useState("")
   const popup = useRef<Window | undefined>(undefined)
+  // The popup while it is still blank, waiting on the start to answer. Leaving
+  // the page drops that answer, so the blank popup is closed with it.
+  const blank = useRef<Window | undefined>(undefined)
   const unsubscribe = useRef<() => void>(() => {})
 
-  useEffect(() => () => unsubscribe.current(), [])
+  useEffect(
+    () => () => {
+      unsubscribe.current()
+      blank.current?.close()
+    },
+    [],
+  )
   // Closing the popup without finishing reports nothing, so coming back to
   // this page while it is closed stops the wait. The subscription stays: a
   // provider that cut the popup off from this page makes it read as closed
@@ -104,6 +113,7 @@ export function useMcpSignIn({
     // Opened now, inside the press, which is what the browser allows.
     const opened = openWindow()
     popup.current = opened
+    blank.current = opened
     setRunning({ serverId, purpose })
     const mutation =
       purpose === "check" ? check : purpose === "shared" ? shared : connect
@@ -111,6 +121,7 @@ export function useMcpSignIn({
       { workspaceId, serverId, returnTo },
       {
         onSuccess: (started) => {
+          blank.current = undefined
           const url = started.authorization_url
           if (opened === undefined) {
             rememberSignInOrigin(returnTo)
@@ -133,6 +144,7 @@ export function useMcpSignIn({
           sendSignInWindow(opened, url)
         },
         onError: (failure) => {
+          blank.current = undefined
           opened?.close()
           setRunning(undefined)
           setError(

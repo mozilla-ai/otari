@@ -162,46 +162,43 @@ export function McpServerRequestsBlock({
         })}
       </SettingsGroup>
 
-      <FormDialog
-        isOpen={declining !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setDeclining(undefined)
-        }}
-        title={declining ? `Decline ${declining.title}` : "Decline"}
-        description={
-          declining
-            ? `${whoAsked(declining.requesters, declining.requester_count)} will see that the request was declined.`
-            : undefined
-        }
-        submitLabel="Decline"
-        isPending={decline.isPending}
-        isSubmitDisabled={reason.length > MAX_REASON_LENGTH}
-        error={decline.error}
-        onSubmit={() => {
-          if (!declining) return
-          decline.mutate(
-            {
-              workspaceId,
-              body: {
-                catalog_name: declining.catalog_name,
-                ...(reason.trim() ? { reason: reason.trim() } : {}),
+      {declining ? (
+        <FormDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setDeclining(undefined)
+          }}
+          title={`Decline ${declining.title}`}
+          description={`${whoAsked(declining.requesters, declining.requester_count)} will see that the request was declined.`}
+          submitLabel="Decline"
+          isPending={decline.isPending}
+          isSubmitDisabled={reason.length > MAX_REASON_LENGTH}
+          error={decline.error}
+          onSubmit={() => {
+            decline.mutate(
+              {
+                workspaceId,
+                body: {
+                  catalog_name: declining.catalog_name,
+                  ...(reason.trim() ? { reason: reason.trim() } : {}),
+                },
               },
-            },
-            { onSuccess: () => setDeclining(undefined) },
-          )
-        }}
-      >
-        <TextArea
-          label="Reason"
-          value={reason}
-          onChange={setReason}
-          rows={3}
-          placeholder="Optional"
-          description="Shown to everyone who asked."
-          isInvalid={reason.length > MAX_REASON_LENGTH}
-          errorMessage={`Keep it under ${MAX_REASON_LENGTH} characters.`}
-        />
-      </FormDialog>
+              { onSuccess: () => setDeclining(undefined) },
+            )
+          }}
+        >
+          <TextArea
+            label="Reason"
+            value={reason}
+            onChange={setReason}
+            rows={3}
+            placeholder="Optional"
+            description="Shown to everyone who asked."
+            isInvalid={reason.length > MAX_REASON_LENGTH}
+            errorMessage={`Keep it under ${MAX_REASON_LENGTH} characters.`}
+          />
+        </FormDialog>
+      ) : null}
     </>
   )
 }
