@@ -25,9 +25,16 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, WorkspaceMcpServer)
 
-    async def find(self, server_id: uuid.UUID, *, lock: bool = False) -> WorkspaceMcpServer | None:
-        """One stored server by id, or ``None``; ``lock`` holds the row until the caller commits."""
+    async def find(
+        self, server_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None, lock: bool = False
+    ) -> WorkspaceMcpServer | None:
+        """One stored server by id, or ``None``; ``lock`` holds the row until the caller commits.
+
+        With ``workspace_id``, a server of another workspace is ``None`` too.
+        """
         query = select(WorkspaceMcpServer).where(WorkspaceMcpServer.id == server_id)
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServer.workspace_id == workspace_id)
         if lock:
             query = query.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(query)).scalar_one_or_none()

@@ -107,8 +107,8 @@ class McpServerLogoService:
 
         ``lock`` holds the server's row until the block commits, so two first uploads store one after the other.
         """
-        server = await self._servers.find(server_id, lock=lock)
-        if server is None or server.workspace_id != workspace_id:
+        server = await self._servers.find(server_id, workspace_id=workspace_id, lock=lock)
+        if server is None:
             raise WorkspaceMcpServerNotFoundError(server_id)
         return server.url
 
