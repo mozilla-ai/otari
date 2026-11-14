@@ -2350,12 +2350,17 @@ class WorkspaceMcpServerService:
             ticket, opened_by=opened_by.id if opened_by is not None else None
         )
 
-    async def my_connections(self, *, user: User, workspace_id: uuid.UUID) -> McpConnectionsPublic:
-        """The caller's own connections to this workspace's servers, oldest first."""
+    async def my_connections(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = 100
+    ) -> McpConnectionsPublic:
+        """A page of the caller's own connections to this workspace's servers, oldest first, plus the total."""
         resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
         server_ids = await WorkspaceMcpServerRepository(self.db).ids_in_workspace(resolved_workspace_id)
-        rows = await McpUserConnectionRepository(self.db).for_user(str(user.id), server_ids)
+        connections = McpUserConnectionRepository(self.db)
+        count = await connections.count_for_user(str(user.id), server_ids)
+        rows = await connections.for_user(str(user.id), server_ids, skip=skip, limit=min(limit, _MAX_LIST_LIMIT))
         return McpConnectionsPublic(
+            count=count,
             data=[
                 McpConnectionPublic(
                     server_id=row.server_id,

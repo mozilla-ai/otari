@@ -158,7 +158,7 @@ def test_a_member_signs_in_lists_their_connection_and_disconnects(
         follow_redirects=False,
     )
     assert _landing(returned) == {"state": query["state"], "code": "the-code"}
-    assert client.get(mine, headers=master_key_header).json() == {"data": []}
+    assert client.get(mine, headers=master_key_header).json() == {"data": [], "count": 0}
 
     refused = client.post(f"{API_ROOT}/mcp-connections/complete", json={"state": query["state"], "code": "the-code"})
     assert refused.status_code in (401, 403), "finishing a sign-in takes the session that started it"
@@ -188,14 +188,18 @@ def test_a_member_signs_in_lists_their_connection_and_disconnects(
         f"{API_ROOT}/workspaces/{workspace}/mcp-servers/{server_id}/connections", headers=master_key_header
     )
     assert [entry["server_id"] for entry in listed.json()["data"]] == [server_id]
+    assert listed.json()["count"] == 1
     assert listed.json()["data"][0]["renewable"] is True
+    # A page past the last connection still counts them all, and a page over the bound is refused.
+    assert client.get(mine, params={"skip": 1}, headers=master_key_header).json() == {"data": [], "count": 1}
+    assert client.get(mine, params={"limit": 1001}, headers=master_key_header).status_code == 422
     assert len(connected.json()["data"]) == 1
     for body in (started.text, done.text, listed.text, connected.text):
         for secret in SECRETS:
             assert secret not in body
 
     assert client.delete(f"{mine}/{server_id}", headers=master_key_header).status_code == 204
-    assert client.get(mine, headers=master_key_header).json() == {"data": []}
+    assert client.get(mine, headers=master_key_header).json() == {"data": [], "count": 0}
     assert client.delete(f"{mine}/{server_id}", headers=master_key_header).status_code == 404
 
 
@@ -419,7 +423,7 @@ def test_a_check_sign_in_records_health_and_connects_nobody(
     health = client.get(f"{servers}/{server_id}", headers=master_key_header).json()["health"]
     assert health["status"] == "healthy"
     mine = client.get(f"{API_ROOT}/workspaces/{workspace}/mcp-connections", headers=master_key_header)
-    assert mine.json() == {"data": []}, "a check leaves no connection behind"
+    assert mine.json() == {"data": [], "count": 0}, "a check leaves no connection behind"
     assert client.get(f"{servers}/{server_id}/connections", headers=master_key_header).json()["count"] == 0
     assert client.post(f"{servers}/{server_id}/check/sign-in", json={}, headers=_bearer(user_key)).status_code in (
         401,

@@ -72,14 +72,16 @@ async def list_my_mcp_connections(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> McpConnectionsPublic:
     """List the caller's own connections to this workspace's MCP servers.
 
     A connection is the caller's sign-in to a server whose `credential_mode`
-    is `per_user`. Any member who can see the workspace may call this. Tokens
-    are never included.
+    is `per_user`. Any member who can see the workspace may call this, oldest
+    connection first; `count` is the total. Tokens are never included.
     """
-    return await service.my_connections(user=current_identity, workspace_id=workspace_id)
+    return await service.my_connections(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @router.post("/mcp-connections/{server_id}")
