@@ -226,3 +226,44 @@ export const RowClassName: Story = {
       row.status === "revoked" ? "opacity-60" : undefined,
   },
 }
+
+const MANY_ROWS: KeyRow[] = Array.from({ length: 40 }, (_, index) => ({
+  ...ROWS[index % ROWS.length],
+  id: `key_${String(index).padStart(10, "0")}`,
+  name: `${ROWS[index % ROWS.length].name}-${index + 1}`,
+}))
+
+/**
+ * Taller than the screen can hold, the table scrolls inside itself under a
+ * pinned header, so the controls above it and whatever sits below stay in
+ * reach. Desk width only.
+ */
+export const LongTable: Story = {
+  args: { rows: MANY_ROWS },
+}
+
+/**
+ * Thick rows reach `--table-max-height` sooner, so fewer show at once: the
+ * same cap, whatever the row height.
+ */
+export const ThickRows: Story = {
+  args: {
+    rows: MANY_ROWS.slice(0, 20),
+    columns: COLUMNS.map((column) =>
+      column.id === "name"
+        ? {
+            ...column,
+            cell: (row) => (
+              <div className="flex flex-col gap-1 py-3">
+                <span>{row.name}</span>
+                <span className="text-caption">{row.owner}</span>
+                <span className="text-caption">
+                  {row.requests.toLocaleString("en-US")} requests this month
+                </span>
+              </div>
+            ),
+          }
+        : column,
+    ),
+  },
+}
