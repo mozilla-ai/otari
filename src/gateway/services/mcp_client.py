@@ -15,6 +15,7 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -26,10 +27,18 @@ import anyio.lowlevel
 import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ListToolsResult
 
-from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
+from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError, McpSignInRequiredError
 from gateway.log_config import logger
-from gateway.services.mcp_stateless import CODE_TOOL_NOT_ALLOWED, failure_class
+from gateway.services.mcp_stateless import (
+    CODE_TOOL_NOT_ALLOWED,
+    catalog_of,
+    closed_with,
+    failure_class,
+    refuse_rejected_token,
+    refused_token,
+)
 from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
@@ -42,6 +51,19 @@ if TYPE_CHECKING:
     from mcp.types import Tool as MCPTool
 
     from gateway.models.mcp import McpServerConfig
+    from gateway.services.mcp_stateless import ContactObserver
+
+
+# How long an attached server may take to answer its first two requests before a request goes on without it,
+# and how long all of a request's attached servers may take between them, since they connect one at a time.
+ATTACHED_CONNECT_DEADLINE_S = 10.0
+ATTACHED_CONNECT_BUDGET_S = 15.0
+
+
+def _cancelling() -> bool:
+    """Whether the running task has a cancellation pending from outside it."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 def _effective_port(url: httpx2.URL) -> int | None:
@@ -80,7 +102,7 @@ def _origin_bound_http_client(
         headers=headers,
         timeout=timeout if timeout is not None else httpx2.Timeout(30.0, read=300.0),
         auth=auth,
-        event_hooks={"request": [enforce_origin]},
+        event_hooks={"request": [enforce_origin], "response": [refuse_rejected_token]},
     )
 
 
@@ -150,6 +172,7 @@ class MCPClientPool:
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
         ceded_tool_names: Iterable[str] = (),
+        contacts: ContactObserver | None = None,
     ):
         self._configs = configs
         self._stack = AsyncExitStack()
@@ -166,6 +189,10 @@ class MCPClientPool:
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
         self._spans = ToolSpans(trace, "mcp")
+        # Hears what each stored server answered at connect time. None outside a request.
+        self._contacts = contacts
+        # Per-user servers that refused the user's token at connect time and whose sign-in is over.
+        self.signed_out: list[tuple[McpServerConfig, McpSignInRequiredError]] = []
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -231,17 +258,42 @@ class MCPClientPool:
         owner.result()
 
     async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
+        loop = asyncio.get_running_loop()
+        # The attached servers' budget starts with the first of them, so a slow named server spends none of it.
+        attached_by: float | None = None
         async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
+                # When an attached server must be up by, on the loop's clock; ``None`` for a named one.
+                expires_at: float | None = None
+                if cfg.attached:
+                    attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
+                    expires_at = min(loop.time() + ATTACHED_CONNECT_DEADLINE_S, attached_by)
                 try:
-                    server = await self._connect(cfg)
-                except Exception:
+                    server = await self._connect(cfg, expires_at)
+                except BaseException as exc:
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
-                    raise
+                    self._report_failure(cfg, exc)
+                    if isinstance(exc, McpSignInRequiredError):
+                        # The server refused the user's token and their sign-in turned out to be over:
+                        # the request goes on, and the model is told to offer a new sign-in.
+                        self.signed_out.append((cfg, exc))
+                        continue
+                    if not cfg.attached or not isinstance(exc, Exception | asyncio.CancelledError):
+                        raise
+                    # An attached server that cannot be reached is left out. A cancellation aimed at the
+                    # request itself is passed on; ``_connect`` has already closed the server's own stack.
+                    if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
+                        raise
+                    logger.warning(
+                        "Attached MCP server left out of the request server_id=%s reason=%s",
+                        cfg.stored_server_id,
+                        failure_class(exc),
+                    )
+                    continue
                 if self._trace is not None:
                     self._trace.record_mcp_connect(
                         server=cfg.name, tool_count=len(server.tools), started=started, ok=True
@@ -250,17 +302,75 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, expires_at: float | None = None) -> _ConnectedServer:
+        """Open one server's session; a per-user server that refuses its token with a 401 is tried once more.
+
+        The session is opened on a stack of its own, joined to the pool's once it is up, so an
+        attempt the server refused leaves nothing behind to close. ``expires_at``, on the event
+        loop's clock, bounds the whole of it: both attempts and the renewal between them.
+
+        Raises:
+            McpSignInRequiredError: the refused token's sign-in ended and the connection was removed.
+            McpConnectionUnavailableError: the refused token could not be renewed right now.
+            TimeoutError: ``expires_at`` passed first.
+        """
+        loop = asyncio.get_running_loop()
+        retried = False
+        while True:
+            stack = AsyncExitStack()
+            try:
+                left = None if expires_at is None else expires_at - loop.time()
+                if left is not None and left <= 0:
+                    raise TimeoutError
+                session, listed = await self._open(stack, cfg, left)
+            except BaseException as exc:
+                failure = await closed_with(stack, exc)
+                if retried or cfg.renew_token is None or not refused_token(failure):
+                    raise failure from None
+                # The renewal is shielded and stores its answer even when this wait gives up on it.
+                async with asyncio.timeout_at(expires_at):
+                    token = await cfg.renew_token(cfg.authorization_token or "")
+                cfg = cfg.model_copy(update={"authorization_token": token})
+                retried = True
+                continue
+            await self._stack.enter_async_context(stack)
+            return self._connected(cfg, session, listed)
+
+    async def _open(
+        self, stack: AsyncExitStack, cfg: McpServerConfig, deadline: float | None = None
+    ) -> tuple[ClientSession, ListToolsResult]:
+        """Connect, initialize and list one server's tools into ``stack``; a test stands in for the network here."""
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
+        client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
+        read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        # An attached server joins every request of its workspace, so one that accepts the connection and
+        # never answers is given up on quickly rather than holding each request for the read timeout.
+        with anyio.fail_after(deadline) if deadline is not None else contextlib.nullcontext():
+            await session.initialize()
+            return session, await session.list_tools()
 
-        client = await self._stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
-        read, write = await self._stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
-        session = await self._stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
+    def _report_failure(self, cfg: McpServerConfig, exc: BaseException) -> None:
+        """Tell the observer a stored server could not be opened, unless the failure says nothing about the server.
 
-        listed = await session.list_tools()
+        A request that was itself cancelled says nothing, and neither does an attached server
+        running out of the short budget it shares with the others.
+        """
+        if self._contacts is None or cfg.stored_server_id is None:
+            return
+        if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
+            return
+        if cfg.attached and isinstance(exc, TimeoutError):
+            return
+        self._contacts.failed(cfg.stored_server_id, cfg.url, exc)
+
+    def _connected(self, cfg: McpServerConfig, session: ClientSession, listed: ListToolsResult) -> _ConnectedServer:
+        if self._contacts is not None and cfg.stored_server_id is not None:
+            # One page is the whole catalog only when the server offered no more.
+            whole = getattr(listed, "next_cursor", None) is None
+            self._contacts.reached(cfg.stored_server_id, cfg.url, catalog_of(listed.tools) if whole else None)
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         not_granted: list[str] = []

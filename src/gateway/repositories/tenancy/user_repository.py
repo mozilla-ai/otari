@@ -340,6 +340,13 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
         return list(result.scalars().all())
 
+    async def get_by_ids(self, user_ids: Collection[uuid.UUID]) -> list[User]:
+        """Return the identities these IDs name, in one query."""
+        if not user_ids:
+            return []
+        result = await self.db.execute(select(User).where(col(User.id).in_(list(user_ids))))
+        return list(result.scalars().all())
+
     async def get_active_ids(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
         """Return which of these identities exist and are active, in one query."""
         if not user_ids:

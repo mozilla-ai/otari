@@ -5126,7 +5126,9 @@
           "http_error",
           "not_mcp",
           "limits_exceeded",
-          "connection_failed"
+          "connection_failed",
+          "sign_in_unsupported",
+          "sign_in_unavailable"
         ],
         "title": "CheckFailure",
         "type": "string"
@@ -13408,6 +13410,208 @@
         "title": "McpCatalogSyncStatus",
         "type": "object"
       },
+      "McpConnectionComplete": {
+        "description": "What the authorization server sent back, as the dashboard received it.",
+        "properties": {
+          "code": {
+            "description": "The authorization code from the redirect",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The redirect's iss, the authorization server's own name, if it sent one",
+            "title": "Iss"
+          },
+          "state": {
+            "description": "The state from the redirect",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "code"
+        ],
+        "title": "McpConnectionComplete",
+        "type": "object"
+      },
+      "McpConnectionCompleted": {
+        "description": "A finished sign-in: which server it connected, and where to land.",
+        "properties": {
+          "checked": {
+            "default": false,
+            "description": "The sign-in was made only to check the server: its health was recorded and nothing was connected",
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dashboard path the sign-in was started with, if any",
+            "title": "Return To"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "server_name": {
+            "title": "Server Name",
+            "type": "string"
+          },
+          "shared": {
+            "default": false,
+            "description": "The sign-in was a manager's for everyone: it is now the shared server's account",
+            "title": "Shared",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "workspace_id",
+          "server_name",
+          "return_to"
+        ],
+        "title": "McpConnectionCompleted",
+        "type": "object"
+      },
+      "McpConnectionPublic": {
+        "description": "One of the caller's own connections. Never carries a token.",
+        "properties": {
+          "connected_at": {
+            "format": "date-time",
+            "title": "Connected At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the current access token expires; null when the server stated no lifetime",
+            "title": "Expires At"
+          },
+          "renewable": {
+            "description": "Whether Otari can renew the token on its own; false means signing in again once it expires",
+            "title": "Renewable",
+            "type": "boolean"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "connected_at",
+          "updated_at",
+          "expires_at",
+          "renewable"
+        ],
+        "title": "McpConnectionPublic",
+        "type": "object"
+      },
+      "McpConnectionStart": {
+        "description": "What a caller sends to start their own sign-in to a per-user MCP server.",
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A dashboard path to land on once signed in, such as /tools/mcp-servers. Anything that is not a path inside the dashboard is refused",
+            "title": "Return To"
+          }
+        },
+        "title": "McpConnectionStart",
+        "type": "object"
+      },
+      "McpConnectionStarted": {
+        "description": "Where to send the caller's browser to sign in.",
+        "properties": {
+          "authorization_url": {
+            "description": "The MCP server's authorization page. It carries a single-use state that expires in ten minutes",
+            "title": "Authorization Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "title": "McpConnectionStarted",
+        "type": "object"
+      },
+      "McpConnectionsPublic": {
+        "properties": {
+          "count": {
+            "description": "How many of the workspace's servers the caller is connected to in all",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpConnectionPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpConnectionsPublic",
+        "type": "object"
+      },
+      "McpCredentialMode": {
+        "description": "Whose credential the gateway sends to a stored MCP server.",
+        "enum": [
+          "shared",
+          "per_user"
+        ],
+        "title": "McpCredentialMode",
+        "type": "string"
+      },
       "McpErrorBody": {
         "description": "The one error shape both stored-server endpoints return.",
         "properties": {
@@ -13425,6 +13629,18 @@
           "request_id": {
             "title": "Request Id",
             "type": "string"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. It works for 30 minutes and stores nothing until it is opened",
+            "title": "Sign In Url"
           }
         },
         "required": [
@@ -13540,6 +13756,462 @@
         "title": "McpServerConfig",
         "type": "object"
       },
+      "McpServerConnectionPublic": {
+        "description": "One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token.",
+        "properties": {
+          "connected_at": {
+            "format": "date-time",
+            "title": "Connected At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dashboard account's email, when the user is one's",
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The request-plane user the connection belongs to",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "full_name",
+          "connected_at",
+          "updated_at"
+        ],
+        "title": "McpServerConnectionPublic",
+        "type": "object"
+      },
+      "McpServerConnectionsPublic": {
+        "properties": {
+          "count": {
+            "description": "How many users are connected in all",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerConnectionPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpServerConnectionsPublic",
+        "type": "object"
+      },
+      "McpServerRequestCreate": {
+        "description": "A member asking the workspace's admins to add one server of the MCP catalog.",
+        "properties": {
+          "catalog_name": {
+            "description": "The catalog server's `name`, such as `com.example/mcp`",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Catalog Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the member needs the server for, shown to the admins",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "catalog_name"
+        ],
+        "title": "McpServerRequestCreate",
+        "type": "object"
+      },
+      "McpServerRequestDecline": {
+        "description": "Declines every pending request for one catalog server.",
+        "properties": {
+          "catalog_name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Catalog Name",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown to each requester",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "catalog_name"
+        ],
+        "title": "McpServerRequestDecline",
+        "type": "object"
+      },
+      "McpServerRequestGroupPublic": {
+        "description": "Everyone waiting for one catalog server in a workspace.",
+        "properties": {
+          "catalog_name": {
+            "title": "Catalog Name",
+            "type": "string"
+          },
+          "catalog_server": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpCatalogServerPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The catalog's entry as it is now; null once the catalog no longer lists the server"
+          },
+          "first_requested_at": {
+            "format": "date-time",
+            "title": "First Requested At",
+            "type": "string"
+          },
+          "requester_count": {
+            "description": "How many pending requests ask for this server in all",
+            "title": "Requester Count",
+            "type": "integer"
+          },
+          "requesters": {
+            "description": "Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest",
+            "items": {
+              "$ref": "#/components/schemas/McpServerRequesterPublic"
+            },
+            "title": "Requesters",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog_name",
+          "title",
+          "url",
+          "catalog_server",
+          "requesters",
+          "requester_count",
+          "first_requested_at"
+        ],
+        "title": "McpServerRequestGroupPublic",
+        "type": "object"
+      },
+      "McpServerRequestGroupsPublic": {
+        "description": "A workspace's pending requests, one entry per catalog server, the longest-waiting first.",
+        "properties": {
+          "count": {
+            "description": "How many requests are pending in all",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerRequestGroupPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "server_count": {
+            "description": "How many catalog servers have a request pending, for paging `data`",
+            "title": "Server Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "server_count"
+        ],
+        "title": "McpServerRequestGroupsPublic",
+        "type": "object"
+      },
+      "McpServerRequestPublic": {
+        "description": "One of the caller's own requests for a catalog server.",
+        "properties": {
+          "catalog_name": {
+            "title": "Catalog Name",
+            "type": "string"
+          },
+          "catalog_server": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpCatalogServerPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The catalog's entry as it is now; null once the catalog no longer lists the server"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An admin's reason for declining, when they gave one",
+            "title": "Decision Reason"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stored server an approval produced",
+            "title": "Server Id"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "declined",
+              "withdrawn"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "description": "The catalog's title for the server when it was requested",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "The server's endpoint when it was requested",
+            "title": "Url",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "catalog_name",
+          "title",
+          "url",
+          "note",
+          "status",
+          "decision_reason",
+          "decided_at",
+          "server_id",
+          "catalog_server",
+          "created_at"
+        ],
+        "title": "McpServerRequestPublic",
+        "type": "object"
+      },
+      "McpServerRequesterPublic": {
+        "description": "One member who asked for a server, as a workspace manager sees them.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "user_id",
+          "full_name",
+          "email",
+          "note",
+          "requested_at"
+        ],
+        "title": "McpServerRequesterPublic",
+        "type": "object"
+      },
+      "McpServerRequestersPublic": {
+        "description": "A page of the members waiting for one catalog server in a workspace.",
+        "properties": {
+          "count": {
+            "description": "How many pending requests ask for this server in all",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "description": "Who asked, earliest first",
+            "items": {
+              "$ref": "#/components/schemas/McpServerRequesterPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "McpServerRequestersPublic",
+        "type": "object"
+      },
+      "McpServerRequestsDeclined": {
+        "properties": {
+          "declined": {
+            "description": "How many requests were declined",
+            "title": "Declined",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "declined"
+        ],
+        "title": "McpServerRequestsDeclined",
+        "type": "object"
+      },
+      "McpServerRequestsPublic": {
+        "description": "The caller's pending requests in a workspace, and the answers they have not acknowledged, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerRequestPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "McpServerRequestsPublic",
+        "type": "object"
+      },
       "McpServerSummary": {
         "description": "A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.",
         "properties": {
@@ -13562,6 +14234,24 @@
               }
             ],
             "title": "Purpose Hint"
+          },
+          "sign_in_required": {
+            "default": false,
+            "description": "The server sends each user's own credential and this key's user has not signed in to it, so a call is refused with mcp_sign_in_required until they do",
+            "title": "Sign In Required",
+            "type": "boolean"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With sign_in_required: a link that starts this key's user's own sign-in to the server, working for 30 minutes",
+            "title": "Sign In Url"
           }
         },
         "required": [
@@ -13589,8 +14279,41 @@
         "title": "McpServersResponse",
         "type": "object"
       },
+      "McpSharedAccountPublic": {
+        "description": "The account a manager signed in to for everyone on a shared server. Never carries a token.",
+        "properties": {
+          "renewable": {
+            "description": "Whether Otari can renew the token on its own; false means signing in again once it expires",
+            "title": "Renewable",
+            "type": "boolean"
+          },
+          "signed_in_at": {
+            "title": "Signed In At",
+            "type": "string"
+          },
+          "signed_in_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name, or else the email, of the dashboard account that signed in; null once it is gone",
+            "title": "Signed In By"
+          }
+        },
+        "required": [
+          "signed_in_by",
+          "signed_in_at",
+          "renewable"
+        ],
+        "title": "McpSharedAccountPublic",
+        "type": "object"
+      },
       "McpToolDefinition": {
-        "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari never turns ``readOnlyHint`` into an authorization\ndecision; each application owns its risk policy, and a server\ncannot waive an application's approval gate by labeling itself read-only.",
+        "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari reads ``readOnlyHint`` in one place only, as the\ndefault for a stored server's read tools until a manager sets them; each\napplication owns its risk policy, and a server cannot waive an\napplication's approval gate by labeling itself read-only.",
         "properties": {
           "annotations": {
             "anyOf": [
@@ -13634,6 +14357,38 @@
           "input_schema"
         ],
         "title": "McpToolDefinition",
+        "type": "object"
+      },
+      "McpToolSummary": {
+        "description": "One tool of a server: its name and, where the server described it, the first line of that description.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Untrusted text the server wrote; null when it has none",
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "read_only": {
+            "default": false,
+            "description": "Whether the tool is one of the server's read tools",
+            "title": "Read Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "McpToolSummary",
         "type": "object"
       },
       "McpToolWarning": {
@@ -19351,6 +20106,12 @@
               }
             ],
             "title": "Purpose Hint"
+          },
+          "sign_in_required": {
+            "default": false,
+            "description": "The server sends each user's own credential and the caller has not signed in to it, so a message that attaches it is refused with mcp_sign_in_required until they do",
+            "title": "Sign In Required",
+            "type": "boolean"
           }
         },
         "required": [
@@ -29768,7 +30529,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerCheckRequest": {
-        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose token stands in when\n``authorization_token`` is omitted, so an edit form can test a new URL with\na token it was never shown. ``\"\"`` checks with no token at all.",
+        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose credential stands in when\n``authorization_token`` is omitted, so an edit form can test a new path with\na token it was never shown. The credential is only sent to that server's own\norigin. ``\"\"`` checks with no token at all.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -29810,7 +30571,7 @@
                 "type": "null"
               }
             ],
-            "description": "A stored server whose token to use",
+            "description": "A stored server whose credential to use, when `url` is on that server's origin",
             "title": "Server Id"
           },
           "url": {
@@ -29847,6 +30608,12 @@
             "description": "Allow-list of tool names; null exposes every tool the server offers",
             "title": "Allowed Tools"
           },
+          "attach_by_default": {
+            "default": false,
+            "description": "Add this server to every model request from the workspace's keys, as if the request named it in mcp_server_ids. A key the server's access rules grant nothing is left without it",
+            "title": "Attach By Default",
+            "type": "boolean"
+          },
           "authorization_token": {
             "anyOf": [
               {
@@ -29859,6 +30626,11 @@
             ],
             "description": "Bearer token for the server; requires an https URL. Encrypted at rest, never returned",
             "title": "Authorization Token"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/McpCredentialMode",
+            "default": "shared",
+            "description": "Whose credential a call carries: 'shared' sends one credential for every caller, authorization_token or the account a manager signs in to for everyone once the server is stored; 'per_user' sends the calling user's own token, which each user gets by signing in to the server, and takes no authorization_token"
           },
           "enabled": {
             "default": true,
@@ -29881,6 +30653,34 @@
             "title": "Name",
             "type": "string"
           },
+          "oauth_client_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a server whose authorization server does not register clients on its own: the OAuth client ID a sign-in goes through. Omit it to let Otari register itself",
+            "title": "Oauth Client Id"
+          },
+          "oauth_client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The secret of oauth_client_id, when it has one. Encrypted at rest, never returned",
+            "title": "Oauth Client Secret"
+          },
           "purpose_hint": {
             "anyOf": [
               {
@@ -29895,12 +30695,19 @@
             "title": "Purpose Hint"
           },
           "read_tools": {
-            "description": "The tool names a manager labeled read, which '@read' in an access rule stands for. The server's own readOnlyHint is never read as one",
-            "items": {
-              "type": "string"
-            },
-            "title": "Read Tools",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tool names a manager labeled read, which '@read' in an access rule stands for. Omit it, or send null, and the labels follow the tools the server itself marks readOnlyHint",
+            "title": "Read Tools"
           },
           "url": {
             "description": "Streamable HTTP MCP endpoint",
@@ -30066,7 +30873,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerHealth": {
-        "description": "The last connection check: whether the gateway reached the server, and what it found.\n\nDescribes the server as the gateway saw it at ``checked_at``, not now: a\nserver that answered then can be down since, and the request path checks\nnothing in advance on the strength of this.",
+        "description": "The last time the gateway talked to the server: whether it answered, and what it found.\n\nWritten by a manager's check and by real requests that reach the server. Describes the server\nas the gateway saw it at ``checked_at``, not now: a server that answered then can be down\nsince, and the request path checks nothing in advance on the strength of this.",
         "properties": {
           "checked_at": {
             "title": "Checked At",
@@ -30104,7 +30911,7 @@
             "type": "array"
           },
           "read_only_hinted_tools": {
-            "description": "Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling read_tools and never applied as one",
+            "description": "Those of tools the server annotates readOnlyHint: untrusted, and what read_tools follows until a manager edits the labels",
             "items": {
               "type": "string"
             },
@@ -30128,8 +30935,16 @@
                 "type": "null"
               }
             ],
-            "description": "Live tools the allow-list admits; null when the check failed",
+            "description": "Live tools the allow-list admits; null when the check failed, or when the server answered a request that did not list its tools and no listing is on record",
             "title": "Tool Count"
+          },
+          "tool_descriptions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The first line of each offered tool's own description, where it has one: untrusted text the server wrote, for a person to read",
+            "title": "Tool Descriptions",
+            "type": "object"
           },
           "tools": {
             "description": "Every tool name the server offers, allowed or not, up to 200; empty on a failure",
@@ -30228,6 +31043,151 @@
         "title": "WorkspaceMcpServerKeyAccess",
         "type": "object"
       },
+      "WorkspaceMcpServerLogoPublic": {
+        "description": "How the dashboard shows one of a workspace's MCP servers.",
+        "properties": {
+          "has_logo_override": {
+            "description": "An admin uploaded this server's logo.",
+            "title": "Has Logo Override",
+            "type": "boolean"
+          },
+          "logo_tile": {
+            "description": "An admin's choice: a tile only where the logo would fade out, always, or never.",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "title": "Logo Tile",
+            "type": "string"
+          },
+          "logo_tone": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dark",
+                  "light",
+                  "tile"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both, or the tile is `never`.",
+            "title": "Logo Tone"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where this gateway serves the server's logo: an admin's upload, else the catalog's logo for its URL, else one found on its host. Null when none was found; the dashboard shows the server's initial.",
+            "title": "Logo Url"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "logo_url",
+          "logo_tone",
+          "logo_tile",
+          "has_logo_override"
+        ],
+        "title": "WorkspaceMcpServerLogoPublic",
+        "type": "object"
+      },
+      "WorkspaceMcpServerLogosPublic": {
+        "description": "The logo of each of a workspace's MCP servers.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMcpServerLogoPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceMcpServerLogosPublic",
+        "type": "object"
+      },
+      "WorkspaceMcpServerMyTools": {
+        "description": "The tools the caller may use on one server, under the access rules that apply to them.\n\nThe rule is the caller's own: their user's grant, else the server's ``everyone_tools``. A key\nwith a grant of its own can reach more or less than this.",
+        "properties": {
+          "access": {
+            "description": "'all' when the rule admits every tool the server offers, 'none' when it admits nothing",
+            "enum": [
+              "all",
+              "some",
+              "none"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the tool list was read; null when it is not known",
+            "title": "Checked At"
+          },
+          "decided_by": {
+            "description": "The caller's own grant, the server's everyone_tools, or the server itself when it is disabled",
+            "enum": [
+              "user",
+              "everyone",
+              "server"
+            ],
+            "title": "Decided By",
+            "type": "string"
+          },
+          "known": {
+            "description": "Whether the server's tool list is known: from its last passing check, or listed just now with the caller's own connection to a per-user server",
+            "title": "Known",
+            "type": "boolean"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "tools": {
+            "description": "The tools the caller may use, in the server's order; empty when not known",
+            "items": {
+              "$ref": "#/components/schemas/McpToolSummary"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "server_id",
+          "decided_by",
+          "access",
+          "known",
+          "checked_at",
+          "tools"
+        ],
+        "title": "WorkspaceMcpServerMyTools",
+        "type": "object"
+      },
       "WorkspaceMcpServerPublic": {
         "description": "The API-facing shape. Never carries the token, only whether one is set.\n\nNo ``last4``-style prefix either, unlike `OrgProviderKeyPublic`: a provider\nkey's last four digits let an operator match a stored key against the one\nin their provider's console, and there is no equivalent workflow for an MCP\nbearer token.",
         "properties": {
@@ -30245,9 +31205,48 @@
             ],
             "title": "Allowed Tools"
           },
+          "attach_by_default": {
+            "description": "Whether every model request from the workspace's keys gets this server without naming it",
+            "title": "Attach By Default",
+            "type": "boolean"
+          },
+          "caller_access": {
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "read",
+                  "some",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On a read of one server or of the list: what the access rules give the caller's own user. 'all' every tool, 'read' the read tools only, 'some' a named subset, 'none' nothing. A key with a rule of its own can differ",
+            "title": "Caller Access"
+          },
+          "connected_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On a per_user server, for a caller who may manage the workspace: how many users have connected their own account. Null on a shared server, and for a caller who may not manage",
+            "title": "Connected Users"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/McpCredentialMode",
+            "description": "'shared': one workspace credential for every caller. 'per_user': each user's own connection"
           },
           "enabled": {
             "title": "Enabled",
@@ -30260,6 +31259,10 @@
             },
             "title": "Everyone Tools",
             "type": "array"
+          },
+          "has_oauth_client_secret": {
+            "title": "Has Oauth Client Secret",
+            "type": "boolean"
           },
           "has_token": {
             "title": "Has Token",
@@ -30274,7 +31277,7 @@
                 "type": "null"
               }
             ],
-            "description": "The last connection check; null until one has run"
+            "description": "What the gateway last learned by talking to the server, from a check or from a real request; null until either has happened"
           },
           "id": {
             "format": "uuid",
@@ -30284,6 +31287,24 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "needs_setup": {
+            "default": false,
+            "description": "A shared server with no token and no shared account, whose server asked for a credential when last reached. Requests skip it, as they skip a disabled server, until it has one",
+            "title": "Needs Setup",
+            "type": "boolean"
+          },
+          "oauth_client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OAuth client ID a manager supplied for sign-ins; null when Otari registers itself",
+            "title": "Oauth Client Id"
           },
           "purpose_hint": {
             "anyOf": [
@@ -30297,12 +31318,28 @@
             "title": "Purpose Hint"
           },
           "read_tools": {
-            "description": "The tool names a manager labeled read, which '@read' stands for",
+            "description": "The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marks readOnlyHint, as last listed",
             "items": {
               "type": "string"
             },
             "title": "Read Tools",
             "type": "array"
+          },
+          "read_tools_from_server": {
+            "description": "True while no manager has edited read_tools, so they follow the server's own readOnlyHint",
+            "title": "Read Tools From Server",
+            "type": "boolean"
+          },
+          "shared_account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpSharedAccountPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none"
           },
           "updated_at": {
             "title": "Updated At",
@@ -30328,7 +31365,12 @@
           "enabled",
           "everyone_tools",
           "read_tools",
+          "read_tools_from_server",
           "has_token",
+          "credential_mode",
+          "oauth_client_id",
+          "has_oauth_client_secret",
+          "attach_by_default",
           "health",
           "created_at",
           "updated_at"
@@ -30337,7 +31379,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerUpdate": {
-        "description": "Partial update. Only the fields the caller sets are applied.\n\n``authorization_token`` has three states rather than two, which is what a\nwrite-only field needs: omit it to leave the stored token alone, send\n``\"\"`` to clear it, send a value to rotate it. An explicit ``null`` also\nleaves it alone, matching the platform: a client that serializes its whole\nform back, with an empty token box it never filled in, must not destroy a\ntoken it was never shown.",
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``authorization_token`` has three states rather than two, which is what a\nwrite-only field needs: omit it to leave the stored token alone, send\n``\"\"`` to clear it, send a value to rotate it. An explicit ``null`` also\nleaves it alone, matching the platform: a client that serializes its whole\nform back, with an empty token box it never filled in, must not destroy a\ntoken it was never shown. ``oauth_client_secret`` follows the same three\nstates, and so does ``oauth_client_id``, where ``\"\"`` goes back to letting\nOtari register itself.\n\nChanging ``credential_mode``, the URL, or the OAuth client ends every\nsign-in to the server, each user's own and the shared account: the tokens\nwere issued for the server and the client as they were. Setting a token on\na shared server ends its shared account too, since a server sends one\ncredential.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -30355,6 +31397,10 @@
             ],
             "title": "Allowed Tools"
           },
+          "attach_by_default": {
+            "title": "Attach By Default",
+            "type": "boolean"
+          },
           "authorization_token": {
             "anyOf": [
               {
@@ -30366,6 +31412,10 @@
               }
             ],
             "title": "Authorization Token"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/McpCredentialMode",
+            "title": "Credential Mode"
           },
           "enabled": {
             "title": "Enabled",
@@ -30384,6 +31434,30 @@
             "title": "Name",
             "type": "string"
           },
+          "oauth_client_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oauth Client Id"
+          },
+          "oauth_client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oauth Client Secret"
+          },
           "purpose_hint": {
             "anyOf": [
               {
@@ -30397,11 +31471,19 @@
             "title": "Purpose Hint"
           },
           "read_tools": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Read Tools",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tool names a manager labeled read. An explicit null goes back to following the tools the server marks readOnlyHint; omit it to leave the labels as they are",
+            "title": "Read Tools"
           },
           "url": {
             "maxLength": 2048,
@@ -40389,6 +41471,56 @@
         ]
       }
     },
+    "/api/v1/mcp-connections/complete": {
+      "post": {
+        "description": "Finish a sign-in to a per-user MCP server, from the code its authorization server returned.\n\nThe dashboard calls this from the page the callback lands on. The state\nis consumed whatever happens next, so it finishes one sign-in at most, and\nit must be one the caller started: another person's is refused with a 400.\nSend the redirect's `iss` too when it had one: an answer naming another\nauthorization server is refused (RFC 9207).",
+        "operationId": "mcp-connections-complete_mcp_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionCompleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Complete Mcp Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
     "/api/v1/mcp/execute": {
       "post": {
         "description": "Execute one caller-authorized tool call against a stored MCP server.\n\nThe calling application owns any user approval, argument editing,\ncancellation and action history; Otari executes exactly the tool name and\narguments it is given, once, and returns the remote server's native result.\nA result with ``isError: true`` is a definitive outcome and comes back as an\nHTTP 200.\n\n**This request must never be retried automatically.** ``client_execution_id``\nis correlation, not idempotency: once the call has been dispatched Otari\ncannot know whether the tool ran, and an ``outcome_unknown`` response means\nexactly that. Proxies, service meshes and SDKs on this path have to disable\nretries for it, including on connection resets and 5xx responses.",
@@ -40551,7 +41683,7 @@
     },
     "/api/v1/mcp/servers": {
       "get": {
-        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.",
+        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is\nleft out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code\n`mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.",
         "operationId": "mcp-list_mcp_servers",
         "responses": {
           "200": {
@@ -59229,6 +60361,710 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mcp-connections": {
+      "get": {
+        "description": "List the caller's own connections to this workspace's MCP servers.\n\nA connection is the caller's sign-in to a server whose `credential_mode`\nis `per_user`. Any member who can see the workspace may call this, oldest\nconnection first; `count` is the total. Tokens are never included.",
+        "operationId": "mcp-connections-list_my_mcp_connections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List My Mcp Connections",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}": {
+      "delete": {
+        "description": "End the caller's own connection to an MCP server.\n\nThe stored tokens are deleted, and the authorization server is asked to\nrevoke them where it publishes a revocation endpoint. The caller's keys\nthen get `mcp_sign_in_required` from this server until they sign in again.",
+        "operationId": "mcp-connections-end_my_mcp_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "End My Mcp Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      },
+      "post": {
+        "description": "Start the caller's own sign-in to a per-user MCP server.\n\nReturns the server's authorization page to send the browser to. Otari\ndiscovers the server's authorization server, registers itself as a client\nwhere the server holds no client ID, and uses the authorization code flow\nwith S256 PKCE. The sign-in is bound to the caller: it finishes only in\ntheir own dashboard session, once, within ten minutes. The connection then\nbelongs to the caller's user, so every key they own in this workspace\nreaches the server as them.\n\nAny member who can see the workspace may call this. A server in `shared`\nmode is refused with a 409, and a deployment with no `public_base_url`\nwith a 400, because the address the authorization server returns to is\nderived from it.",
+        "operationId": "mcp-connections-start_mcp_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Mcp Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
+      "get": {
+        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names the first five\nwho asked, with their notes, and `requester_count` says how many asked in all; the\n`requesters` list pages through the rest. Each also carries the catalog's entry for the server\nas it is now. A page holds `limit` servers after the first `skip`; `count` says how many\nrequests wait in all, and `server_count` how many servers they ask for.",
+        "operationId": "mcp-servers-list_mcp_server_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of catalog servers to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of catalog servers to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of catalog servers to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of catalog servers to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestGroupsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Server Requests",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Ask the workspace's owners and admins to add a server the MCP catalog lists.\n\nAny member who can see the workspace, a viewer included. The request keeps the title and URL\nthe catalog gives the server now. Where this deployment can send mail, the workspace's owners\nand admins and its organization's are told, at most 20 of them; otherwise they find the\nrequest on the MCP servers page. A caller holds one pending request per server.",
+        "operationId": "mcp-servers-request_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerRequestCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "The catalog lists no server by that name."
+          },
+          "409": {
+            "description": "The workspace already has the server, or the caller's request for it is already waiting."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "The caller has 10 requests waiting in this workspace, or made 10 there in the last day."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Request Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/decline": {
+      "post": {
+        "description": "Decline every pending request for one catalog server.\n\nOrganization owners/admins or this workspace's owners/admins. Each requester sees the\n`reason`, and is mailed it where this deployment can send mail. To approve instead, add the\nserver to the workspace: storing a server at the requested URL approves every pending request\nfor it.",
+        "operationId": "mcp-servers-decline_mcp_server_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerRequestDecline"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestsDeclined"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Nobody is waiting for that server in this workspace."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Decline Mcp Server Requests",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/mine": {
+      "get": {
+        "description": "The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.\n\nAny member who can see the workspace. Pending requests come first, then the answers, each\nnewest first, so a first page of 10 or more holds every pending one. An answer, approved or\ndeclined, is listed until the caller acknowledges it. A declined request also leaves the list\nwhen the caller asks for the server again or the server is added, and an approved one when its\nserver is deleted.",
+        "operationId": "mcp-servers-list_my_mcp_server_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List My Mcp Server Requests",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters": {
+      "get": {
+        "description": "Everyone waiting for one catalog server, a page at a time, the earliest first.\n\nOrganization owners/admins or this workspace's owners/admins. For a server whose entry in the\nlist above names fewer requesters than its `requester_count`.",
+        "operationId": "mcp-servers-list_mcp_server_requesters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The catalog server asked for",
+            "in": "query",
+            "name": "catalog_name",
+            "required": true,
+            "schema": {
+              "description": "The catalog server asked for",
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Catalog Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerRequestersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Server Requesters",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}": {
+      "delete": {
+        "description": "Withdraw one of the caller's own pending requests. Someone else's request is a 404.",
+        "operationId": "mcp-servers-withdraw_mcp_server_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "The request was already answered or withdrawn."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Withdraw Mcp Server Request",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}/acknowledge": {
+      "post": {
+        "description": "Record that the caller has seen the answer to one of their own requests, so it is no longer listed for them.\n\nRepeating it changes nothing. Someone else's request is a 404.",
+        "operationId": "mcp-servers-acknowledge_mcp_server_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "The request is still waiting for an answer."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Acknowledge Mcp Server Request",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
       "get": {
         "description": "List the MCP servers configured for a workspace.\n\nReadable by any member who can see the workspace: these servers act on\nevery request a member sends through it, so what they are is a member's\nto view (otari-ai#1942). Changing them stays with organization\nowners/admins or this workspace's owners/admins. Authorization tokens are\nnever included; each server reports only whether it has one.",
@@ -59370,7 +61206,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
       "post": {
-        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored credential, which is\nonly sent to a URL on that server's own origin (scheme, host and port): any\nother is a 400. The URL is checked for SSRF safety first, with the same 400\na create gets.",
         "operationId": "mcp-servers-check_workspace_mcp_server_connection",
         "parameters": [
           {
@@ -59406,7 +61242,7 @@
             "description": "Successful Response"
           },
           "400": {
-            "description": "The URL failed the SSRF or TLS check; nothing was sent to it."
+            "description": "The URL failed the SSRF or TLS check, or is on another origin than the stored server whose credential was asked for; nothing was sent to it."
           },
           "422": {
             "content": {
@@ -59496,6 +61332,85 @@
           }
         ],
         "summary": "Get Workspace Mcp Key Access",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/logos": {
+      "get": {
+        "description": "The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.\n\nPaged as the server list is, oldest server first. Readable by any member who can\nsee the workspace, as the servers are. A logo is an admin's upload, else the\ncatalog's for the server's URL, else one the gateway found on the server's host.\nListing them makes the gateway fetch nothing.",
+        "operationId": "mcp-servers-list_workspace_mcp_server_logos",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerLogosPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Mcp Server Logos",
         "tags": [
           "mcp-servers"
         ]
@@ -60069,7 +61984,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
       "post": {
-        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded.",
+        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded. A per-user server holds no token to check with and\nis refused with a 409: start its check with `POST .../check/sign-in`.",
         "operationId": "mcp-servers-check_workspace_mcp_server",
         "parameters": [
           {
@@ -60127,6 +62042,572 @@
           }
         ],
         "summary": "Check Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check/sign-in": {
+      "post": {
+        "description": "Start a sign-in made only to check a per-user server. Organization or workspace owners/admins.\n\nReturns the authorization page to send the browser to, as starting a connection does. The\ncaller signs in with any account; finishing the sign-in (`POST /mcp-connections/complete`)\nlists the server's tools once with the token it returns, stores the outcome as `health`, and\ndrops the token, revoking it where the authorization server allows. No connection is created,\nand the caller's own connection, if they have one, is left as it was. A server in `shared` mode\nis refused with a 409.",
+        "operationId": "mcp-servers-start_workspace_mcp_server_check_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Workspace Mcp Server Check Sign In",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections": {
+      "get": {
+        "description": "List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.\n\nEach entry names the user the connection belongs to and, when that user\nis a dashboard account, its email and name: the caller's own connection\nfirst, then the rest oldest first.\n`count` is the total. Tokens are never included.",
+        "operationId": "mcp-connections-list_mcp_server_connections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerConnectionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Server Connections",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}": {
+      "delete": {
+        "description": "End one user's connection to an MCP server. Organization owners/admins or this workspace's owners/admins.\n\nThe stored tokens are deleted and the authorization server is asked to\nrevoke them. That user's keys get `mcp_sign_in_required` from this server\nuntil they sign in again.",
+        "operationId": "mcp-connections-remove_mcp_server_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Mcp Server Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo": {
+      "delete": {
+        "description": "Remove a server's uploaded logo, so it shows its own again. The tile choice stays.\n\nOrganization owners/admins or this workspace's owners/admins.",
+        "operationId": "mcp-servers-remove_workspace_mcp_server_logo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerLogoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Workspace Mcp Server Logo",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "put": {
+        "description": "Set how a server's logo shows: the tile choice, and an uploaded PNG in place of its own logo.\n\nOrganization owners/admins or this workspace's owners/admins. The upload is kept\napart from the logo the gateway fetches, so no fetch or catalog sync replaces it.",
+        "operationId": "mcp-servers-set_workspace_mcp_server_logo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "contentMediaType": "image/png",
+                    "description": "A PNG of at most 512 KB to show instead of the server's own logo. Leave out to keep it.",
+                    "type": "string"
+                  },
+                  "tile": {
+                    "description": "Whether the logo sits on a tile: where it would fade out, always, or never.",
+                    "enum": [
+                      "auto",
+                      "always",
+                      "never"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tile"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerLogoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "description": "The body is larger than the logo limit."
+          },
+          "422": {
+            "description": "The file is not a PNG, or the tile is not one of the choices."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Mcp Server Logo",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/my-tools": {
+      "get": {
+        "description": "The tools the caller may use on a server. Any member who can see the workspace.\n\nApplies the caller's own rule: their user's grant, else the server's `everyone_tools`, within\nits `allowed_tools`; a disabled server admits nothing. The tool list comes from the server's\nlast passing check; where there is none and the server is per-user, it is listed with the\ncaller's own connection and not stored. `known` is false when neither is available.",
+        "operationId": "mcp-servers-get_my_workspace_mcp_server_tools",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerMyTools"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get My Workspace Mcp Server Tools",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
+      "delete": {
+        "description": "End a shared server's account. Organization owners/admins or this workspace's owners/admins.\n\nThe stored tokens are deleted, and the authorization server is asked to revoke them where it\npublishes a revocation endpoint. The server is then checked again with no credential, and\ncomes back with `needs_setup` when it asks for one. A server with no shared account is a 404.",
+        "operationId": "mcp-servers-end_workspace_mcp_server_shared_account",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "End Workspace Mcp Server Shared Account",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Start a sign-in for everyone, to a shared server. Organization or workspace owners/admins.\n\nReturns the authorization page to send the browser to, as starting a connection does. The\ncaller signs in with the account the whole workspace should act as, so a service account is\nthe better choice. Finishing the sign-in (`POST /mcp-connections/complete`) stores that\naccount as the server's `shared_account`: every caller's call then carries its token, which\nOtari renews as it does a user's own, and a stored `authorization_token` is removed. A server\nin `per_user` mode is refused with a 409.",
+        "operationId": "mcp-servers-start_workspace_mcp_server_shared_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Workspace Mcp Server Shared Sign In",
         "tags": [
           "mcp-servers"
         ]

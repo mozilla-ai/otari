@@ -160,20 +160,45 @@ class OrganizationMemberRepository(
         return result.scalars().first()
 
     async def active_with_roles(
-        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], roles: Collection[str]
+        self,
+        organization_id: uuid.UUID,
+        user_ids: Collection[uuid.UUID],
+        roles: Collection[str],
+        *,
+        lock: bool = False,
     ) -> set[uuid.UUID]:
-        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query."""
+        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query.
+
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal or a
+        demotion that changes one waits for it (PostgreSQL only).
+        """
         if not user_ids or not roles:
             return set()
+        statement = select(col(OrganizationMember.user_id)).where(
+            col(OrganizationMember.organization_id) == organization_id,
+            col(OrganizationMember.user_id).in_(list(user_ids)),
+            col(OrganizationMember.status) == "active",
+            col(OrganizationMember.role).in_(list(roles)),
+        )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
+        return set(result.scalars().all())
+
+    async def active_user_ids_with_roles(self, organization_id: uuid.UUID, roles: Collection[str]) -> list[uuid.UUID]:
+        """The users holding an active membership of one of ``roles`` in an organization, oldest membership first."""
+        if not roles:
+            return []
         result = await self.db.execute(
-            select(col(OrganizationMember.user_id)).where(
+            select(col(OrganizationMember.user_id))
+            .where(
                 col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.user_id).in_(list(user_ids)),
                 col(OrganizationMember.status) == "active",
                 col(OrganizationMember.role).in_(list(roles)),
             )
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
-        return set(result.scalars().all())
+        return list(result.scalars().all())
 
     async def get_active_by_user_with_organizations(
         self, user_id: uuid.UUID

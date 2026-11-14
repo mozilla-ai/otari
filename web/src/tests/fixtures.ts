@@ -998,8 +998,18 @@ export function workspaceMcpServer(
     // defaults to.
     everyone_tools: ["*"],
     read_tools: [],
+    // A builder that names read tools is a manager's labels; one that names
+    // none follows the server, as a fresh row does.
+    read_tools_from_server: overrides.read_tools === undefined,
+    needs_setup: false,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // One workspace token for every caller, as a create defaults to.
+    credential_mode: "shared",
+    oauth_client_id: null,
+    has_oauth_client_secret: false,
+    // Reached only by a request that names it, as a create defaults to.
+    attach_by_default: false,
     // Never checked, which is how a row stored before checks existed reads.
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",

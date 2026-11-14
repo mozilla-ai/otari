@@ -595,6 +595,7 @@ POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # 
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}                  # operator surface
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access          # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/my-tools        # operator surface
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check    # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants  # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}  # operator surface
@@ -602,6 +603,25 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access    # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check/sign-in  # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account  # dashboard surface: starts a browser sign-in
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections     # operator surface
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/logos                       # dashboard-only
+PUT /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo            # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo         # dashboard-only
+GET /api/v1/workspaces/{workspace_id}/mcp-server-requests                     # dashboard surface: members ask admins for a catalog server
+POST /api/v1/workspaces/{workspace_id}/mcp-server-requests                    # dashboard surface: members ask admins for a catalog server
+GET /api/v1/workspaces/{workspace_id}/mcp-server-requests/mine                # dashboard surface: members ask admins for a catalog server
+GET /api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters          # dashboard surface: members ask admins for a catalog server
+POST /api/v1/workspaces/{workspace_id}/mcp-server-requests/decline            # dashboard surface: members ask admins for a catalog server
+DELETE /api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}     # dashboard surface: members ask admins for a catalog server
+POST /api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}/acknowledge # dashboard surface: members ask admins for a catalog server
+GET /api/v1/workspaces/{workspace_id}/mcp-connections                         # dashboard surface: a member's own sign-ins
+POST /api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}            # dashboard surface: starts a browser sign-in
+DELETE /api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}          # dashboard surface: a member's own sign-ins
+POST /api/v1/mcp-connections/complete                                         # dashboard surface: finishes a browser sign-in
 GET /api/v1/mcp-catalog/servers                                               # dashboard-only
 GET /api/v1/mcp-catalog/popular                                               # dashboard-only
 GET /api/v1/mcp-catalog/sync                                                  # dashboard-only

@@ -1,4 +1,4 @@
-"""Admit the MCP servers one request may reach: its own, and the stored ones its IDs name."""
+"""Admit the MCP servers one request may reach: its own, the stored ones its IDs name, and the attached ones."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from gateway.exceptions.tools_exceptions import McpServerConfigurationError, McpServerDeclarationError
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from gateway.services._tool_loop import ToolBackend
     from gateway.services.model_access import McpAccess
     from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+    from gateway.services.tools._mcp_sign_in import McpSignInNeeded
 
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
@@ -89,6 +91,32 @@ async def _validate_mcp_server_urls(
         raise McpServerConfigurationError(MCP_SERVER_URL_UNSAFE_DETAIL) from exc
 
 
+async def _safe_attached(servers: list[McpServerConfig], workspace_id: uuid.UUID) -> list[McpServerConfig]:
+    """The attached servers whose URL passes its safety check; one that fails is left out of the request.
+
+    An attached server joins every request of its workspace, so a host that stops resolving to a public
+    address must not refuse them all. Why it was left out goes to the log, as a named one's refusal does.
+    """
+    checks = await asyncio.gather(
+        *(validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token)) for server in servers),
+        return_exceptions=True,
+    )
+    safe: list[McpServerConfig] = []
+    for server, outcome in zip(servers, checks, strict=True):
+        if isinstance(outcome, UnsafeURLError):
+            logger.warning(
+                "Attached MCP server left out for workspace %s server_id=%s: %s",
+                workspace_id,
+                server.stored_server_id,
+                outcome,
+            )
+        elif isinstance(outcome, BaseException):
+            raise outcome
+        else:
+            safe.append(server)
+    return safe
+
+
 # Tool fields through which a provider is handed MCP servers to dial itself: Gemini's ``Tool.mcp_servers``, in
 # either of the spellings its SDK accepts.
 _PROVIDER_MCP_FIELDS = frozenset({"mcp_servers", "mcpServers"})
@@ -108,6 +136,14 @@ def declares_provider_mcp(tools: Sequence[object] | None) -> bool:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class AdmittedMcpServers:
+    """The MCP servers one request's tool loop opens, and the per-user ones it reaches only through a sign-in."""
+
+    servers: list[McpServerConfig] | None = None
+    sign_in: list[McpSignInNeeded] = field(default_factory=list)
+
+
 async def admit_mcp_servers(
     inline_servers: list[McpServerConfig] | None,
     server_ids: list[uuid.UUID] | None,
@@ -116,13 +152,17 @@ async def admit_mcp_servers(
     workspace_id: uuid.UUID,
     access: McpAccess,
     provider_mcp: bool = False,
-) -> list[McpServerConfig] | None:
-    """The MCP servers the request may reach: its own, then the stored ones its IDs name.
+    attach: bool = False,
+) -> AdmittedMcpServers:
+    """The MCP servers the request may reach: its own, then the stored ones its IDs name, then with ``attach``
+    the ones its workspace attaches to every request.
 
     ``access`` is the caller's MCP access. A stored ID whose access list grants the caller nothing is
     answered as an unknown one, and the servers returned carry the tool patterns the caller holds on
-    them. A request's own servers, including a ``provider_mcp`` tool its provider would dial, are refused
-    where the workspace has turned them off.
+    them. An attached server the caller may not reach is left out. A request's own servers, including
+    a ``provider_mcp`` tool its provider would dial, are refused where the workspace has turned them off.
+    A per-user server the caller may reach and its user has not signed in to, or whose token cannot be
+    renewed, does not fail the request: it comes back in ``sign_in``.
 
     Raises:
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
@@ -136,6 +176,8 @@ async def admit_mcp_servers(
         inline.caller_tool_patterns = None
         inline.caller_access_source = None
         inline.stored_server_id = None
+        inline.attached = False
+        inline.renew_token = None
     # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
     # A duplicate name collapses two servers into one client session, so each source refuses one.
     inline_names: set[str] = set()
@@ -146,15 +188,25 @@ async def admit_mcp_servers(
                 raise McpServerDeclarationError(duplicate_mcp_server_name_detail(server.name))
             inline_names.add(server.name)
         await _validate_mcp_server_urls(mcp_servers)
-    if server_ids:
+    sign_in: list[McpSignInNeeded] = []
+    if server_ids or attach:
         try:
-            stored_servers = await servers.resolve_many(workspace_id, server_ids, access)
+            resolved = await servers.resolve_for_request(workspace_id, list(server_ids or []), access, attach=attach)
         except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
             # The operator's problem, not the caller's, and the underlying message
             # names the environment variable, so it stays in the log.
             logger.error("MCP server token could not be decrypted for workspace %s: %s", workspace_id, exc)
             raise McpServerConfigurationError(MCP_SERVER_TOKEN_UNREADABLE_DETAIL) from exc
-        await _validate_mcp_server_urls(stored_servers, stored=True, workspace_id=workspace_id)
+        # An attached server gives way to one the request brought under the same name, and never refuses it.
+        stored_servers = [
+            server for server in resolved.servers if not (server.attached and server.name in inline_names)
+        ]
+        sign_in = [need for need in resolved.sign_in if not (need.attached and need.name in inline_names)]
+        named_servers = [server for server in stored_servers if not server.attached]
+        await _validate_mcp_server_urls(named_servers, stored=True, workspace_id=workspace_id)
+        stored_servers = named_servers + await _safe_attached(
+            [server for server in stored_servers if server.attached], workspace_id
+        )
         stored_name_counts = Counter(server.name for server in stored_servers)
         # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
         if len(stored_name_counts) != len(stored_servers):
@@ -165,10 +217,12 @@ async def admit_mcp_servers(
             )
             raise McpServerConfigurationError(MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL)
         # Gotcha: the detail does not repeat a stored name, but a caller can still guess one by probing.
-        if inline_names & stored_name_counts.keys():
+        # A named server waiting on a sign-in collides as a connected one does; an attached one was dropped above.
+        if inline_names & (stored_name_counts.keys() | {need.name for need in sign_in}):
             raise McpServerDeclarationError(MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL)
-        mcp_servers = (mcp_servers or []) + stored_servers
-    return mcp_servers
+        if stored_servers or mcp_servers:
+            mcp_servers = (mcp_servers or []) + stored_servers
+    return AdmittedMcpServers(servers=mcp_servers, sign_in=sign_in)
 
 
 def refuse_shadowed_builtin_tools(pool: ToolBackend, builtin_names: Iterable[str]) -> None:

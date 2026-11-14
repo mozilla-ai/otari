@@ -115,7 +115,9 @@ def _store(
     enabled: bool = True,
     allowed_tools: list[str] | None = None,
     read_tools: list[str] | None = None,
+    labeled: bool = True,
 ) -> WorkspaceMcpServer:
+    """Store a server. ``labeled=False`` leaves its read labels unset, so they follow the server's own."""
     row = WorkspaceMcpServer(
         workspace_id=workspace_id,
         name=name,
@@ -124,7 +126,7 @@ def _store(
         enabled=enabled,
         everyone_tools=["*"] if everyone is None else everyone,
         allowed_tools=allowed_tools,
-        read_tools=read_tools or [],
+        read_tools=(read_tools or []) if labeled else None,
         purpose_hint=f"{name} hint",
     )
     test_db.add(row)
@@ -206,7 +208,17 @@ def test_a_key_lists_the_enabled_servers_whose_everyone_rule_lets_it_in(
     response = client.get(f"{API_ROOT}/mcp/servers", headers=api_key_header)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"servers": [{"id": str(visible.id), "name": "github", "purpose_hint": "github hint"}]}
+    assert response.json() == {
+        "servers": [
+            {
+                "id": str(visible.id),
+                "name": "github",
+                "purpose_hint": "github hint",
+                "sign_in_required": False,
+                "sign_in_url": None,
+            }
+        ]
+    }
     for secret in ("ghp_token", "93.184.216.34"):
         assert secret not in response.text
 
@@ -319,18 +331,97 @@ def test_a_read_rule_reaches_only_the_tools_a_manager_labeled_read(
     assert session.calls == ["list_issues"]
 
 
-def test_the_connection_check_suggests_read_tools_without_labeling_them(
+def test_read_labels_follow_the_server_until_a_manager_edits_them(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=["@read"], labeled=False)
+    url = f"{_servers(row.workspace_id)}/{row.id}"
+
+    unchecked = client.get(url, headers=master_key_header).json()
+    checked = client.post(f"{url}/check", headers=master_key_header)
+
+    assert unchecked["read_tools"] == []
+    assert unchecked["read_tools_from_server"] is True
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["health"]["read_only_hinted_tools"] == ["list_issues", "delete_issue"]
+    assert checked.json()["read_tools"] == ["list_issues", "delete_issue"]
+    assert checked.json()["read_tools_from_server"] is True
+    # The rule reaches what the server marks read-only, with nobody having ticked anything.
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+    assert [tool["name"] for tool in discovered.json()["tools"]] == ["list_issues", "delete_issue"]
+
+    edited = client.patch(url, json={"read_tools": ["list_issues"]}, headers=master_key_header)
+    rechecked = client.post(f"{url}/check", headers=master_key_header)
+
+    assert edited.json()["read_tools_from_server"] is False
+    assert rechecked.json()["read_tools"] == ["list_issues"]
+    narrowed = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+    assert [tool["name"] for tool in narrowed.json()["tools"]] == ["list_issues"]
+
+
+def test_labeling_no_tool_read_is_a_choice_a_check_does_not_overwrite(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", labeled=False)
+    url = f"{_servers(row.workspace_id)}/{row.id}"
+
+    emptied = client.patch(url, json={"read_tools": []}, headers=master_key_header)
+    checked = client.post(f"{url}/check", headers=master_key_header)
+    reset = client.patch(url, json={"read_tools": None}, headers=master_key_header)
+
+    assert emptied.status_code == 200, emptied.text
+    assert checked.json()["read_tools"] == []
+    assert checked.json()["read_tools_from_server"] is False
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["read_tools"] == ["list_issues", "delete_issue"]
+    assert reset.json()["read_tools_from_server"] is True
+
+
+def _health_of(client: TestClient, master: dict[str, str], row: WorkspaceMcpServer) -> dict[str, Any] | None:
+    """A server's stored health, once the write a request left running has landed."""
+    health: dict[str, Any] | None = None
+    for _ in range(40):
+        health = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master).json()["health"]
+        if health is not None:
+            break
+        time.sleep(0.05)
+    return health
+
+
+def test_a_request_that_lists_a_server_s_tools_records_them_as_a_check_would(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", labeled=False)
+
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+    health = _health_of(client, master_key_header, row)
+
+    assert discovered.status_code == 200, discovered.text
+    assert health is not None
+    assert health["status"] == "healthy"
+    assert health["tools"] == list(TOOL_NAMES)
+    assert health["read_only_hinted_tools"] == ["list_issues", "delete_issue"]
+    stored = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master_key_header).json()
+    assert stored["read_tools"] == ["list_issues", "delete_issue"]
+
+
+def test_a_tool_call_marks_the_server_reached_without_claiming_its_tools(
     client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
 ) -> None:
     key = _new_key(client, master_key_header)
     row = _store(test_db, _workspace_id(test_db, key), "github")
 
-    checked = client.post(f"{_servers(row.workspace_id)}/{row.id}/check", headers=master_key_header)
+    called = client.post(f"{API_ROOT}/mcp/execute", headers=_bearer(key), json=_execute_body(row, "list_issues"))
+    health = _health_of(client, master_key_header, row)
 
-    assert checked.status_code == 200, checked.text
-    stored = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master_key_header).json()
-    assert stored["health"]["read_only_hinted_tools"] == ["list_issues", "delete_issue"]
-    assert stored["read_tools"] == []
+    assert called.status_code == 200, called.text
+    assert health is not None
+    assert health["status"] == "healthy"
+    assert health["tool_count"] is None
+    assert health["tools"] == []
 
 
 def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
@@ -390,7 +481,7 @@ def test_a_catalog_stored_before_the_screen_is_read_back_without_pattern_names(
     assert stored["health"]["read_only_hinted_tools"] == ["list_issues"]
 
 
-@pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None, ["x" * 257]])
+@pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], ["x" * 257]])
 def test_read_tools_name_tools_exactly(
     client: TestClient, master_key_header: dict[str, str], test_db: Session, read_tools: Any
 ) -> None:

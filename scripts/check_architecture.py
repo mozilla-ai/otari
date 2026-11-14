@@ -2396,6 +2396,22 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/sandbox_credential_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.McpOAuthFlow": {
+        "repository": "gateway/repositories/tools/mcp_oauth_flow_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.McpServerRequest": {
+        "repository": "gateway/repositories/tools/mcp_server_request_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.McpSharedConnection": {
+        "repository": "gateway/repositories/tools/mcp_user_connection_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.McpUserConnection": {
+        "repository": "gateway/repositories/tools/mcp_user_connection_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
         "baseline": (),
@@ -2413,6 +2429,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.WorkspaceMcpServerGrant": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.WorkspaceMcpServerLogo": {
+        "repository": "gateway/repositories/tools/workspace_mcp_server_logo_repository.py",
         "baseline": (),
     },
     "gateway.models.tools.WorkspaceWebSearchConfig": {

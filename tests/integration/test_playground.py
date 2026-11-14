@@ -46,7 +46,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
 from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -1343,6 +1343,29 @@ def test_the_menu_offers_only_the_mcp_servers_the_caller_reaches(
 
     assert code == status.HTTP_200_OK
     assert [server["name"] for server in body["mcp_servers"]] == ["open"]
+
+
+def test_the_menu_marks_a_per_user_server_the_caller_has_not_signed_in_to(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The dashboard keeps it out of the attachable set: every message attaching it would be refused."""
+    with db_session_factory() as db:
+        db.add(
+            WorkspaceMcpServer(
+                workspace_id=world.workspaces["alpha_one"],
+                name="drive",
+                url=_MCP_URL,
+                credential_mode=McpCredentialMode.PER_USER,
+            )
+        )
+        db.commit()
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert [(server["name"], server["enabled"], server["sign_in_required"]) for server in body["mcp_servers"]] == [
+        ("drive", True, True)
+    ]
 
 
 def test_a_session_cannot_reach_a_stored_server_its_access_denies(

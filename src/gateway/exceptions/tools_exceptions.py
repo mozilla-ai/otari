@@ -1,10 +1,16 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
+import uuid
 from enum import StrEnum
 
 from fastapi import status
 
-from gateway.core.error_codes import PRICING_REQUIRED, WEB_ACCESS_DISABLED
+from gateway.core.error_codes import (
+    MCP_OAUTH_ISSUER_CHANGED,
+    MCP_SIGN_IN_REQUIRED,
+    PRICING_REQUIRED,
+    WEB_ACCESS_DISABLED,
+)
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -100,6 +106,45 @@ class WorkspaceMcpServerCheckBusyError(TenancyError):
         super().__init__("Too many MCP server checks are running on this gateway; try again shortly")
 
 
+class McpServerRequestNotFoundError(TenancyNotFoundError):
+    def __init__(self, request_id: object):
+        super().__init__(f"MCP server request {request_id} not found")
+
+
+class McpCatalogServerNotListedError(TenancyNotFoundError):
+    def __init__(self, catalog_name: str):
+        super().__init__(f"The MCP catalog lists no server named {catalog_name}")
+
+
+class McpServerAlreadyRequestedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("You already asked for this server; the request is waiting for an admin")
+
+
+class McpServerAlreadyAddedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This workspace already has that server")
+
+
+class McpServerRequestDecidedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This request was already answered or withdrawn")
+
+
+class McpServerRequestPendingError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This request is still waiting for an answer")
+
+
+class McpServerRequestLimitError(TenancyError):
+    """A member reached a bound on how many servers they may ask for.
+
+    A 429: it clears on its own, when a request is answered or the day's count ages out.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+
 class ContainerOnManagedCredentialError(TenancyValidationError):
     """A request named a container on a provider account this gateway shares across workspaces."""
 
@@ -109,6 +154,113 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
             "manages on behalf of many workspaces, and a container id addresses state on that account "
             "rather than on your workspace. Use a model served by your own provider key."
         )
+
+
+class McpSignInRequiredError(TenancyForbiddenError):
+    """A per-user MCP server the caller may reach, whose user has no connection to it.
+
+    A result of its own and not a missing server: the caller's access rules admitted it, and what is
+    absent is the user's sign-in. It names the server and the user, so a caller can offer that sign-in.
+    """
+
+    error_code = MCP_SIGN_IN_REQUIRED
+
+    def __init__(self, mcp_server_id: uuid.UUID, *, name: str, user_id: str):
+        super().__init__(
+            f"MCP server '{name}' ({mcp_server_id}) uses each user's own account, and this user has not "
+            "signed in to it yet. Connect it under MCP servers in the dashboard."
+        )
+        self.mcp_server_id = mcp_server_id
+        self.name = name
+        self.user_id = user_id
+
+
+class McpCheckSignInRequiredError(TenancyConflictError):
+    """A per-user server was asked to be checked without a sign-in made for the check.
+
+    It holds no token of its own, and a check never borrows anyone's connection, so a check of one
+    starts with a sign-in. The message is for the dashboard, which offers that sign-in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Checking a Personal server needs a sign-in. Use Check, which opens one.")
+
+
+class McpConnectionUnavailableError(TenancyError):
+    """A user's connection to a per-user MCP server has an expired token that could not be renewed right now."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self, mcp_server_id: uuid.UUID):
+        super().__init__(f"The sign-in to MCP server {mcp_server_id} could not be renewed; try again shortly")
+        self.mcp_server_id = mcp_server_id
+
+
+class McpConnectionNotFoundError(TenancyNotFoundError):
+    def __init__(self, mcp_server_id: object):
+        super().__init__(f"No connection to MCP server {mcp_server_id}")
+
+
+class McpConnectionModeError(TenancyConflictError):
+    """A sign-in was asked of a server in the other mode: a user's own of a shared one, or the reverse."""
+
+    def __init__(self, mcp_server_id: object, *, mode: str = "shared"):
+        super().__init__(
+            f"MCP server {mcp_server_id} uses one shared account; members do not sign in to it"
+            if mode == "shared"
+            else f"MCP server {mcp_server_id} uses each member's own account; it has no shared one"
+        )
+
+
+class McpConnectionSetupError(TenancyValidationError):
+    """Per-user sign-in cannot be set up on a server as it is configured, or on this deployment."""
+
+
+class McpOAuthIssuerChangedError(McpConnectionSetupError):
+    """A server's sign-ins now go to another authorization server than the one its saved OAuth client was used with.
+
+    Refused before the client's secret is sent anywhere: a server that names a new authorization
+    server could be pointing it at one that collects secrets. A manager approves the move by saving
+    the client again.
+    """
+
+    error_code = MCP_OAUTH_ISSUER_CHANGED
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This server now sends sign-ins to a different authorization server than the one its OAuth client "
+            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
+            "page, to approve the new sign-in server."
+        )
+
+
+class McpConnectionFlowError(TenancyValidationError):
+    """A sign-in could not be finished: its state is unknown, used, expired, or another person's."""
+
+
+class McpSignInLinkOtherUserError(TenancyForbiddenError):
+    """A sign-in link was opened in the dashboard session of somebody other than the user it was made for."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link was made for another user")
+
+
+class WorkspaceMcpServerCheckOriginError(TenancyValidationError):
+    """A connection check asked to send a stored server's credential to another origin than that server's."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A stored server's credential is only sent to that server's own address. "
+            "To test another address, enter a token for it."
+        )
+
+
+class McpConnectionUpstreamError(TenancyValidationError):
+    """The MCP server or its authorization server refused or failed a sign-in step.
+
+    A 4xx and not a 502, so the person signing in is shown what failed: the message is written here
+    and never repeats what the remote party sent.
+    """
 
 
 class McpServerDeclarationError(TenancyValidationError):
@@ -532,6 +684,13 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
+    "McpConnectionFlowError",
+    "McpConnectionModeError",
+    "McpConnectionNotFoundError",
+    "McpConnectionSetupError",
+    "McpConnectionUnavailableError",
+    "McpConnectionUpstreamError",
+    "McpSignInRequiredError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",
@@ -567,3 +726,12 @@ __all__ = [
     "WorkspaceMcpServerUnsafeUrlError",
     "WorkspaceWebSearchDomainsExcludedError",
 ]
+
+
+class McpLogoInvalidError(TenancyError):
+    """An uploaded MCP server logo is not a PNG the gateway can read, or the tile is not one of the choices."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def __init__(self) -> None:
+        super().__init__("The logo must be a PNG of at most 512 KB, and the tile auto, always or never")

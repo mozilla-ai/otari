@@ -1,0 +1,10 @@
+{{HEADLINE}}
+
+{{INTRO}}
+
+{{NOTE}}
+
+Add the server or decline the request under Requests on the MCP servers page:
+{{SERVERS_LINK}}
+
+You get this because you are an owner or admin of {{WORKSPACE}} or of its organization.

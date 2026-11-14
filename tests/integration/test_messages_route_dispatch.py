@@ -471,6 +471,8 @@ def test_cache_control_survives_route_level_purpose_hint_injection(
     captured: dict[str, Any] = {}
 
     class FakePool:
+        signed_out: tuple[()] = ()
+
         @property
         def openai_tools(self) -> list[dict[str, Any]]:
             return [
@@ -557,7 +559,7 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -615,7 +617,7 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -1372,7 +1374,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -1467,6 +1469,8 @@ def test_stream_mcp_activity_requires_beta(
         return next(streams)
 
     class ActivityPool:
+        signed_out: tuple[()] = ()
+
         @property
         def openai_tools(self) -> list[dict[str, Any]]:
             return [
