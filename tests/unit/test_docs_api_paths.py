@@ -1,11 +1,10 @@
 """Check that every API path the docs spell out is a route the gateway serves.
 
 A reader copies a path out of the docs, so one that names no route is a 404 they
-debug themselves. ``docs/api-reference.md`` once named ``/api/v1/key``, a router
-prefix with no route of its own, as where a key reads its spend (#3030). Each
-backticked ``/api/v1/...`` path under ``docs/`` must therefore be a path in
-``docs/public/openapi.json``, end in ``*`` to name a family of routes, or be one
-of the exceptions below, which only shrink.
+debug themselves; a router prefix with no route of its own reads like a route
+and is the easy one to get wrong. Each backticked ``/api/v1/...`` path under
+``docs/`` must therefore be a path in ``docs/public/openapi.json``, end in ``*``
+to name a family of routes, or be one of the exceptions below, which only shrink.
 """
 
 import json
