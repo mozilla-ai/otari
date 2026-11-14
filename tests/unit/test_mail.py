@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH, stored_address
 from gateway.core.config import MAIL_TRANSPORT_SETTINGS, GatewayConfig
 from gateway.log_config import CredentialMaskingFilter
 from gateway.log_config import logger as gateway_logger
@@ -1022,3 +1023,17 @@ def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:
     started = time.perf_counter()
     assert normalized_address("!@!." + "!." * 50_000 + "@") is None
     assert time.perf_counter() - started < 0.5
+
+
+def test_stored_address_refuses_text_longer_than_the_column_after_lower_casing() -> None:
+    address = "a" * 250 + "İ" + "@b.c"
+    assert len(address) == MAX_STORED_ADDRESS_LENGTH
+
+    assert stored_address(address) is None
+
+
+def test_stored_address_keeps_text_exactly_the_column_width_after_lower_casing() -> None:
+    address = "A" + "a" * 250 + "@B.c"
+    assert len(address) == MAX_STORED_ADDRESS_LENGTH
+
+    assert stored_address(address) == address.lower()
