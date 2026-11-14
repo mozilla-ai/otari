@@ -22,6 +22,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -227,7 +228,7 @@ def test_all_settlement_callbacks_wired_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
-        unavailable_model_reporter=reporter_with_null_listener(),
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -280,7 +281,7 @@ def test_keepalive_interval_wired_from_config_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
-        unavailable_model_reporter=reporter_with_null_listener(),
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -393,7 +394,7 @@ def _build(
     prompt_chars: int | None = None,
 ) -> Any:
     return build_streaming_response(
-        unavailable_model_reporter=reporter_with_null_listener(),
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -1779,7 +1780,7 @@ def _build_inline_stream(
 ) -> AsyncIterator[str]:
     """A stream that settles inline, so its terminal carrier waits for the cost."""
     response = build_streaming_response(
-        unavailable_model_reporter=reporter_with_null_listener(),
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -3313,7 +3314,7 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
 
     monkeypatch.setattr(pipeline, "streaming_generator", capture)
     build_streaming_response(
-        unavailable_model_reporter=reporter_with_null_listener(),
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=empty(),
         provider=LLMProvider.OPENAI,
@@ -3406,8 +3407,12 @@ async def test_a_stream_ending_in_the_provider_refusing_the_model_is_reported(mo
 
     monkeypatch.setattr(pipeline, "streaming_generator", capture)
     build_streaming_response(
-        unavailable_model_reporter=UnavailableModelReporter(listener),
-        deployment_charge=_deployment_charge(_ChargeRecorder(_Settlement())),
+        report_refusal=partial(
+            UnavailableModelReporter(listener).report,
+            instance="together",
+            model="m",
+            uses_deployment_credential=True,
+        ),
         adapter=chat._ADAPTER,
         stream=empty(),
         provider="together",
@@ -3452,6 +3457,88 @@ async def test_a_stream_the_provider_refuses_to_start_for_the_model_is_reported(
             provider=LLMProvider.TOGETHER,
             model="m",
         )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_refused_on_the_deployments_credential_with_nothing_to_charge_is_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def streaming_provider(**kwargs: Any) -> Any:
+        return empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(chat, "acompletion", streaming_provider)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+    assert ctx.deployment_charge is None
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.TOGETHER,
+        model="m",
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_stream_is_reported_with_the_credential_of_the_candidate_that_served_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+    own_key = Attempt(1, "openai", LLMProvider.OPENAI, "m")
+    hosted = _refused_attempt()
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def serve_from_the_hosted_candidate(**kwargs: Any) -> tuple[Attempt, AsyncIterator[Any]]:
+        return hosted, empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "walk_attempts", serve_from_the_hosted_candidate)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener, plan=CompiledPlan("model", [own_key, hosted]))
+    assert not ctx.deployment_paid
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.OPENAI,
+        model="m",
+        base_request_fields={},
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
     await background_tasks_done()
 
     assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]

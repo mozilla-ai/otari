@@ -5623,7 +5623,7 @@ def build_streaming_response(
     config: GatewayConfig,
     db: AsyncSession,
     log_writer: LogWriter,
-    unavailable_model_reporter: UnavailableModelReporter,
+    report_refusal: Callable[[BaseException], None],
     api_key_id: str | None,
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
@@ -5889,9 +5889,7 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
-        unavailable_model_reporter.report(
-            exc, instance=provider, model=model, uses_deployment_credential=deployment_paid
-        )
+        report_refusal(exc)
         if automatic_observation is not None:
             automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
         if isinstance(exc, IncompleteStreamError):
@@ -6382,12 +6380,14 @@ async def run_single_attempt_stream(
             finally:
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
+            uses_deployment_credential = chosen.deployment_paid
             stream_attribution = _attribution_for(ctx, chosen)
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             _mark_dispatched(ctx)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
+            uses_deployment_credential = ctx.deployment_paid
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
             stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
@@ -6451,7 +6451,12 @@ async def run_single_attempt_stream(
             | served_by
         ),
         log_writer=ctx.log_writer,
-        unavailable_model_reporter=ctx.unavailable_model_reporter,
+        report_refusal=partial(
+            ctx.unavailable_model_reporter.report,
+            instance=provider,
+            model=model,
+            uses_deployment_credential=uses_deployment_credential,
+        ),
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         rate_limit_info=ctx.rate_limit_info,
