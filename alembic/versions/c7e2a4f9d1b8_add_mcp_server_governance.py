@@ -2,7 +2,8 @@
 
 On ``workspace_mcp_servers``: ``credential_mode`` defaults to ``shared``, so every
 stored server keeps sending its one workspace token; ``attach_by_default`` defaults
-to off; ``oauth_client_issuer`` and ``oauth_client_token_endpoint`` start empty, and
+to off; ``oauth_client_issuer``, ``oauth_client_token_endpoint`` and
+``oauth_client_revocation_endpoint`` start empty, and
 are filled by the first sign-in through the server's OAuth client; and ``read_tools``
 becomes nullable, null meaning no manager has edited the labels, so they follow the
 tools the server marks read-only.
@@ -64,6 +65,7 @@ def upgrade() -> None:
         batch.add_column(sa.Column("oauth_client", sa.JSON(), nullable=True))
         batch.add_column(sa.Column("oauth_client_issuer", sa.Text(), nullable=True))
         batch.add_column(sa.Column("oauth_client_token_endpoint", sa.Text(), nullable=True))
+        batch.add_column(sa.Column("oauth_client_revocation_endpoint", sa.Text(), nullable=True))
         batch.add_column(sa.Column("attach_by_default", sa.Boolean(), nullable=False, server_default=sa.false()))
         batch.alter_column(
             "read_tools", existing_type=sa.JSON(), nullable=True, existing_server_default="[]", server_default=None
@@ -206,6 +208,7 @@ def downgrade() -> None:
     with op.batch_alter_table(_SERVERS) as batch:
         batch.alter_column("read_tools", existing_type=sa.JSON(), nullable=False, server_default="[]")
         batch.drop_column("attach_by_default")
+        batch.drop_column("oauth_client_revocation_endpoint")
         batch.drop_column("oauth_client_token_endpoint")
         batch.drop_column("oauth_client_issuer")
         batch.drop_column("oauth_client")

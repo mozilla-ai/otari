@@ -1019,10 +1019,10 @@ async def _resolve_for_request(
             shared_ref, unset = accounts[need.server_id]
             try:
                 if bound is None:
-                    account_token = await tokens.shared_token_for(shared_ref)
+                    account = await tokens.shared_account_for(shared_ref)
                 else:
                     async with bound:
-                        account_token = await tokens.shared_token_for(shared_ref)
+                        account = await tokens.shared_account_for(shared_ref)
             except TimeoutError:
                 if bound is None or not bound.expired():
                     raise
@@ -1035,9 +1035,9 @@ async def _resolve_for_request(
                     raise
                 _leave_out_unreadable(need.server_id)
                 continue
-            if account_token is not None:
-                config.authorization_token = account_token
-                config.renew_token = partial(tokens.renew_rejected_shared, shared_ref)
+            if account is not None:
+                config.authorization_token, generation = account
+                config.renew_token = _shared_renewer(tokens, shared_ref, generation)
             elif unset:
                 continue
         resolved.servers.append(config)
@@ -1056,6 +1056,23 @@ def _leave_out_unreadable(server_id: uuid.UUID) -> None:
 def _needs_a_user(row: WorkspaceMcpServer, access: McpAccess | None) -> bool:
     """Whether a server sends each user's own credential and the caller has no user to send one for."""
     return row.credential_mode == McpCredentialMode.PER_USER and (access is None or access.user_id is None)
+
+
+def _shared_renewer(tokens: McpUserTokens, ref: McpServerRef, generation: str) -> Callable[[str], Awaitable[str]]:
+    """What the call path asks a shared account's new token with: only ever the account it resolved.
+
+    A sign-in to another account while the call waits would otherwise hand that account's token to a
+    call resolved, and for the MCP endpoints authorized by revision, for the earlier one.
+    """
+
+    async def renew(rejected: str) -> str:
+        token, renewed_for = await tokens.renew_rejected_shared(ref, rejected)
+        if renewed_for != generation:
+            logger.info("MCP shared token withheld reason=account_replaced server_id=%s", ref.id)
+            raise McpConnectionUnavailableError(ref.id)
+        return token
+
+    return renew
 
 
 def _renewer(
@@ -1164,7 +1181,7 @@ async def resolve_workspace_mcp_server(
         account = await tokens.shared_account_for(ref)
         if account is not None:
             resolved.authorization_token, generation = account
-            resolved.renew_token = partial(tokens.renew_rejected_shared, ref)
+            resolved.renew_token = _shared_renewer(tokens, ref, generation)
             # The account's token changes at every renewal, which changes nothing an application
             # authorized; a manager signing in to another account does.
             resolved.credential_revision = f"shared_account:{generation}"
@@ -1383,8 +1400,7 @@ class WorkspaceMcpServerService:
         client = McpConnectionService.stored_oauth_client(server)
         if client is not None and client.dynamic:
             server.oauth_client = None
-            server.oauth_client_issuer = None
-            server.oauth_client_token_endpoint = None
+            McpConnectionService.unpin_client(server)
 
     async def _record_check(
         self, server: WorkspaceMcpServer, *, required: bool = False, check_token: str | None = None
@@ -1402,14 +1418,17 @@ class WorkspaceMcpServerService:
         it was.
 
         An edit can land while the check waits. The row is re-read under a lock
-        before the write, and a check of a URL, token or allow-list the row no
-        longer holds is dropped: that edit cleared health and runs its own.
+        before the write, and a check of a URL, token, allow-list or shared account
+        the row no longer holds is dropped: that change cleared health and runs its own.
 
         Raises:
             McpCheckSignInRequiredError: ``required`` on a per-user server with no ``check_token``.
         """
         checked = (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode)
         per_user = server.credential_mode == McpCredentialMode.PER_USER
+        # Which shared account the check's token belongs to, read with it: a sign-in to another account
+        # while the check waits replaces the account and clears health, and this check describes the old one.
+        generation: str | None = None
         if per_user and check_token is None:
             await self.db.commit()
             if required:
@@ -1428,9 +1447,13 @@ class WorkspaceMcpServerService:
                 try:
                     token = _stored_token(server)
                     if token is None:
-                        token = await self._tokens.shared_token_for(server)
+                        account = await self._tokens.shared_account_for(server)
+                        token, generation = account if account is not None else (None, None)
+                    else:
+                        generation = await self._tokens.shared_generation(server.id)
                 except (SecretDecryptionError, SecretBoxUnavailableError, McpConnectionUnavailableError):
                     token = _UNREADABLE
+                    generation = await self._tokens.shared_generation(server.id)
             await self.db.commit()
             try:
                 check = await _check(server, token)
@@ -1438,7 +1461,14 @@ class WorkspaceMcpServerService:
                 logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
                 return False
         await self.db.refresh(server, with_for_update=True)
-        if (server.url, server.encrypted_token, server.allowed_tools, server.credential_mode) != checked:
+        account_now = None if per_user else await self._tokens.shared_generation(server.id)
+        if (
+            server.url,
+            server.encrypted_token,
+            server.allowed_tools,
+            server.credential_mode,
+            account_now,
+        ) != checked + (generation,):
             await self.db.commit()
             logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
             return True
@@ -1720,8 +1750,7 @@ class WorkspaceMcpServerService:
             server.oauth_client = None
         # Saving the client again approves whichever authorization server its next sign-in finds.
         if store_client or moves_host or isinstance(new_client_id, str) or isinstance(new_client_secret, str):
-            server.oauth_client_issuer = None
-            server.oauth_client_token_endpoint = None
+            McpConnectionService.unpin_client(server)
         for field, value in fields.items():
             setattr(server, field, value)
         if connection_changed:
@@ -2372,7 +2401,7 @@ class WorkspaceMcpServerService:
                     renewable=row.encrypted_refresh_token is not None,
                 )
                 for row in rows
-            ]
+            ],
         )
 
     async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:

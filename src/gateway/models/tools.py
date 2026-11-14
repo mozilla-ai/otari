@@ -161,11 +161,13 @@ class WorkspaceMcpServer(Base):
     # The OAuth client users of a per-user server sign in through, in the shape ``StoredMcpOAuthClient``
     # reads: a manager's own, or one the gateway registered itself. Its secret is encrypted inside it.
     oauth_client: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
-    # The authorization server's issuer and token endpoint the first sign-in through ``oauth_client``
-    # discovered. A later discovery naming another of either is refused rather than sent the client's
-    # secret, until a manager saves the client again, which clears both.
+    # The authorization server's issuer, token endpoint and revocation endpoint the first sign-in
+    # through ``oauth_client`` discovered. A later discovery naming another of any is refused rather
+    # than sent the client's secret, and a secret is sent nowhere while they are unset: a manager
+    # saving the client again clears them, and the next sign-in sets them.
     oauth_client_issuer: Mapped[str | None] = mapped_column(Text, default=None)
     oauth_client_token_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
+    oauth_client_revocation_endpoint: Mapped[str | None] = mapped_column(Text, default=None)
     # Whether a model request from any key of the workspace gets this server without naming it.
     attach_by_default: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False)
     # What the gateway last learned by talking to the server, from a manager's

@@ -133,32 +133,72 @@ def stored_oauth_client(server: WorkspaceMcpServer) -> StoredMcpOAuthClient | No
 
 @dataclass(frozen=True, slots=True)
 class _Pin:
-    """The authorization server a server's OAuth client was first used with: its issuer and token endpoint."""
+    """The authorization server a server's OAuth client was first used with: its issuer and endpoints."""
 
     issuer: str | None
     token_endpoint: str | None
+    revocation_endpoint: str | None = None
 
     @classmethod
     def of(cls, server: WorkspaceMcpServer) -> _Pin:
-        return cls(server.oauth_client_issuer, server.oauth_client_token_endpoint)
+        return cls(
+            server.oauth_client_issuer, server.oauth_client_token_endpoint, server.oauth_client_revocation_endpoint
+        )
 
     def admits(self, metadata: McpOAuthMetadata) -> bool:
         """Whether discovery found the pinned authorization server; an unpinned client takes any.
 
-        The token endpoint counts on its own: a server that is its own authorization server can keep
-        its issuer and move the endpoint the client's secret is sent to.
+        Each endpoint the client's secret is sent to counts on its own: a server that is its own
+        authorization server can keep its issuer and move either.
         """
         issuer_held = self.issuer is None or (
             metadata.issuer is not None and self.issuer.rstrip("/") == metadata.issuer.rstrip("/")
         )
-        endpoint_held = self.token_endpoint is None or self.token_endpoint == metadata.token_endpoint
-        return issuer_held and endpoint_held
+        endpoints_held = self.token_endpoint is None or (
+            self.token_endpoint == metadata.token_endpoint and self.revocation_endpoint == metadata.revocation_endpoint
+        )
+        return issuer_held and endpoints_held
 
 
 def _set_pin(server: WorkspaceMcpServer, metadata: McpOAuthMetadata | None) -> None:
     """Pin the server's client to what ``metadata`` names, or clear the pin with ``None``."""
     server.oauth_client_issuer = metadata.issuer if metadata is not None else None
     server.oauth_client_token_endpoint = metadata.token_endpoint if metadata is not None else None
+    server.oauth_client_revocation_endpoint = metadata.revocation_endpoint if metadata is not None else None
+
+
+def unpin_client(server: WorkspaceMcpServer) -> None:
+    """Clear the pin, for a client a manager saved again: its next sign-in approves what it finds."""
+    _set_pin(server, None)
+
+
+def _approved(pinned: str | None, recorded: str | None, client: McpOAuthClient) -> bool:
+    """Whether a connection's credentials may be sent to ``recorded``, the endpoint its sign-in recorded.
+
+    The one rule for every request that carries a token or a client secret: it goes only to an
+    endpoint approved at sign-in. The connection's token was approved for the endpoint its own
+    sign-in recorded. A client secret was approved for the endpoint the client is pinned to, so a
+    client with one sends nothing while the pin is unset (the client was saved again since) or
+    names another endpoint.
+    """
+    if recorded is None:
+        return False
+    return client.client_secret is None or pinned == recorded
+
+
+def _revocation(
+    server_id: uuid.UUID, pinned: str | None, recorded: str | None, client: McpOAuthClient, token: str
+) -> McpRevocation | None:
+    """A revocation of ``token`` at ``recorded``, or ``None`` where :func:`_approved` withholds it.
+
+    A withheld revocation sends nothing. The tokens are still deleted here; only the remote end is skipped.
+    """
+    if recorded is None:
+        return None
+    if not _approved(pinned, recorded, client):
+        logger.warning("MCP connection revocation skipped server_id=%s reason=endpoint_not_approved", server_id)
+        return None
+    return McpRevocation(endpoint=recorded, client=client, token=token)
 
 
 def _pin_issuer(server: WorkspaceMcpServer, client: StoredMcpOAuthClient, metadata: McpOAuthMetadata) -> None:
@@ -543,7 +583,8 @@ def revocations_for(
     """What revoking these connections to ``server`` sends: one token each, the refresh token where there is one.
 
     A connection whose server publishes no revocation endpoint, whose client the server no longer
-    holds, or whose token will not decrypt is left out: its tokens are only deleted here.
+    holds, whose endpoint is not approved (:func:`_approved`), or whose token will not decrypt is
+    left out: its tokens are only deleted here.
     """
     revocations: list[McpRevocation] = []
     for connection in connections:
@@ -556,7 +597,11 @@ def revocations_for(
             token = decrypt_secret(connection.encrypted_refresh_token or connection.encrypted_access_token)
         except (SecretDecryptionError, SecretBoxUnavailableError):
             continue
-        revocations.append(McpRevocation(endpoint=connection.revocation_endpoint, client=client, token=token))
+        revocation = _revocation(
+            server.id, server.oauth_client_revocation_endpoint, connection.revocation_endpoint, client, token
+        )
+        if revocation is not None:
+            revocations.append(revocation)
     return revocations
 
 
@@ -665,6 +710,7 @@ class McpConnectionService:
     require_per_user_support = staticmethod(require_per_user_support)
     revocations_for = staticmethod(revocations_for)
     revoke_in_background = staticmethod(revoke_in_background)
+    unpin_client = staticmethod(unpin_client)
     sign_in_link = staticmethod(sign_in_link)
     sign_in_link_is_for = staticmethod(sign_in_link_is_for)
     sign_in_link_prefix = staticmethod(sign_in_link_prefix)
@@ -1037,9 +1083,12 @@ class McpConnectionService:
             raise McpConnectionFlowError("This sign-in can no longer be finished. Start it again.") from None
         if server is None or client is None:
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
-        if server.oauth_client_token_endpoint != pending.token_endpoint:
+        if (server.oauth_client_token_endpoint, server.oauth_client_revocation_endpoint) != (
+            pending.token_endpoint,
+            pending.revocation_endpoint,
+        ):
             # The client was saved again, or pinned elsewhere, since this sign-in started: its secret
-            # is not sent to the endpoint discovered then.
+            # is not sent to the endpoints discovered then, and they are not recorded on a connection.
             logger.warning("MCP sign-in refused reason=token_endpoint_changed server_id=%s", pending.server_id)
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
         # Copied now: the row is read again below into this same object.
@@ -1125,16 +1174,15 @@ class McpConnectionService:
                 )
         if refusal is not None:
             # The authorization server issued these tokens and nothing will hold them: ask it to end them.
-            if pending.revocation_endpoint is not None:
-                revoke_in_background(
-                    [
-                        McpRevocation(
-                            endpoint=pending.revocation_endpoint,
-                            client=client,
-                            token=tokens.refresh_token or tokens.access_token,
-                        )
-                    ]
-                )
+            revocation = _revocation(
+                pending.server_id,
+                current.oauth_client_revocation_endpoint if current is not None else None,
+                pending.revocation_endpoint,
+                client,
+                tokens.refresh_token or tokens.access_token,
+            )
+            if revocation is not None:
+                revoke_in_background([revocation])
             raise McpConnectionFlowError(refusal)
         if pending.for_check:
             logger.info("MCP check sign-in finished server_id=%s", pending.server_id)
@@ -1145,12 +1193,12 @@ class McpConnectionService:
                 return_to=pending.return_to,
                 server_url=url_before,
                 check_token=tokens.access_token,
-                revocation=None
-                if pending.revocation_endpoint is None
-                else McpRevocation(
-                    endpoint=pending.revocation_endpoint,
-                    client=client,
-                    token=tokens.refresh_token or tokens.access_token,
+                revocation=_revocation(
+                    pending.server_id,
+                    server.oauth_client_revocation_endpoint,
+                    pending.revocation_endpoint,
+                    client,
+                    tokens.refresh_token or tokens.access_token,
                 ),
             )
         if pending.for_shared:
@@ -1258,13 +1306,24 @@ class McpConnectionService:
         server_id = server.id
         try:
             client = _client_for(server, client_id=client_id, auth_method=auth_method)
-            if client is not None:
+            revocation = (
+                None
+                if client is None
+                else _revocation(
+                    server_id,
+                    server.oauth_client_revocation_endpoint,
+                    revocation_endpoint,
+                    client,
+                    decrypt_secret(encrypted_token),
+                )
+            )
+            if revocation is not None:
                 # Bounded as the background revocations are: the tokens are already gone here, and the
                 # person disconnecting should not wait on a slow authorization server.
                 try:
                     async with asyncio.timeout(_REVOCATION_DEADLINE_SECONDS):
                         revoked = await _mcp_oauth.revoke(
-                            revocation_endpoint, client, token=decrypt_secret(encrypted_token)
+                            revocation.endpoint, revocation.client, token=revocation.token
                         )
                 except TimeoutError:
                     revoked = False
@@ -1279,6 +1338,8 @@ class _Refreshed:
     """What a renewal under the row's lock came to."""
 
     token: str | None = None
+    # Which sign-in ``token`` belongs to (:func:`_generation`), read with it under the lock.
+    generation: str | None = None
     sign_in_required: bool = False
     # A client Otari registered that the authorization server refused, to drop once the connection's lock is released.
     refused_client_id: str | None = None
@@ -1289,6 +1350,14 @@ class _Refreshed:
 _refresh_locks: weakref.WeakValueDictionary[tuple[uuid.UUID, str | None], asyncio.Lock] = weakref.WeakValueDictionary()
 # Renewals whose caller went away, kept referenced until they finish: the loop holds tasks weakly.
 _renewals: set[asyncio.Task[_Refreshed]] = set()
+
+
+def _generation(connection: McpUserConnection | McpSharedConnection) -> str:
+    """Which sign-in a connection is: the same across its renewals, which update the row, new at each sign-in.
+
+    A shared account's sign-in replaces the row, so its creation time names it.
+    """
+    return connection.created_at.isoformat()
 
 
 def _issued_for(connection: McpUserConnection | McpSharedConnection, server: McpServerRef) -> bool:
@@ -1346,7 +1415,8 @@ class McpUserTokens:
         """The access token to send to a per-user server for one user.
 
         Raises:
-            McpSignInRequiredError: the user has no connection, or its grant ended and it was removed.
+            McpSignInRequiredError: the user has no connection, its grant ended and it was removed, or it
+                cannot be renewed until a sign-in approves where its client's secret goes.
             McpConnectionUnavailableError: the token has expired and could not be renewed right now.
             SecretDecryptionError: a stored token or client secret will not decrypt.
             SecretBoxUnavailableError: ``OTARI_SECRET_KEY`` is not configured.
@@ -1368,7 +1438,8 @@ class McpUserTokens:
             raise McpSignInRequiredError(server.id, name=server.name, user_id=user_id)
         if outcome.token is not None:
             return outcome.token
-        if _is_expired(expires_at, now):
+        # Read after the renewal, which can take as long as its deadline.
+        if _is_expired(expires_at, datetime.now(UTC)):
             raise McpConnectionUnavailableError(server.id)
         # The renewal failed for now and the token is still inside its lifetime, so it is used.
         return stale
@@ -1397,33 +1468,39 @@ class McpUserTokens:
         if connection is None:
             return None
         _require_issued_for(connection, server)
-        # A sign-in replaces the row, and a renewal updates it in place.
-        generation = connection.created_at.isoformat()
-        now = datetime.now(UTC)
+        generation = _generation(connection)
         stale = decrypt_secret(connection.encrypted_access_token)
-        if not _needs_refresh(connection, now):
+        if not _needs_refresh(connection, datetime.now(UTC)):
             return stale, generation
         expires_at = connection.expires_at
         outcome = await self._shielded_renew(server, None, stale=stale, rejected=False)
         if outcome.sign_in_required:
             return None
-        if outcome.token is not None:
-            return outcome.token, generation
-        if _is_expired(expires_at, now):
+        if outcome.token is not None and outcome.generation is not None:
+            # Read together under the lock: a sign-in that replaced the account meanwhile is named by its own.
+            return outcome.token, outcome.generation
+        if _is_expired(expires_at, datetime.now(UTC)):
             raise McpConnectionUnavailableError(server.id)
         return stale, generation
 
-    async def renew_rejected_shared(self, row: WorkspaceMcpServer | McpServerRef, rejected: str) -> str:
+    async def shared_generation(self, server_id: uuid.UUID) -> str | None:
+        """Which sign-in a shared server's account is now, or ``None`` where it has none."""
+        connection = await self._connections.find_shared(server_id)
+        return _generation(connection) if connection is not None else None
+
+    async def renew_rejected_shared(self, row: WorkspaceMcpServer | McpServerRef, rejected: str) -> tuple[str, str]:
         """A new token for a shared server's account after the MCP server refused ``rejected``, for one retry.
+
+        Returned with the sign-in it belongs to, read with it under the lock.
 
         Raises:
             McpConnectionUnavailableError: the renewal failed, or the account's grant ended and it was removed.
         """
         server = row if isinstance(row, McpServerRef) else McpServerRef.of(row)
         outcome = await self._shielded_renew(server, None, stale=rejected, rejected=True)
-        if outcome.token is None:
+        if outcome.token is None or outcome.generation is None:
             raise McpConnectionUnavailableError(server.id)
-        return outcome.token
+        return outcome.token, outcome.generation
 
     async def renew_rejected(self, row: WorkspaceMcpServer | McpServerRef, user_id: str, rejected: str) -> str:
         """A new token after the MCP server refused ``rejected`` with a 401, for one retry.
@@ -1533,17 +1610,17 @@ class McpUserTokens:
         now = datetime.now(UTC)
         current = decrypt_secret(connection.encrypted_access_token)
         if current != stale and (rejected or not _needs_refresh(connection, now)):
-            return _Refreshed(token=current)
+            return _Refreshed(token=current, generation=_generation(connection))
         client = _client_from(server.client, client_id=connection.client_id, auth_method=connection.client_auth_method)
-        if (
-            client is not None
-            and client.client_secret is not None
-            and server.token_endpoint is not None
-            and server.token_endpoint != connection.token_endpoint
-        ):
-            # The client is pinned to another token endpoint now, and its secret is not sent to this one.
-            logger.warning("MCP token renewal refused reason=token_endpoint_changed server_id=%s", server.id)
-            return _Refreshed()
+        if client is not None and not _approved(server.token_endpoint, connection.token_endpoint, client):
+            # The client's secret is not approved for this connection's token endpoint: it was saved
+            # again since (the pin is unset until a sign-in sets it), or is pinned elsewhere. A token
+            # still in its lifetime is used; past it, or refused, only a new sign-in helps. The
+            # connection is kept, so it renews again once a sign-in pins the client back to its endpoint.
+            logger.warning("MCP token renewal refused reason=endpoint_not_approved server_id=%s", server.id)
+            if not rejected and not _is_expired(connection.expires_at, now):
+                return _Refreshed()
+            return _Refreshed(sign_in_required=True)
         if connection.encrypted_refresh_token is None or client is None:
             # Nothing to renew with. Once the token is refused or past its expiry only a new sign-in helps.
             if not rejected and not _is_expired(connection.expires_at, now):
@@ -1593,7 +1670,7 @@ class McpUserTokens:
             scope=tokens.scope if tokens.scope is not None else connection.scope,
         )
         logger.info("MCP token renewed server_id=%s user_id=%s", server.id, user_id)
-        return _Refreshed(token=tokens.access_token)
+        return _Refreshed(token=tokens.access_token, generation=_generation(connection))
 
 
 __all__ = [
