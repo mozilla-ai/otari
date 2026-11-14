@@ -11,26 +11,15 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _alembic_support import parent_of
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, create_engine, text
 
 from gateway.types.key_scope import KeyScopeSet
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "c3f8a1d6e2b9"
-
-
-def _parent_of(revision: str) -> str:
-    """The revision immediately below ``revision``, read from the chain itself.
-
-    Derived rather than written down, because every migration that lands on main re-points this
-    revision's ``down_revision``, and a literal here would be a second place to remember.
-    """
-    parent = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_revision(revision).down_revision
-    assert isinstance(parent, str), f"{revision} should have exactly one parent, got {parent!r}"
-    return parent
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -46,7 +35,7 @@ def before(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
     """A SQLite database at the revision before this one."""
     url = f"sqlite:///{tmp_path / 'scopes.db'}"
     config = _alembic_config(url)
-    command.upgrade(config, _parent_of(_REVISION))
+    command.upgrade(config, parent_of(_REVISION, alembic_dir=_ALEMBIC_DIR))
     engine = create_engine(url)
     try:
         yield config, engine
@@ -98,7 +87,7 @@ def test_the_revision_downgrades_and_upgrades_again(before: tuple[Config, Engine
     plain = _key(engine, is_service_key=False)
     command.upgrade(config, _REVISION)
 
-    command.downgrade(config, _parent_of(_REVISION))
+    command.downgrade(config, parent_of(_REVISION, alembic_dir=_ALEMBIC_DIR))
     command.upgrade(config, _REVISION)
 
     assert _scopes(engine, plain) == KeyScopeSet.unscoped(is_service_key=False).stored
