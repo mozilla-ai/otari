@@ -47,6 +47,11 @@ export const pageHeading = (page: Page, name: string): Locator =>
   page.getByRole("main").getByRole("heading", { name, exact: true })
 
 export async function login(page: Page): Promise<void> {
+  // The e2e gateway offers otari.ai, so the operator's one-time welcome would
+  // cover whatever a spec opens next.
+  await page.addInitScript(() =>
+    localStorage.setItem("otari.welcome.answered", "e2e"),
+  )
   await page.goto("/")
   // Once any member holds a password (the tenancy spec's invitee does), the
   // screen offers both credentials and defaults to email and password.

@@ -34,6 +34,7 @@ from any_llm import LLMProvider
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes import _pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
 from gateway.container import build_container
@@ -153,6 +154,7 @@ def _ctx(
     config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=config or GatewayConfig(),
         db=cast(AsyncSession, AsyncMock()),
         uow=cast(Any, AsyncMock()),

@@ -12,13 +12,19 @@ from gateway.models.catalog import ModelMetadataOverride
 from gateway.repositories.base_repository import BaseRepository
 
 
-def _owned(provider: str, model: str, organization_id: uuid.UUID | None) -> Any:
-    owner = (
+def _owner(organization_id: uuid.UUID | None) -> Any:
+    """The rows ``organization_id`` holds, or the deployment's where it is ``None``."""
+    return (
         ModelMetadataOverride.organization_id == organization_id
         if organization_id is not None
         else ModelMetadataOverride.organization_id.is_(None)
     )
-    return (ModelMetadataOverride.provider == provider) & (ModelMetadataOverride.model == model) & owner
+
+
+def _owned(provider: str, model: str, organization_id: uuid.UUID | None) -> Any:
+    return (
+        (ModelMetadataOverride.provider == provider) & (ModelMetadataOverride.model == model) & _owner(organization_id)
+    )
 
 
 class ModelMetadataOverrideRepository(BaseRepository[ModelMetadataOverride, BaseModel, BaseModel]):
@@ -48,12 +54,9 @@ class ModelMetadataOverrideRepository(BaseRepository[ModelMetadataOverride, Base
 
     async def remove_provider(self, provider: str, organization_id: uuid.UUID | None) -> None:
         """Drop every override the owner holds under ``provider``."""
-        owner = (
-            ModelMetadataOverride.organization_id == organization_id
-            if organization_id is not None
-            else ModelMetadataOverride.organization_id.is_(None)
+        await self.db.execute(
+            delete(ModelMetadataOverride).where((ModelMetadataOverride.provider == provider) & _owner(organization_id))
         )
-        await self.db.execute(delete(ModelMetadataOverride).where((ModelMetadataOverride.provider == provider) & owner))
 
     async def remove(self, provider: str, model: str, organization_id: uuid.UUID | None) -> bool:
         """Drop the owner's override of ``provider:model``. Whether there was one."""

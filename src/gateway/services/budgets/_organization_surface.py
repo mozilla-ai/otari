@@ -85,7 +85,7 @@ class _OrganizationSurface:
 
     async def _require_no_existing_ceiling(self, request: OrganizationScopedBudgetCreate) -> None:
         if await self._repositories.ceilings.has_ceiling(request.scope_type, request.scope_id, request.provider_key_id):
-            raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type, request.scope_id)
+            raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type)
 
     async def _require_own_budget(self, *, organization: Organization, budget_id: str) -> Budget:
         """Return a budget this organization owns, or refuse it as not found."""
@@ -177,7 +177,7 @@ class _OrganizationSurface:
                 )
             )
         except SpendCeilingAlreadyExistsError:
-            raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type, request.scope_id) from None
+            raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type) from None
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
 
     async def delete_budget(

@@ -1,14 +1,18 @@
 """Which provider refusals switch a hosted model off, and which never do."""
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
 
-from gateway.api.routes import _unavailable_models
+from _unavailable_model_support import RecordingListener, background_tasks_done
+from gateway.api.deps import build_unavailable_model_reporter
 from gateway.core.config import GatewayConfig
 from gateway.models.providers import HostedProviderModel
+from gateway.services.health_checks import UnavailableModelListener
 from gateway.services.health_checks._probe import capped_error
-from gateway.services.inference import is_model_unavailable_error
+from gateway.services.inference import UnavailableModel, UnavailableModelReporter
+from gateway.services.inference._upstream_errors import is_model_unavailable_error
 from gateway.services.providers._hosted_offers import _hold_for_a_price, _release_price_hold
 from gateway.services.upstream_redaction import redact_upstream_message
 
@@ -74,23 +78,131 @@ def test_a_refusal_in_an_sdk_error_body_is_recognized_past_its_framing() -> None
     assert is_model_unavailable_error(_BodiedError(400, NOT_SERVERLESS))
 
 
-@pytest.mark.parametrize(
-    ("exc", "deployment_paid"),
-    [
-        # An organization's own key says nothing about what the deployment's key reaches.
-        (_UpstreamError(400, NOT_SERVERLESS), False),
-        (_UpstreamError(404, "The model `x` does not exist"), True),
-    ],
-)
-def test_nothing_is_switched_off_unless_the_deployments_key_met_the_refusal(
-    exc: Exception, deployment_paid: bool
-) -> None:
-    with patch("gateway.api.routes._unavailable_models.asyncio.create_task") as create_task:
-        _unavailable_models.note_unavailable_model(
-            GatewayConfig(), "together", "m", exc, deployment_paid=deployment_paid
-        )
+def _refusal() -> _UpstreamError:
+    return _UpstreamError(400, NOT_SERVERLESS)
 
-    create_task.assert_not_called()
+
+class _SlowListener(RecordingListener):
+    def __init__(self, failure: Exception | None = None) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+        self.failure = failure
+
+    async def model_unavailable(self, unavailable_model: UnavailableModel) -> None:
+        await self.release.wait()
+        if self.failure is not None:
+            raise self.failure
+        await super().model_unavailable(unavailable_model)
+
+
+@pytest.mark.parametrize("uses_deployment_credential", [True, False])
+@pytest.mark.asyncio
+async def test_a_refusal_reaches_the_listener_in_the_providers_words(uses_deployment_credential: bool) -> None:
+    listener = RecordingListener()
+
+    UnavailableModelReporter(listener).report(
+        _refusal(), instance="together", model="m", uses_deployment_credential=uses_deployment_credential
+    )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", NOT_SERVERLESS, uses_deployment_credential)]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_that_is_not_a_refusal_reaches_no_listener() -> None:
+    listener = RecordingListener()
+
+    UnavailableModelReporter(listener).report(
+        _UpstreamError(404, "The model `x` does not exist"),
+        instance="together",
+        model="m",
+        uses_deployment_credential=True,
+    )
+    await background_tasks_done()
+
+    assert listener.models == []
+
+
+@pytest.mark.asyncio
+async def test_a_report_returns_before_the_listener_has_reacted() -> None:
+    listener = _SlowListener()
+
+    UnavailableModelReporter(listener).report(
+        _refusal(), instance="together", model="m", uses_deployment_credential=True
+    )
+    reacted_on_return = list(listener.models)
+    listener.release.set()
+    await background_tasks_done()
+
+    assert reacted_on_return == []
+    assert len(listener.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_the_listener_is_still_being_told_of_is_not_told_twice() -> None:
+    listener = _SlowListener()
+    reporter = UnavailableModelReporter(listener)
+
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    reporter.report(_refusal(), instance="together", model="other", uses_deployment_credential=True)
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=False)
+    listener.release.set()
+    await background_tasks_done()
+
+    assert [(heard.model, heard.uses_deployment_credential) for heard in listener.models] == [
+        ("m", True),
+        ("other", True),
+        ("m", False),
+    ]
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("boom"), TimeoutError()], ids=["unexpected", "database"])
+@pytest.mark.asyncio
+async def test_a_listener_that_fails_is_logged_and_told_of_the_next_refusal(
+    failure: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    listener = _SlowListener(failure=failure)
+    listener.release.set()
+    reporter = UnavailableModelReporter(listener)
+
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    await background_tasks_done()
+    listener.failure = None
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    await background_tasks_done()
+
+    assert caplog.text.count("Could not act on unavailable model together:m") == 1
+    assert listener.models == [UnavailableModel("together", "m", NOT_SERVERLESS, True)]
+
+
+@pytest.mark.asyncio
+async def test_a_listener_that_is_canceled_is_told_of_the_next_refusal() -> None:
+    listener = _SlowListener()
+    reporter = UnavailableModelReporter(listener)
+
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    (telling,) = asyncio.all_tasks() - {asyncio.current_task()}
+    await asyncio.sleep(0)
+    telling.cancel()
+    await background_tasks_done()
+    listener.release.set()
+    reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+    await background_tasks_done()
+
+    assert telling.cancelled()
+    assert listener.models == [UnavailableModel("together", "m", NOT_SERVERLESS, True)]
+
+
+@pytest.mark.asyncio
+async def test_the_app_reports_unavailable_models_to_the_health_checks() -> None:
+    reporter = build_unavailable_model_reporter(GatewayConfig())
+
+    with patch.object(UnavailableModelListener, "model_unavailable") as model_unavailable:
+        reporter.report(_refusal(), instance="together", model="m", uses_deployment_credential=True)
+        await background_tasks_done()
+
+    model_unavailable.assert_awaited_once_with(UnavailableModel("together", "m", NOT_SERVERLESS, True))
 
 
 def test_the_refusal_mailed_to_operators_is_redacted_and_capped() -> None:

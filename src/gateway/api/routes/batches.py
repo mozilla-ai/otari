@@ -36,7 +36,6 @@ from gateway.api.routes._passthrough import (
 )
 from gateway.api.routes._pipeline import (
     _raise_for_unresolvable_model,
-    failure_status_code,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
@@ -64,6 +63,7 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.inference import (
+    UpstreamFailure,
     admit_deployment_paid,
     billed_model,
     deferred_charge,
@@ -528,7 +528,7 @@ async def create_batch(
             endpoint=USAGE_ENDPOINT,
             user_id=user_id,
             error=str(e),
-            status_code=failure_status_code(e),
+            status_code=UpstreamFailure(e).logged_status,
             counts_toward_budget=not budget_exempt,
         )
         await refund_reservation(db, reservation)

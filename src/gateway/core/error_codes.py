@@ -1,14 +1,15 @@
-"""Stable, machine-readable codes for the refusals a caller is expected to act on.
+"""The machine-readable parts of a refusal: its code, and the category a dialect names.
 
-Sent as the ``Otari-Error-Code`` response header and as ``code`` in the error
-body, beside the human-readable ``detail``, so a client maps a refusal by its
-code rather than by matching text that may be reworded. A streamed error event
-carries it as ``error.code``. A code, once sent, keeps its meaning.
+A code is sent as the ``Otari-Error-Code`` response header and as ``code`` in
+the error body, beside the human-readable ``detail``, so a client maps a refusal
+by its code rather than by matching text that may be reworded. A streamed error
+event carries it as ``error.code``. A code, once sent, keeps its meaning.
 """
 
 from collections.abc import Mapping
+from enum import Enum, auto
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 ERROR_CODE_HEADER = "Otari-Error-Code"
 # Which budget refused: ``user`` for the billed user's own budget, otherwise the
@@ -77,6 +78,41 @@ PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 TERMS_NOT_ACCEPTED = "terms_not_accepted"
 # A workspace with web access (fetch or search) turned off refused a request that declared a web tool.
 WEB_ACCESS_DISABLED = "web_access_disabled"
+
+
+class ErrorKind(Enum):
+    """Coarse error category, for a dialect that names one on an HTTP error.
+
+    A dialect that distinguishes more categories once its stream has committed
+    maps those itself.
+    """
+
+    API = auto()
+    AUTHENTICATION = auto()
+    INVALID_REQUEST = auto()
+    NOT_FOUND = auto()
+    PERMISSION = auto()
+    RATE_LIMIT = auto()
+    REQUEST_TOO_LARGE = auto()
+
+    @classmethod
+    def from_status(cls, status_code: int) -> "ErrorKind":
+        """The kind a bare status implies, falling back to ``API``.
+
+        An error flattened into an ``HTTPException`` no longer carries its kind,
+        so a status stands in for one.
+        """
+        return _STATUS_ERROR_KINDS.get(status_code, cls.API)
+
+
+_STATUS_ERROR_KINDS = {
+    status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
+    status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
+    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
+    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
+    status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
+}
 
 
 def error_headers(
