@@ -1104,7 +1104,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "password_policy.py",
         "password_reset_email.py",
         "provisioning_service.py",
-        "tokens.py",
         "user_service.py",
         "verification_email.py",
         "webauthn_service.py",

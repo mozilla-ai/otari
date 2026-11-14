@@ -67,7 +67,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity import BlockedEmailRepository, IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
@@ -147,7 +147,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, reso
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
-from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -167,7 +167,14 @@ from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
+from gateway.services.organizations import (
+    DeliveryRule,
+    InvitationDelivery,
+    InvitationFactsReader,
+    InvitationMailLimit,
+    OrganizationClaimedDomains,
+    UserAccess,
+)
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
@@ -2327,6 +2334,23 @@ def get_unavailable_model_reporter(request: Request) -> UnavailableModelReporter
     return reporter
 
 
+def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> InvitationDelivery:
+    """Build the sender of due invitation emails on a worker job's Unit of Work."""
+    domains = OrganizationClaimedDomains(OrganizationDomainRepository(uow))
+    return InvitationDelivery(
+        uow,
+        OrganizationRepositories.on(uow),
+        rule=DeliveryRule(domains, EmailBlocklist(uow, BlockedEmailRepository(uow))),
+        facts=InvitationFactsReader(
+            domains=domains,
+            organizations=OrganizationRepository(uow),
+            users=UserRepository(uow),
+            workspaces=WorkspaceRepository(uow),
+        ),
+        mailer=Mailer(config),
+    )
+
+
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
     """Build the update check service on a request's Unit of Work, or the worker's own."""
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
@@ -3284,6 +3308,7 @@ __all__ = [
     "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",
     "build_update_check_service",
+    "build_invitation_delivery",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",

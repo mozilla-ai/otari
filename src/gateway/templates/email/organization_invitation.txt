@@ -1,0 +1,13 @@
+You're invited to join {{ORGANIZATION_NAME}} on Otari
+
+{{INVITER}} has invited you to join {{ORGANIZATION_NAME}} on Otari with the role {{ROLE}}. {{EXPIRY}}
+
+{{CHECKED_HEADING}}
+{{CHECKED}}
+
+{{WORKSPACES}}The organization's admins will see your name, your email address, and what you do inside this organization. Your other organizations do not change, and this organization cannot see them. An organization admin can remove you.
+
+Accept the invitation by opening this link:
+{{ACCEPT_LINK}}
+
+If you weren't expecting this invitation, you can ignore this email.

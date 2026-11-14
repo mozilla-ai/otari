@@ -86,7 +86,9 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     one SMTP would send is precisely the bug a local preview exists to catch.
     """
     message = MIMEMultipart("alternative")
-    message["Subject"] = sanitize_header_value(envelope.message.subject)
+    subject = sanitize_header_value(envelope.message.subject)
+    # A subject that holds "=?" is encoded, because a mail client would decode it as an encoded word.
+    message["Subject"] = Charset("utf-8").header_encode(subject) if "=?" in subject else subject
     # sender_name is not a value a caller would already have sanitized (unlike
     # the subject): a stray CR/LF in it would raise HeaderParseError on every
     # send, silently and from then on, with one warning line that never points
@@ -144,6 +146,8 @@ class MailTransport(Protocol):
     """
 
     name: str
+    # False for a transport that shows an email to the deployment operator and delivers it to nobody.
+    delivers_to_recipients: bool
 
     def deliver(self, envelope: MailEnvelope) -> None: ...
 
@@ -152,6 +156,7 @@ class SmtpTransport:
     """Delivers through an SMTP server."""
 
     name = "smtp"
+    delivers_to_recipients = True
 
     def __init__(self, *, host: str, port: int, use_tls: bool, user: str | None, password: str | None) -> None:
         self._host = host
@@ -208,6 +213,7 @@ class ConsoleTransport:
     """
 
     name = "console"
+    delivers_to_recipients = False
 
     def deliver(self, envelope: MailEnvelope) -> None:
         logger.info(

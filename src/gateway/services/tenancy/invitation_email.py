@@ -6,8 +6,8 @@ wording around them, which is tenancy's to own. A new message is a body template
 pair plus a function this shape, not another renderer.
 """
 
+from gateway.core.tokens import format_expiry
 from gateway.services.mail import MailMessage, render_email
-from gateway.services.tenancy.tokens import format_expiry
 
 
 def _article_for(role: str) -> str:
