@@ -580,6 +580,12 @@ provider serves the code execution (see
 0) serves the request and reports no container. An id is a requirement, so the
 same deployment refuses it.
 
+A container keeps what earlier runs staged into it, so re-entering one reads
+those files. An API key therefore needs `files:read` as well as `code:execute`
+to send an id back, and is refused with a 403 naming the scope. A key without
+it is served normally and reports no container, because one it could never
+re-enter is worth nothing to it.
+
 The provider's own timer does the reclaiming: the gateway tells it the idle
 timeout when the request ends, and a periodic sweep only drops the rows that
 named a sandbox nobody can resume any more.

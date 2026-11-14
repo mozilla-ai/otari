@@ -84,6 +84,7 @@ from gateway.api.deps import (
     routed_trace_content,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import may_read_files
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import (
@@ -2946,7 +2947,7 @@ async def resolve_request_context(
             post_chars, vision_usage = await normalize_messages(
                 NormalizationTarget(
                     file_user_id=user_id,
-                    may_read_files=_may_read_files(api_key),
+                    may_read_files=may_read_files(api_key),
                     provider=gate_impl,
                     model=gate_model,
                     instance=gate_instance,
@@ -4301,15 +4302,6 @@ async def _admit_web_access(
     ) as exc:
         raise domain_error(adapter, exc) from exc
     return replace(admitted, search_url=search_url)
-
-
-def _may_read_files(api_key: APIKey | None) -> bool:
-    """Whether a ``file_id`` in the request may resolve to a stored file's contents.
-
-    The same scope as reading it from ``/api/v1/files``, since a model given the file
-    can repeat it. A request no key made (the master key, a Playground session) may.
-    """
-    return api_key is None or KeyScope.FILES_READ in api_key.scopes
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:

@@ -250,6 +250,56 @@ async def test_a_second_request_cannot_run_in_a_sandbox_a_first_is_still_using(
     assert len(port.opened) == 1, "a refused request leases nothing"
 
 
+def test_a_key_that_may_not_read_files_cannot_resume_a_container(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    sandbox_env: None,
+) -> None:
+    """A held container keeps what earlier runs staged into it, so re-entering one reads those files."""
+    port = _FakePort()
+    first = _post(client, api_key_header, _body(), port)
+    assert first.status_code == 200, first.text
+    container_id = first.json()["container"]["id"]
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}",
+        json={"scopes": ["inference:run", "code:execute"]},
+        headers=master_key_header,
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    response = _post(client, api_key_header, _body(container_id), port)
+
+    assert response.status_code == 403, response.text
+    assert "'files:read'" in response.json()["error"]["message"]
+    assert response.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+    assert len(port.opened) == 1, "the refused resume opened no sandbox"
+
+
+def test_a_key_that_may_not_read_files_is_held_no_container(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    sandbox_env: None,
+) -> None:
+    """Holding one it could never re-enter would park a sandbox and name an id it cannot use."""
+    port = _FakePort()
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}",
+        json={"scopes": ["inference:run", "code:execute"]},
+        headers=master_key_header,
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    response = _post(client, api_key_header, _body(), port)
+
+    assert response.status_code == 200, response.text
+    assert response.json().get("container") is None
+    assert port.opened == [{"resume": None, "keep_alive_s": None}], "nothing was held"
+
+
 def test_a_request_that_asks_for_nothing_holds_nothing(
     client: TestClient, api_key_header: dict[str, str], sandbox_env: None
 ) -> None:

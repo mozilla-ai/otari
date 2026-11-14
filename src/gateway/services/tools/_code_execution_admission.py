@@ -275,6 +275,7 @@ class DeclaredCodeExecution:
             CodeExecutionDeclarationError: the declaration or its container cannot be served this way.
             CodeExecutionRefusedError: the workspace's policy refuses it.
             CodeExecutionContainerBusyError: the named container is serving another request.
+            KeyScopeMissingError: the caller may not read stored files, so may not resume a held container.
         """
         executor: CodeExecutor | None = None
         if self.preference is not None and self.sandbox_available:
@@ -363,7 +364,11 @@ class DeclaredCodeExecution:
             if container_request is None:
                 # Nothing asked for, so nothing is held.
                 sandbox_containers = None
-            elif container_request != CONTAINER_AUTO:
+            elif container_request == CONTAINER_AUTO:
+                if sandbox_containers is not None and not sandbox_containers.caller_may_resume:
+                    # Holding one this caller may never re-enter parks a sandbox and names an id that cannot be used.
+                    sandbox_containers = None
+            else:
                 sandbox_container_lease = await self._lease(container_request)
                 held = sandbox_container_lease.image
                 if environment is not None and environment != held:

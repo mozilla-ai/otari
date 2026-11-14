@@ -36,7 +36,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.error_body import BodyHTTPException
-from gateway.api.key_scopes import key_scope
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import messages_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
@@ -1090,6 +1090,7 @@ async def create_message(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

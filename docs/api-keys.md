@@ -174,13 +174,13 @@ owner can do.
 | Scope | Lets the key |
 | --- | --- |
 | `inference:run` | Call models: chat completions, messages, responses, embeddings, moderations, rerank, audio, images, video, and decisions |
-| `files:read` | List and download files, attach a stored file to a model request by its `file_id`, and stage one into a code run |
+| `files:read` | List and download files, attach a stored file to a model request by its `file_id`, stage one into a code run, and resume a held code-execution container, which still holds what earlier runs staged into it |
 | `files:write` | Upload and delete files |
 | `batches:read` | List batches and read their results |
 | `batches:write` | Create and cancel batches |
 | `web:search` | Search the web, directly or by declaring a search in a model call |
 | `web:fetch` | Fetch a web page, directly or by declaring a fetch in a model call |
-| `code:execute` | Run code, directly or by declaring a code run in a model call |
+| `code:execute` | Run code, directly or by declaring a code run in a model call. Resuming a held container needs `files:read` as well |
 | `mcp:read` | List MCP servers and their tools |
 | `mcp:execute` | Call MCP tools, directly or during a model call |
 | `telemetry:write` | Send OpenTelemetry traces, logs and metrics |
@@ -222,10 +222,16 @@ code execution or MCP tool needs that tool's scope too, whoever ends up running
 it: naming a provider's own search or code keyword needs the scope as much as
 asking Otari to run one, because which of them runs it is the deployment's
 answer rather than the caller's. A call that attaches a stored file by its
-`file_id` needs `files:read`. The master key holds
+`file_id` needs `files:read`, and so does resuming a held code-execution
+container, because the container still holds what earlier runs staged into it.
+A key without `files:read` can still open a fresh container; only resuming an
+existing one is refused. The master key holds
 every scope. Each operation in the [OpenAPI specification](public/openapi.json)
-lists the scopes it needs in `x-otari-key-scopes`, empty where every key may
-call it.
+lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
+every key may call it. A scope a request needs only for something it asked for,
+such as `files:read` for a `file_id` or a container, is named in this page
+rather than there, because the extension carries one answer for the whole
+operation.
 
 Keys that existed before scopes hold every scope that existed then, so they
 keep working; a scope added later is never granted to a key that did not ask

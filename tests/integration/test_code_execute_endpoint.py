@@ -256,6 +256,41 @@ def test_staging_an_upload_needs_files_read(
     assert port.opened == []
 
 
+def test_resuming_a_container_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A held container keeps what a run staged in it, so resuming one reaches those files again."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    staged = client.post(
+        _ENDPOINT,
+        json={"code": "x = 1", "file_ids": [upload.json()["id"]], "container": "auto"},
+        headers=api_key_header,
+    )
+    assert staged.status_code == 200, staged.text
+    container_id = staged.headers["Otari-Container-Id"]
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resumed = client.post(_ENDPOINT, json={"code": "print(1)", "container": container_id}, headers=api_key_header)
+
+    assert resumed.status_code == 403, resumed.text
+    assert "'files:read'" in resumed.json()["detail"]
+    assert resumed.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+
+
 def test_an_upload_the_caller_cannot_reach_is_a_400(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:

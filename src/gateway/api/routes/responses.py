@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.key_scopes import key_scope
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import responses_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
@@ -562,6 +562,7 @@ async def create_response(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

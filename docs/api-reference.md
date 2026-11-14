@@ -1004,7 +1004,7 @@ it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
 |---|---|
 | `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, a `file_ids` entry is not an upload the caller can read (or the Files API is off), `environment` is not one the gateway offers, or `container` names a sandbox created in another environment, or in one it did not record. |
 | `402` | `require_pricing` is on and neither the environment's `otari:code_execution:<image>` nor `otari:code_execution` has a price (`pricing_required`), or the organization's funds are exhausted. |
-| `403` | The workspace's code execution policy is off or pins another environment, or the billed user's budget is spent. |
+| `403` | The workspace's code execution policy is off or pins another environment, the billed user's budget is spent, or the key lacks `files:read` and the request stages a `file_ids` entry or names a `container` to re-enter. |
 | `409` | The named container is running another request. |
 | `502` | The sandbox could not be reached. |
 | `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |

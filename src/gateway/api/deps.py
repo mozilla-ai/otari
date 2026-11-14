@@ -1143,6 +1143,7 @@ def build_sandbox_container_registry(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     port: CodeExecutionPort | None,
+    may_read_stored_files: bool,
 ) -> SandboxContainerRegistry | None:
     """The registry a completion request's sandbox session is held in, or ``None``.
 
@@ -1150,6 +1151,9 @@ def build_sandbox_container_registry(
     deployment with no sandbox at all; and one that turned reuse off with a zero idle TTL. The
     lease is scoped to the billed user and workspace, and to the adapter this
     build runs, so a deployment that changes providers starts fresh.
+
+    NOTE: ``may_read_stored_files`` has no default, so a caller cannot drop the check by accident.
+    A container keeps what earlier runs staged into it, so re-entering one reads those files.
     """
     if user_id is None or workspace_id is None or port is None or config.sandbox_container_idle_ttl_sec <= 0:
         return None
@@ -1157,6 +1161,7 @@ def build_sandbox_container_registry(
         uow=uow,
         user_id=user_id,
         workspace_id=workspace_id,
+        may_read_stored_files=may_read_stored_files,
         provider=port.label,
         idle_ttl_s=config.sandbox_container_idle_ttl_sec,
         max_lifetime_s=config.sandbox_container_max_lifetime_sec,

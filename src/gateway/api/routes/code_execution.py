@@ -47,7 +47,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_catalog_reader,
 )
-from gateway.api.key_scopes import key_scope
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS
 from gateway.api.routes._passthrough import resolve_passthrough_user_id
@@ -248,7 +248,12 @@ async def execute_code(
             config=config,
             resolve_policy=lambda: policies.for_request(workspace_id),
             container_registry=build_sandbox_container_registry(
-                config=config, uow=uow, user_id=user_id, workspace_id=workspace_id, port=port
+                config=config,
+                uow=uow,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                port=port,
+                may_read_stored_files=may_read_files(api_key),
             ),
         )
         admitted = await declared.admit(claimed=False, beside_sandbox=False, environment=request.environment)

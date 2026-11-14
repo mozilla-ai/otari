@@ -39,6 +39,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.repositories.code_execution import (
     SandboxContainerRow,
     claim_container_row,
@@ -47,6 +48,7 @@ from gateway.repositories.code_execution import (
     release_container_claim,
     upsert_container_row,
 )
+from gateway.types.key_scope import KeyScope
 
 # The gateway's own container ids. OpenAI issues ``cntr_``-prefixed ids and
 # Anthropic ``container_``-prefixed ones, so a reserved prefix is what lets an
@@ -210,6 +212,7 @@ class SandboxContainerRegistry:
         uow: UnitOfWork,
         user_id: str,
         workspace_id: uuid.UUID,
+        may_read_stored_files: bool,
         provider: str,
         idle_ttl_s: int,
         max_lifetime_s: int,
@@ -217,9 +220,15 @@ class SandboxContainerRegistry:
         self._uow = uow
         self._user_id = user_id
         self._workspace_id = workspace_id
+        self._may_read_stored_files = may_read_stored_files
         self._provider = provider
         self._idle_ttl_s = idle_ttl_s
         self._max_lifetime_s = max_lifetime_s
+
+    @property
+    def caller_may_resume(self) -> bool:
+        """Whether this caller could re-enter a container held for them, so holding one is worth it."""
+        return self._may_read_stored_files
 
     @property
     def idle_ttl_s(self) -> int:
@@ -250,8 +259,9 @@ class SandboxContainerRegistry:
     async def resolve(self, container_id: str) -> ContainerLease:
         """The lease behind ``container_id`` for this caller, claimed for this request.
 
-        Raises :class:`ContainerNotFoundError` when the id is unknown, expired,
-        another tenant's or another provider's, and :class:`ContainerBusyError`
+        Raises :class:`KeyScopeMissingError` when the caller may not read stored files, because a
+        container holds what earlier runs staged into it, :class:`ContainerNotFoundError` when the id
+        is unknown, expired, another tenant's or another provider's, and :class:`ContainerBusyError`
         when it is this caller's own and another of their requests holds it.
 
         A row whose clocks ran out is dropped on the way, so the next resume
@@ -260,6 +270,8 @@ class SandboxContainerRegistry:
         """
         if not container_id.startswith(CONTAINER_ID_PREFIX):
             raise ContainerNotFoundError(container_id)
+        if not self._may_read_stored_files:
+            raise KeyScopeMissingError(KeyScope.FILES_READ, "resuming a held container")
         now = datetime.now(UTC)
         async with self._uow:
             row = await get_container_row(self._uow, container_id)
