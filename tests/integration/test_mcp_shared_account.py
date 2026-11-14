@@ -312,6 +312,33 @@ async def test_a_change_the_account_no_longer_fits_ends_it(
     assert await _account(async_db, world) is None
 
 
+async def test_a_pending_shared_sign_in_is_not_finished_for_a_path_the_server_moved_to(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """On the same origin a path edit keeps the client and the token endpoint, so only the URL tells them apart."""
+    world = await _shared_world(async_db, config)
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    started = await service.start_shared_sign_in(user=world.owner, return_to=None, **ids)
+
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(url=base.PUBLIC_URL + "/v2"), **ids)
+
+    assert (await async_db.execute(select(McpOAuthFlow))).first() is None, "the edit ends the pending sign-in"
+    with pytest.raises(McpConnectionFlowError):
+        await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="code")
+    assert await _account(async_db, world) is None
+
+    # A sign-in that outlives such an edit is refused on its own record of the URL it was started for.
+    for loaded in (world.owner, world.workspace):
+        await async_db.refresh(loaded)
+    started = await service.start_shared_sign_in(user=world.owner, return_to=None, **ids)
+    (await _row(async_db, world.server.id)).url = base.PUBLIC_URL + "/v3"
+    await async_db.commit()
+    with pytest.raises(McpConnectionFlowError, match="changed"):
+        await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="code")
+    assert await _account(async_db, world) is None
+
+
 async def test_switching_a_personal_server_to_shared_ends_every_connection_and_waits_for_an_account(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:

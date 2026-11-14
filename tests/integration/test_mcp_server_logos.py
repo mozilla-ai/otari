@@ -290,13 +290,17 @@ async def test_another_workspaces_server_is_not_found(async_db: AsyncSession) ->
 
     # Named under the caller's own workspace, the other workspace's server does not exist. Ids are read
     # first: the refusal rolls the shared session back, which expires the objects the test holds.
-    workspace_id = workspace.id
+    workspace_id, other_id = workspace.id, other.id
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await service.logo(user=owner, workspace_id=workspace_id, server_id=foreign)
     await async_db.refresh(owner)
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await service.set_logo(user=owner, workspace_id=workspace_id, server_id=foreign, tile="never", content=None)
     assert fetcher.asked == []
+    # The workspace is part of the query, so the lock a refused upload asks for takes no other workspace's row.
+    servers = WorkspaceMcpServerRepository(async_db)
+    assert await servers.find(foreign, workspace_id=workspace_id, lock=True) is None
+    assert await servers.find(foreign, workspace_id=other_id, lock=True) is not None
 
 
 async def test_deleting_a_server_takes_its_logo(async_db: AsyncSession) -> None:

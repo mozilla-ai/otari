@@ -101,6 +101,19 @@ class WorkspaceMcpServerHealth(BaseModel):
         """The health one check of the server found (``server_health``)."""
         return server_health(allowed_tools, check)
 
+    def for_allow_list(self, allowed_tools: list[str] | None) -> WorkspaceMcpServerHealth:
+        """This health read against another allow-list: only the counts the list decides move.
+
+        What the server offered, its read hints and when it was seen stay, so '@read' keeps its tools
+        after an allow-list edit that a check cannot list again.
+        """
+        if self.tool_count is None:
+            return self
+        listed = server_health(allowed_tools, ServerCheck(tool_names=self.tools))
+        return self.model_copy(
+            update={"tool_count": listed.tool_count, "missing_allowed_tools": listed.missing_allowed_tools}
+        )
+
 
 def server_health(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcpServerHealth:
     """Read a check against an allow-list: ``None`` admits every tool and ``[]`` none, as the tool loop reads it."""
