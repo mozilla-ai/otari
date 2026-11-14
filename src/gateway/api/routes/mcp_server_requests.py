@@ -91,9 +91,11 @@ async def list_my_mcp_server_requests(
 ) -> McpServerRequestsPublic:
     """The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.
 
-    Any member who can see the workspace. An answer, approved or declined, is listed until the
-    caller acknowledges it. A declined request also leaves the list when the caller asks for the
-    server again or the server is added, and an approved one when its server is deleted.
+    Any member who can see the workspace. Pending requests come first, then the answers, each
+    newest first, so a first page of 10 or more holds every pending one. An answer, approved or
+    declined, is listed until the caller acknowledges it. A declined request also leaves the list
+    when the caller asks for the server again or the server is added, and an approved one when its
+    server is deleted.
     """
     return await service.mine(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 

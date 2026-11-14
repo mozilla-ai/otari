@@ -183,7 +183,7 @@ describe("McpServerRequestsBlock", () => {
     )
   })
 
-  it("pages by server, so a server past the first page can be answered", async () => {
+  it("pages by server, answers a server past the first page, and steps back when its page empties", async () => {
     const servers = Array.from({ length: 26 }, (_, index) =>
       group({ catalog_name: `server-${index}`, title: `Server ${index}` }),
     )
@@ -212,6 +212,31 @@ describe("McpServerRequestsBlock", () => {
       screen.getAllByRole("region", { name: /^Requests for / }),
     ).toHaveLength(1)
     expect(calls.at(-1)?.url).toMatch(/\?skip=25&limit=25$/)
+
+    await user.click(screen.getByRole("button", { name: "Decline Server 25" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Reason"), "Not needed")
+    await user.click(within(dialog).getByRole("button", { name: "Decline" }))
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")).toMatchObject({
+        body: { catalog_name: "server-25" },
+      }),
+    )
+    // Its page is now empty, so the list steps back to the last one with servers.
+    expect(
+      await screen.findByRole("region", { name: "Requests for Server 0" }),
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole("region", { name: /^Requests for / }),
+    ).toHaveLength(25)
+    expect(
+      screen.queryByRole("region", { name: "Requests for Server 25" }),
+    ).not.toBeInTheDocument()
+    // One page of servers is left, so the pager goes.
+    expect(
+      screen.queryByRole("button", { name: "Next page" }),
+    ).not.toBeInTheDocument()
   })
 
   it("offers Retry and the previous page when a later page fails", async () => {
