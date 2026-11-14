@@ -642,6 +642,40 @@ def test_a_configured_transport_without_a_public_url_still_cannot_send_links() -
         mailer.require_ready()
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        pytest.param({"mail_transport": "none"}, False, id="no transport"),
+        pytest.param({"mail_transport": "console"}, False, id="console transport"),
+        pytest.param({"public_base_url": None}, False, id="SMTP with no base URL"),
+        pytest.param({"public_base_url": "   "}, False, id="SMTP with a whitespace-only base URL"),
+        pytest.param({"public_base_url": "otari.example.com"}, False, id="SMTP with a base URL that has no scheme"),
+        pytest.param(
+            {"public_base_url": None, "ui_base_url": "https://app.example.com"},
+            False,
+            id="SMTP with an interface address and no base URL",
+        ),
+        pytest.param({"public_base_url": "https:///path"}, False, id="SMTP with a base URL that has no host"),
+        pytest.param({"public_base_url": "https://[broken"}, False, id="SMTP with a base URL that cannot be read"),
+        pytest.param({}, True, id="SMTP with a base URL"),
+        pytest.param({"public_base_url": "HTTP://otari.example.com"}, True, id="SMTP with an uppercase scheme"),
+    ],
+)
+def test_links_are_delivered_only_through_a_transport_that_delivers_and_with_an_absolute_address(
+    settings: dict[str, object], expected: bool
+) -> None:
+    assert Mailer(_ready(**settings)).can_deliver_links is expected
+
+
+def test_each_transport_states_whether_it_delivers_to_recipients() -> None:
+    smtp = select_transport(_ready())
+    console = select_transport(_ready(mail_transport="console"))
+
+    assert smtp is not None
+    assert console is not None
+    assert (smtp.delivers_to_recipients, console.delivers_to_recipients) == (True, False)
+
+
 def test_link_is_absolute_when_the_deployment_knows_its_address_and_relative_otherwise() -> None:
     assert Mailer(_ready()).link("/#/accept-invitation?token=abc") == (
         "https://otari.example.com/#/accept-invitation?token=abc"
@@ -852,6 +886,20 @@ def test_the_subject_is_stripped_of_newlines_but_the_body_is_not() -> None:
     )
     assert "\r" not in message.subject
     assert "\n" not in message.subject
+
+
+@pytest.mark.parametrize("subject", ["=?utf-8?b?4oCuZXZpbOKArA==?= invites you", "Join =?utf-8?q?Acme?="])
+def test_a_mail_client_reads_the_subject_as_the_text_given(subject: str) -> None:
+    envelope = MailEnvelope(
+        to="support@example.com",
+        sender_email="otari@example.com",
+        sender_name="Otari",
+        message=replace(MESSAGE, subject=subject),
+    )
+
+    received = message_from_string(build_mime(envelope).as_string(), policy=policy.default)
+
+    assert received["Subject"] == subject
 
 
 # --- The shape of the guard -------------------------------------------------

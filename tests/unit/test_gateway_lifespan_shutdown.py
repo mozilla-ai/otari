@@ -37,6 +37,7 @@ from gateway.main import (
     _start_lifespan_workers,
     _stop_refreshers,
 )
+from gateway.services.organizations import InvitationDelivery
 
 
 async def _absorbs_cancellation() -> None:
@@ -200,6 +201,7 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
     for attribute in dir(gateway_main):
         if attribute.startswith("run_"):
             monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
+    monkeypatch.setattr(InvitationDelivery, "poll", _recording_refresher("InvitationDelivery.poll", called))
 
     workers = _start_lifespan_workers(config, build_container(config=config))
     for task, _worker in workers:
