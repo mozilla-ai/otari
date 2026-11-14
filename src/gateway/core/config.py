@@ -2424,19 +2424,12 @@ class GatewayConfig(
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
             raise ValueError(msg)
-        # Shape-checked here for the same reason the transport is: a typo in the
-        # from-address is a misconfiguration, and letting it through means the
-        # first anyone hears of it is a recipient's server rejecting the
-        # envelope, which is the send-time failure this design exists to avoid.
-        # Every recipient address already goes through the same check.
-        #
-        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
-        # deliberate and costs nothing: mail_transport is new here, so no
-        # existing deployment can be holding the value this refuses, while a
-        # deployment that has had a working odd-looking address under the
-        # implicit path keeps booting.
+        # NOTE: Checked only under an explicit 'smtp'. Under 'auto', a from-address that is not plain still starts.
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
-            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
+            msg = (
+                f"mail_from_email is not a plain email address: {self.mail_from_email!r}. "
+                "Set the address alone, such as otari@example.com, and put the display name in mail_from_name."
+            )
             raise ValueError(msg)
 
     def warn_about_half_configured_oauth(self) -> None:
