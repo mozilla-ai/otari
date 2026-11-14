@@ -38,7 +38,10 @@ requests, resolves provider credentials, enforces budgets before dispatch, and
 records usage afterwards. Provider calls go through
 [any-llm](https://github.com/mozilla-ai/any-llm).
 
-Run Otari with your own database and provider keys.
+Run Otari with your own database and provider keys, or call the hosted gateway
+at [otari.ai](https://otari.ai): its [quickstart](docs/quickstart.md) covers the
+[base URL](docs/api-reference.md#base-url) for your SDK and region, the `otk_`
+token your app sends, and where to copy a model id.
 
 ## Why Otari
 
@@ -174,6 +177,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 ## Documentation
 
 - [Quickstart](docs/self-hosted-quickstart.md)
+- [otari.ai quickstart](docs/quickstart.md)
 - [Deployment](docs/deployment.md)
 - [Configuration](docs/configuration.md)
 - [Models](docs/models.md)

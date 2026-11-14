@@ -358,7 +358,10 @@ Authorization: Bearer <token>
 
 The enabled stored servers of the key's workspace whose
 [access list](#server-access) grants it something, which is what to send in
-`mcp_server_ids`. The URL and the token are never returned. A master key has no
+`mcp_server_ids`. An empty list means no enabled server grants this key
+anything, not that the workspace stores none: a workspace admin stores a server
+as [Configuring them](#configuring-them) shows, and grants keys access to it.
+The URL and the token are never returned. A master key has no
 workspace and is refused with `404`, as on the other routes of this section; the
 route is rate limited and refuses a blocked user as they are.
 

@@ -7,7 +7,13 @@ reliable than a copied provider table.
 
 ## Model format
 
-Use `provider:model`:
+Two spellings work, and examples use both: `deepseek/deepseek-v4-pro-0813`
+(slash) is a catalog id, which leaves Otari to pick the provider, and
+`openai:gpt-4o-mini` (colon) names the provider. `GET /api/v1/models` lists the
+catalog ids a key can use, and on otari.ai the **Use this model** panel copies
+one. The display name a model page shows (`Qwen3 Max`) is not an id.
+
+Use `provider:model` to choose the provider:
 
 ```text
 openai:gpt-5

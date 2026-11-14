@@ -39,7 +39,9 @@
 Otari 位于你的应用和模型提供商之间。它为请求做身份验证，确定该用哪份提供商凭据，在发出请求前执行预算检查，并在请求结束后记录用量。对提供商的调用通过
 [any-llm](https://github.com/mozilla-ai/any-llm) 完成。
 
-你可以用自己的数据库和提供商密钥运行 Otari。
+你可以用自己的数据库和提供商密钥运行 Otari，也可以调用 [otari.ai](https://otari.ai)
+上的托管网关：它的[快速入门](docs/quickstart.md)介绍了适合你的 SDK 和地区的
+[基础 URL](docs/api-reference.md#base-url)、应用发送的 `otk_` 令牌，以及在哪里复制模型 ID。
 
 ## 为什么选择 Otari
 

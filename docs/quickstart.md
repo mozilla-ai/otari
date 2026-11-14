@@ -41,7 +41,7 @@ Pick a model your workspace can use.
 
 1. Open the Models page.
 2. Choose a model using the available filters, including modality, provider, vendor, capabilities, and more, to quickly find the option that best fits your needs.
-3. After selecting a model, click **Use this model**, and copy the model selector from the panel that opens.
+3. After selecting a model, click **Use this model**, and copy the model selector from the panel that opens. The selector, not the model's display name, is what a request sends. A selector with a slash (`deepseek/deepseek-v4-pro-0813`) lets Otari pick the provider, and one with a colon (`openai:gpt-4o-mini`) names it; both work (see [Model format](models.md#model-format)).
 
 otari.ai exposes an OpenAI-compatible endpoint at `https://api.otari.ai/api/v1`, or `https://eu.api.otari.ai/api/v1` for an account in the European Union. The fastest first check is one cURL request that you can copy. The examples use `deepseek/deepseek-v4-pro-0813`; replace it with the selector you copied.
 
