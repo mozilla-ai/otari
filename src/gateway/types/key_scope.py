@@ -141,6 +141,10 @@ class KeyScopeSet:
         """The set as a column holds it."""
         return [scope.value for scope in self]
 
+    def __and__(self, other: Iterable[KeyScope]) -> Self:
+        """The scopes this set and ``other`` share, which can only be fewer than either."""
+        return type(self)(self._held & frozenset(other))
+
     def __contains__(self, scope: object) -> bool:
         return scope in self._held
 

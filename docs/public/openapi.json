@@ -2077,7 +2077,7 @@
             "type": "string"
           },
           "scopes": {
-            "description": "The scopes the consent screen showed. A registration that no longer names these is refused.",
+            "description": "The scopes the consent screen showed. The key holds these and what the registration still names, so one added since the screen was drawn is left out and one removed since takes effect.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -2224,9 +2224,15 @@
         "type": "object"
       },
       "AppTokenResponse": {
+        "description": "A minted app key, as RFC 6749 section 5.1 shapes it.",
         "properties": {
           "access_token": {
             "title": "Access Token",
+            "type": "string"
+          },
+          "scope": {
+            "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.",
+            "title": "Scope",
             "type": "string"
           },
           "token_type": {
@@ -2237,7 +2243,8 @@
           }
         },
         "required": [
-          "access_token"
+          "access_token",
+          "scope"
         ],
         "title": "AppTokenResponse",
         "type": "object"

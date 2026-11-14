@@ -151,7 +151,8 @@ async def app_workspaces(
 @public_router.post("/token", response_model=AppTokenResponse, responses={400: {"model": OAuthErrorResponse}})
 async def exchange(body: Annotated[AppTokenRequest, Form()], service: OAuthAppServiceDep) -> JSONResponse:
     """Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key."""
-    token = AppTokenResponse(access_token=await service.exchange(body))
+    key, scopes = await service.exchange(body)
+    token = AppTokenResponse(access_token=key, scope=" ".join(scope.value for scope in scopes))
     return JSONResponse(token.model_dump(), headers=_NO_STORE)
 
 

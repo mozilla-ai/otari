@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.repositories.base_repository import BaseRepository
+from gateway.types.key_scope import KeyScopeSet
 
 _NAMES_BATCH = 10_000
 
@@ -33,7 +34,7 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         user_id: str,
         workspace_id: uuid.UUID,
         client_id: str,
-        scopes: list[str],
+        scopes: KeyScopeSet,
     ) -> None:
         """Stage a budget-enforced, self-service key with inherited access restrictions."""
         self.db.add(
