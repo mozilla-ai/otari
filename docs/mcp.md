@@ -296,7 +296,9 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   deleting the server, deleting the user, the user leaving the workspace, and a
   change to the server's URL, its OAuth client ID or its credential mode. A
   new secret for the same client ID is the same client: it ends no connection
-  and revokes no token. For
+  and revokes no token. A sign-in still under way when the URL, the client ID
+  or the mode changes is not finished: each one records the URL it was started
+  for and is refused when the server's no longer matches. For
   each of these, Otari also asks the authorization server to revoke the
   tokens, best effort and only after the removal has committed; a removal
   that rolls back revokes nothing. One removal asks for at most 500
