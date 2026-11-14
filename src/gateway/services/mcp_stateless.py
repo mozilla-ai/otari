@@ -861,9 +861,10 @@ async def refuse_unusable_answer(response: httpx2.Response) -> None:
 
 def _opens_a_session(request: httpx2.Request) -> bool:
     try:
-        return json.loads(request.content).get("method") == "initialize"
-    except (ValueError, TypeError, AttributeError, httpx2.RequestNotRead):
+        body = json.loads(request.content)
+    except (ValueError, TypeError, httpx2.RequestNotRead):
         return False
+    return isinstance(body, dict) and body.get("method") == "initialize"
 
 
 async def refuse_rejected_token(response: httpx2.Response) -> None:
