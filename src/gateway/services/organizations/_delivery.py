@@ -10,6 +10,7 @@ from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.organizations import DueInvitation, OrganizationRepositories
 from gateway.services.mail import Mailer
+from gateway.services.organizations._accept_link import accept_link
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_email import render_invitation_email
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
@@ -20,10 +21,6 @@ MAX_ATTEMPTS = len(RETRY_WAITS) + 1
 # NOTE: This must be longer than one send can take, or a second email is sent while the first is on its way.
 CLAIM_HOLD = timedelta(minutes=10)
 POLL_SECONDS = 30.0
-
-
-def _accept_path(token: str) -> str:
-    return f"/#/accept-invitation?token={token}"
 
 
 class InvitationDelivery:
@@ -80,7 +77,7 @@ class InvitationDelivery:
 
         message = render_invitation_email(
             facts,
-            accept_link=self._mailer.link(_accept_path(token)),
+            accept_link=accept_link(self._mailer, token),
             expires_at=due.expires_at,
             asset_root=self._mailer.asset_root,
         )
