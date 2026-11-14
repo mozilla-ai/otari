@@ -22,6 +22,7 @@ from gateway.services.tools import McpServerContact, McpServerContacts
 from gateway.services.tools._mcp_server_health import (
     _MAX_PENDING_WRITES,
     CONTACT_WRITE_INTERVAL_S,
+    MAX_ALLOWED_TOOLS,
     health_after_contact,
     server_health,
 )
@@ -135,6 +136,26 @@ def test_a_listing_is_read_against_the_allow_list() -> None:
     assert health is not None
     assert health["tool_count"] == 1
     assert health["missing_allowed_tools"] == ["gone"]
+
+
+def test_an_allow_list_edit_recounts_a_complete_listing() -> None:
+    health = server_health(None, LISTING).for_allow_list(["list_issues", "gone"])
+
+    assert (health.tool_count, health.missing_allowed_tools) == (1, ["gone"])
+    assert health.tools == ["list_issues", "create_issue"]
+    assert health.read_only_hinted_tools == ["list_issues"]
+
+
+def test_an_allow_list_edit_does_not_call_a_tool_past_the_stored_preview_missing() -> None:
+    names = [f"tool_{i}" for i in range(MAX_ALLOWED_TOOLS + 1)]
+    stored = server_health(None, ServerCheck(tool_names=names, read_only_hinted=["tool_0", names[-1]]))
+    assert len(stored.tools) == MAX_ALLOWED_TOOLS
+
+    health = stored.for_allow_list([names[-1]])
+
+    assert (health.tool_count, health.missing_allowed_tools) == (None, [])
+    assert health.read_only_hinted_tools == ["tool_0", names[-1]]
+    assert mcp_read_tools(None, health.model_dump(mode="json")) == ["tool_0", names[-1]]
 
 
 class _Recorder(McpServerContacts):

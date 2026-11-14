@@ -105,10 +105,17 @@ class WorkspaceMcpServerHealth(BaseModel):
         """This health read against another allow-list: only the counts the list decides move.
 
         What the server offered, its read hints and when it was seen stay, so '@read' keeps its tools
-        after an allow-list edit that a check cannot list again.
+        after an allow-list edit that a check cannot list again. ``tools`` keeps only the first
+        ``MAX_ALLOWED_TOOLS`` names, so a list at that length may be cut short: the counts then become
+        unknown, as when no listing is on record, rather than calling a tool past the cut missing.
         """
         if self.tool_count is None:
             return self
+        if len(self.tools) >= MAX_ALLOWED_TOOLS:
+            # The preview goes too, or a next listing equal to it would be throttled and not restore the counts.
+            return self.model_copy(
+                update={"tool_count": None, "missing_allowed_tools": [], "tools": [], "tool_descriptions": {}}
+            )
         listed = server_health(allowed_tools, ServerCheck(tool_names=self.tools))
         return self.model_copy(
             update={"tool_count": listed.tool_count, "missing_allowed_tools": listed.missing_allowed_tools}
