@@ -8,7 +8,7 @@ MCP servers allow requests from a workspace to connect to external tools and ser
 2. Go to **Tools** → **MCP servers**.
 3. Click **Add MCP server**.
 4. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
-5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway.
+5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
 6. If required, enter an **Authorization token**.
 7. Optionally, add a **Purpose hint** describing when the model should use this server, for example, “Use for repository and issue lookups.”
 8. Under **Allowed tools**, specify which tools from the MCP server the model can access. Enter the tool names separated by commas, or leave the field blank to make all tools offered by the server available.

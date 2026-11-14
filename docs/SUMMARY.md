@@ -21,6 +21,7 @@
 * [Web search](web-search.md)
 * [Code execution](code-execution.md)
 * [MCP servers](mcp-servers.md)
+* [Connect an MCP server on a private network](connect-a-private-mcp-server.md)
 
 ## Integrations
 
