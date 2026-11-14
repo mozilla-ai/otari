@@ -80,6 +80,11 @@ connection, since it is the same client. Whether those connections still work
 is up to the new sign-in server: if it does not accept what the old one issued,
 a member is asked to connect again the next time their token is renewed.
 
+After you save a client secret again, Otari renews no one's sign-in on that
+server until somebody signs in once more, which records the sign-in server the
+secret may go to. A member whose sign-in expires before then is asked to sign
+in again; the first sign-in by anyone sets renewals going for everyone else.
+
 ## Connect your account
 
 Anyone who can see the workspace can do this.
