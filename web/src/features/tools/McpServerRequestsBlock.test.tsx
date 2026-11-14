@@ -71,12 +71,16 @@ function mockApi(groups: McpServerRequestGroup[]): Call[] {
       )
       return Response.json({ declined: 2 })
     }
+    const params = new URL(url, "http://localhost").searchParams
+    const skip = Number(params.get("skip") ?? 0)
+    const limit = Number(params.get("limit") ?? 100)
     return Response.json({
-      data: waiting,
+      data: waiting.slice(skip, skip + limit),
       count: waiting.reduce(
         (total, entry) => total + entry.requesters.length,
         0,
       ),
+      server_count: waiting.length,
     })
   })
   return calls
@@ -177,6 +181,47 @@ describe("McpServerRequestsBlock", () => {
         screen.queryByRole("heading", { name: /Requests/ }),
       ).not.toBeInTheDocument(),
     )
+  })
+
+  it("pages by server, so a server past the first page can be answered", async () => {
+    const servers = Array.from({ length: 26 }, (_, index) =>
+      group({ catalog_name: `server-${index}`, title: `Server ${index}` }),
+    )
+    const calls = mockApi(servers)
+    const user = userEvent.setup()
+    renderBlock()
+
+    expect(
+      await screen.findByRole("region", { name: "Requests for Server 0" }),
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole("region", { name: /^Requests for / }),
+    ).toHaveLength(25)
+    // The heading still counts people waiting; the pager counts servers.
+    expect(
+      screen.getByRole("heading", { name: /^Requests\s*\(52\)$/ }),
+    ).toBeVisible()
+    expect(screen.getByText("1–25 of 26")).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    expect(
+      await screen.findByRole("region", { name: "Requests for Server 25" }),
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole("region", { name: /^Requests for / }),
+    ).toHaveLength(1)
+    expect(calls.at(-1)?.url).toMatch(/\?skip=25&limit=25$/)
+  })
+
+  it("has no pager while every server fits on one page", async () => {
+    mockApi([group()])
+    renderBlock()
+
+    await screen.findByRole("region", { name: "Requests for Sentry" })
+    expect(
+      screen.queryByRole("button", { name: "Next page" }),
+    ).not.toBeInTheDocument()
   })
 
   it("names the people who asked without listing a crowd", () => {
