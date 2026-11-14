@@ -6,7 +6,7 @@ lets exactly one replica sync. ``mcp_logos`` is keyed by what a logo is of (a
 catalog server's name or a server's host), so it references no other table.
 
 Revision ID: b3d6f8a2c5e1
-Revises: 3ec751593322
+Revises: 62256ffefe75
 Create Date: 2026-11-13
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3d6f8a2c5e1"
-down_revision: str | Sequence[str] | None = "3ec751593322"
+down_revision: str | Sequence[str] | None = "62256ffefe75"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

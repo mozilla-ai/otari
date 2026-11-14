@@ -36,7 +36,7 @@ Departures from the port, each for a reason that belongs to this edition:
   password-less. An address nobody has touched is refused rather than
   onboarded from nothing.
 - **Verification and reset tokens are opaque and hashed at rest, not JWTs.**
-  ``gateway.services.tenancy.tokens`` mirrors the shape
+  ``gateway.core.tokens`` mirrors the shape
   ``organization_service`` already uses for an invitation token: a random
   token handed to the caller once, only its SHA-256 hash stored, an explicit
   expiry column, and single-use enforced by clearing both to ``NULL`` on
@@ -57,6 +57,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     CurrentPasswordIncorrectError,
@@ -90,7 +91,6 @@ from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.password_reset_email import render_account_exists_email, render_password_reset_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity, password_claims_deployment
-from gateway.services.tenancy.tokens import generate_token, hash_token, is_shared_token
 from gateway.services.tenancy.verification_email import render_verification_email
 
 # The unique index alembic creates on ``user.email`` (c4b6d8e0f2a3).
