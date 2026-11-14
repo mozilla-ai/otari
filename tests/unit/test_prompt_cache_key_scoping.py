@@ -3,12 +3,14 @@
 import uuid
 from typing import Any, cast
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes._pipeline import RequestContext, scope_prompt_cache_key
 from gateway.core.config import GatewayConfig
 
 
 def _context(*, user_id: str | None = "user-a") -> RequestContext:
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=cast(Any, object()),
         uow=cast(Any, object()),

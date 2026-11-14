@@ -939,6 +939,7 @@ class McpConnectionPublic(pydantic.BaseModel):
 
 class McpConnectionsPublic(pydantic.BaseModel):
     data: list[McpConnectionPublic]
+    count: int = pydantic.Field(description="How many of the workspace's servers the caller is connected to in all")
 
 
 class McpServerConnectionPublic(pydantic.BaseModel):

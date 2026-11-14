@@ -4,9 +4,11 @@ from datetime import datetime
 from typing import Never
 
 from sqlalchemy import and_, false, or_, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.mcp_catalog import SYNC_STATE_ROW_ID, McpCatalogSyncState
 from gateway.repositories.base_repository import BaseRepository
@@ -22,20 +24,21 @@ class McpCatalogSyncStateRepository(BaseRepository[McpCatalogSyncState, Never, N
         """The state row, created with its defaults the first time it is read.
 
         Every replica's poll and a page load can find no row at once. The insert
-        runs in a SAVEPOINT, so the one that loses the race rolls back its row
-        alone and reads the winner's.
+        skips a row that is already there, so the one that loses the race inserts
+        nothing and reads the winner's.
         """
         row = await self.db.get(McpCatalogSyncState, SYNC_STATE_ROW_ID, populate_existing=True)
+        if row is not None:
+            return row
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        await self.db.execute(
+            insert(McpCatalogSyncState)
+            .values(id=SYNC_STATE_ROW_ID)
+            .on_conflict_do_nothing(index_elements=[McpCatalogSyncState.id])
+        )
+        row = await self.db.get(McpCatalogSyncState, SYNC_STATE_ROW_ID, populate_existing=True)
         if row is None:
-            try:
-                async with self.db.begin_nested():
-                    self.db.add(McpCatalogSyncState(id=SYNC_STATE_ROW_ID))
-            except IntegrityError:
-                pass
-            row = await self.db.get(McpCatalogSyncState, SYNC_STATE_ROW_ID, populate_existing=True)
-            if row is None:
-                raise LookupError("the MCP catalog sync state row is missing after its insert")
-            await self.db.refresh(row)
+            raise LookupError("the MCP catalog sync state row is missing after its insert")
         return row
 
     async def claim(self, now: datetime, *, scheduled: bool, stale_before: datetime, next_sync_at: datetime) -> bool:

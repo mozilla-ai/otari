@@ -222,7 +222,7 @@ async def test_streaming_generator_hands_the_exception_to_on_error() -> None:
     """on_error receives the raised exception itself, not a rendered message.
 
     The settlement callback classifies it (recording the upstream HTTP status on
-    the usage log, see ``failure_status_code``), which a string cannot support:
+    the usage log, see ``UpstreamFailure.logged_status``), which a string cannot support:
     provider error prose carries no reliable status. Pinned separately from the
     format tests above, which only compare ``str(exc)`` and so would pass either
     way.

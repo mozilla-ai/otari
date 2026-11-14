@@ -827,10 +827,96 @@ async def test_a_renewal_sends_no_secret_to_a_token_endpoint_the_client_is_no_lo
     )
     await async_db.commit()
 
-    with pytest.raises(McpConnectionUnavailableError):
+    with pytest.raises(McpSignInRequiredError):
         await tokens.token_for(await _row(async_db, world.server.id), str(world.member.id))
 
     assert wire.refreshes == []
+    assert await _connection(async_db, world.server.id, str(world.member.id)) is not None
+
+
+async def test_a_renewal_after_the_secret_was_saved_again_waits_for_a_sign_in_to_approve_its_endpoint(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """Saving the client clears what it was approved for, so the new secret goes nowhere until a sign-in pins it."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="old-secret")
+    await _sign_in(async_db, config, world, world.member)
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    await service.update_server(
+        user=world.owner, request=WorkspaceMcpServerUpdate(oauth_client_secret="new-secret"), **ids
+    )
+    user_id = str(world.member.id)
+
+    # Inside its lifetime the token is still used as it is, and nothing is sent anywhere.
+    await _expire(async_db, world.server.id, ago=-timedelta(minutes=1))
+    assert await tokens.token_for(await _row(async_db, world.server.id), user_id) == "access-1"
+    await _expire(async_db, world.server.id)
+    with pytest.raises(McpSignInRequiredError):
+        await tokens.token_for(await _row(async_db, world.server.id), user_id)
+    with pytest.raises(McpSignInRequiredError):
+        await tokens.renew_rejected(await _row(async_db, world.server.id), user_id, "access-1")
+    assert wire.refreshes == []
+    assert await _connection(async_db, world.server.id, user_id) is not None
+
+    # Another sign-in pins the client to the same token endpoint, and the kept connection renews again.
+    await _sign_in(async_db, config, world, world.owner)
+    assert await tokens.token_for(await _row(async_db, world.server.id), user_id) == "renewed-1"
+    [(client, _)] = wire.refreshes
+    assert client.client_secret == "new-secret"
+
+
+async def test_a_managers_client_is_never_sent_to_a_moved_revocation_endpoint(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    assert (await _row(async_db, world.server.id)).oauth_client_revocation_endpoint == f"{ISSUER}/revoke"
+
+    wire.metadata = dataclasses.replace(wire.metadata, revocation_endpoint="https://93.184.216.38/revoke")
+    with pytest.raises(McpOAuthIssuerChangedError):
+        await _service(async_db, config).start_connection(
+            user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert len(wire.exchanges) == 1
+
+
+@pytest.mark.parametrize("pinned", [None, "https://93.184.216.38/revoke"])
+async def test_a_revocation_sends_nothing_to_an_endpoint_the_client_is_not_approved_for(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, pinned: str | None
+) -> None:
+    """Saved again (no pin) or pinned elsewhere: the connection still goes, and nothing is sent to revoke it."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(col(WorkspaceMcpServer.id) == world.server.id)
+        .values(oauth_client_revocation_endpoint=pinned)
+    )
+    await async_db.commit()
+
+    await _service(async_db, config).disconnect(
+        user=world.member, workspace_id=world.workspace.id, server_id=world.server.id
+    )
+
+    assert wire.revoked == []
+    assert await _connection(async_db, world.server.id, str(world.member.id)) is None
+
+
+async def test_a_removal_revokes_nothing_at_an_endpoint_the_client_is_not_approved_for(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    await service.update_server(
+        user=world.owner, request=WorkspaceMcpServerUpdate(oauth_client_secret="new-secret"), **ids
+    )
+
+    await service.delete_server(user=world.owner, **ids)
+    await _drain_revocations()
+
+    assert wire.revoked == []
 
 
 async def test_an_edit_waits_for_another_that_moved_the_url_and_decides_against_the_moved_server(
@@ -1442,6 +1528,26 @@ async def test_a_renewal_that_hangs_is_given_up_on(
     assert await _connection(async_db, world.server.id, str(world.member.id)) is not None
 
 
+async def test_a_token_that_expires_while_its_renewal_fails_is_not_handed_out(
+    async_db: AsyncSession,
+    config: GatewayConfig,
+    wire: _Wire,
+    tokens: McpUserTokens,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Its expiry is read after the renewal, which can take as long as its deadline."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _expire(async_db, world.server.id, ago=-timedelta(milliseconds=300))
+    wire.refresh_gate = asyncio.Event()
+    monkeypatch.setattr(_mcp_connections, "RENEWAL_DEADLINE_SECONDS", 0.6)
+
+    with pytest.raises(McpConnectionUnavailableError):
+        await tokens.token_for(await _row(async_db, world.server.id), str(world.member.id))
+
+    assert len(wire.refreshes) == 1
+
+
 async def test_concurrent_requests_spend_a_refresh_token_once(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens, postgres_url: str
 ) -> None:
@@ -1878,7 +1984,7 @@ async def test_an_organization_manager_outside_the_workspace_may_still_connect(
     ("sends_iss", "iss", "connects"),
     [
         (True, ISSUER, True),
-        (True, ISSUER + "/", True),
+        (True, ISSUER + "/", False),
         (True, None, False),
         (True, "https://93.184.216.99", False),
         (False, None, True),

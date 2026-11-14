@@ -5,9 +5,11 @@ from datetime import datetime
 from typing import NamedTuple, Never
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.mcp_catalog import LOGO_MISSING, LOGO_OK, McpLogo
 from gateway.repositories.base_repository import BaseRepository
@@ -78,17 +80,18 @@ class McpLogoRepository(BaseRepository[McpLogo, Never, Never]):
     async def _row(self, key: str, fetched_at: datetime) -> McpLogo:
         """The row for ``key``, inserted as missing when there is none.
 
-        Two replicas can look for one logo at once. The insert runs in a SAVEPOINT, so the one
-        that loses the race rolls back its row alone and updates the winner's.
+        Two replicas can look for one logo at once. The insert skips a key that is already
+        there, so the one that loses the race inserts nothing and updates the winner's row.
         """
         row = await self.find(key)
         if row is not None:
             return row
-        try:
-            async with self.db.begin_nested():
-                self.db.add(McpLogo(key=key, status=LOGO_MISSING, fetched_at=fetched_at, retry_at=fetched_at))
-        except IntegrityError:
-            pass
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        await self.db.execute(
+            insert(McpLogo)
+            .values(key=key, status=LOGO_MISSING, fetched_at=fetched_at, retry_at=fetched_at)
+            .on_conflict_do_nothing(index_elements=[McpLogo.key])
+        )
         row = await self.find(key)
         if row is None:
             raise LookupError("the MCP logo row is missing after its insert")

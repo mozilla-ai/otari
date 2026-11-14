@@ -7999,8 +7999,8 @@ export interface paths {
          * @description List the caller's own connections to this workspace's MCP servers.
          *
          *     A connection is the caller's sign-in to a server whose `credential_mode`
-         *     is `per_user`. Any member who can see the workspace may call this. Tokens
-         *     are never included.
+         *     is `per_user`. Any member who can see the workspace may call this, oldest
+         *     connection first; `count` is the total. Tokens are never included.
          */
         get: operations["mcp-connections-list_my_mcp_connections"];
         put?: never;
@@ -15449,6 +15449,11 @@ export interface components {
         };
         /** McpConnectionsPublic */
         McpConnectionsPublic: {
+            /**
+             * Count
+             * @description How many of the workspace's servers the caller is connected to in all
+             */
+            count: number;
             /** Data */
             data: components["schemas"]["McpConnectionPublic"][];
         };
@@ -37483,7 +37488,12 @@ export interface operations {
     };
     "mcp-connections-list_my_mcp_connections": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;

@@ -16,7 +16,8 @@ from typing import Any
 from any_llm.types.completion import CompletionUsage
 
 from gateway.api.routes._guardrail_targets import AnswerPart
-from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
+from gateway.api.routes._guardrails import RequestGuardrails
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.streaming import close_stream_quietly, merge_stream_usage
 
 # The Responses items that are a call the client runs, each with the field its arguments are in.

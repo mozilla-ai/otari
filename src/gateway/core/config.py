@@ -593,20 +593,25 @@ def _is_origin(value: str) -> bool:
 
     That is a scheme and a lowercase ASCII host, a port only when it is not the
     scheme's default, and nothing else: a browser never sends any other spelling,
-    so an entry written another way could never match.
+    so an entry written another way could never match. Origins are compared
+    whole, so a ``*`` inside a host is a literal that no page has.
     """
     try:
         parts = urlsplit(value)
         port = parts.port
     except ValueError:
         return False
+    host = parts.hostname
+    if not host or parts.scheme not in _DEFAULT_PORTS:
+        return False
+    if ":" in host:
+        host = f"[{host}]"
     return (
-        parts.scheme in _DEFAULT_PORTS
-        and bool(parts.hostname)
-        and "@" not in parts.netloc
-        and value.isascii()
-        and parts.netloc == parts.netloc.lower()
+        value.isascii()
+        and "*" not in host
         and port != _DEFAULT_PORTS[parts.scheme]
+        # urlsplit lowercases the host and drops userinfo and an empty port, so any of those leaves a difference.
+        and parts.netloc == (host if port is None else f"{host}:{port}")
         and value == f"{parts.scheme}://{parts.netloc}"
     )
 
@@ -2261,7 +2266,7 @@ class GatewayConfig(
                 msg = (
                     f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
                     "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
-                    "such as https://app.example.com, or '*'"
+                    "such as https://app.example.com, or '*' alone, since an origin is matched whole"
                 )
                 raise ValueError(msg)
         return origins
@@ -2426,19 +2431,12 @@ class GatewayConfig(
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
             raise ValueError(msg)
-        # Shape-checked here for the same reason the transport is: a typo in the
-        # from-address is a misconfiguration, and letting it through means the
-        # first anyone hears of it is a recipient's server rejecting the
-        # envelope, which is the send-time failure this design exists to avoid.
-        # Every recipient address already goes through the same check.
-        #
-        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
-        # deliberate and costs nothing: mail_transport is new here, so no
-        # existing deployment can be holding the value this refuses, while a
-        # deployment that has had a working odd-looking address under the
-        # implicit path keeps booting.
+        # NOTE: Checked only under an explicit 'smtp'. Under 'auto', a from-address that is not plain still starts.
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
-            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
+            msg = (
+                f"mail_from_email is not a plain email address: {self.mail_from_email!r}. "
+                "Set the address alone, such as otari@example.com, and put the display name in mail_from_name."
+            )
             raise ValueError(msg)
 
     def warn_about_half_configured_oauth(self) -> None:

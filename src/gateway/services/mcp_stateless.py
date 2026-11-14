@@ -415,8 +415,7 @@ def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., 
     check, for a connection check that has to name why a server failed.
     """
     response_hooks: list[Callable[[httpx2.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
-    if screen_answers:
-        response_hooks.insert(0, refuse_unusable_answer)
+    response_hooks.insert(0, refuse_unusable_answer if screen_answers else refuse_rejected_token)
 
     def factory(
         headers: dict[str, str] | None = None,
@@ -564,7 +563,8 @@ async def closed_with(stack: AsyncExitStack, failure: BaseException) -> BaseExce
 def refused_token(failure: BaseException) -> bool:
     """Whether a failed session was the server answering 401, the one failure a new token can mend.
 
-    With answers screened, as a check screens them, the 401 arrives already named.
+    The SDK reports a 401 as a protocol error with no status, so the response hooks name it first
+    (:func:`refuse_rejected_token`, or :func:`refuse_unusable_answer` when a check screens answers).
     """
     return any(
         (isinstance(leaf, httpx2.HTTPStatusError) and leaf.response.status_code == 401)
@@ -857,6 +857,27 @@ async def refuse_unusable_answer(response: httpx2.Response) -> None:
     content_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
     if content_type not in _MCP_CONTENT_TYPES and _answers_a_request(response.request):
         raise _UnusableAnswer(CheckFailure.NOT_MCP, None)
+
+
+def _opens_a_session(request: httpx2.Request) -> bool:
+    try:
+        body = json.loads(request.content)
+    except (ValueError, TypeError, httpx2.RequestNotRead):
+        return False
+    return isinstance(body, dict) and body.get("method") == "initialize"
+
+
+async def refuse_rejected_token(response: httpx2.Response) -> None:
+    """Name a 401 to the opening handshake, which the SDK would otherwise turn into a status-less protocol error.
+
+    A response hook on every MCP client, so a refused token reaches :func:`refused_token` and is renewed.
+    The handshake only: a session that opened was given a token the server accepted.
+
+    Raises:
+        _UnusableAnswer: the server answered ``initialize`` with 401.
+    """
+    if response.status_code == 401 and response.request.method == "POST" and _opens_a_session(response.request):
+        raise _UnusableAnswer(CheckFailure.UNAUTHORIZED, 401)
 
 
 def _leaves(exc: BaseException, _depth: int = 0) -> Iterator[BaseException]:

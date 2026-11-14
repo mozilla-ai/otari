@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._pipeline import PROVIDER_BAD_REQUEST_DETAIL
 from gateway.core.config import API_ROOT
+from gateway.core.error_details import ProviderDetail
 
 
 def test_provider_error_does_not_leak_details(
@@ -88,7 +88,7 @@ def test_caller_fault_error_does_not_echo_request_payloads(
         ),
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == PROVIDER_BAD_REQUEST_DETAIL
+    assert response.json()["detail"] == ProviderDetail.BAD_REQUEST
     assert prompt not in response.text
 
 

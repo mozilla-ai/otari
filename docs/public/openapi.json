@@ -13583,6 +13583,11 @@
       },
       "McpConnectionsPublic": {
         "properties": {
+          "count": {
+            "description": "How many of the workspace's servers the caller is connected to in all",
+            "title": "Count",
+            "type": "integer"
+          },
           "data": {
             "items": {
               "$ref": "#/components/schemas/McpConnectionPublic"
@@ -13592,7 +13597,8 @@
           }
         },
         "required": [
-          "data"
+          "data",
+          "count"
         ],
         "title": "McpConnectionsPublic",
         "type": "object"
@@ -60351,7 +60357,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-connections": {
       "get": {
-        "description": "List the caller's own connections to this workspace's MCP servers.\n\nA connection is the caller's sign-in to a server whose `credential_mode`\nis `per_user`. Any member who can see the workspace may call this. Tokens\nare never included.",
+        "description": "List the caller's own connections to this workspace's MCP servers.\n\nA connection is the caller's sign-in to a server whose `credential_mode`\nis `per_user`. Any member who can see the workspace may call this, oldest\nconnection first; `count` is the total. Tokens are never included.",
         "operationId": "mcp-connections-list_my_mcp_connections",
         "parameters": [
           {
@@ -60362,6 +60368,33 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

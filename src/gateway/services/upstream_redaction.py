@@ -10,6 +10,7 @@ and both callers import them from here.
 
 import re
 
+from gateway.core.error_details import ProviderDetail
 from gateway.secret_shapes import CREDENTIAL_SHAPES, REDACTION_PLACEHOLDER
 
 # What a caller is told of a provider's failure when nothing of the failure itself may be shown.
@@ -73,8 +74,7 @@ def redact_upstream_message(message: str) -> str:
 
     Redaction is the second line rather than the only one. Statuses where
     secrets concentrate (a rejected credential, a 5xx) never reach here at all,
-    because :func:`gateway.api.routes._pipeline.classify_provider_error` keeps a
-    fixed detail for them.
+    because the provider error mapping keeps a fixed detail for them.
     """
     redacted = message.strip()
     if _PAYLOAD_ECHO.search(redacted):
@@ -94,3 +94,17 @@ def redacted_upstream_detail(message: str, fallback: str) -> str:
     if not any(char.isalpha() for char in explanatory):
         return fallback
     return redacted
+
+
+def stored_error_message(error: str | None) -> str | None:
+    """The error text a usage row may carry.
+
+    ``UsageLog.error_message`` is read by every member of the workspace,
+    including a viewer, so the upstream text goes through the same redaction the
+    HTTP detail gets before it is persisted. Redacting at write time rather than
+    on the read path is what covers every reader of the column at once. A
+    wording Otari writes itself passes unchanged.
+    """
+    if error is None:
+        return None
+    return redacted_upstream_detail(error, ProviderDetail.ERROR)

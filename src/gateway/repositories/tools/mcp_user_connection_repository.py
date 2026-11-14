@@ -58,16 +58,31 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return set(rows.scalars().all())
 
-    async def for_user(self, user_id: str, server_ids: Collection[uuid.UUID]) -> list[McpUserConnection]:
-        """A user's connections to these servers, oldest first."""
+    async def for_user(
+        self, user_id: str, server_ids: Collection[uuid.UUID], *, skip: int, limit: int
+    ) -> list[McpUserConnection]:
+        """A page of a user's connections to these servers, oldest first."""
         if not server_ids:
             return []
         rows = await self.db.execute(
             select(McpUserConnection)
             .where(McpUserConnection.user_id == user_id, McpUserConnection.server_id.in_(list(server_ids)))
             .order_by(McpUserConnection.created_at, McpUserConnection.id)
+            .offset(skip)
+            .limit(limit)
         )
         return list(rows.scalars().all())
+
+    async def count_for_user(self, user_id: str, server_ids: Collection[uuid.UUID]) -> int:
+        """How many of these servers a user is connected to."""
+        if not server_ids:
+            return 0
+        counted = (
+            select(func.count())
+            .select_from(McpUserConnection)
+            .where(McpUserConnection.user_id == user_id, McpUserConnection.server_id.in_(list(server_ids)))
+        )
+        return (await self.db.execute(counted)).scalar_one()
 
     async def for_server(self, server_id: uuid.UUID, *, skip: int, limit: int) -> list[McpUserConnection]:
         """A page of a server's connections, oldest first."""
