@@ -456,3 +456,81 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["model_provider"] is None
     # Indexed by real offering, so an aliased model keeps its selectors.
     assert build.await_args.kwargs["withhold_alias_targets"] is False
+
+
+@pytest.fixture
+def claude_index() -> Iterator[selectors.SelectorIndex]:
+    """Claude Code names models bare; ``llama-4`` ends two catalog ids."""
+    rows = [
+        selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0),
+        selectors.OfferingRow("bedrock:anthropic.claude-opus-5-5", "bedrock", "bedrock", 4.0),
+        selectors.OfferingRow("groq:llama-4", "groq", "groq", 0.1),
+        selectors.OfferingRow("together:llama-4", "together", "together", 0.2),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5-5": (
+            "claude-opus-5-5",
+            ("anthropic:claude-opus-5-5", "bedrock:anthropic.claude-opus-5-5"),
+        ),
+        "meta/llama-4": ("llama-4", ("groq:llama-4",)),
+        "acme/llama-4": ("acme-llama-4", ("together:llama-4",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_bare_name_resolves_as_the_one_catalog_id_ending_in_it(claude_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_selector("claude-opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_selector("Claude-Opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_offerings("claude-opus-5-5") == claude_index.offerings["anthropic/claude-opus-5-5"]
+
+    config = GatewayConfig(master_key="k", providers={"anthropic": {"api_key": "x"}, "bedrock": {"api_key": "x"}})
+    resolved = resolve_provider_selector(config, "claude-opus-5-5")
+    assert (resolved.instance, resolved.model, resolved.alias) == ("anthropic", "claude-opus-5-5", "claude-opus-5-5")
+
+
+def test_a_bare_name_two_catalog_ids_end_in_resolves_to_nothing(claude_index: selectors.SelectorIndex) -> None:
+    assert "llama-4" not in claude_index.bare
+    assert selectors.resolve_catalog_selector("llama-4") is None
+    assert selectors.resolve_catalog_offerings("llama-4") == ()
+
+
+def test_an_alias_wins_over_a_bare_name(claude_index: selectors.SelectorIndex) -> None:
+    config = GatewayConfig(
+        master_key="k",
+        providers={"anthropic": {"api_key": "x"}, "bedrock": {"api_key": "x"}},
+        aliases={"claude-opus-5-5": "bedrock:anthropic.claude-opus-5-5"},
+    )
+    resolved = resolve_provider_selector(config, "claude-opus-5-5")
+    assert (resolved.instance, resolved.model) == ("bedrock", "anthropic.claude-opus-5-5")
+
+
+def test_a_bare_name_reaches_an_organizations_own_key_first() -> None:
+    deployment = [selectors.OfferingRow("bedrock:anthropic.claude-opus-5-5", "bedrock", "bedrock", 4.0)]
+    own = [selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5-5": (
+            "claude-opus-5-5",
+            ("anthropic:claude-opus-5-5", "bedrock:anthropic.claude-opus-5-5"),
+        )
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment,
+            {"anthropic/claude-opus-5-5": ("claude-opus-5-5", ("bedrock:anthropic.claude-opus-5-5",))},
+            organizations={_ORG_A: view},
+            workspace_organization={_WORKSPACE_A: _ORG_A},
+        )
+    )
+    try:
+        assert selectors.resolve_catalog_selector("claude-opus-5-5", workspace_id=_WORKSPACE_A) == (
+            "anthropic:claude-opus-5-5"
+        )
+        assert selectors.resolve_catalog_selector("claude-opus-5-5", workspace_id=_WORKSPACE_B) == (
+            "bedrock:anthropic.claude-opus-5-5"
+        )
+    finally:
+        selectors.reset_selector_index()
