@@ -888,6 +888,20 @@ def test_the_subject_is_stripped_of_newlines_but_the_body_is_not() -> None:
     assert "\n" not in message.subject
 
 
+@pytest.mark.parametrize("subject", ["=?utf-8?b?4oCuZXZpbOKArA==?= invites you", "Join =?utf-8?q?Acme?="])
+def test_a_mail_client_reads_the_subject_as_the_text_given(subject: str) -> None:
+    envelope = MailEnvelope(
+        to="support@example.com",
+        sender_email="otari@example.com",
+        sender_name="Otari",
+        message=replace(MESSAGE, subject=subject),
+    )
+
+    received = message_from_string(build_mime(envelope).as_string(), policy=policy.default)
+
+    assert received["Subject"] == subject
+
+
 # --- The shape of the guard -------------------------------------------------
 
 

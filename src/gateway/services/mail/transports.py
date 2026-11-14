@@ -86,7 +86,9 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     one SMTP would send is precisely the bug a local preview exists to catch.
     """
     message = MIMEMultipart("alternative")
-    message["Subject"] = sanitize_header_value(envelope.message.subject)
+    subject = sanitize_header_value(envelope.message.subject)
+    # A subject that holds "=?" is encoded, because a mail client would decode it as an encoded word.
+    message["Subject"] = Charset("utf-8").header_encode(subject) if "=?" in subject else subject
     # sender_name is not a value a caller would already have sanitized (unlike
     # the subject): a stray CR/LF in it would raise HeaderParseError on every
     # send, silently and from then on, with one warning line that never points
