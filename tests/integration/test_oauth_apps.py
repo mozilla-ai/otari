@@ -42,6 +42,21 @@ def test_config(postgres_url: str) -> GatewayConfig:
     return config
 
 
+def consent_body(workspace_id: str, **changes: object) -> dict[str, object]:
+    """The body the dashboard posts to approve an app, with ``changes`` replacing any field."""
+    body: dict[str, object] = dict(
+        client_id="thunderbolt",
+        redirect_uri=REDIRECT,
+        state="s" * 43,
+        code_challenge=pkce_challenge(VERIFIER),
+        code_challenge_method="S256",
+        workspace_id=workspace_id,
+        scopes=["inference:run"],
+    )
+    body.update(changes)
+    return body
+
+
 def approve(
     client: TestClient,
     world: _World,
@@ -50,17 +65,11 @@ def approve(
     **changes: object,
 ) -> Response:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
-    body: dict[str, object] = dict(
-        client_id="thunderbolt",
-        redirect_uri=REDIRECT,
-        state="s" * 43,
-        code_challenge=pkce_challenge(VERIFIER),
-        code_challenge_method="S256",
-        workspace_id=str(world.workspaces[workspace]),
-        scopes=["inference:run"],
+    return client.post(
+        f"{API_ROOT}/oauth/apps/authorize",
+        json=consent_body(str(world.workspaces[workspace]), **changes),
+        headers={"Sec-Fetch-Site": "same-origin"},
     )
-    body.update(changes)
-    return client.post(f"{API_ROOT}/oauth/apps/authorize", json=body, headers={"Sec-Fetch-Site": "same-origin"})
 
 
 def redeem(client: TestClient, code: str, **changes: str) -> Response:
