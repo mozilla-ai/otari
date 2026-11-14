@@ -26,7 +26,7 @@ from gateway.api.deps import (
     verify_service_key,
 )
 from gateway.api.routes._helpers import erase_user_records
-from gateway.api.routes.users import TOTAL_COUNT_HEADER
+from gateway.core.config import TOTAL_COUNT_HEADER
 from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.schemas.budgets import (

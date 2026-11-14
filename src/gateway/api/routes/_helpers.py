@@ -38,10 +38,6 @@ if TYPE_CHECKING:
     from gateway.services.tools import DirectToolOutcome
 
 
-GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
-"""Response header carrying a compact JSON summary of guardrail verdicts when a
-``monitor``-mode (or otherwise non-blocking) check ran."""
-
 # How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.
 DIRECT_TOOL_COST_HEADERS: dict[str, Any] = {
     COST_USD_HEADER: {

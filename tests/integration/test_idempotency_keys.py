@@ -29,7 +29,6 @@ from gateway.api.deps import build_inference_service
 from gateway.api.routes._idempotency import (
     _REQUEST_SHAPING_HEADERS,
     IDEMPOTENCY_KEY_HEADER,
-    IDEMPOTENT_REPLAYED_HEADER,
     IdempotencyGuard,
 )
 from gateway.core.config import (
@@ -38,6 +37,7 @@ from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
     CONVERSATION_HEADER,
     FALLBACK_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
     MODEL_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,

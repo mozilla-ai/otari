@@ -24,8 +24,7 @@ from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
 from openai.types.responses import ResponseCompletedEvent
 
-from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GUARDRAILS_RESULT_HEADER
 from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 
 # Per-route knobs: (path, provider-call symbol to patch, request body sans guardrails).
