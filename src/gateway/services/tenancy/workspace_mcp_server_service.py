@@ -1719,7 +1719,8 @@ class WorkspaceMcpServerService:
         if url_changed or mode_changed or (isinstance(new_token, str) and not per_user):
             await _validate_url(fields.get("url") or server.url, has_token=per_user or effective_has_token)
         # What the stored health described. Rechecked after the commit; cleared
-        # here so a check that cannot run leaves no health rather than a stale one.
+        # here (below, unless only the allow-list moved) so a check that cannot
+        # run leaves no health rather than a stale one.
         connection_changed = (
             url_changed
             or mode_changed
@@ -1754,7 +1755,16 @@ class WorkspaceMcpServerService:
         for field, value in fields.items():
             setattr(server, field, value)
         if connection_changed:
-            server.health = None
+            # An edit of the allow-list alone keeps the server and its credentials: what it last found
+            # still stands, read against the new list, as a per-user server's check cannot list it again.
+            list_only = not (url_changed or mode_changed or isinstance(new_token, str) or ends_connections)
+            server.health = (
+                WorkspaceMcpServerHealth.model_validate(server.health)
+                .for_allow_list(server.allowed_tools)
+                .model_dump(mode="json")
+                if list_only and server.health is not None
+                else None
+            )
 
         # Read before the flush: the rollback below expires every loaded
         # instance, so reading ``server.name`` inside the handler would emit a
