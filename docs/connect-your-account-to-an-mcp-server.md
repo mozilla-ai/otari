@@ -60,6 +60,34 @@ A client ID and secret belong to one host. If you later change the server's
 **URL** to another host, saving clears them, and you enter the new host's
 client or leave it blank for Otari to register itself.
 
+A saved client also stays with the sign-in server it was first used with: the
+server's address and the address Otari sends the client secret to. If the MCP
+server later sends sign-ins to a different one, or moves that second address,
+Otari refuses them before your client's secret goes there, and the message asks
+a workspace admin to save the OAuth client again.
+
+Saving it again approves whatever sign-in server the next sign-in finds, and
+the client secret is then sent there. Before you save, confirm with the
+provider that the new sign-in server is theirs and expected. Then enter the
+**Client secret** again and click **Save**.
+
+A client with no secret has nothing to enter again, and the settings form does
+not save an unchanged client ID. Approve the new sign-in server through the API
+instead: send the same client ID again,
+`PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}` with
+`{"oauth_client_id": "<the client ID>"}`. Otari keeps each member's
+connection, since it is the same client. Whether those connections still work
+is up to the new sign-in server: if it does not accept what the old one issued,
+a member is asked to connect again the next time their token is renewed.
+
+After you save a client secret again, Otari renews no one's sign-in on that
+server until somebody signs in once more, which records the sign-in server the
+secret may go to. A member whose sign-in expires before then is asked to sign
+in again. Once somebody has signed in, renewals resume for every connection
+made through the same sign-in server. If the server moved its sign-in to a new
+address, connections made before the move cannot renew, and each of those
+members signs in again when their sign-in expires.
+
 ## Connect your account
 
 Anyone who can see the workspace can do this.
@@ -110,9 +138,11 @@ server's **Availability** to **Every request**, or your client names the server 
 `mcp_server_ids`, just ask your agent for something the server does:
 
 1. Ask, for example "check my open Jira tasks".
-2. The agent answers with a sign-in link. Open it within 30 minutes and sign in
-   with your own account.
-3. A page says you are signed in. Go back to the conversation and ask again.
+2. The agent answers with a sign-in link. Open it within 30 minutes.
+3. An Otari page names the server and the Otari user your account will be
+   attached to. Check that the user is you, then click **This is me, continue**
+   and sign in with your own account.
+4. A page says you are signed in. Go back to the conversation and ask again.
 
 The second ask uses your account.
 
@@ -123,8 +153,14 @@ An address that only starts the same way, such as
 `https://otari.example.com.other.site/...`, is not Otari: do not open it.
 
 Keep the link to yourself. It is made for you, from the key your agent uses, and
-whoever opens it within its 30 minutes connects the account they sign in with to
-you.
+whoever opens it within its 30 minutes and continues connects the account they
+sign in with to you.
+
+Never open a sign-in link someone else sent you. It is made for their Otari
+user, so signing in through it would hand them the use of your account on that
+server. The page the link opens names the user it is for: if that is not you, or
+you did not ask for the link yourself, close the page. If you are signed in to
+the Otari dashboard as a different user, the page refuses to continue.
 
 ## What your keys see before you connect
 
@@ -209,3 +245,8 @@ connection is removed and the page says **Not connected** again. Click
 Otari only learns this when it next renews your sign-in. Until then the page can
 still say **Connected** while calls to the server fail. Click **Reconnect** to
 sign in again straight away.
+
+Some servers give Otari nothing to renew with. The server's page then says
+you'll need to connect again when the sign-in expires. Once it has, **Your
+account** reads **Your sign-in has expired**; click **Sign in again** there, or at
+the top of the server's page if you are an owner or admin.

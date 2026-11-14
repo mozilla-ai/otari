@@ -143,12 +143,20 @@ A sync stops early when the registry fails three attempts at a page, when a
 page takes more than three minutes, after 5,000 pages, or after 30 minutes. A
 gateway that shuts down mid-sync ends it as `partial` too.
 
+It also stops when the registry's answer points to the next page in a way it
+cannot follow: a cursor that is not a non-empty string, or the same cursor it
+was asked for. Reading the first as the last page would remove every server
+the sync had not reached yet, and following the second would read the same
+page forever. After a repeated cursor, the next sync starts over.
+
 Two answers from the registry are not trusted, because a registry cut short is
 more likely than one that emptied overnight, and both remove nothing:
 
 - a last page reached with no server kept at all, reported as `failed`;
-- a last page reached with fewer than half the servers the catalog holds,
-  reported as `partial`.
+- a last page reached having seen fewer than half the servers the catalog held
+  when the sync began, reported as `partial`. Servers the sync added along the
+  way do not count toward that half, and a sync that resumes keeps the number
+  from when it first began.
 
 In `scheduled` mode, a sync that did not complete is tried again an hour later.
 
@@ -214,7 +222,8 @@ On a server's page, an admin clicks the logo to open **Logo for** the server.
 It shows the logo on the light and the dark theme side by side. From there:
 
 - **Choose a PNG or SVG** to upload one. The browser crops it to a square and
-  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again.
+  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again
+  and that its whole image decodes, so a damaged file is refused.
 - **Tile behind the logo**: **Auto** adds a tile only on the theme where the
   logo would fade out, **Always** adds one on both, **Never** on neither.
 - **Remove uploaded logo** goes back to the server's own logo.
@@ -236,8 +245,9 @@ curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&workspace_id
 # The Popular servers the catalog holds.
 curl "https://otari.example.com/api/v1/mcp-catalog/popular" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
-# The logo of each of a workspace's servers, and whether it needs a tile.
-curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+# The logo of each of a workspace's servers, and whether it needs a tile. Pages as the
+# server list does: skip and limit, 100 by default, at most 1000.
+curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos?limit=100" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
 # An admin's own logo for a server, and the tile choice (auto, always or never).
 curl -X PUT "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/<server-id>/logo" \
