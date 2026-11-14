@@ -14,6 +14,7 @@ class _Row:
         self.name = name
         self.provider = provider
         self.zero_data_retention = False
+        self.supported_countries: list[str] | None = None
 
 
 class _Uow:
@@ -80,3 +81,66 @@ async def test_a_refresh_after_the_write_reads_it_from_the_rows(monkeypatch: pyt
     await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
 
     assert index.hosted_implementation("openai-eu") is None
+
+
+@pytest.mark.asyncio
+async def test_a_country_list_stored_while_the_refresh_read_survives_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The read saw the row before its list was stored; the list must not be lost until the next refresh."""
+    monkeypatch.setattr(
+        index,
+        "HostedProviderRepository",
+        _repository_reading(
+            [_Row("openai-eu", "openai")], lambda: index.remember_hosted_country_limit("openai-eu", True)
+        ),
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert index.hosted_country_lists_exist()
+
+
+@pytest.mark.asyncio
+async def test_a_country_list_removed_while_the_refresh_read_stays_removed(monkeypatch: pytest.MonkeyPatch) -> None:
+    index.remember_hosted_country_limit("openai-eu", True)
+    row = _Row("openai-eu", "openai")
+    row.supported_countries = ["US"]
+    monkeypatch.setattr(
+        index,
+        "HostedProviderRepository",
+        _repository_reading([row], lambda: index.remember_hosted_country_limit("openai-eu", False)),
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert not index.hosted_country_lists_exist()
+
+
+@pytest.mark.asyncio
+async def test_a_retention_declaration_stored_while_the_refresh_read_survives_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        index,
+        "HostedProviderRepository",
+        _repository_reading(
+            [_Row("openai-eu", "openai")], lambda: index.remember_hosted_zero_data_retention("openai-eu", True)
+        ),
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert index.hosted_zero_data_retention("openai-eu")
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_after_a_flag_write_reads_it_from_the_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    index.remember_hosted_country_limit("openai-eu", True)
+    index.remember_hosted_zero_data_retention("openai-eu", True)
+    monkeypatch.setattr(
+        index, "HostedProviderRepository", _repository_reading([_Row("openai-eu", "openai")], lambda: None)
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert not index.hosted_country_lists_exist()
+    assert not index.hosted_zero_data_retention("openai-eu")

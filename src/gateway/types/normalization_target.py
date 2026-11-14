@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from any_llm import LLMProvider
 
 from gateway.models.tools import CodeExecutor
+from gateway.types.country_gate import CountryGate
 from gateway.types.provider_account import ResolvedCredential
 
 
@@ -27,8 +28,8 @@ class NormalizationTarget:
     ``hosted_credential`` resolves the deployment's hosted provider for the head
     candidate, the rung dispatch falls back to when no stored key serves it, so
     an attachment moved to the provider ahead of the call uses the same key.
-    ``client_country`` is the country the request comes from, None when no source
-    knows it, which keeps such a side-call within ``provider_supported_countries``.
+    ``country_gate`` is the request's country gate, which keeps such a side-call
+    within ``provider_supported_countries`` as the main call is.
     """
 
     user_id: str
@@ -41,4 +42,4 @@ class NormalizationTarget:
     candidate_providers: tuple[LLMProvider | None, ...]
     upstream_user: str | None
     hosted_credential: Callable[[], Awaitable[ResolvedCredential | None]] | None = None
-    client_country: str | None = None
+    country_gate: CountryGate | None = None

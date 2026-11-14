@@ -29,11 +29,16 @@ HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
 _names: dict[str, str] = {}
 # Every hosted provider name, own or not, whose upstream is declared to keep no data.
 _zero_retention: frozenset[str] = frozenset()
+# Every hosted provider name with a ``supported_countries`` list of its own.
+_country_limited: frozenset[str] = frozenset()
 # Writes this worker made, numbered, so a refresh whose read began before one
 # replays it rather than overwriting it with an older snapshot. name ->
-# (write number, implementation, or None for a name removed).
+# (write number, implementation, or None for a name removed), and for each
+# flag, name -> (write number, whether the name is in the set).
 _write_count = 0
 _recent_writes: dict[str, tuple[int, str | None]] = {}
+_recent_retention: dict[str, tuple[int, bool]] = {}
+_recent_country_limits: dict[str, tuple[int, bool]] = {}
 
 
 def hosted_implementation(name: str) -> str | None:
@@ -50,14 +55,32 @@ def remember_hosted_zero_data_retention(name: str, declared: bool) -> None:
     """Record what this worker just stored as ``name``'s declaration, ahead of the next refresh."""
     global _zero_retention  # noqa: PLW0603
 
+    _recent_retention[name] = (_next_write(), declared)
     _zero_retention = _zero_retention | {name} if declared else _zero_retention - {name}
 
 
-def _record_write(name: str, implementation: str | None) -> None:
+def hosted_country_lists_exist() -> bool:
+    """Whether any hosted provider serves only some countries, so a request's account country can matter."""
+    return bool(_country_limited)
+
+
+def remember_hosted_country_limit(name: str, limited: bool) -> None:
+    """Record whether ``name``, as this worker just stored it, has a country list, ahead of the next refresh."""
+    global _country_limited  # noqa: PLW0603
+
+    _recent_country_limits[name] = (_next_write(), limited)
+    _country_limited = _country_limited | {name} if limited else _country_limited - {name}
+
+
+def _next_write() -> int:
     global _write_count  # noqa: PLW0603
 
     _write_count += 1
-    _recent_writes[name] = (_write_count, implementation)
+    return _write_count
+
+
+def _record_write(name: str, implementation: str | None) -> None:
+    _recent_writes[name] = (_next_write(), implementation)
     if implementation is None:
         _names.pop(name, None)
     else:
@@ -81,19 +104,25 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     this worker made while the read was in flight is newer than what the read
     saw, so it is replayed over the snapshot rather than lost.
     """
-    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
+    global _country_limited, _names, _recent_country_limits, _recent_retention, _recent_writes, _zero_retention  # noqa: PLW0603
 
     read_from = _write_count
     async with uow:
         rows = await HostedProviderRepository(uow).list_all()
     names = {name: entry.provider for name, entry in config.hosted_provider_entries().items()}
     names.update({row.name: row.provider for row in rows})
-    declared = {name for name, entry in config.hosted_provider_entries().items() if entry.zero_data_retention}
+    entries = config.hosted_provider_entries()
+    declared = {name for name, entry in entries.items() if entry.zero_data_retention}
+    limited = {name for name, entry in entries.items() if entry.supported_countries is not None}
     for row in rows:
         if row.zero_data_retention:
             declared.add(row.name)
         else:
             declared.discard(row.name)
+        if row.supported_countries is not None:
+            limited.add(row.name)
+        else:
+            limited.discard(row.name)
     fresh = {name: implementation for name, implementation in names.items() if name != implementation}
     newer = {name: write for name, write in _recent_writes.items() if write[0] > read_from}
     for name, (_, implementation) in newer.items():
@@ -101,14 +130,29 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             fresh.pop(name, None)
         else:
             fresh[name] = implementation
-    _names, _recent_writes, _zero_retention = fresh, newer, frozenset(declared)
+    retention = _replay(_recent_retention, read_from, declared)
+    limits = _replay(_recent_country_limits, read_from, limited)
+    _names, _recent_writes, _recent_retention, _recent_country_limits = fresh, newer, retention, limits
+    _zero_retention, _country_limited = frozenset(declared), frozenset(limited)
+
+
+def _replay(journal: dict[str, tuple[int, bool]], read_from: int, members: set[str]) -> dict[str, tuple[int, bool]]:
+    """Apply the flag writes made after ``read_from`` to ``members``, and keep only those for the next refresh."""
+    newer = {name: write for name, write in journal.items() if write[0] > read_from}
+    for name, (_, member) in newer.items():
+        if member:
+            members.add(name)
+        else:
+            members.discard(name)
+    return newer
 
 
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
-    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
+    global _country_limited, _names, _recent_country_limits, _recent_retention, _recent_writes, _zero_retention  # noqa: PLW0603
 
-    _names, _recent_writes, _zero_retention = {}, {}, frozenset()
+    _names, _recent_writes, _recent_retention, _recent_country_limits = {}, {}, {}, {}
+    _zero_retention, _country_limited = frozenset(), frozenset()
 
 
 async def _refresh_on_a_session_of_its_own(config: GatewayConfig) -> None:

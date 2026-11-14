@@ -947,9 +947,22 @@ that list or for the supported countries of an enabled hosted provider. A
 private address, or one the file does not hold, has no country, and
 a listed provider refuses it.
 
-A VPN changes the country a request appears to come from, so this check does
-not replace the account and billing checks a provider may also ask for, which
-need billing data a self-hosted Otari does not hold.
+A VPN changes the country a request appears to come from, so the gate also
+reads where the account lives, when the deployment knows. That country comes
+from the build, not from a setting: a self-hosted Otari holds no billing data
+and knows no account's country, and a build that bills its customers, such as
+otari.ai, answers it from the billing address of the organization the API key
+belongs to. A list refuses a request when either country is off it. An unknown
+account country is no opinion, so a deployment that knows none is gated on
+the request's country alone, while an unknown request country still refuses.
+The account is looked up only where a list could refuse it: a provider type
+lists countries, or the build answers that a credential it serves does.
+A build that holds the country but cannot read it at the moment refuses on
+every listed provider rather than going by the request's country alone. A
+master key is the operator, not an account, so its requests are gated on the
+request's country alone. A refusal names the request's country and never the
+account's, nor which of the two the list left out; the usage row's detail, a
+dropped candidate's operator detail and the log say which.
 
 ## Pricing
 

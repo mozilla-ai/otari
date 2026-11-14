@@ -141,6 +141,9 @@ deployment serves on its own credentials with the models it offers on them,
 their health, and what a dispatch needs to reach a provider. It also owns the
 connection to otari.ai, which stores a hosted provider from a key otari.ai
 issues ([docs/platform-connect-protocol.md](docs/platform-connect-protocol.md)).
+It owns the provider country gate, with `ports/account_country_port.py`, the
+country an account is in as the build that bills it knows, and its adapter in
+`adapters/`.
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.

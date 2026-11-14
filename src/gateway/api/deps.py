@@ -37,6 +37,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import (
@@ -1495,6 +1496,11 @@ def get_request_session_model_provider_port(
 def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderPort:
     """Resolve the model-provider adapter on ``db``, for a path that resolves it only when it needs it."""
     return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
+
+
+def account_country_port_on(request: Request, db: AsyncSession) -> AccountCountryPort:
+    """Resolve the account country adapter on ``db``, for the provider country gate."""
+    return get_container(request).resolve(AccountCountryPort, db)
 
 
 def billing_port_on(request: Request, db: AsyncSession) -> BillingPort:

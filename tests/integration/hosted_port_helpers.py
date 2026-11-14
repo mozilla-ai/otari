@@ -33,6 +33,9 @@ class HostedModelProvider:
             return HostedCredential(api_key="fleet", api_base=None, response_provider=provider)
         return None
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         self.asked_for.append(organization_id)
         if self.error is not None:

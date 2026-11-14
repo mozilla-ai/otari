@@ -11,7 +11,13 @@ from _mmdb_support import write_country_database
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.main import _validate_client_country_database
-from gateway.services.inference import CountryDatabaseError, _client_country, client_country, open_country_database
+from gateway.services.inference import (
+    CountryDatabaseError,
+    _client_country,
+    client_country,
+    open_country_database,
+    request_country_gate,
+)
 
 
 @pytest.fixture
@@ -213,3 +219,20 @@ def test_a_stored_file_that_cannot_be_flushed_leaves_no_temporary_file(
         _client_country.open_stored_country_database("sha", b"content")
 
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(("answer", "country"), [("de", "DE"), (None, None), ("XX", None), ("Germany", None)])
+def test_the_gate_holds_the_accounts_country_as_a_code_or_not_at_all(answer: str | None, country: str | None) -> None:
+    config = GatewayConfig(client_country_header="CF-IPCountry")
+
+    gate = request_country_gate(config, {"cf-ipcountry": "US"}, None, account_country=answer)
+
+    assert (gate.country, gate.account_country, gate.account_unresolved) == ("US", country, False)
+
+
+def test_the_gate_records_an_account_the_port_could_not_resolve() -> None:
+    config = GatewayConfig(client_country_header="CF-IPCountry")
+
+    gate = request_country_gate(config, {"cf-ipcountry": "US"}, None, account_unresolved=True)
+
+    assert (gate.country, gate.account_country, gate.account_unresolved) == ("US", None, True)

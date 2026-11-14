@@ -71,9 +71,10 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `EntitlementPort` | Which capabilities a deployment is entitled to. |
 | `IdentityProviderPort` | Authenticating users/sign-in. |
 | `RoutingPort` | Choosing the provider/model attempts for a request. |
-| `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none. |
+| `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none, and whether any such credential serves only some countries. |
 | `CodeExecutionPort` | Running model-generated code in a sandbox. Two core adapters: the published protocol over HTTP, and E2B's hosted sandboxes. |
 | `BillingPort` | Metering and charging for usage. |
+| `AccountCountryPort` | Where an organization's account is, so the provider country gate can check where a caller lives as well as where a request comes from. The core adapter knows no country. |
 | `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
 | `UsageSignalPort` | Telling an outside analytics or CRM vendor about each usage row a request settles. |
 | `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |
@@ -194,6 +195,7 @@ This is the open-core line: for each capability, what Otari's core ships and wha
 | Code execution | **Core port and adapters, managed service from an overlay** *(provisional)* | The core adapters reach a sandbox backend through the published protocol or E2B. A hardened, managed sandbox is a service an overlay runs, either behind the published protocol or behind an adapter of its own. Interface still provisional. |
 | Telemetry storage | **Core port, store from an overlay** | The core adapter keeps captured telemetry in this deployment's own database. An overlay binds a scale-out store behind the same port, for many tenants' retention and query volume. |
 | Billing (wallet/payments) | **Overlay-only** | A Null Object (no-op) adapter in the core; real billing exists only in an overlay. |
+| Account country | **Overlay-only** | A Null Object adapter in the core knows where no account is, so the provider country gate reads the request's country alone; a build that bills its customers binds an adapter that answers from the billing address. |
 
 The **provisional** rows (RBAC, routing) share one open question: how deep the core base goes before an overlay adapter takes over. That is an open design decision for the project maintainers, not settled yet and not a contributor's to assume; treat those lines as a working assumption until it is decided and recorded here.
 

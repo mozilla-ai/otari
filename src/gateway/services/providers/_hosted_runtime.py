@@ -15,10 +15,11 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_declared_credential,
 )
-from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
+from gateway.services.providers._country_gate import ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._workspace_hosted_access import ensure_workspace_may_use_hosted
+from gateway.types.country_gate import CountryGate
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:

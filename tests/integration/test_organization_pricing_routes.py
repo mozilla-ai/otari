@@ -899,6 +899,9 @@ class _FakeHostedModelProvider:
             return HostedCredential(api_key="x", api_base=None, response_provider=provider)
         return None
 
+    async def limits_countries(self) -> bool:
+        return False
+
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         del organization_id
         return {} if self._served is None else {self._served: None}

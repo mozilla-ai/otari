@@ -83,3 +83,7 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         if self._service is None:
             return {}
         return await self._service.serveable_models(organization_id=organization_id)
+
+    async def limits_countries(self) -> bool:
+        """Whether any of the deployment's hosted providers has a country list, from this worker's name index."""
+        return HostedProviderService.country_lists_exist()
