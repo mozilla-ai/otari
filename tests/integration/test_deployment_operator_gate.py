@@ -132,6 +132,9 @@ _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/workspaces"),
     ("GET", f"{API_ROOT}/admin/access"),
     ("GET", f"{API_ROOT}/tool-settings"),
+    ("GET", f"{API_ROOT}/mcp-catalog/servers"),
+    ("GET", f"{API_ROOT}/mcp-catalog/popular"),
+    ("GET", f"{API_ROOT}/mcp-catalog/sync"),
 ]
 
 

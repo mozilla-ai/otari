@@ -859,7 +859,10 @@ def _add_security_headers(headers: MutableHeaders, path: str, status_code: int) 
     elif serves_content and (path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES)):
         headers.setdefault("Cache-Control", "public, max-age=86400")
     else:
-        headers["Cache-Control"] = "private, no-store, no-cache"
+        # A route may let the signed-in browser alone keep what it served (an MCP server's logo), never a shared cache.
+        own = headers.get("Cache-Control", "")
+        if not (serves_content and own.startswith("private, max-age=")):
+            headers["Cache-Control"] = "private, no-store, no-cache"
         vary_values = {part.strip() for part in headers.get("Vary", "").split(",") if part.strip()}
         vary_values.add("Authorization")
         headers["Vary"] = ", ".join(sorted(vary_values))

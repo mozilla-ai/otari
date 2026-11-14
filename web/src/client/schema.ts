@@ -2719,6 +2719,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp-catalog/popular": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Popular Mcp Servers
+         * @description Well-known remote MCP servers, from a list bundled with Otari, that the catalog holds now.
+         *
+         *     Each is matched to the catalog by its URL, so the list is empty until a sync has run.
+         */
+        get: operations["mcp-catalog-list_popular_mcp_servers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Mcp Catalog
+         * @description Search the catalog of remote MCP servers, or page through all of it with no `q`.
+         *
+         *     A title that starts with `q` comes first, then a title that contains it, then a
+         *     match in the name or description alone; within each, a server whose
+         *     `publisher_kind` is `vendor` comes first. The catalog is
+         *     empty until a sync has run, and stays empty on a deployment whose
+         *     `mcp_catalog_sync` is `off`. Listing a server here permits nothing: a
+         *     workspace reaches a server only once it is added to that workspace.
+         */
+        get: operations["mcp-catalog-search_mcp_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Catalog Sync
+         * @description Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.
+         */
+        get: operations["mcp-catalog-get_mcp_catalog_sync"];
+        put?: never;
+        /**
+         * Request Mcp Catalog Sync
+         * @description Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.
+         *
+         *     An operator may always ask. Anyone else names a `workspace_id` they may add MCP
+         *     servers to, and waits out `next_request_at` after the last sync: an hour after
+         *     a complete one, five minutes after any other. A sync already running or asked
+         *     for is left to finish, and this request returns its status.
+         */
+        post: operations["mcp-catalog-request_mcp_catalog_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/execute": {
         parameters: {
             query?: never;
@@ -14666,6 +14744,162 @@ export interface components {
              * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard. `insufficient_funds`: the tool, or for web search the pages it reads, would run on the deployment's account and the API key's organization has no funds to pay for it, which adding funds changes.
              */
             reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
+        };
+        /**
+         * McpCatalogServerPublic
+         * @description One remote MCP server the catalog lists.
+         */
+        McpCatalogServerPublic: {
+            /** Description */
+            description: string | null;
+            /**
+             * Icon Url
+             * @description The https image the registry entry names as the server's icon, null when it names none.
+             */
+            icon_url: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Logo Tone
+             * @description Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both.
+             */
+            logo_tone: ("dark" | "light" | "tile") | null;
+            /**
+             * Logo Url
+             * @description Where this gateway serves the server's logo, which it fetched once and keeps. Null when it looked and found none. A URL without `v` has not been looked for yet, and asking for it starts the look.
+             */
+            logo_url: string | null;
+            /**
+             * Name
+             * @description The source's own identifier, such as `com.example/mcp`.
+             */
+            name: string;
+            /**
+             * Publisher Kind
+             * @description `vendor` when the server is its maker's own: the endpoint lives on a domain the publisher owns, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API. The rule reads names and vouches for nothing.
+             * @enum {string}
+             */
+            publisher_kind: "vendor" | "community";
+            /**
+             * Requires Token
+             * @description The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.
+             */
+            requires_token: boolean;
+            /**
+             * Source
+             * @description Where the entry came from. `registry` is the official MCP Registry; `curated` is a short list bundled with Otari of well-known servers the registry does not list.
+             */
+            source: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description The server's streamable HTTP endpoint.
+             */
+            url: string;
+            /** Version */
+            version: string | null;
+            /** Website Url */
+            website_url: string | null;
+        };
+        /**
+         * McpCatalogServersPublic
+         * @description A page of catalog servers. `count` is how many match in all.
+         */
+        McpCatalogServersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpCatalogServerPublic"][];
+        };
+        /**
+         * McpCatalogSyncRequest
+         * @description Who asks for a sync, for a caller who does not operate the deployment.
+         */
+        McpCatalogSyncRequest: {
+            /**
+             * Workspace Id
+             * @description A workspace the caller may add MCP servers to. Required unless the caller operates the deployment.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * McpCatalogSyncStatus
+         * @description Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.
+         */
+        McpCatalogSyncStatus: {
+            /**
+             * Error
+             * @description Why the last sync was partial or failed.
+             */
+            error: string | null;
+            /**
+             * Fetched
+             * @description Registry entries read.
+             */
+            fetched: number;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Is Stale
+             * @description The catalog is empty, or no sync has read the whole registry into it in the last day.
+             */
+            is_stale: boolean;
+            /**
+             * Kept
+             * @description Entries stored: remote servers Otari can connect to.
+             */
+            kept: number;
+            /**
+             * Last Completed At
+             * @description When a sync last read the whole registry.
+             */
+            last_completed_at: string | null;
+            /**
+             * Mode
+             * @description The deployment's `mcp_catalog_sync` setting.
+             * @enum {string}
+             */
+            mode: "off" | "manual" | "scheduled";
+            /**
+             * Next Request At
+             * @description Before this time a workspace admin's sync request is refused with a 429, because a sync ended recently. Null when one may be asked for now. An operator is not held to it.
+             */
+            next_request_at: string | null;
+            /**
+             * Next Sync At
+             * @description When the next scheduled sync is due, if the mode is scheduled.
+             */
+            next_sync_at: string | null;
+            /**
+             * Outcome
+             * @description How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.
+             */
+            outcome: ("complete" | "partial" | "failed") | null;
+            /** Pages */
+            pages: number;
+            /**
+             * Removed
+             * @description Servers a complete sync deleted because the registry no longer lists them.
+             */
+            removed: number;
+            /**
+             * Requested
+             * @description A sync was asked for and no worker has started it yet.
+             */
+            requested: boolean;
+            /** Running */
+            running: boolean;
+            /**
+             * Server Count
+             * @description Servers in the catalog now.
+             */
+            server_count: number;
+            /** Started At */
+            started_at: string | null;
         };
         /**
          * McpErrorBody
@@ -27111,6 +27345,150 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "mcp-catalog-list_popular_mcp_servers": {
+        parameters: {
+            query?: {
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-search_mcp_catalog": {
+        parameters: {
+            query?: {
+                /** @description Text to find in a server's title, name or description */
+                q?: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-get_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-request_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["McpCatalogSyncRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+            /** @description The caller does not operate the deployment and may not add MCP servers to the workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The sync is switched off on this deployment; nothing was started. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description A sync ended too recently for a workspace admin to ask for another; see next_request_at. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

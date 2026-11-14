@@ -70,6 +70,7 @@ from gateway.repositories.health_checks import (
 from gateway.repositories.identity import BlockedEmailRepository, IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
+from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
@@ -99,6 +100,7 @@ from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
@@ -161,6 +163,7 @@ from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -243,6 +246,7 @@ from gateway.services.tools import (
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
+    WorkspaceMcpServerUrls,
     WorkspaceSearchKeys,
     web_search_configured,
 )
@@ -2273,6 +2277,52 @@ def get_health_check_service(
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 
 
+def build_mcp_catalog_service(
+    uow: UnitOfWork, config: GatewayConfig, workspaces: WorkspaceAccess | None = None
+) -> McpCatalogService:
+    """Build the MCP catalog service on a request's Unit of Work, or the sync worker's own.
+
+    The worker passes no workspace checks: it only syncs, and who may ask for a sync is a request's question.
+    """
+    return McpCatalogService(
+        uow,
+        McpCatalogServerRepository(uow),
+        McpCatalogSyncStateRepository(uow),
+        workspaces,
+        config,
+        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+    )
+
+
+def get_mcp_catalog_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    workspaces: WorkspaceAccessDep,
+) -> McpCatalogService:
+    """The request's service. The sync worker builds its own through ``build_mcp_catalog_service``."""
+    return build_mcp_catalog_service(uow, config, workspaces)
+
+
+async def master_key_caller_operates_deployment(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    _master_key: Annotated[str | None, Depends(verify_master_key)],
+) -> bool:
+    """Whether a caller :func:`verify_master_key` admitted operates the deployment.
+
+    The question :func:`require_deployment_operator` asks, answered rather than enforced, for a route
+    that admits every signed-in caller and holds an operator to a looser rule. A session is put to
+    ``DeploymentAdministrationAccess.has_administration_access``; without one, the caller holds the master key.
+    """
+    if session_identity is not None:
+        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
+    return True
+
+
+OperatesDeployment = Annotated[bool, Depends(master_key_caller_operates_deployment)]
+McpCatalogServiceDep = Annotated[McpCatalogService, Depends(get_mcp_catalog_service)]
+
+
 def build_unavailable_model_reporter(config: GatewayConfig) -> UnavailableModelReporter:
     """Build the app's reporter of models their providers refuse to serve, with the health checks listening."""
     return UnavailableModelReporter(UnavailableModelListener(lambda uow: build_health_check_service(uow, config)))
@@ -3251,6 +3301,9 @@ __all__ = [
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",
+    "McpCatalogServiceDep",
+    "OperatesDeployment",
+    "build_mcp_catalog_service",
     "build_unavailable_model_reporter",
     "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",

@@ -602,3 +602,7 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access    # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface
+GET /api/v1/mcp-catalog/servers                                               # dashboard-only
+GET /api/v1/mcp-catalog/popular                                               # dashboard-only
+GET /api/v1/mcp-catalog/sync                                                  # dashboard-only
+POST /api/v1/mcp-catalog/sync                                                 # dashboard-only

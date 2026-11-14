@@ -299,6 +299,25 @@ and a random install id, once a day at a time of day picked by a seed that is
 never sent. Every replica polls, and the conditional update on the state row
 decides which one sends.
 
+### mcp-catalog
+
+The catalog of remote MCP servers a workspace can add: a copy of the official
+MCP Registry, kept only where Otari can connect, the sync that fills it, the
+hand-maintained Popular list matched against it, and server logos: the
+gateway finds one per catalog server, or per host for a server added by URL,
+fetches it once through the pinned retrieval client and serves it itself
+(`mcp_logos`).
+Who may ask for a sync is answered through the tenancy domain's workspace
+checks, passed in rather than imported.
+
+The catalog permits nothing and the model never calls it, so it is not part of
+tools. Being in the catalog gives a workspace no access: a catalog server is
+one the workspace stores only through the tools domain's own create. Whether a
+request may name a server inline instead is that domain's separate policy. Every replica polls, and the
+conditional update on the sync state row decides which one syncs.
+
+Built in the target shape from the start.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows

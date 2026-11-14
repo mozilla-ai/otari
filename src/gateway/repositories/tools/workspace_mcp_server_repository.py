@@ -47,3 +47,10 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             .scalars()
             .all()
         )
+
+    async def urls_in_workspace(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, str]:
+        """Each of a workspace's stored servers' URL, by server id."""
+        rows = await self.db.execute(
+            select(WorkspaceMcpServer.id, WorkspaceMcpServer.url).where(WorkspaceMcpServer.workspace_id == workspace_id)
+        )
+        return {row.id: row.url for row in rows}
