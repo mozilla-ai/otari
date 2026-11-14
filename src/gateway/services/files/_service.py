@@ -62,11 +62,15 @@ class FileScope:
 
     ``workspace_id`` is the workspace the authenticating key belongs to, and is
     None for the master key, which is the operator acting deployment-wide and
-    sees every workspace.
+    sees every workspace. ``fallback_user_id`` is a second owner a reference in a
+    request resolves under when ``user_id`` owns no such file: a service key's own
+    user, for a request it sends for one of its end users, since that key uploads
+    as itself.
     """
 
     user_id: str
     workspace_id: uuid.UUID | None = None
+    fallback_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -294,6 +298,8 @@ class FileService:
         """
         async with self._uow:
             record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
+            if record is None and scope.fallback_user_id is not None:
+                record = await self._files.live(file_id, scope.fallback_user_id, workspace_id=scope.workspace_id)
         if record is None or record.storage_ref is None:
             return None
         return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref, record.expires_at)

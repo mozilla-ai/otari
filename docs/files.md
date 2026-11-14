@@ -111,7 +111,8 @@ key belongs to. Both have to match for a request to reach it, on the listing, th
 metadata, the download, the delete, and the `file_id` references resolved out of
 a chat message. A user who holds keys in two workspaces reaches each
 workspace's files only through that workspace's key. Anything they cannot see
-answers 404, not 403.
+answers 404, not 403. A service key's uploads belong to the key's own user, and
+the requests it sends for its [end users](end-users.md) read them as that user.
 
 The workspace comes from the key, never from a header. The master key sees
 every workspace, narrowable with `GET /api/v1/files?workspace_id=<id>`, and a

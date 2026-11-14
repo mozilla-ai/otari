@@ -29,6 +29,9 @@ class NormalizationTarget:
     an attachment moved to the provider ahead of the call uses the same key.
     ``client_country`` is the country the request comes from, None when no source
     knows it, which keeps such a side-call within ``provider_supported_countries``.
+    ``file_owner_id`` is the service key's own user when the request names one of its
+    end users: that key's uploads belong to it, so a file the end user does not own is
+    looked up there too.
     """
 
     user_id: str
@@ -42,3 +45,4 @@ class NormalizationTarget:
     upstream_user: str | None
     hosted_credential: Callable[[], Awaitable[ResolvedCredential | None]] | None = None
     client_country: str | None = None
+    file_owner_id: str | None = None

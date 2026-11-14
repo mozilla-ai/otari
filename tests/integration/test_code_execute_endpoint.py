@@ -231,6 +231,55 @@ def test_an_upload_the_caller_cannot_reach_is_a_400(
     assert port.opened == []
 
 
+def test_a_service_keys_upload_is_seeded_into_a_run_it_sends_for_an_end_user(
+    client: TestClient,
+    port: _FakePort,
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    db_session_factory: Any,
+) -> None:
+    """A service key uploads as its own user, so the runs it sends for its end users reach the upload."""
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "code-service", "user_id": "code-service", "is_service_key": True},
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=headers,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    port.writes = {"chart.png": b"png-bytes"}
+
+    resp = client.post(
+        _ENDPOINT, json={"code": "print(1)", "file_ids": [upload.json()["id"]], "user": "fxa-123"}, headers=headers
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert port.seeded == {"data.csv": b"a,b\n1,2\n"}
+    # What the run wrote belongs to the end user, and its next run still reads it.
+    (written,) = resp.json()["files"]
+    session = db_session_factory()
+    try:
+        owner = session.execute(
+            text(
+                "SELECT u.parent_user_id, u.external_id FROM file_objects f"
+                " JOIN users u ON u.user_id = f.user_id WHERE f.id = :id"
+            ),
+            {"id": written["file_id"]},
+        ).one()
+    finally:
+        session.close()
+    assert tuple(owner) == ("code-service", "fxa-123")
+    again = client.post(
+        _ENDPOINT, json={"code": "print(1)", "file_ids": [written["file_id"]], "user": "fxa-123"}, headers=headers
+    )
+    assert again.status_code == 200, again.text
+
+
 def test_auto_holds_the_sandbox_and_its_id_runs_there_again(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str]
 ) -> None:

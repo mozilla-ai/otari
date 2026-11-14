@@ -463,6 +463,7 @@ async def create_response(
             model=target.model,
             files=files,
             user_id=target.user_id,
+            file_owner_id=target.file_owner_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
