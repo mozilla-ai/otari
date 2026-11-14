@@ -287,7 +287,9 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   change to the server's URL, its OAuth client or its credential mode. For
   each of these, Otari also asks the authorization server to revoke the
   tokens, best effort and only after the removal has committed; a removal
-  that rolls back revokes nothing.
+  that rolls back revokes nothing. The request goes only to the revocation
+  endpoint recorded at sign-in: where that is no longer the approved one,
+  nothing is sent and the connection is still removed.
 - **Moving the server to another origin drops its OAuth client.** A client ID
   and secret a manager entered were issued for the old origin, so a URL change
   of scheme, host or port (`https://example.com` to `https://example.com:8443`
@@ -295,16 +297,19 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   path on the same origin keeps them.
 - **A saved OAuth client stays with its sign-in server.** The first sign-in
   through a client a manager saved records the authorization server the MCP
-  server named: its issuer and its token endpoint, where the client's secret
-  is sent. If the MCP server later names another issuer, or the same issuer
-  with another token endpoint, sign-in is refused with
+  server named: its issuer, and its token and revocation endpoints, where the
+  client's secret is sent. If the MCP server later names another issuer, or the
+  same issuer with another of those endpoints, sign-in is refused with
   `mcp_oauth_issuer_changed` (`400`) before the client's secret is sent
   anywhere, until a manager saves the client again: a `PATCH` that sends
   `oauth_client_id` or `oauth_client_secret` clears the record, and the next
   sign-in records the new server. A sign-in already under way when the client
-  is saved again is not finished, and a renewal never sends the secret to a
-  token endpoint other than the recorded one. A client Otari registered
-  itself is registered again with the new server instead.
+  is saved again is not finished. Until that next sign-in there is no recorded
+  server, so a client with a secret renews nothing: existing connections are
+  kept, and a member whose token expires in that window is asked to sign in
+  again. One sign-in by anyone records the server and renewals resume. A
+  client Otari registered itself is registered again with the new server
+  instead.
 - **A token goes only to the URL it was signed in for.** Each connection, and
   a shared server's account, records the server URL its sign-in was made for.
   A request that resolved the server before a URL edit, and reads a token a
@@ -340,7 +345,8 @@ the dashboard finishes the sign-in by posting both, as JSON, to
 redirect's `iss` when it had one. Since one redirect URI serves every server,
 the `iss` (RFC 9207) is what tells their answers apart: one naming another
 authorization server is refused, and so is a missing one from a server that
-says it always sends it. No route returns a token.
+says it always sends it. The comparison is exact, so an `iss` that differs from
+the issuer in the server's metadata by a trailing slash is refused too. No route returns a token.
 
 #### Signing in from the conversation
 
