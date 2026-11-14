@@ -20,6 +20,7 @@ from typing import Any, Literal, cast
 
 from any_llm import LLMProvider
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes._pipeline import RequestContext, merge_guardrail_layers
 from gateway.core.config import GatewayConfig
 from gateway.models.guardrails import GuardrailConfig
@@ -67,6 +68,7 @@ def _ctx(*policy_guardrails: GuardrailConfig) -> RequestContext:
             guardrails=list(policy_guardrails),
         )
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=cast(Any, object()),
         uow=cast(Any, object()),

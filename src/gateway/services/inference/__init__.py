@@ -90,12 +90,16 @@ from gateway.services.inference._responses_bridge import (
 from gateway.services.inference._responses_input import strip_gateway_minted_items
 from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
 from gateway.services.inference._sweeper import run_idempotency_sweeper
+from gateway.services.inference._unavailable_models import (
+    ProviderRefusalListener,
+    UnavailableModel,
+    UnavailableModelReporter,
+)
 from gateway.services.inference._upstream_errors import (
     EMPTY_COMPLETION_DETAIL,
     EmptyCompletionError,
     UpstreamErrorKind,
     is_empty_completion,
-    is_model_unavailable_error,
     is_provider_billing_error,
     is_provider_credential_rejection,
     is_provider_cut,
@@ -149,6 +153,9 @@ __all__ = [
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
     "VIDEO_BILLING",
+    "ProviderRefusalListener",
+    "UnavailableModel",
+    "UnavailableModelReporter",
     "PassthroughBilling",
     "Admission",
     "BlockedCaller",
@@ -219,7 +226,6 @@ __all__ = [
     "EmptyCompletionError",
     "UpstreamErrorKind",
     "is_empty_completion",
-    "is_model_unavailable_error",
     "is_provider_billing_error",
     "is_provider_credential_rejection",
     "is_provider_cut",

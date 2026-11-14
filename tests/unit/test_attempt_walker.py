@@ -15,6 +15,7 @@ from any_llm import LLMProvider
 from any_llm.exceptions import ContextLengthExceededError
 from fastapi import HTTPException
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes._attempts import (
     ALL_ATTEMPTS_FAILED_DETAIL,
     ALL_ATTEMPTS_TIMED_OUT_DETAIL,
@@ -528,6 +529,7 @@ def _request_context(plan: Any) -> Any:
     from gateway.core.config import GatewayConfig
 
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=cast(Any, object()),
         uow=cast(Any, object()),

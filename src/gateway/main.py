@@ -33,6 +33,7 @@ from gateway.api.deps import (
     build_search_tool_refresh,
     build_search_tool_service,
     build_trace_service,
+    build_unavailable_model_reporter,
     get_api_key_service,
     get_membership_listener,
     set_config,
@@ -1672,6 +1673,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         app.state.public_catalog_rate_limiter = None
 
     app.state.config = config
+    app.state.unavailable_model_reporter = build_unavailable_model_reporter(config)
 
     # The composition root, built before the routers because a bootstrap may
     # contribute some of them. Per app rather than module-global, for the same
