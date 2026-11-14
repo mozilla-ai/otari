@@ -60780,7 +60780,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-server-requests/mine": {
       "get": {
-        "description": "The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.\n\nAny member who can see the workspace. An answer, approved or declined, is listed until the\ncaller acknowledges it. A declined request also leaves the list when the caller asks for the\nserver again or the server is added, and an approved one when its server is deleted.",
+        "description": "The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.\n\nAny member who can see the workspace. Pending requests come first, then the answers, each\nnewest first, so a first page of 10 or more holds every pending one. An answer, approved or\ndeclined, is listed until the caller acknowledges it. A declined request also leaves the list\nwhen the caller asks for the server again or the server is added, and an approved one when its\nserver is deleted.",
         "operationId": "mcp-servers-list_my_mcp_server_requests",
         "parameters": [
           {
