@@ -38,6 +38,7 @@ from gateway.core.error_codes import (
 )
 from gateway.log_config import logger
 from gateway.services.inference import (
+    UpstreamFailure,
     is_empty_completion,
     is_provider_billing_error,
     is_provider_credential_rejection,
@@ -74,20 +75,17 @@ def provider_failure_http_exc(
     upstream, or is ``fallback_detail`` when the failure has no signal we can
     safely surface.
     """
-    # Deferred import: _pipeline imports this module, so importing it at module
-    # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers, provider_failure_detail
-
-    mapping = classify_provider_error(exc)
+    failure = UpstreamFailure(exc)
+    mapping = failure.mapping
     if mapping is not None:
         return HTTPException(
             status_code=mapping.status_code,
             detail=mapping.detail,
-            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+            headers=with_retry_hint(exc, mapping.status_code, failure.headers),
         )
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        detail=provider_failure_detail(exc, fallback_detail),
+        detail=failure.unclassified_detail(fallback_detail),
         headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
     )
 
@@ -184,9 +182,8 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
             headers=error_headers(STRUCTURED_OUTPUT_FAILED),
         )
     if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
-        from gateway.api.routes._pipeline import unsupported_parameter_name
-
-        named = {name for name in map(unsupported_parameter_name, errors) if name is not None}
+        parameters = (UpstreamFailure(error).unsupported_parameter_name for error in errors)
+        named = {name for name in parameters if name is not None}
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_parameters_detail(sorted(named), len(errors)),

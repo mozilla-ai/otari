@@ -63,10 +63,13 @@ const { PostSignInGate } = await vi.importActual<
 
 describe("the base post-sign-in gate", () => {
   it("renders its children unchanged", () => {
+    // Off, so the welcome it also mounts stays away and asks nothing.
     render(
-      <PostSignInGate>
-        <p>CHILD</p>
-      </PostSignInGate>,
+      <DeploymentProvider value={bootstrap({ platform_connect: false })}>
+        <PostSignInGate>
+          <p>CHILD</p>
+        </PostSignInGate>
+      </DeploymentProvider>,
     )
 
     expect(screen.getByText("CHILD")).toBeInTheDocument()

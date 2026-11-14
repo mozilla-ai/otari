@@ -27,26 +27,24 @@ function approvalLink(status: PlatformConnectStatus | undefined): string {
 }
 
 /**
- * Connect this gateway to otari.ai, in place: the offer, then the code to
- * approve with its link and a waiting state, then how it ended.
+ * One attempt to connect this gateway to otari.ai: its status, and the press
+ * that starts it. Shared by the card below and the operator's welcome.
  *
  * The gateway asks otari.ai and stores the key; this only starts the attempt,
  * opens the approval page and follows the status. Nothing is sent to otari.ai
- * before Connect is pressed. Render it only where the bootstrap offers
+ * before `connect` runs. Use it only where the bootstrap offers
  * `platform_connect`.
  */
-export function PlatformConnect({
-  onConnected,
-}: {
-  /** Called once, when an attempt this component watched is approved. */
-  onConnected?: () => void
-}) {
+export function usePlatformConnectFlow(
+  /** Called once, when an attempt this hook watched is approved. */
+  onConnected?: () => void,
+) {
   const status = usePlatformConnectStatus(true)
   const start = useStartPlatformConnect()
   const cancel = useCancelPlatformConnect()
   const state = status.data?.status ?? "idle"
 
-  // Only an approval this component waited for: a deployment connected earlier
+  // Only an approval this hook waited for: a deployment connected earlier
   // must not send whoever opens the page somewhere else.
   const wasPending = useRef(false)
   useEffect(() => {
@@ -58,13 +56,20 @@ export function PlatformConnect({
     }
   }, [state, onConnected])
 
+  // The blank tab while the gateway has not answered. The per-call callbacks
+  // below do not run once the caller unmounts, so the tab is closed here then.
+  const waitingTab = useRef<Window | null>(null)
+  useEffect(() => () => waitingTab.current?.close(), [])
+
   const connect = () => {
     // Opened while the press is still the active gesture: a tab opened after
     // the gateway answers is one a browser blocks. The link stays on the page
     // for a browser that blocks this one too.
     const tab = window.open("", "_blank")
+    waitingTab.current = tab
     start.mutate(undefined, {
       onSuccess: (started) => {
+        waitingTab.current = null
         const link = approvalLink({ status: "pending", ...started })
         if (!tab) return
         if (!link) {
@@ -74,13 +79,48 @@ export function PlatformConnect({
         tab.opener = null
         tab.location.replace(link)
       },
-      onError: () => tab?.close(),
+      onError: () => {
+        waitingTab.current = null
+        tab?.close()
+      },
     })
   }
 
-  const link = approvalLink(status.data)
-  const ended = ENDED_COPY[state]
+  return {
+    state,
+    userCode: status.data?.user_code,
+    link: approvalLink(status.data),
+    ended: ENDED_COPY[state],
+    connect,
+    isStarting: start.isPending,
+    cancel: () => cancel.mutate(),
+    isCancelling: cancel.isPending,
+    error: start.error ?? cancel.error ?? status.error,
+  }
+}
 
+/**
+ * Connect this gateway to otari.ai, in place: the offer, then the code to
+ * approve with its link and a waiting state, then how it ended. Render it only
+ * where the bootstrap offers `platform_connect`.
+ */
+export function PlatformConnect({
+  onConnected,
+}: {
+  /** Called once, when an attempt this component watched is approved. */
+  onConnected?: () => void
+}) {
+  const {
+    state,
+    userCode,
+    link,
+    ended,
+    connect,
+    isStarting,
+    cancel,
+    isCancelling,
+    error,
+  } = usePlatformConnectFlow(onConnected)
   return (
     <div className="flex flex-col gap-3">
       <div>
@@ -97,7 +137,7 @@ export function PlatformConnect({
             Approve this code on otari.ai. This page updates on its own.
           </p>
           <p className="text-mono-caption text-lg text-foreground">
-            {status.data?.user_code}
+            {userCode}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             {link ? (
@@ -112,8 +152,8 @@ export function PlatformConnect({
             ) : null}
             <Button
               className="min-h-11 md:min-h-9"
-              isPending={cancel.isPending}
-              onPress={() => cancel.mutate()}
+              isPending={isCancelling}
+              onPress={cancel}
             >
               Cancel
             </Button>
@@ -147,7 +187,7 @@ export function PlatformConnect({
             <Button
               variant="primary"
               className="min-h-11 md:min-h-9"
-              isPending={start.isPending}
+              isPending={isStarting}
               onPress={connect}
             >
               {ended
@@ -160,7 +200,7 @@ export function PlatformConnect({
         </div>
       )}
 
-      <ErrorBanner error={start.error ?? cancel.error ?? status.error} />
+      <ErrorBanner error={error} />
     </div>
   )
 }

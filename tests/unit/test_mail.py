@@ -8,10 +8,13 @@ transport is what proves a *templated message actually sends* without one.
 
 import ast
 import logging
+import random
+import smtplib
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from email import message_from_string, policy
+from email.utils import parseaddr
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +26,8 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
     ConsoleTransport,
+    MailDelivery,
+    MailDeliveryError,
     MailEnvelope,
     Mailer,
     MailMessage,
@@ -206,11 +211,21 @@ def test_a_real_transport_warns_about_nothing(gateway_logs: pytest.LogCaptureFix
     assert gateway_logs.text == ""
 
 
-def test_an_explicit_smtp_transport_refuses_a_from_address_that_is_not_one() -> None:
-    """A typo would otherwise surface as a recipient server rejecting the envelope."""
-    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com", mail_from_email="not-an-address")
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "not-an-address",
+        "<otari@example.com>",
+        "Otari <otari@example.com>",
+        "otari@example.com(ops)",
+        "otari@[127.0.0.1]",
+        '"otari"@example.com',
+    ],
+)
+def test_an_explicit_smtp_transport_refuses_a_from_address_that_is_not_a_plain_address(sender: str) -> None:
+    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com", mail_from_email=sender)
 
-    with pytest.raises(ValueError, match="not a valid email address"):
+    with pytest.raises(ValueError, match="mail_from_email is not a plain email address"):
         config.validate_mail_transport()
 
 
@@ -282,6 +297,95 @@ async def test_a_failure_reason_never_carries_the_recipient_into_the_logs(
     assert "a***@example.com" in gateway_logs.text
 
 
+def _smtp_client_failing_with(exc: Exception) -> MagicMock:
+    client = MagicMock()
+    client.sendmail.side_effect = exc
+    return client
+
+
+@pytest.mark.asyncio
+async def test_a_refused_recipient_is_reported_without_the_address(gateway_logs: pytest.LogCaptureFixture) -> None:
+    recipient = "secret.invitee@elsewhere.test"
+    refusal = smtplib.SMTPRecipientsRefused({recipient: (550, b"5.1.1 no such user")})
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = _smtp_client_failing_with(refusal)
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert delivery.delivered is False
+    assert delivery.reason == "The email server refused the recipient (550)."
+    assert all(recipient not in record.getMessage() for record in gateway_logs.records)
+    assert "s***@elsewhere.test" in gateway_logs.text
+
+
+_SERVER_REPLY = b"5.7.1 <secret.invitee@elsewhere.test> is not accepted"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (
+            smtplib.SMTPAuthenticationError(535, _SERVER_REPLY),
+            "The email server refused the sign-in (535).",
+        ),
+        (
+            smtplib.SMTPConnectError(421, _SERVER_REPLY),
+            "The email server refused the connection (421).",
+        ),
+        (
+            smtplib.SMTPDataError(554, _SERVER_REPLY),
+            "The email server refused the message (554).",
+        ),
+        (
+            smtplib.SMTPHeloError(501, _SERVER_REPLY),
+            "The email server refused the greeting (501).",
+        ),
+        (
+            smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server."),
+            "The email server lacks a feature this send needs: STARTTLS extension not supported by server.",
+        ),
+        (
+            smtplib.SMTPResponseException(451, _SERVER_REPLY),
+            "The email server refused the request (451).",
+        ),
+        (
+            smtplib.SMTPSenderRefused(553, _SERVER_REPLY, "otari@example.com"),
+            "The email server refused the sender (553).",
+        ),
+        (
+            smtplib.SMTPServerDisconnected("Connection unexpectedly closed"),
+            "The email server closed the connection.",
+        ),
+        (
+            smtplib.SMTPException(_SERVER_REPLY.decode()),
+            "The email server could not complete the send.",
+        ),
+        (
+            TimeoutError("timed out"),
+            "The connection to the email server failed: timed out",
+        ),
+        (
+            TimeoutError(),
+            "The email server did not answer.",
+        ),
+        (
+            ValueError(_SERVER_REPLY.decode()),
+            "The message could not be prepared for sending.",
+        ),
+    ],
+)
+def test_a_failed_send_names_what_failed_and_no_address(failure: Exception, reason: str) -> None:
+    envelope = MailEnvelope(
+        to="secret.invitee@elsewhere.test", sender_email="otari@example.com", sender_name="Otari", message=MESSAGE
+    )
+    transport = SmtpTransport(host="smtp.example.com", port=587, use_tls=False, user=None, password=None)
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = _smtp_client_failing_with(failure)
+        with pytest.raises(MailDeliveryError) as raised:
+            transport.deliver(envelope)
+
+    assert str(raised.value) == reason
+
+
 @pytest.mark.asyncio
 async def test_send_never_raises_even_on_a_malformed_header() -> None:
     """Defense in depth: message serialization runs before any socket I/O.
@@ -301,36 +405,83 @@ async def test_send_never_raises_even_on_a_malformed_header() -> None:
     assert delivery.delivered is False
 
 
+_NOT_PLAIN = [
+    "grace@example.test(x.y)",
+    "x<grace@example.test>",
+    "<grace@example.test>",
+    "grace@example.test, ada@example.test",
+    "grace@example.test\r\nRCPT TO:<ada@example.test>",
+    "grace@example.test\n",
+    " grace@example.test",
+    "grace hopper@example.test",
+    '"grace\nhopper"@example.test',
+    "grace@example.test\x00",
+    "grace\u200b@example.test",
+    "grace@example.test\x1f",
+    "\x1cgrace@example.test",
+    ":" * 2000,
+]
+
+
 @pytest.mark.asyncio
-async def test_send_never_raises_on_a_crlf_in_an_address() -> None:
-    """smtplib puts the envelope addresses on the wire itself, so sanitizing the header is not enough.
-
-    ``build_mime`` sanitized the ``To`` header while ``sendmail`` received the
-    raw value, so a CR/LF in a recipient left the message clean and the wire
-    dirty: smtplib refused it with ``ValueError``, which was outside this
-    transport's except clause and propagated out of ``Mailer.send`` into the
-    caller's request. That is the never-raises contract broken, and it was
-    reachable by any caller that had not validated its address first (both of
-    today's had, which is precisely why nothing caught it).
-    """
-    config = _ready()
-    injected = "ada@example.com>\r\nRCPT TO:<attacker@evil.example"
-
+@pytest.mark.parametrize("recipient", ["", *_NOT_PLAIN])
+async def test_a_recipient_that_is_not_a_plain_address_is_never_handed_to_smtp(recipient: str) -> None:
     with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
         client = MagicMock()
         mock_smtp.return_value.__enter__.return_value = client
-        delivery = await Mailer(config).send(to=injected, message=MESSAGE)
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
 
-    # Did not raise, which is the contract.
-    assert delivery.transport == "smtp"
-    # And the addresses smtplib was handed carry no newline, which is why it
-    # cannot raise: asserting on the call rather than on the delivery outcome,
-    # because a mocked server would accept anything and prove nothing.
-    sender, recipients, _body = client.sendmail.call_args.args
-    assert "\r" not in sender and "\n" not in sender
-    for recipient in recipients:
-        assert "\r" not in recipient, recipient
-        assert "\n" not in recipient, recipient
+    assert delivery == MailDelivery(
+        delivered=False, transport="smtp", reason="The recipient is not a plain email address."
+    )
+    mock_smtp.assert_not_called()
+    client.sendmail.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", _NOT_PLAIN)
+async def test_a_recipient_that_is_not_a_plain_address_is_not_in_the_log(
+    recipient: str, gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert "Failed to send mail to *** via smtp" in gateway_logs.text
+    assert "example.test" not in gateway_logs.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", ["grace", "grace@localhost", '"grace"@example.test', "grace\\x@example.test"])
+async def test_a_recipient_that_is_not_an_email_address_is_never_handed_to_smtp(recipient: str) -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        delivery = await Mailer(_ready()).send(to=recipient, message=MESSAGE)
+
+    assert delivery.delivered is False
+    mock_smtp.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply_to", _NOT_PLAIN)
+async def test_a_reply_address_that_is_not_a_plain_address_is_never_handed_to_smtp(reply_to: str) -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        delivery = await Mailer(_ready()).send(to="support@example.com", message=MESSAGE, reply_to=reply_to)
+
+    assert delivery == MailDelivery(
+        delivered=False, transport="smtp", reason="The reply address is not a plain email address."
+    )
+    mock_smtp.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_envelope_recipient_is_exactly_the_address_given() -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        delivery = await Mailer(_ready()).send(to="Grace+Otari@Mail.Example.test", message=MESSAGE)
+
+    assert delivery.delivered is True
+    _sender, recipients, body = client.sendmail.call_args.args
+    assert recipients == ["Grace+Otari@Mail.Example.test"]
+    assert "\nTo: Grace+Otari@Mail.Example.test\n" in body
 
 
 def test_build_mime_puts_no_newline_in_any_header() -> None:
@@ -758,6 +909,65 @@ def test_normalized_address_refuses_an_empty_domain_label() -> None:
     assert normalized_address("x@.example.test") is None
     assert normalized_address("x@example..test") is None
     assert normalized_address("x@sub.example.test") == "x@sub.example.test"
+
+
+_ACCEPTED_SPELLINGS = {
+    "grace@example.test": "grace@example.test",
+    "grace+otari@example.test": "grace+otari@example.test",
+    "grace.hopper@mail.eu.example.test": "grace.hopper@mail.eu.example.test",
+    "  Grace@Example.TEST\t": "grace@example.test",
+    "o'brien_x-y=z!#$%&*/?^`{|}~@example.test": "o'brien_x-y=z!#$%&*/?^`{|}~@example.test",
+}
+
+_REFUSED_SPELLINGS = [
+    "grace@example.test(x.y)",
+    "(x.y)grace@example.test",
+    "x<grace@example.test>",
+    "<grace@example.test>",
+    '"grace"@example.test',
+    '"grace hopper"@example.test',
+    "grace@example.test,ada@example.test",
+    "grace@example.test;ada@example.test",
+    "team:grace@example.test;",
+    "a@[127.0.0.1]",
+    "grace\\hopper@example.test",
+    "grace\x00@example.test",
+    "\x00grace@example.test",
+    "grace\thopper@example.test",
+    "grace@example.test\x7f",
+    "grace@exa\x85mple.test",
+    "grace\u200b@example.test",
+    "grace@\u202eexample.test",
+    "=?utf-8?q?ada=40example.test=2C?=grace@example.test",
+    "grace@=?utf-8?q?example?=.test",
+]
+
+
+@pytest.mark.parametrize(("spelling", "address"), _ACCEPTED_SPELLINGS.items())
+def test_an_accepted_address_is_the_address_an_email_to_it_goes_to(spelling: str, address: str) -> None:
+    assert normalized_address(spelling) == address
+    assert parseaddr(address) == ("", address)
+
+
+@pytest.mark.parametrize("spelling", _REFUSED_SPELLINGS)
+def test_text_that_is_more_than_a_plain_address_is_not_an_address(spelling: str) -> None:
+    assert normalized_address(spelling) is None
+
+
+def test_every_address_accepted_from_generated_text_is_the_address_an_email_to_it_goes_to() -> None:
+    extras = "ab.@+-_'!=? \t\x00\x7f()<>[],;:\\\"\u00f6"
+    generator = random.Random(20240)
+    accepted = 0
+    for _ in range(20_000):
+        characters = list("grace@example.test")
+        for _ in range(generator.randint(0, 3)):
+            characters.insert(generator.randint(0, len(characters)), generator.choice(extras))
+        text = "".join(characters)
+        address = normalized_address(text)
+        if address is not None:
+            accepted += 1
+            assert parseaddr(address) == ("", address), text
+    assert accepted > 1_000
 
 
 def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:

@@ -18,14 +18,13 @@ from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
 from fastapi import HTTPException, status
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
-from gateway.api.routes._pipeline import ErrorKind
 from gateway.api.routes.messages import (
     _ADAPTER,
     _ERROR_KIND_TO_ANTHROPIC_TYPE,
     _anthropic_error,
     _ensure_anthropic_error,
 )
-from gateway.core.error_codes import RefusalException, error_headers
+from gateway.core.error_codes import ErrorKind, RefusalException, error_headers
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT
 
 
