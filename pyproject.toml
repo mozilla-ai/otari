@@ -53,7 +53,7 @@ dependencies = [
     # (`services.tenancy.domain_verification`). The async resolver specifically:
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
-    "dnspython>=2.9.0",
+    "dnspython>=2.9.2",
     "fastapi>=0.153.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
