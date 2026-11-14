@@ -22,10 +22,14 @@ from gateway.exceptions.mcp_catalog_exceptions import (
     McpCatalogSyncTooSoonError,
 )
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
-from gateway.models.mcp_catalog import McpCatalogServer, McpCatalogSyncState
+from gateway.models.mcp_catalog import LOGO_OK, McpCatalogServer, McpCatalogSyncState, McpLogo
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.tools import WorkspaceMcpServer
-from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
+from gateway.repositories.mcp_catalog import (
+    McpCatalogServerRepository,
+    McpCatalogSyncStateRepository,
+    McpLogoRepository,
+)
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -1137,6 +1141,65 @@ async def test_two_workers_polling_at_once_start_one_sync(async_db: AsyncSession
     assert sorted(claims) == [False, True]
     row = (await async_db.execute(select(McpCatalogSyncState).execution_options(populate_existing=True))).scalar_one()
     assert (row.running, row.sync_requested) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_creating_the_sync_state_at_once_end_with_its_one_row(
+    async_db: AsyncSession, postgres_url: str
+) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as first, sessions() as second:
+            created = await McpCatalogSyncStateRepository(first).get_or_create()
+            # The second finds no committed row, so its insert waits on the first's until that commits.
+            racing = asyncio.create_task(McpCatalogSyncStateRepository(second).get_or_create())
+            await asyncio.sleep(0.2)
+            assert not racing.done()
+            await first.commit()
+            read = await racing
+            await second.commit()
+    finally:
+        await engine.dispose()
+
+    assert created.id == read.id
+    rows = (await async_db.execute(select(McpCatalogSyncState))).scalars().all()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_storing_one_new_logo_at_once_end_with_its_one_row(
+    async_db: AsyncSession, postgres_url: str
+) -> None:
+    now = _Clock().now
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as first, sessions() as second:
+            await McpLogoRepository(first).store_not_found("host:mcp.example.com", fetched_at=now, retry_at=now)
+            # The second finds no committed row, so its insert waits on the first's, then updates that row.
+            racing = asyncio.create_task(
+                McpLogoRepository(second).store_found(
+                    "host:mcp.example.com",
+                    content=b"<svg/>",
+                    content_type="image/svg+xml",
+                    etag="e1",
+                    luminance=None,
+                    source_url="https://mcp.example.com/icon.svg",
+                    fetched_at=now,
+                    retry_at=now,
+                )
+            )
+            await asyncio.sleep(0.2)
+            assert not racing.done()
+            await first.commit()
+            await racing
+            await second.commit()
+    finally:
+        await engine.dispose()
+
+    rows = (await async_db.execute(select(McpLogo))).scalars().all()
+    assert [(row.key, row.status, row.content) for row in rows] == [("host:mcp.example.com", LOGO_OK, b"<svg/>")]
 
 
 @pytest.mark.asyncio
