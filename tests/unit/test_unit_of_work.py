@@ -406,3 +406,23 @@ async def test_a_sandbox_collaborator_joins_the_step_the_request_has_open(notes_
 
         assert commits() == 1
         assert await _committed_bodies() == ["request step"]
+
+
+@pytest.mark.asyncio
+async def test_abandoning_a_step_rolls_back_and_keeps_a_rollback_failure_to_the_log() -> None:
+    session = AsyncMock()
+    session.rollback.side_effect = OperationalError("ROLLBACK", None, Exception("gone"))
+    uow = UnitOfWork(cast(AsyncSession, session))
+
+    await uow.abandon()
+
+    session.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_step_cannot_be_abandoned_inside_a_block() -> None:
+    uow = UnitOfWork(cast(AsyncSession, AsyncMock()))
+
+    async with uow:
+        with pytest.raises(InsideUnitOfWorkError):
+            await uow.abandon()

@@ -146,13 +146,13 @@ class _Recorder(McpServerContacts):
         self.per_user = per_user
         self.gate = gate
 
-    async def _write(self, contact: McpServerContact, handed: Any = None, before: Any = None) -> None:
+    async def _store(self, contact: McpServerContact) -> Any:
         if self.gate is not None:
             await self.gate.wait()
         if self.per_user and contact.failure in (CheckFailure.UNAUTHORIZED, CheckFailure.FORBIDDEN):
-            self._discarded(contact.server_id, handed, before)
-            return
+            return "discarded"
         self.written.append(contact)
+        return "decided"
 
 
 @pytest.mark.asyncio
@@ -215,10 +215,72 @@ async def test_a_shared_account_s_refusal_keeps_the_same_status_throttle() -> No
     recorder = _Recorder(interval_s=900, clock=lambda: 0.0)
 
     recorder.failed(SERVER, URL, _refused(401))
+    await recorder.drain()
     recorder.failed(SERVER, URL, httpx2.ConnectError("refused"))
     await recorder.drain()
 
     assert [contact.failure for contact in recorder.written] == [CheckFailure.UNAUTHORIZED]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_arriving_while_one_user_s_refusal_is_being_written_is_recorded() -> None:
+    """The refusal's write is held open while the timeout arrives; only the write decides what counts."""
+    gate = asyncio.Event()
+    recorder = _Recorder(per_user=True, gate=gate, interval_s=900, clock=lambda: 0.0)
+
+    recorder.failed(SERVER, URL, _refused(401))
+    await asyncio.sleep(0)
+    recorder.failed(SERVER, URL, TimeoutError())
+    gate.set()
+    await recorder.drain()
+    recorder.failed(SERVER, URL, _refused(401))
+    await recorder.drain()
+
+    assert [contact.failure for contact in recorder.written] == [CheckFailure.TIMEOUT]
+
+
+@pytest.mark.asyncio
+async def test_an_identical_contact_in_flight_is_not_handed_to_a_second_write() -> None:
+    gate = asyncio.Event()
+    recorder = _Recorder(gate=gate, interval_s=900, clock=lambda: 0.0)
+
+    recorder.failed(SERVER, URL, TimeoutError())
+    recorder.failed(SERVER, URL, TimeoutError())
+    gate.set()
+    await recorder.drain()
+
+    assert [contact.failure for contact in recorder.written] == [CheckFailure.TIMEOUT]
+
+
+@pytest.mark.asyncio
+async def test_a_new_url_is_not_held_back_by_the_old_one_s_throttle() -> None:
+    recorder = _Recorder(interval_s=900, clock=lambda: 0.0)
+    moved = "https://93.184.216.35/mcp"
+
+    recorder.reached(SERVER, URL, LISTING)
+    await recorder.drain()
+    recorder.reached(SERVER, moved, LISTING)
+    await recorder.drain()
+
+    assert [contact.url for contact in recorder.written] == [URL, moved]
+
+
+@pytest.mark.asyncio
+async def test_a_contact_the_write_found_stale_does_not_count() -> None:
+    class Stale(_Recorder):
+        async def _store(self, contact: McpServerContact) -> Any:
+            if not self.written and contact.listing is None:
+                self.written.append(contact)
+                return "stale"
+            return await super()._store(contact)
+
+    recorder = Stale(interval_s=900, clock=lambda: 0.0)
+    recorder.reached(SERVER, URL)
+    await recorder.drain()
+    recorder.reached(SERVER, URL)
+    await recorder.drain()
+
+    assert len(recorder.written) == 2
 
 
 @pytest.mark.asyncio
@@ -252,7 +314,7 @@ async def test_a_missing_sign_in_and_an_inline_server_record_nothing() -> None:
 @pytest.mark.asyncio
 async def test_a_write_that_fails_never_reaches_the_request() -> None:
     class Broken(McpServerContacts):
-        async def _write(self, contact: McpServerContact, handed: Any = None, before: Any = None) -> None:
+        async def _store(self, contact: McpServerContact) -> Any:
             raise RuntimeError("no database")
 
     recorder = Broken()

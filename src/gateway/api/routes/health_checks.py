@@ -76,7 +76,6 @@ async def _poll(config: GatewayConfig) -> None:
     await run_health_check_worker(
         lambda uow: build_health_check_service(uow, config),
         lambda uow: build_hosted_provider_service(uow, config=config),
-        config,
     )
 
 

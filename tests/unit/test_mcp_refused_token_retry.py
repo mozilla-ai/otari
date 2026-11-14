@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from contextlib import AsyncExitStack
 from typing import Any, cast
@@ -13,7 +14,7 @@ from mcp.types import ListToolsResult
 
 from gateway.exceptions.tools_exceptions import McpSignInRequiredError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
-from gateway.services import mcp_stateless
+from gateway.services import mcp_client, mcp_stateless
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_stateless import CODE_SIGN_IN_REQUIRED, McpExecutionError
 
@@ -219,3 +220,71 @@ async def test_a_failed_open_whose_transport_never_closes_still_answers_with_its
                 pass
 
     assert not mcp_stateless.refused_token(raised.value)
+
+
+class _FakeMcpServer:
+    """A minimal MCP server behind a mock HTTP transport: it accepts only ``Bearer <accepted>``."""
+
+    def __init__(self, accepted: str) -> None:
+        self.accepted = accepted
+        self.tokens: list[str] = []
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        if request.method != "POST":
+            return httpx2.Response(405)
+        body = json.loads(request.content)
+        if body.get("method") == "initialize":
+            self.tokens.append(request.headers.get("authorization", ""))
+        if request.headers.get("authorization") != f"Bearer {self.accepted}":
+            return httpx2.Response(401, headers={"www-authenticate": 'Bearer error="invalid_token"'})
+        if "id" not in body:
+            return httpx2.Response(202)
+        if body["method"] == "initialize":
+            result: dict[str, Any] = {
+                "protocolVersion": body["params"]["protocolVersion"],
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "fake", "version": "1"},
+            }
+        else:
+            result = {"tools": []}
+        return httpx2.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
+
+
+def _behind(client: httpx2.AsyncClient, server: _FakeMcpServer) -> httpx2.AsyncClient:
+    client._transport = httpx2.MockTransport(server)  # noqa: SLF001
+    return client
+
+
+async def test_a_real_401_reaches_the_stateless_renewal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the SDK's own transport, which reports a 401 as a protocol error with no status."""
+    fake = _FakeMcpServer(accepted="renewed")
+    real_factory = mcp_stateless.build_http_client_factory
+
+    def factory(**kwargs: Any) -> Any:
+        build = real_factory(**kwargs)
+        return lambda *args, **kw: _behind(build(*args, **kw), fake)
+
+    monkeypatch.setattr(mcp_stateless, "build_http_client_factory", factory)
+    renew = _Renewer()
+
+    async with asyncio.timeout(10):
+        async with mcp_stateless.open_session(_server(renew)) as session:
+            assert (await session.list_tools()).tools == []
+
+    assert (fake.tokens, renew.asked) == (["Bearer stale", "Bearer renewed"], ["stale"])
+
+
+async def test_a_real_401_reaches_the_managed_loop_renewal(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeMcpServer(accepted="renewed")
+    real_client = mcp_client._origin_bound_http_client
+    monkeypatch.setattr(
+        mcp_client, "_origin_bound_http_client", lambda *args, **kw: _behind(real_client(*args, **kw), fake)
+    )
+    renew = _Renewer()
+    config = McpServerConfig(name="drive", url=URL, authorization_token="stale", renew_token=renew)
+
+    async with asyncio.timeout(10):
+        async with MCPClientPool([config]) as pool:
+            assert pool.signed_out == []
+
+    assert (fake.tokens, renew.asked) == (["Bearer stale", "Bearer renewed"], ["stale"])

@@ -26,7 +26,8 @@ from gateway.repositories.health_checks import (
     HealthCheckSettingsRepository,
 )
 from gateway.schemas.health_checks import HealthCheckSettingsUpdate
-from gateway.services.health_checks import HealthCheckOffering, HealthCheckService, list_hosted_offerings
+from gateway.services.health_checks import HealthCheckOffering, HealthCheckService
+from gateway.services.health_checks._offerings import list_hosted_offerings
 from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import get_model_cache
@@ -515,9 +516,7 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
     )
     await async_db.flush()
 
-    offerings = await list_hosted_offerings(
-        build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
-    )
+    offerings = await list_hosted_offerings(build_hosted_provider_service(UnitOfWork(async_db), config=test_config))
 
     assert [(o.selector, o.provider, o.implementation, o.model) for o in offerings] == [
         ("openai-eu:gpt-test", "openai-eu", "openai", "gpt-test")
@@ -590,7 +589,7 @@ async def test_a_run_asks_the_models_kind_rather_than_its_id(
     try:
         with patch(f"{_OFFERINGS_MODULE}.cached_models_dev_catalog", return_value=catalog):
             offerings = await list_hosted_offerings(
-                build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
+                build_hosted_provider_service(UnitOfWork(async_db), config=test_config)
             )
     finally:
         get_model_cache().clear("openai-eu")
@@ -743,7 +742,7 @@ async def test_disable_all_switches_the_hosted_rows_off(
 
     await service.request_run()
     with patch(f"{_PROBE}.acompletion", new=broken_only):
-        await service.run_if_due(lambda: list_hosted_offerings(hosted, test_config))
+        await service.run_if_due(lambda: list_hosted_offerings(hosted))
 
     assert await service.disable_failing() == 1
     assert await hosted.serveable_models(organization_id=None) == {"openai": frozenset({"gpt-fine"})}

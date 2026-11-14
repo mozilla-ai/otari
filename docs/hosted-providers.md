@@ -112,6 +112,13 @@ providers. It is a paid service, and a request served on it leaves this gateway
 for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
 the `otari` implementation.
 
+The first time a deployment operator opens the dashboard in a browser, on a
+gateway not yet connected, a **Welcome to Otari** dialog offers otari.ai, with a
+link to its plans. It is remembered per browser, not per account: skip it or
+close it and that browser does not show it again, while a new browser, or an
+existing operator after upgrading, sees it once. It is not shown where
+`platform_url` is empty or the gateway cannot encrypt a provider key.
+
 On the Hosted providers page, **Connect otari.ai** is offered beside adding a
 provider of your own:
 

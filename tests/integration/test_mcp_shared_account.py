@@ -39,6 +39,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
 )
 from gateway.services.tools import McpGrantMembershipListener, McpUserTokens
+from gateway.services.tools._mcp_connections import McpServerRef
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
 from . import test_mcp_user_connections as base
@@ -449,3 +450,80 @@ async def test_deleting_the_workspace_revokes_its_shared_account_and_a_member_le
         await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
     await base._drain_revocations()
     assert wire.revoked == ["refresh-1"]
+
+
+async def test_a_renewal_that_finds_another_account_returns_that_accounts_generation_with_its_token(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A manager signs in to another account while a request waits to renew: the pair names the new one."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    now = datetime.now(UTC)
+    await async_db.execute(
+        update(McpSharedConnection).values(expires_at=now - timedelta(minutes=1), updated_at=now - timedelta(hours=1))
+    )
+    await async_db.commit()
+    ref = McpServerRef.of(await _row(async_db, world.server.id))
+
+    async def another_account_signs_in() -> None:
+        wire.issue = McpOAuthTokens(access_token="access-2", refresh_token="refresh-2", expires_in=3600)
+        await _sign_in_for_everyone(async_db, config, world)
+
+    tokens._release = another_account_signs_in  # noqa: SLF001
+    account = await tokens.shared_account_for(ref)
+    tokens._release = None  # noqa: SLF001
+
+    replaced = await _account(async_db, world)
+    assert replaced is not None
+    assert account == ("access-2", replaced.created_at.isoformat())
+    assert wire.refreshes == [], "the other account's fresh token is used as it is"
+
+
+async def test_a_refused_token_is_never_renewed_into_another_accounts(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """A call resolved, and approved by revision, for one account does not retry with another's token."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    servers = WorkspaceMcpServers(async_db, tokens)
+    anyone = McpAccess(user_id="anyone")
+    one = await servers.resolve_one(world.workspace.id, world.server.id, anyone)
+    [many] = await servers.resolve_many(world.workspace.id, [world.server.id], anyone)
+
+    wire.issue = McpOAuthTokens(access_token="access-2", refresh_token="refresh-2", expires_in=3600)
+    await _sign_in_for_everyone(async_db, config, world)
+
+    for resolved in (one, many):
+        assert resolved is not None and resolved.renew_token is not None
+        with pytest.raises(McpConnectionUnavailableError):
+            await resolved.renew_token("access-1")
+    # The same account's refusal still renews.
+    again = await servers.resolve_one(world.workspace.id, world.server.id, anyone)
+    assert again is not None and again.renew_token is not None
+    assert await again.renew_token("access-2") == "renewed-1"
+
+
+async def test_a_check_of_an_account_replaced_while_it_ran_is_dropped(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    replaced = False
+
+    async def check(server: ResolvedMcpServer) -> ServerCheck:
+        nonlocal replaced
+        if server.authorization_token == "access-1" and not replaced:
+            replaced = True
+            wire.issue = McpOAuthTokens(access_token="access-2", refresh_token="refresh-2", expires_in=3600)
+            await _sign_in_for_everyone(async_db, config, world)
+            return ServerCheck(tool_names=[], failure=CheckFailure.SERVER_ERROR, http_status=500)
+        return ServerCheck(tool_names=["list_issues"])
+
+    monkeypatch.setattr(mcp_stateless, "check_stored_server", check)
+
+    checked = await _service(async_db, config).check_server(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id
+    )
+
+    assert replaced
+    assert checked.health is not None and checked.health.status == "healthy", "account B's health is kept"

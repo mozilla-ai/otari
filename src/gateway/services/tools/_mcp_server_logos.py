@@ -174,7 +174,8 @@ class McpServerLogoService:
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
         async with self._uow:
-            url = await self._server_url(workspace.id, server_id)
+            # Locked as ``set_logo`` locks it, so a tile chosen meanwhile is not written back over.
+            url = await self._server_url(workspace.id, server_id, lock=True)
             row = await self._logos.find(server_id)
             if row is not None:
                 row = await self._logos.save(

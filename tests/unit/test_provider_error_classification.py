@@ -1,4 +1,4 @@
-"""Unit tests for classify_provider_error.
+"""Unit tests for the provider error mapping.
 
 The classifier maps an upstream provider exception to a client-facing
 (status, detail), and must return None for failures it cannot safely classify
@@ -37,36 +37,19 @@ from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
 from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
-from gateway.api.routes._pipeline import (
-    _FORWARDED_PARAMS,
-    PROVIDER_ACCOUNT_QUOTA_DETAIL,
-    PROVIDER_BAD_REQUEST_DETAIL,
-    PROVIDER_BILLING_DETAIL,
-    PROVIDER_CREDENTIALS_DETAIL,
-    PROVIDER_ERROR_DETAIL,
-    PROVIDER_MODEL_NOT_FOUND_DETAIL,
-    PROVIDER_RATE_LIMITED_DETAIL,
-    PROVIDER_REQUEST_TOO_LARGE_DETAIL,
-    PROVIDER_TIMEOUT_DETAIL,
-    classify_provider_error,
-    failure_error_message,
-    failure_status_code,
-    provider_error_headers,
-    provider_failure_detail,
-    refusal_code,
-    stream_error_code,
-    stream_error_message,
-    with_provider_failure,
-)
+from gateway.api.routes._pipeline import with_provider_failure
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
+from gateway.core.error_details import ProviderDetail
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.inference import (
+    UpstreamFailure,
     is_provider_credential_rejection,
     is_retry_futile,
     is_upstream_request_fault,
     provider_failure,
     upstream_retry_after,
 )
+from gateway.services.inference._provider_errors import _FORWARDED_PARAMS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
 from gateway.services.upstream_redaction import (
@@ -144,8 +127,8 @@ class _CodeError(Exception):
 
 def test_timeout_maps_to_504() -> None:
     for exc in (asyncio.TimeoutError(), TimeoutError(), httpx.TimeoutException("slow")):
-        mapping = classify_provider_error(exc)
-        assert mapping == (504, PROVIDER_TIMEOUT_DETAIL)
+        mapping = UpstreamFailure(exc).mapping
+        assert mapping == (504, ProviderDetail.TIMEOUT)
 
 
 def test_sdk_wrapped_timeout_maps_to_504() -> None:
@@ -157,15 +140,15 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
         OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
         AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
     ):
-        assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
-        assert failure_status_code(exc) == 504
+        assert UpstreamFailure(exc).mapping == (504, ProviderDetail.TIMEOUT)
+        assert UpstreamFailure(exc).logged_status == 504
 
 
 def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
     """Once otari enables ``ANY_LLM_UNIFIED_EXCEPTIONS=1``, a raw SDK timeout
     error arrives wrapped in a generic ``AnyLLMError`` subclass (no
     ``status_code``, a class name the duck-typed fallback won't recognize)
-    rather than the SDK type directly. ``classify_provider_error`` must still
+    rather than the SDK type directly. The mapping must still
     resolve it to 504 via the shared ``original_exception`` unwrap, not fall
     back to the generic 502."""
 
@@ -176,7 +159,7 @@ def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
 
     request = httpx.Request("POST", "http://upstream")
     wrapped = _WrappedByAnyLLM(OpenAIAPITimeoutError(request=request))
-    assert classify_provider_error(wrapped) == (504, PROVIDER_TIMEOUT_DETAIL)
+    assert UpstreamFailure(wrapped).mapping == (504, ProviderDetail.TIMEOUT)
 
 
 @pytest.mark.parametrize(
@@ -188,7 +171,7 @@ def test_caller_fault_statuses_carry_the_upstream_message(status_code: int, expe
     message. Only the provider knows what it objected to, and every fixed string
     we could write in its place discards that."""
     exc = _ParamError(status_code, None, "max_tokens must be less than or equal to 8192")
-    assert classify_provider_error(exc) == (expected_status, "max_tokens must be less than or equal to 8192")
+    assert UpstreamFailure(exc).mapping == (expected_status, "max_tokens must be less than or equal to 8192")
 
 
 def test_rate_limit_carries_the_upstream_message() -> None:
@@ -197,7 +180,7 @@ def test_rate_limit_carries_the_upstream_message() -> None:
     fixed "you were rate-limited" discards the retry window for something the
     status already said."""
     exc = _ParamError(429, None, "Quota exceeded for generate_content_requests. Please retry in 34.6s.")
-    assert classify_provider_error(exc) == (
+    assert UpstreamFailure(exc).mapping == (
         429,
         "Quota exceeded for generate_content_requests. Please retry in 34.6s.",
     )
@@ -206,7 +189,7 @@ def test_rate_limit_carries_the_upstream_message() -> None:
 def test_rate_limit_message_is_still_redacted() -> None:
     """Passing a 429's text through does not exempt it from redaction."""
     exc = _ParamError(429, None, "Quota exceeded on project proj-a1b2c3d4 via https://internal.upstream/v1")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 429
     assert "Quota exceeded" in mapping.detail
@@ -219,7 +202,7 @@ def test_request_too_large_carries_the_upstream_message() -> None:
     retry, so it is the caller's 413 with the provider's sentence (the limit and
     the size requested) rather than a retryable 502."""
     exc = _ParamError(413, None, "Request too large: Limit 8000, Requested 10974, please reduce your message size")
-    assert classify_provider_error(exc) == (
+    assert UpstreamFailure(exc).mapping == (
         413,
         "Request too large: Limit 8000, Requested 10974, please reduce your message size",
     )
@@ -227,7 +210,7 @@ def test_request_too_large_carries_the_upstream_message() -> None:
 
 def test_request_too_large_message_is_still_redacted() -> None:
     exc = _ParamError(413, None, "Request too large in organization org_01abc23 via https://internal.upstream/v1")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 413
     assert "Request too large" in mapping.detail
@@ -238,46 +221,46 @@ def test_request_too_large_message_is_still_redacted() -> None:
 def test_request_too_large_carries_a_code_and_no_retry_after() -> None:
     exc = _rate_limited_with("23")
     exc.status_code = 413  # type: ignore[attr-defined]
-    assert provider_error_headers(exc, 413) == {"Otari-Error-Code": "request_too_large"}
-    assert refusal_code(exc) == "request_too_large"
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "request_too_large"}
+    assert UpstreamFailure(exc).error_code == "request_too_large"
 
 
 def test_request_too_large_falls_back_to_a_fixed_detail() -> None:
-    mapping = classify_provider_error(_ParamError(413, None, "413"))
+    mapping = UpstreamFailure(_ParamError(413, None, "413")).mapping
     assert mapping is not None
     assert mapping.status_code == 413
-    assert mapping.detail == PROVIDER_REQUEST_TOO_LARGE_DETAIL
+    assert mapping.detail == ProviderDetail.REQUEST_TOO_LARGE
 
 
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [
-        (401, (424, PROVIDER_CREDENTIALS_DETAIL)),
-        (403, (424, PROVIDER_CREDENTIALS_DETAIL)),
+        (401, (424, ProviderDetail.CREDENTIALS)),
+        (403, (424, ProviderDetail.CREDENTIALS)),
     ],
 )
 def test_gateway_fault_statuses_keep_a_fixed_detail(status_code: int, expected: tuple[int, str]) -> None:
     """A rejected credential is not something the caller can act on, so the
     detail stays fixed and the upstream text is never echoed. It is a 424, not a
     5xx: retrying cannot make the gateway's key valid."""
-    assert classify_provider_error(_StatusError(status_code)) == expected
+    assert UpstreamFailure(_StatusError(status_code)).mapping == expected
 
 
 @pytest.mark.parametrize("status_code", [400, 404, 422, 429])
 def test_caller_actionable_falls_back_when_the_provider_said_nothing(status_code: int) -> None:
     """An exception carrying no usable text still gets a usable detail rather
     than an empty string."""
-    mapping = classify_provider_error(_ParamError(status_code, None, ""))
+    mapping = UpstreamFailure(_ParamError(status_code, None, "")).mapping
     assert mapping is not None
     assert mapping.detail in (
-        PROVIDER_BAD_REQUEST_DETAIL,
-        PROVIDER_MODEL_NOT_FOUND_DETAIL,
-        PROVIDER_RATE_LIMITED_DETAIL,
+        ProviderDetail.BAD_REQUEST,
+        ProviderDetail.MODEL_NOT_FOUND,
+        ProviderDetail.RATE_LIMITED,
     )
 
 
 def test_status_read_from_attached_response() -> None:
-    mapping = classify_provider_error(_ResponseStatusError(404))
+    mapping = UpstreamFailure(_ResponseStatusError(404)).mapping
     assert mapping is not None
     assert mapping.status_code == 404
 
@@ -285,7 +268,7 @@ def test_status_read_from_attached_response() -> None:
 def test_status_read_from_an_int_code() -> None:
     """google-genai's ``APIError`` puts the status on ``code`` and never sets
     ``status_code``, so a Gemini rejection is unclassifiable without it."""
-    mapping = classify_provider_error(_CodeError(404, "models/gemini-9 is not found"))
+    mapping = UpstreamFailure(_CodeError(404, "models/gemini-9 is not found")).mapping
     assert mapping is not None
     assert mapping.status_code == 404
 
@@ -295,13 +278,13 @@ def test_a_string_code_is_not_read_as_a_status() -> None:
     must not be guessed at and the exception stays unclassifiable."""
     exc = Exception(_RAW)
     exc.code = "invalid_api_key"  # type: ignore[attr-defined]
-    assert classify_provider_error(exc) is None
+    assert UpstreamFailure(exc).mapping is None
 
 
 def test_a_non_http_int_code_is_not_read_as_a_status() -> None:
     """google-genai's live API raises through the same ``APIError`` with a
     websocket close code. It is an ``int`` but not a status."""
-    assert classify_provider_error(_CodeError(1008, "policy violation")) is None
+    assert UpstreamFailure(_CodeError(1008, "policy violation")).mapping is None
 
 
 def test_a_non_error_response_status_does_not_shadow_the_real_status() -> None:
@@ -312,10 +295,10 @@ def test_a_non_error_response_status_does_not_shadow_the_real_status() -> None:
     request's outcome."""
     exc = _CodeError(429, "You exceeded your current quota. Please retry in 34.6s.")
     exc.response = httpx.Response(200)  # type: ignore[attr-defined]
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 429
-    assert failure_status_code(exc) == 429
+    assert UpstreamFailure(exc).logged_status == 429
     # google-genai's ``str()`` is "<code> <status>. <whole response body>", so
     # joining it to ``message`` would hand the caller the sentence twice, the
     # second time inside a JSON dump.
@@ -335,7 +318,7 @@ def _rate_limited_with(retry_after: str) -> Exception:
 
 
 def test_retry_after_is_forwarded_on_a_429() -> None:
-    assert provider_error_headers(_rate_limited_with("34"), 429) == {
+    assert UpstreamFailure(_rate_limited_with("34")).headers == {
         "Otari-Error-Code": "upstream_rate_limited",
         "Retry-After": "34",
     }
@@ -344,7 +327,7 @@ def test_retry_after_is_forwarded_on_a_429() -> None:
 def test_retry_after_rounds_a_fraction_up() -> None:
     """A client honoring the header must not retry before the window the
     provider named, so 0.4s becomes 1s rather than 0s."""
-    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {
+    assert UpstreamFailure(_rate_limited_with("0.4")).headers == {
         "Otari-Error-Code": "upstream_rate_limited",
         "Retry-After": "1",
     }
@@ -353,7 +336,7 @@ def test_retry_after_rounds_a_fraction_up() -> None:
 def test_retry_after_is_clamped() -> None:
     """A provider does not get to tell this gateway's callers to sleep for a
     year."""
-    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {
+    assert UpstreamFailure(_rate_limited_with("99999999")).headers == {
         "Otari-Error-Code": "upstream_rate_limited",
         "Retry-After": "86400",
     }
@@ -379,7 +362,7 @@ def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
     """The value is re-serialized from a parsed number, never relayed as
     received: a header value is not a body, and CRLF in one is not a formatting
     problem."""
-    assert provider_error_headers(_rate_limited_with(raw), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
+    assert UpstreamFailure(_rate_limited_with(raw)).headers == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
@@ -387,11 +370,11 @@ def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
     gateway's own upstream account, which is not the caller's to read."""
     exc = _StatusError(401)
     exc.response = httpx.Response(401, headers={"Retry-After": "34"})  # type: ignore[attr-defined]
-    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
 
 
 def test_retry_after_absent_sends_only_the_error_code() -> None:
-    assert provider_error_headers(_StatusError(429), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
+    assert UpstreamFailure(_StatusError(429)).headers == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_read_through_the_exception_chain() -> None:
@@ -408,14 +391,14 @@ def test_terminal_exc_forwards_retry_after() -> None:
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])
 def test_unclassifiable_returns_none(exc: BaseException) -> None:
-    assert classify_provider_error(exc) is None
+    assert UpstreamFailure(exc).mapping is None
 
 
 def test_gateway_fault_details_never_echo_the_raw_message() -> None:
     """The statuses where the gateway's own credentials and topology concentrate
     keep a fixed detail, whatever the provider put in the body."""
     for status_code in (401, 403):
-        mapping = classify_provider_error(_StatusError(status_code))
+        mapping = UpstreamFailure(_StatusError(status_code)).mapping
         assert mapping is not None
         assert "SECRET" not in mapping.detail
         assert "abc123" not in mapping.detail
@@ -442,7 +425,7 @@ def test_terminal_exc_falls_back_to_generic() -> None:
 def test_missing_credential_maps_to_424_naming_the_provider() -> None:
     """Nothing went upstream, so the answer is the deployment's to fix: a client
     error that names the provider, in the gateway's own words."""
-    mapping = classify_provider_error(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"))
+    mapping = UpstreamFailure(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY")).mapping
     assert mapping is not None
     assert mapping.status_code == 424
     assert mapping.detail == MissingCredential("anthropic", "ANTHROPIC_API_KEY").detail
@@ -452,12 +435,12 @@ def test_missing_credential_maps_to_424_naming_the_provider() -> None:
 
 def test_missing_credential_is_read_through_the_exception_chain() -> None:
     wrapped = _WrappedError(500, MissingApiKeyError("mistral", "MISTRAL_API_KEY"))
-    mapping = classify_provider_error(wrapped)
+    mapping = UpstreamFailure(wrapped).mapping
     assert mapping is not None
     assert mapping.status_code == 424
     assert "'mistral'" in mapping.detail
     # The usage row records what the caller was answered, not the wrapper's 500.
-    assert failure_status_code(wrapped) == 424
+    assert UpstreamFailure(wrapped).logged_status == 424
 
 
 def test_attempts_that_all_lack_a_credential_share_one_424() -> None:
@@ -476,19 +459,19 @@ def test_attempts_that_fail_differently_share_no_rejection_for_a_missing_credent
 
 def test_missing_credential_carries_its_error_code() -> None:
     exc = MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY")
-    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_NOT_CONFIGURED}
-    assert refusal_code(exc) == PROVIDER_NOT_CONFIGURED
-    assert failure_status_code(exc) == 424
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": PROVIDER_NOT_CONFIGURED}
+    assert UpstreamFailure(exc).error_code == PROVIDER_NOT_CONFIGURED
+    assert UpstreamFailure(exc).logged_status == 424
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_rejected_credential_carries_its_error_code(status_code: int) -> None:
     exc = _StatusError(status_code)
-    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
-    assert refusal_code(exc) == PROVIDER_CREDENTIAL_REJECTED
-    assert stream_error_code(exc) == PROVIDER_CREDENTIAL_REJECTED
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
+    assert UpstreamFailure(exc).error_code == PROVIDER_CREDENTIAL_REJECTED
+    assert UpstreamFailure(exc).stream_code == PROVIDER_CREDENTIAL_REJECTED
     # The row keeps what the provider said, so misconfiguration stays countable.
-    assert failure_status_code(exc) == status_code
+    assert UpstreamFailure(exc).logged_status == status_code
 
 
 def test_attempts_whose_credentials_were_all_rejected_or_missing_share_one_424() -> None:
@@ -506,7 +489,7 @@ def test_a_rejected_credential_beside_another_failure_shares_no_rejection() -> N
 
 def test_missing_credential_error_code_is_not_sent_for_an_upstream_424() -> None:
     """A provider's own 424 is a different failure, so it keeps no code of ours."""
-    assert provider_error_headers(_StatusError(424), 424) is None
+    assert UpstreamFailure(_StatusError(424)).headers is None
 
 
 def test_terminal_exc_for_a_missing_credential_is_a_424() -> None:
@@ -525,52 +508,52 @@ def test_missing_credential_detail_names_only_what_a_caller_can_configure(alias:
 
 
 # ---------------------------------------------------------------------------
-# failure_status_code: what lands on usage_logs.status_code
+# UpstreamFailure.logged_status: what lands on usage_logs.status_code
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422, 429, 500, 503, 529])
-def test_failure_status_code_keeps_the_upstream_status(status_code: int) -> None:
+def test_the_logged_status_keeps_the_upstream_status(status_code: int) -> None:
     """The upstream status is recorded verbatim, including the codes the caller
     never sees: an upstream 401/403 surfaces as a fixed-detail 424 (a provider
     rejecting the gateway's credentials must not be echoed as a 401 or 403),
     but the log has to keep the 401 or the misconfiguration is unattributable.
     """
-    assert failure_status_code(_StatusError(status_code)) == status_code
+    assert UpstreamFailure(_StatusError(status_code)).logged_status == status_code
 
 
-def test_failure_status_code_reads_an_attached_response() -> None:
-    assert failure_status_code(_ResponseStatusError(429)) == 429
+def test_the_logged_status_reads_an_attached_response() -> None:
+    assert UpstreamFailure(_ResponseStatusError(429)).logged_status == 429
 
 
-def test_failure_status_code_records_504_for_a_timeout() -> None:
+def test_the_logged_status_records_504_for_a_timeout() -> None:
     """A timeout carries no upstream status, so the gateway's own classification
     is recorded rather than leaving the row unclassifiable."""
     request = httpx.Request("POST", "http://upstream")
     for exc in (asyncio.TimeoutError(), httpx.TimeoutException("slow"), OpenAIAPITimeoutError(request=request)):
-        assert failure_status_code(exc) == 504
+        assert UpstreamFailure(exc).logged_status == 504
 
 
 @pytest.mark.parametrize("exc", [Exception(_RAW), ValueError(_RAW), httpx.ConnectError("refused")])
-def test_failure_status_code_falls_back_to_502(exc: BaseException) -> None:
+def test_the_logged_status_falls_back_to_502(exc: BaseException) -> None:
     """An unreachable or otherwise unclassifiable provider still gets a code, so
     every error row is groupable."""
-    assert failure_status_code(exc) == 502
+    assert UpstreamFailure(exc).logged_status == 502
 
 
-def test_failure_status_code_unwraps_original_exception() -> None:
+def test_the_logged_status_unwraps_original_exception() -> None:
     """An any-llm-wrapped error surfaces the inner status, matching how
-    ``classify_provider_error`` reads the same chain."""
+    ``UpstreamFailure.mapping`` reads the same chain."""
 
     class _WrappedByAnyLLM(Exception):
         def __init__(self, original_exception: BaseException) -> None:
             super().__init__(str(original_exception))
             self.original_exception = original_exception
 
-    assert failure_status_code(_WrappedByAnyLLM(_StatusError(429))) == 429
+    assert UpstreamFailure(_WrappedByAnyLLM(_StatusError(429))).logged_status == 429
 
 
-def test_failure_status_code_records_422_for_the_tool_loop_cap() -> None:
+def test_the_logged_status_records_422_for_the_tool_loop_cap() -> None:
     """The gateway's own tool-loop cap records 422, not the generic 502.
 
     The non-streaming path stamps 422 at its own ``except`` clause, but a
@@ -581,7 +564,7 @@ def test_failure_status_code_records_422_for_the_tool_loop_cap() -> None:
     prevent, and only on streaming traffic, so the two halves of the same failure
     would classify differently.
     """
-    assert failure_status_code(MaxToolIterationsExceeded("Exceeded max_tool_iterations=8")) == 422
+    assert UpstreamFailure(MaxToolIterationsExceeded("Exceeded max_tool_iterations=8")).logged_status == 422
 
 
 def test_reasoning_effort_tools_conflict_reaches_the_caller_verbatim() -> None:
@@ -590,14 +573,14 @@ def test_reasoning_effort_tools_conflict_reaches_the_caller_verbatim() -> None:
     PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL used to, for every rewording of
     it we would otherwise have to chase."""
     exc = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG)
-    assert classify_provider_error(exc) == (400, _REASONING_TOOLS_MSG)
+    assert UpstreamFailure(exc).mapping == (400, _REASONING_TOOLS_MSG)
 
 
 def test_upstream_message_read_from_original_exception() -> None:
     """The message is found when it lives only on ``original_exception`` (the
     any-llm unified-exception shape)."""
     original = _ParamError(400, None, "temperature must be between 0 and 2")
-    mapping = classify_provider_error(_WrappedError(400, original))
+    mapping = UpstreamFailure(_WrappedError(400, original)).mapping
     assert mapping is not None
     assert "temperature must be between 0 and 2" in mapping.detail
 
@@ -605,7 +588,7 @@ def test_upstream_message_read_from_original_exception() -> None:
 def test_upstream_message_and_unsupported_feature_read_from_nested_original_exceptions() -> None:
     """The shared chain walk handles arbitrarily nested any-llm wrappers."""
     nested = _WrappedError(400, _WrappedError(400, NotImplementedError(_CONTEXT_MANAGEMENT_MSG)))
-    mapping = classify_provider_error(nested)
+    mapping = UpstreamFailure(nested).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "context_management" in mapping.detail
@@ -651,7 +634,7 @@ def test_unsupported_feature_maps_to_400_with_the_reason() -> None:
     generic 500 telling the caller to retry something that can never succeed.
     The exception type carries the whole signal, so this needs no probe into
     any-llm's wording, and the message names the feature."""
-    mapping = classify_provider_error(NotImplementedError(_CONTEXT_MANAGEMENT_MSG))
+    mapping = UpstreamFailure(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "context_management" in mapping.detail
@@ -661,7 +644,7 @@ def test_unsupported_feature_maps_to_400_with_the_reason() -> None:
 def test_unsupported_feature_survives_the_unified_exception_wrapper() -> None:
     """The type check still fires once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the
     raw error, because the wrapper keeps it on ``original_exception``."""
-    mapping = classify_provider_error(_WrappedError(500, NotImplementedError(_CONTEXT_MANAGEMENT_MSG)))
+    mapping = UpstreamFailure(_WrappedError(500, NotImplementedError(_CONTEXT_MANAGEMENT_MSG))).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "context_management" in mapping.detail
@@ -676,7 +659,7 @@ def test_unsupported_container_maps_to_400_naming_the_param() -> None:
     Anthropic account can resolve the id. The rejection is permanent and the caller
     is the one who can fix it, so it owes a 400 naming the param rather than the
     generic 502 an unclassified failure would report as an upstream outage."""
-    mapping = classify_provider_error(NotImplementedError(_CONTAINER_MSG))
+    mapping = UpstreamFailure(NotImplementedError(_CONTAINER_MSG)).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "container" in mapping.detail
@@ -685,18 +668,18 @@ def test_unsupported_container_maps_to_400_naming_the_param() -> None:
 def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     """Typed any-llm capability failures are permanent caller errors, not 502s."""
     exc = UnsupportedParameterError("prompt_cache_key", "anthropic")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert mapping.detail == "'prompt_cache_key' is not supported for anthropic"
-    assert failure_status_code(exc) == 400
+    assert UpstreamFailure(exc).logged_status == 400
 
 
 def test_unsupported_parameter_carries_its_code() -> None:
     exc = UnsupportedParameterError("response_format", "bedrock")
 
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_parameter"}
-    assert refusal_code(exc) == "unsupported_parameter"
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "unsupported_parameter"}
+    assert UpstreamFailure(exc).error_code == "unsupported_parameter"
 
 
 def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> None:
@@ -719,8 +702,8 @@ def test_a_refusal_naming_no_parameter_carries_no_code() -> None:
     """An operation or feature a provider lacks (rerank, context_management) is no parameter to name."""
     exc = NotImplementedError(_CONTEXT_MANAGEMENT_MSG)
 
-    assert classify_provider_error(exc) is not None
-    assert provider_error_headers(exc, 400) is None
+    assert UpstreamFailure(exc).mapping is not None
+    assert UpstreamFailure(exc).headers is None
 
 
 def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -> None:
@@ -739,15 +722,15 @@ def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
         "bedrock",
         'request_body={"messages":[{"content":"secret prompt"}]}',
     )
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 400
-    assert mapping.detail == PROVIDER_BAD_REQUEST_DETAIL
+    assert mapping.detail == ProviderDetail.BAD_REQUEST
 
 
 def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:
     """The usage-log status follows the classification rather than the generic 502."""
-    assert failure_status_code(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)) == 400
+    assert UpstreamFailure(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)).logged_status == 400
 
 
 def test_rejected_param_maps_to_400_naming_the_param() -> None:
@@ -756,7 +739,7 @@ def test_rejected_param_maps_to_400_naming_the_param() -> None:
     and comes back as a TypeError with no HTTP status. It used to read as a
     generic 502, which reports a permanent mismatch as an upstream outage."""
     exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'seed'")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "'seed'" in mapping.detail
@@ -766,7 +749,7 @@ def test_rejected_param_detail_does_not_name_the_sdk_internals() -> None:
     """Only the param name crosses the boundary: the SDK's class and method are
     the gateway's implementation, not something a caller can act on."""
     exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'logit_bias'")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert "AsyncMessages" not in mapping.detail
     assert "create()" not in mapping.detail
@@ -776,7 +759,7 @@ def test_rejected_param_survives_the_unified_exception_wrapper() -> None:
     """Same unwrapping the other permanent-failure branches get, so the mapping
     keeps working once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the raw SDK error."""
     wrapped = _WrappedError(500, TypeError("create() got an unexpected keyword argument 'n'"))
-    mapping = classify_provider_error(wrapped)
+    mapping = UpstreamFailure(wrapped).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "'n'" in mapping.detail
@@ -784,7 +767,7 @@ def test_rejected_param_survives_the_unified_exception_wrapper() -> None:
 
 def test_rejected_param_is_recorded_as_400_on_the_usage_log() -> None:
     """The usage-log status follows the classification rather than the generic 502."""
-    assert failure_status_code(TypeError("create() got an unexpected keyword argument 'seed'")) == 400
+    assert UpstreamFailure(TypeError("create() got an unexpected keyword argument 'seed'")).logged_status == 400
 
 
 def test_operator_client_args_typo_is_not_the_callers_fault() -> None:
@@ -794,8 +777,8 @@ def test_operator_client_args_typo_is_not_the_callers_fault() -> None:
     caller for a parameter they cannot remove, and would drop a gateway
     misconfiguration off the error-rate panel as a 4xx."""
     exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'timeoutt'")
-    assert classify_provider_error(exc) is None
-    assert failure_status_code(exc) == 502
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).logged_status == 502
 
 
 def test_gateway_internal_signature_drift_is_not_the_callers_fault() -> None:
@@ -805,8 +788,8 @@ def test_gateway_internal_signature_drift_is_not_the_callers_fault() -> None:
     constructor drifted (mozilla-ai/otari#766) must not surface as a 400 naming
     an internal parameter."""
     exc = TypeError("_FakeSandboxBackend.__init__() got an unexpected keyword argument 'image'")
-    assert classify_provider_error(exc) is None
-    assert failure_status_code(exc) == 502
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).logged_status == 502
 
 
 def test_client_args_key_colliding_with_a_real_param_is_still_not_a_400() -> None:
@@ -814,13 +797,13 @@ def test_client_args_key_colliding_with_a_real_param_is_still_not_a_400() -> Non
     that happens to be a real request param. It is a constructor rejection, so
     the second gate keeps it a 502."""
     exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'seed'")
-    assert classify_provider_error(exc) is None
+    assert UpstreamFailure(exc).mapping is None
 
 
 def test_param_the_gateway_never_forwards_stays_unclassified() -> None:
     """A name outside the request-body surface cannot have come from the caller,
     whatever raised it."""
-    assert classify_provider_error(TypeError("post() got an unexpected keyword argument 'proxies'")) is None
+    assert UpstreamFailure(TypeError("post() got an unexpected keyword argument 'proxies'")).mapping is None
 
 
 def test_the_caller_fault_gate_excludes_the_params_the_schema_refuses() -> None:
@@ -837,36 +820,36 @@ def test_the_caller_fault_gate_excludes_the_params_the_schema_refuses() -> None:
 
     sensitive = min(SENSITIVE_PARAM_FIELDS)
     exc = TypeError(f"acompletion() got an unexpected keyword argument '{sensitive}'")
-    assert classify_provider_error(exc) is None
-    assert failure_status_code(exc) == 502
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).logged_status == 502
 
 
 def test_rejected_param_names_a_field_the_route_says_the_caller_set() -> None:
     """A pass-through route's fields are not completion params, so it names the
     ones the caller set, and only those can read as the caller's 400."""
     exc = TypeError("AsyncV2Client.embed() got an unexpected keyword argument 'encoding_format'")
-    assert classify_provider_error(exc) is None
+    assert UpstreamFailure(exc).mapping is None
 
-    mapping = classify_provider_error(exc, request_params={"encoding_format"})
+    mapping = UpstreamFailure(exc, request_params={"encoding_format"}).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "'encoding_format'" in mapping.detail
     assert "AsyncV2Client" not in mapping.detail
-    assert failure_status_code(exc, request_params={"encoding_format"}) == 400
+    assert UpstreamFailure(exc, request_params={"encoding_format"}).logged_status == 400
 
 
 def test_rejected_param_the_caller_did_not_set_stays_unclassified() -> None:
     """A keyword the route added itself is the gateway's mismatch, not the caller's."""
     exc = TypeError("embed() got an unexpected keyword argument 'inputs'")
-    assert classify_provider_error(exc, request_params={"input", "encoding_format"}) is None
-    assert failure_status_code(exc, request_params={"input", "encoding_format"}) == 502
+    assert UpstreamFailure(exc, request_params={"input", "encoding_format"}).mapping is None
+    assert UpstreamFailure(exc, request_params={"input", "encoding_format"}).logged_status == 502
 
 
 def test_unrelated_type_error_stays_unclassified() -> None:
     """A TypeError that is not a keyword-argument rejection carries no signal a
     caller could act on, so it keeps the generic 502 rather than becoming a 400
     that blames the caller for a gateway-side fault."""
-    assert classify_provider_error(TypeError("unsupported operand type(s) for +: 'int' and 'str'")) is None
+    assert UpstreamFailure(TypeError("unsupported operand type(s) for +: 'int' and 'str'")).mapping is None
 
 
 def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
@@ -904,15 +887,15 @@ def test_redacted_detail_keeps_the_redacted_explanation() -> None:
 def test_exposed_detail_is_length_capped() -> None:
     """A provider that echoes the offending request back does not get to put all
     of it in a response detail."""
-    mapping = classify_provider_error(_ParamError(400, None, "problem: " + "word " * 500))
+    mapping = UpstreamFailure(_ParamError(400, None, "problem: " + "word " * 500)).mapping
     assert mapping is not None
     assert len(mapping.detail) <= MAX_EXPOSED_DETAIL_CHARS
     assert mapping.detail.endswith("...")
 
 
 def test_caller_fault_falls_back_after_the_message_is_completely_redacted() -> None:
-    mapping = classify_provider_error(_ParamError(400, None, "token=supersecretvalue123"))
-    assert mapping == (400, PROVIDER_BAD_REQUEST_DETAIL)
+    mapping = UpstreamFailure(_ParamError(400, None, "token=supersecretvalue123")).mapping
+    assert mapping == (400, ProviderDetail.BAD_REQUEST)
 
 
 def test_redaction_strips_prefixless_32_character_api_keys() -> None:
@@ -972,14 +955,14 @@ def test_billing_exhaustion_maps_to_502_billing_detail(status_code: int, message
     account ran dry and every agent turn failed with "check the model name and
     parameters", sending the operator to debug a model alias for 10 hours."""
     exc = _ParamError(status_code, None, message)
-    assert classify_provider_error(exc) == (502, PROVIDER_BILLING_DETAIL)
+    assert UpstreamFailure(exc).mapping == (502, ProviderDetail.BILLING)
 
 
 def test_billing_exhaustion_read_from_original_exception() -> None:
     """The signal is picked up when it lives only on ``original_exception`` (the
     any-llm unified-exception shape)."""
     original = _ParamError(400, None, _ANTHROPIC_BILLING_MSG)
-    assert classify_provider_error(_WrappedError(400, original)) == (502, PROVIDER_BILLING_DETAIL)
+    assert UpstreamFailure(_WrappedError(400, original)).mapping == (502, ProviderDetail.BILLING)
 
 
 def test_billing_probe_is_gated_on_the_status_code() -> None:
@@ -987,8 +970,8 @@ def test_billing_probe_is_gated_on_the_status_code() -> None:
     existing classification, so the probe can only ever reinterpret a 400/402/422
     dead end. 500 stays unclassifiable (generic 502); 429 stays a rate limit,
     which is still an actionable signal for the caller."""
-    assert classify_provider_error(_ParamError(500, None, _ANTHROPIC_BILLING_MSG)) is None
-    assert classify_provider_error(_ParamError(429, None, "insufficient_quota")) == (429, "insufficient_quota")
+    assert UpstreamFailure(_ParamError(500, None, _ANTHROPIC_BILLING_MSG)).mapping is None
+    assert UpstreamFailure(_ParamError(429, None, "insufficient_quota")).mapping == (429, "insufficient_quota")
 
 
 def test_unrecognized_400_message_stays_a_caller_fault_400() -> None:
@@ -996,25 +979,25 @@ def test_unrecognized_400_message_stays_a_caller_fault_400() -> None:
     stays a 400 and now says what was actually wrong, which is the case that
     motivated passing the message through at all."""
     exc = _ParamError(400, None, "messages.3: tool_use ids were found without tool_result blocks")
-    assert classify_provider_error(exc) == (400, "messages.3: tool_use ids were found without tool_result blocks")
+    assert UpstreamFailure(exc).mapping == (400, "messages.3: tool_use ids were found without tool_result blocks")
 
 
 def test_billing_detail_does_not_leak_raw_message() -> None:
     """The billing detail is a fixed string; nothing from the upstream body is
     echoed to the caller."""
     exc = _ParamError(400, None, _ANTHROPIC_BILLING_MSG + " SECRET token=abc123")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
-    assert mapping.detail == PROVIDER_BILLING_DETAIL
+    assert mapping.detail == ProviderDetail.BILLING
     assert "SECRET" not in mapping.detail
     assert "Anthropic" not in mapping.detail
 
 
-def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
+def test_the_logged_status_keeps_the_upstream_status_for_billing() -> None:
     """The usage log keeps the status the provider actually returned, so "how much
     of my error rate is an empty wallet" stays answerable even though the caller
     saw a 502."""
-    assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
+    assert UpstreamFailure(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)).logged_status == 400
 
 
 # ---------------------------------------------------------------------------
@@ -1027,7 +1010,7 @@ def test_status_less_invalid_request_error_maps_to_400() -> None:
     bedrock, and anthropic for bad request shapes) must map to HTTP 400 with
     the provider's own explanation, not fall through to the generic 502."""
     exc = InvalidRequestError("max_tokens exceeds context window for this model")
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "max_tokens" in mapping.detail
@@ -1048,7 +1031,7 @@ def test_status_less_invalid_request_error_survives_wrapped_error() -> None:
     """The InvalidRequestError type check fires when it lives on
     ``original_exception`` rather than on the failure itself."""
     original = InvalidRequestError("invalid message role: 'system'")
-    mapping = classify_provider_error(_StatusLessWrapper(original))
+    mapping = UpstreamFailure(_StatusLessWrapper(original)).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert "invalid message role" in mapping.detail
@@ -1068,7 +1051,7 @@ def test_a_carried_status_wins_over_an_invalid_request_error_in_the_chain(
     these into a client 400, which is how a rejected credential's message would
     have reached the caller."""
     wrapped = _WrappedError(status_code, InvalidRequestError("upstream text"))
-    mapping = classify_provider_error(wrapped)
+    mapping = UpstreamFailure(wrapped).mapping
     assert mapping is not None
     assert mapping.status_code == expected_status
 
@@ -1078,17 +1061,17 @@ def test_a_credential_failure_keeps_its_fixed_detail_over_a_chained_invalid_requ
     message never reaches the caller, which is the invariant
     ``redact_upstream_message`` documents about itself."""
     wrapped = _WrappedError(401, InvalidRequestError("sk-ant-would-leak-here"))
-    mapping = classify_provider_error(wrapped)
+    mapping = UpstreamFailure(wrapped).mapping
     assert mapping is not None
-    assert mapping.detail == PROVIDER_CREDENTIALS_DETAIL
+    assert mapping.detail == ProviderDetail.CREDENTIALS
     assert "sk-ant" not in mapping.detail
 
 
 def test_status_less_invalid_request_error_is_recorded_as_400() -> None:
-    """failure_status_code records 400 for a status-less InvalidRequestError so
+    """The log records 400 for a status-less InvalidRequestError so
     the usage log reflects the real classification, not the generic 502."""
     exc = InvalidRequestError("unknown parameter 'response_format'")
-    assert failure_status_code(exc) == 400
+    assert UpstreamFailure(exc).logged_status == 400
 
 
 def test_invalid_request_error_with_status_is_classified_by_status() -> None:
@@ -1096,7 +1079,7 @@ def test_invalid_request_error_with_status_is_classified_by_status() -> None:
     rerouted by the type-based branch; the status branch handles it as usual."""
     exc = InvalidRequestError("bad request shape")
     exc.status_code = 400
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
     assert mapping is not None
     assert mapping.status_code == 400
 
@@ -1104,16 +1087,16 @@ def test_invalid_request_error_with_status_is_classified_by_status() -> None:
 def test_a_prompt_too_long_for_the_model_has_its_own_code() -> None:
     exc = ContextLengthExceededError("prompt is too long", status_code=400)
 
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert mapping.status_code == 400
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "context_length_exceeded"}
-    assert refusal_code(exc) == "context_length_exceeded"
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "context_length_exceeded"}
+    assert UpstreamFailure(exc).error_code == "context_length_exceeded"
 
 
 def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
-    event = openai_error_event(OPENAI_STREAM_FORMAT, refusal_code(_rate_limited_with("3")))
+    event = openai_error_event(OPENAI_STREAM_FORMAT, UpstreamFailure(_rate_limited_with("3")).error_code)
 
     payload = json.loads(event.removeprefix("data: "))
     assert payload["error"]["code"] == "upstream_rate_limited"
@@ -1122,7 +1105,8 @@ def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
 
 def test_a_stream_error_event_names_a_cause_the_unstreamed_error_would() -> None:
     exc = TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
-    event = openai_error_event(OPENAI_STREAM_FORMAT, stream_error_code(exc), stream_error_message(exc))
+    failure = UpstreamFailure(exc)
+    event = openai_error_event(OPENAI_STREAM_FORMAT, failure.stream_code, failure.stream_message)
 
     payload = json.loads(event.removeprefix("data: "))
     assert payload["error"] == {
@@ -1133,14 +1117,14 @@ def test_a_stream_error_event_names_a_cause_the_unstreamed_error_would() -> None
 
 
 def test_a_stream_error_event_keeps_the_fixed_message_for_a_failure_that_names_no_cause() -> None:
-    assert stream_error_message(_StatusError(503)) == "The provider failed the request with HTTP 503"
-    assert stream_error_message(RuntimeError("bug")) is None
-    assert stream_error_message(HTTPException(status_code=400, detail="internal")) is None
+    assert UpstreamFailure(_StatusError(503)).stream_message == "The provider failed the request with HTTP 503"
+    assert UpstreamFailure(RuntimeError("bug")).stream_message is None
+    assert UpstreamFailure(HTTPException(status_code=400, detail="internal")).stream_message is None
 
 
 def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
-    assert stream_error_code(_rate_limited_with("3")) == "upstream_rate_limited"
-    assert stream_error_code(ContextLengthExceededError("prompt is too long", status_code=400)) == (
+    assert UpstreamFailure(_rate_limited_with("3")).stream_code == "upstream_rate_limited"
+    assert UpstreamFailure(ContextLengthExceededError("prompt is too long", status_code=400)).stream_code == (
         "context_length_exceeded"
     )
 
@@ -1157,7 +1141,7 @@ def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
     ids=["rejected", "unavailable", "unreachable", "any-llm", "rejected-param"],
 )
 def test_a_stream_the_provider_failed_is_coded_as_a_provider_error(exc: Exception) -> None:
-    assert stream_error_code(exc) == "provider_error"
+    assert UpstreamFailure(exc).stream_code == "provider_error"
 
 
 @pytest.mark.parametrize(
@@ -1171,8 +1155,8 @@ def test_a_stream_the_provider_failed_is_coded_as_a_provider_error(exc: Exceptio
     ids=["no-finish", "chunked-body-cut", "reset", "sdk-wrapped"],
 )
 def test_a_stream_the_provider_ended_early_has_its_own_code_and_message(exc: Exception) -> None:
-    assert stream_error_code(exc) == "provider_stream_interrupted"
-    assert stream_error_message(exc) == "The provider's stream ended before it finished"
+    assert UpstreamFailure(exc).stream_code == "provider_stream_interrupted"
+    assert UpstreamFailure(exc).stream_message == "The provider's stream ended before it finished"
 
 
 @pytest.mark.parametrize(
@@ -1181,7 +1165,7 @@ def test_a_stream_the_provider_ended_early_has_its_own_code_and_message(exc: Exc
     ids=["tool-cap", "gateway-bug", "uncoded-refusal"],
 )
 def test_a_stream_the_gateway_failed_is_not_blamed_on_the_provider(exc: Exception) -> None:
-    assert stream_error_code(exc) is None
+    assert UpstreamFailure(exc).stream_code is None
 
 
 # ---------------------------------------------------------------------------
@@ -1202,18 +1186,18 @@ def _bedrock_error(code: str, message: str, status_code: int | None) -> ClientEr
 def test_bedrock_validation_error_is_a_caller_fault_400() -> None:
     exc = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400)
 
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert mapping.status_code == 400
     assert mapping.detail == _BEDROCK_INVALID_MODEL
-    assert failure_status_code(exc) == 400
+    assert UpstreamFailure(exc).logged_status == 400
 
 
 def test_bedrock_caller_fault_detail_is_still_redacted() -> None:
     exc = _bedrock_error("ValidationException", f"Rejected {_RAW}", 400)
 
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert "abc123" not in mapping.detail
@@ -1224,7 +1208,7 @@ def test_bedrock_caller_fault_detail_hides_the_aws_account() -> None:
     arn = "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/abc1"
     exc = _bedrock_error("ValidationException", f"The provisioned model {arn} is not ready.", 400)
 
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert mapping.status_code == 400
@@ -1256,7 +1240,7 @@ def test_bedrock_account_quota_is_the_gateways_fault() -> None:
         "ServiceQuotaExceededException", "Your request exceeded the service quota for your account.", 400
     )
 
-    assert classify_provider_error(exc) == (502, PROVIDER_ACCOUNT_QUOTA_DETAIL)
+    assert UpstreamFailure(exc).mapping == (502, ProviderDetail.ACCOUNT_QUOTA)
 
 
 def test_bedrock_throttling_forwards_its_retry_after() -> None:
@@ -1269,38 +1253,38 @@ def test_bedrock_throttling_forwards_its_retry_after() -> None:
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
     exc = _bedrock_error("AccessDeniedException", f"User arn:aws:iam::123456789012:user/otari {_RAW}", 403)
 
-    assert classify_provider_error(exc) == (424, PROVIDER_CREDENTIALS_DETAIL)
-    assert failure_status_code(exc) == 403
+    assert UpstreamFailure(exc).mapping == (424, ProviderDetail.CREDENTIALS)
+    assert UpstreamFailure(exc).logged_status == 403
 
 
 def test_bedrock_throttling_is_an_upstream_rate_limit() -> None:
     exc = _bedrock_error("ThrottlingException", "Too many requests, please wait before trying again.", 429)
 
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert mapping.status_code == 429
-    assert refusal_code(exc) == "upstream_rate_limited"
+    assert UpstreamFailure(exc).error_code == "upstream_rate_limited"
 
 
 def test_bedrock_service_failure_stays_the_generic_502() -> None:
     exc = _bedrock_error("ServiceUnavailableException", _RAW, 503)
 
-    assert classify_provider_error(exc) is None
-    assert failure_status_code(exc) == 503
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).logged_status == 503
 
 
 def test_bedrock_error_without_a_status_stays_unclassified() -> None:
     exc = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, None)
 
-    assert classify_provider_error(exc) is None
-    assert failure_status_code(exc) == 502
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).logged_status == 502
 
 
 def test_bedrock_status_is_read_through_the_unified_exception_wrapper() -> None:
     wrapper = convert_exception(_bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400), "bedrock")
 
-    mapping = classify_provider_error(wrapper)
+    mapping = UpstreamFailure(wrapper).mapping
 
     assert mapping is not None
     assert mapping.status_code == 400
@@ -1377,11 +1361,11 @@ def test_a_transient_or_unplaced_failure_stays_retryable(exc: BaseException) -> 
 
 def test_an_exhausted_provider_account_is_not_worth_retrying() -> None:
     billing = _ParamError(400, None, "Your credit balance is too low to access the Anthropic API.")
-    mapping = classify_provider_error(billing)
+    mapping = UpstreamFailure(billing).mapping
     assert mapping is not None
     assert mapping.status_code == 502
     assert is_retry_futile(billing)
-    assert with_retry_hint(billing, mapping.status_code, provider_error_headers(billing, 502)) == _NO_RETRY
+    assert with_retry_hint(billing, mapping.status_code, UpstreamFailure(billing).headers) == _NO_RETRY
 
 
 def test_an_account_quota_stays_retryable() -> None:
@@ -1398,7 +1382,7 @@ def test_the_retry_hint_keeps_the_refusal_headers() -> None:
 def test_no_retry_is_not_sent_below_500() -> None:
     """A client SDK does not retry a 4xx it answers, so the header would say nothing there."""
     rejected = TypeError("create() got an unexpected keyword argument 'seed'")
-    mapping = classify_provider_error(rejected)
+    mapping = UpstreamFailure(rejected).mapping
     assert mapping is not None
     assert mapping.status_code == 400
     assert with_retry_hint(rejected, mapping.status_code, None) is None
@@ -1479,8 +1463,8 @@ def test_a_provider_rejection_reaches_the_caller_as_the_providers_own_sentence(
 ) -> None:
     exc = convert_exception(upstream, "provider") if unified else upstream
 
-    assert classify_provider_error(exc) == (400, expected)
-    assert stream_error_message(exc) == expected
+    assert UpstreamFailure(exc).mapping == (400, expected)
+    assert UpstreamFailure(exc).stream_message == expected
 
 
 def test_a_prompt_too_long_reaches_the_caller_unwrapped_and_keeps_its_code() -> None:
@@ -1489,16 +1473,16 @@ def test_a_prompt_too_long_reaches_the_caller_unwrapped_and_keeps_its_code() -> 
     )
     exc = convert_exception(upstream, "openai")
 
-    assert classify_provider_error(exc) == (400, _OPENAI_CONTEXT_MSG)
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "context_length_exceeded"}
+    assert UpstreamFailure(exc).mapping == (400, _OPENAI_CONTEXT_MSG)
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "context_length_exceeded"}
 
 
 def test_a_provider_404_and_429_read_the_body_too() -> None:
     not_found = _openai_status_error(404, _openai_error("The model `gpt-9` does not exist", code="model_not_found"))
     rate_limited = _openai_status_error(429, _openai_error("Rate limit reached for gpt-4o on tokens per min"))
 
-    assert classify_provider_error(not_found) == (404, "The model `gpt-9` does not exist")
-    assert classify_provider_error(rate_limited) == (429, "Rate limit reached for gpt-4o on tokens per min")
+    assert UpstreamFailure(not_found).mapping == (404, "The model `gpt-9` does not exist")
+    assert UpstreamFailure(rate_limited).mapping == (429, "Rate limit reached for gpt-4o on tokens per min")
 
 
 def test_cohere_response_headers_never_reach_the_caller() -> None:
@@ -1508,15 +1492,15 @@ def test_cohere_response_headers_never_reach_the_caller() -> None:
         CohereBadRequestError(body={"id": "a1b2"}, headers=_COHERE_HEADERS),
     ):
         for exc in (upstream, convert_exception(upstream, "cohere")):
-            mapping = classify_provider_error(exc)
+            mapping = UpstreamFailure(exc).mapping
             assert mapping is not None
             assert "x-debug-trace-id" not in mapping.detail
             assert "f3a9c2" not in mapping.detail
             assert "headers" not in mapping.detail
 
-    assert classify_provider_error(CohereBadRequestError(body={"id": "a1b2"}, headers=_COHERE_HEADERS)) == (
+    assert UpstreamFailure(CohereBadRequestError(body={"id": "a1b2"}, headers=_COHERE_HEADERS)).mapping == (
         400,
-        PROVIDER_BAD_REQUEST_DETAIL,
+        ProviderDetail.BAD_REQUEST,
     )
 
 
@@ -1525,7 +1509,7 @@ def test_a_body_message_is_still_redacted() -> None:
         400, _openai_error("Invalid key sk-proj-ABCDEFGHIJKLMNOP for https://proxy.internal/v1")
     )
 
-    mapping = classify_provider_error(upstream)
+    mapping = UpstreamFailure(upstream).mapping
 
     assert mapping is not None
     assert "sk-proj-ABCDEFGHIJKLMNOP" not in mapping.detail
@@ -1537,7 +1521,7 @@ def test_a_body_message_echoing_the_request_falls_back_without_reading_the_sdk_s
     """When the body's message is refused as a payload echo, the dict repr around it is not tried instead."""
     upstream = _openai_status_error(400, _openai_error("messages: [{'role': 'user', 'content': 'my secret prompt'}]"))
 
-    assert classify_provider_error(upstream) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+    assert UpstreamFailure(upstream).mapping == (400, ProviderDetail.BAD_REQUEST)
 
 
 @pytest.mark.parametrize(
@@ -1545,12 +1529,12 @@ def test_a_body_message_echoing_the_request_falls_back_without_reading_the_sdk_s
     [
         ('{"object": "error", "message": "Invalid model: foo", "type": "invalid_model"}', "Invalid model: foo"),
         ("Unknown field 'foo'", "Unknown field 'foo'"),
-        ("<html><body><h1>400 Bad Request</h1></body></html>", PROVIDER_BAD_REQUEST_DETAIL),
-        ("{not json", PROVIDER_BAD_REQUEST_DETAIL),
+        ("<html><body><h1>400 Bad Request</h1></body></html>", ProviderDetail.BAD_REQUEST),
+        ("{not json", ProviderDetail.BAD_REQUEST),
         ({"error": "model is required"}, "model is required"),
         ({"error": "invalid_request_error", "message": "model is required"}, "model is required"),
-        ({"error": {"code": 400}}, PROVIDER_BAD_REQUEST_DETAIL),
-        (["not", "a", "mapping"], PROVIDER_BAD_REQUEST_DETAIL),
+        ({"error": {"code": 400}}, ProviderDetail.BAD_REQUEST),
+        (["not", "a", "mapping"], ProviderDetail.BAD_REQUEST),
     ],
     ids=[
         "json-text",
@@ -1567,19 +1551,19 @@ def test_body_shapes_other_sdks_attach(body: object, expected: str) -> None:
     exc = _StatusError(400)
     exc.body = body  # type: ignore[attr-defined]
 
-    assert classify_provider_error(exc) == (400, expected)
+    assert UpstreamFailure(exc).mapping == (400, expected)
 
 
 def test_a_billing_message_in_the_body_is_still_the_gateways_fault() -> None:
     upstream = _anthropic_bad_request("Your credit balance is too low to access the Anthropic API.")
 
-    assert classify_provider_error(upstream) == (502, PROVIDER_BILLING_DETAIL)
+    assert UpstreamFailure(upstream).mapping == (502, ProviderDetail.BILLING)
 
 
 def test_a_credential_rejection_never_echoes_its_body() -> None:
     upstream = _openai_status_error(401, _openai_error("Incorrect API key provided: sk-proj-ABCDEFGHIJKLMNOP"))
 
-    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+    assert UpstreamFailure(upstream).mapping == (424, ProviderDetail.CREDENTIALS)
 
 
 # ---------------------------------------------------------------------------
@@ -1604,11 +1588,11 @@ def test_an_openai_403_invalid_request_is_the_callers_400_with_the_providers_sen
 
     assert is_upstream_request_fault(exc)
     assert not is_provider_credential_rejection(exc)
-    assert classify_provider_error(exc) == (400, _OPENAI_LOGPROBS_MSG)
-    assert provider_error_headers(exc, 400) is None
-    assert stream_error_code(exc) != PROVIDER_CREDENTIAL_REJECTED
+    assert UpstreamFailure(exc).mapping == (400, _OPENAI_LOGPROBS_MSG)
+    assert UpstreamFailure(exc).headers is None
+    assert UpstreamFailure(exc).stream_code != PROVIDER_CREDENTIAL_REJECTED
     # The row keeps the provider's own status.
-    assert failure_status_code(exc) == 403
+    assert UpstreamFailure(exc).logged_status == 403
 
 
 @pytest.mark.parametrize(
@@ -1624,13 +1608,13 @@ def test_an_openai_403_invalid_request_is_the_callers_400_with_the_providers_sen
 def test_a_403_about_the_key_stays_a_rejected_credential(upstream: Exception) -> None:
     assert not is_upstream_request_fault(upstream)
     assert is_provider_credential_rejection(upstream)
-    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+    assert UpstreamFailure(upstream).mapping == (424, ProviderDetail.CREDENTIALS)
 
 
 def test_a_401_is_a_rejected_credential_whatever_its_body_says() -> None:
     upstream = _openai_status_error(401, _openai_error("Incorrect API key provided"))
     assert not is_upstream_request_fault(upstream)
-    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+    assert UpstreamFailure(upstream).mapping == (424, ProviderDetail.CREDENTIALS)
 
 
 def test_attempts_that_all_hit_a_request_fault_403_share_the_callers_400() -> None:
@@ -1642,7 +1626,7 @@ def test_attempts_that_all_hit_a_request_fault_403_share_the_callers_400() -> No
 
 
 # ---------------------------------------------------------------------------
-# provider_failure_detail: what the 502 says happened upstream
+# UpstreamFailure.detail: what the 502 says happened upstream
 # ---------------------------------------------------------------------------
 
 
@@ -1668,16 +1652,16 @@ def test_a_provider_failure_left_to_the_502_says_what_happened_upstream(
 ) -> None:
     exc = convert_exception(upstream, "openai") if unified else upstream
 
-    assert classify_provider_error(exc) is None
-    detail = provider_failure_detail(exc)
+    assert UpstreamFailure(exc).mapping is None
+    detail = UpstreamFailure(exc).unclassified_detail()
     assert detail == expected
     assert _RAW not in detail
     assert "internal-proxy" not in detail
 
 
 def test_a_failure_inside_the_gateway_keeps_the_fixed_detail() -> None:
-    assert provider_failure_detail(RuntimeError("bug at /srv/otari")) == PROVIDER_ERROR_DETAIL
-    assert provider_failure_detail(RuntimeError("bug"), "fallback") == "fallback"
+    assert UpstreamFailure(RuntimeError("bug at /srv/otari")).unclassified_detail() == ProviderDetail.ERROR
+    assert UpstreamFailure(RuntimeError("bug")).unclassified_detail("fallback") == "fallback"
 
 
 def test_the_502_keeps_its_retry_behavior() -> None:
@@ -1704,20 +1688,20 @@ def _image_rejections() -> list[Exception]:
 
 @pytest.mark.parametrize("exc", _image_rejections(), ids=["fireworks", "cohere", "fireworks-unified", "cohere-unified"])
 def test_an_image_the_model_cannot_take_is_one_400_with_one_code(exc: Exception) -> None:
-    mapping = classify_provider_error(exc, model="cohere:command-r7b-12-2024")
+    mapping = UpstreamFailure(exc, model="cohere:command-r7b-12-2024").mapping
 
     assert mapping == (400, f"The model 'cohere:command-r7b-12-2024' {_IMAGE_DETAIL_TAIL}")
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_content"}
-    assert refusal_code(exc) == "unsupported_content"
-    assert failure_status_code(exc) == 400
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "unsupported_content"}
+    assert UpstreamFailure(exc).error_code == "unsupported_content"
+    assert UpstreamFailure(exc).logged_status == 400
 
 
 def test_an_image_rejection_without_a_model_names_the_serving_model() -> None:
     exc = _image_rejections()[0]
 
-    assert classify_provider_error(exc) == (400, f"The model serving this request {_IMAGE_DETAIL_TAIL}")
-    assert stream_error_code(exc) == "unsupported_content"
-    assert stream_error_message(exc) == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
+    assert UpstreamFailure(exc).mapping == (400, f"The model serving this request {_IMAGE_DETAIL_TAIL}")
+    assert UpstreamFailure(exc).stream_code == "unsupported_content"
+    assert UpstreamFailure(exc).stream_message == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
 
 
 def test_an_image_rejection_is_recorded_on_the_usage_row_in_the_gateways_words() -> None:
@@ -1725,15 +1709,15 @@ def test_an_image_rejection_is_recorded_on_the_usage_row_in_the_gateways_words()
 
     # Cohere's string form redacts to nothing, which left the row reading "LLM provider error".
     assert redact_upstream_message(str(cohere)) == ""
-    assert failure_error_message(cohere) == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
-    assert failure_error_message(_StatusError(400)) == _RAW
+    assert UpstreamFailure(cohere).logged_message == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
+    assert UpstreamFailure(_StatusError(400)).logged_message == _RAW
 
 
 def test_an_image_mention_on_a_gateway_fault_is_not_an_image_rejection() -> None:
     exc = _openai_status_error(503, _openai_error(_COHERE_IMAGE_MSG))
 
-    assert classify_provider_error(exc) is None
-    assert provider_error_headers(exc, 503) is None
+    assert UpstreamFailure(exc).mapping is None
+    assert UpstreamFailure(exc).headers is None
 
 
 def test_an_image_refusal_in_wording_not_seen_yet_keeps_the_providers_sentence() -> None:
@@ -1741,8 +1725,8 @@ def test_an_image_refusal_in_wording_not_seen_yet_keeps_the_providers_sentence()
     message = "Invalid content type. image_url is only supported by certain models."
     exc = _openai_status_error(400, _openai_error(message))
 
-    assert classify_provider_error(exc) == (400, message)
-    assert provider_error_headers(exc, 400) is None
+    assert UpstreamFailure(exc).mapping == (400, message)
+    assert UpstreamFailure(exc).headers is None
 
 
 def test_attempts_that_all_refuse_the_image_share_one_400() -> None:
@@ -1852,7 +1836,7 @@ def test_a_stream_error_event_carries_the_providers_failure() -> None:
     assert failure is not None
 
     event = openai_error_event(
-        OPENAI_STREAM_FORMAT, stream_error_code(exc), stream_error_message(exc), failure.as_dict()
+        OPENAI_STREAM_FORMAT, UpstreamFailure(exc).stream_code, UpstreamFailure(exc).stream_message, failure.as_dict()
     )
 
     payload = json.loads(event.removeprefix("data: "))
@@ -1893,15 +1877,15 @@ def test_a_structured_output_failure_carries_its_code_and_drops_the_failed_gener
     upstream = _groq_json_validate_failed(message)
     exc = convert_exception(upstream, "groq") if unified else upstream
 
-    assert classify_provider_error(exc) == (400, expected)
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
-    assert stream_error_code(exc) == "structured_output_failed"
-    assert stream_error_message(exc) == expected
+    assert UpstreamFailure(exc).mapping == (400, expected)
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "structured_output_failed"}
+    assert UpstreamFailure(exc).stream_code == "structured_output_failed"
+    assert UpstreamFailure(exc).stream_message == expected
 
 
 def test_a_structured_output_failure_never_relays_the_partial_generation() -> None:
     exc = _groq_json_validate_failed(_GROQ_JSON_FAILED_MSG)
-    mapping = classify_provider_error(exc)
+    mapping = UpstreamFailure(exc).mapping
 
     assert mapping is not None
     assert "Fixes a" not in mapping.detail
@@ -1910,7 +1894,7 @@ def test_a_structured_output_failure_never_relays_the_partial_generation() -> No
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
-        ("See 'failed_generation' for more details.", PROVIDER_BAD_REQUEST_DETAIL),
+        ("See 'failed_generation' for more details.", ProviderDetail.BAD_REQUEST),
         ("Output was not valid JSON for the schema.", "Output was not valid JSON for the schema."),
     ],
     ids=["pointer-only", "no-pointer"],
@@ -1919,12 +1903,12 @@ def test_a_structured_output_failure_detail_without_a_sentence_of_its_own(messag
     """A message that is only the pointer falls back to the generic detail; one without it is kept whole."""
     exc = _groq_json_validate_failed(message)
 
-    assert classify_provider_error(exc) == (400, expected)
-    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "structured_output_failed"}
+    assert UpstreamFailure(exc).mapping == (400, expected)
+    assert UpstreamFailure(exc).headers == {"Otari-Error-Code": "structured_output_failed"}
 
 
 def test_a_400_with_another_provider_code_carries_no_structured_output_code() -> None:
     exc = _openai_status_error(400, _openai_error(_GROQ_JSON_FAILED_MSG, code="invalid_value"))
 
-    assert classify_provider_error(exc) == (400, _GROQ_JSON_FAILED_MSG)
-    assert provider_error_headers(exc, 400) is None
+    assert UpstreamFailure(exc).mapping == (400, _GROQ_JSON_FAILED_MSG)
+    assert UpstreamFailure(exc).headers is None

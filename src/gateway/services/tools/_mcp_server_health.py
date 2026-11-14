@@ -206,13 +206,23 @@ def _is_recent(checked_at: str, interval_s: float) -> bool:
     return datetime.now(UTC) - at < timedelta(seconds=interval_s)
 
 
+# A server's throttle entry: its id and the URL a contact reached, so an edited URL starts afresh.
+_Key = tuple[uuid.UUID, str]
+
+
 class McpServerContacts:
     """Records on a stored server what real requests find when they talk to it.
 
     Neither method waits or raises: the write runs in a task of its own, on a Unit of Work of its
-    own, and a failure there is logged. One server is written at most once per
-    ``interval_s`` per process unless its status changes, and :func:`health_after_contact` holds
-    the stored row to the same interval across processes.
+    own, and a failure there is logged.
+
+    The throttle has one rule: once a write has decided what a server at a URL looks like, another
+    contact with the same status is not handed to a write for ``interval_s``, unless it brings a
+    listing the decided one lacked. Only the write sets that entry, so a contact the write
+    discarded (one user's 401 or 403 on a per-user server) never counts, and a contact arriving
+    while another write is in flight is held back only by an identical one. At most
+    ``_MAX_PENDING_WRITES`` writes run at once. :func:`health_after_contact` holds the stored row to
+    the same interval across processes.
     """
 
     def __init__(
@@ -225,10 +235,12 @@ class McpServerContacts:
         self._unit_of_work = unit_of_work
         self._interval_s = interval_s
         self._clock = clock
-        # When each server was last handed to a write, with which status, and whether it carried a listing.
-        self._seen: dict[uuid.UUID, tuple[float, bool, bool]] = {}
-        # Per-user servers a write found, and when: one user's 401 or 403 there is never stored.
-        self._per_user: dict[uuid.UUID, float] = {}
+        # When a write last decided each server's health, with which status, and whether it had a listing.
+        self._seen: dict[_Key, tuple[float, bool, bool]] = {}
+        # When a write last found one user's refusal on a per-user server, which is never stored.
+        self._per_user: dict[_Key, float] = {}
+        # The contacts handed to a write that has not finished: their failure, and whether they listed.
+        self._in_flight: dict[_Key, set[tuple[CheckFailure | None, bool]]] = {}
         # Held so a running write is not collected before it finishes.
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -262,16 +274,19 @@ class McpServerContacts:
             )
 
     def _record(self, contact: McpServerContact) -> None:
+        key = (contact.server_id, contact.url)
         ok = contact.failure is None
         listed = contact.listing is not None
         now = self._clock()
         if contact.failure in _ONE_USERS_REFUSAL:
-            learned = self._per_user.get(contact.server_id)
+            learned = self._per_user.get(key)
             if learned is not None and now - learned < self._interval_s:
                 return
-        last = self._seen.get(contact.server_id)
-        # A listing after a contact that listed nothing is let through once, so the catalog is stored.
+        last = self._seen.get(key)
         if last is not None and last[1] == ok and (last[2] or not listed) and now - last[0] < self._interval_s:
+            return
+        pending = self._in_flight.get(key, set())
+        if any(failure == contact.failure and (had_listing or not listed) for failure, had_listing in pending):
             return
         if len(self._tasks) >= _MAX_PENDING_WRITES:
             return
@@ -279,12 +294,12 @@ class McpServerContacts:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        if len(self._seen) >= _MAX_REMEMBERED_SERVERS:
+        if len(self._seen) + len(self._per_user) >= _MAX_REMEMBERED_SERVERS:
             self._seen.clear()
             self._per_user.clear()
-        handed = (now, ok, listed)
-        self._seen[contact.server_id] = handed
-        task = loop.create_task(self._write(contact, handed, last), name="mcp-server-contact")
+        handed = (contact.failure, listed)
+        self._in_flight.setdefault(key, set()).add(handed)
+        task = loop.create_task(self._write(contact, handed), name="mcp-server-contact")
         self._tasks.add(task)
         task.add_done_callback(self._finished)
 
@@ -293,54 +308,53 @@ class McpServerContacts:
         if not task.cancelled() and (failure := task.exception()) is not None:
             logger.warning("MCP server contact not recorded error_class=%s", type(failure).__name__)
 
-    async def _write(
-        self,
-        contact: McpServerContact,
-        handed: tuple[float, bool, bool] | None = None,
-        before: tuple[float, bool, bool] | None = None,
-    ) -> None:
+    async def _write(self, contact: McpServerContact, handed: tuple[CheckFailure | None, bool]) -> None:
+        """Hand ``contact`` to :meth:`_store`, and set the throttle from what it decided."""
+        key = (contact.server_id, contact.url)
         try:
-            async with self._unit_of_work() as uow, uow:
-                server = await WorkspaceMcpServerRepository(uow).find(contact.server_id, lock=True)
-                # A request that resolved the server before its URL was edited describes the old one.
-                if server is None or server.url != contact.url:
-                    return
-                per_user = server.credential_mode == McpCredentialMode.PER_USER
-                if per_user and contact.failure in _ONE_USERS_REFUSAL:
-                    self._discarded(contact.server_id, handed, before)
-                    return
-                health = health_after_contact(
-                    server.health,
-                    allowed_tools=server.allowed_tools,
-                    per_user=per_user,
-                    contact=contact,
-                    interval_s=self._interval_s,
-                )
-                if health is None:
-                    return
-                server.health = health
+            outcome = await self._store(contact)
         except DATABASE_ERRORS as exc:
-            self._seen.pop(contact.server_id, None)
             logger.warning(
                 "MCP server contact not recorded server_id=%s %s", contact.server_id, describe_database_error(exc)
             )
             return
-        logger.info("MCP server contact recorded server_id=%s outcome=%s", contact.server_id, contact.failure or "ok")
+        finally:
+            pending = self._in_flight.get(key)
+            if pending is not None:
+                pending.discard(handed)
+                if not pending:
+                    del self._in_flight[key]
+        if outcome == "decided":
+            self._seen[key] = (self._clock(), contact.failure is None, contact.listing is not None)
+        elif outcome == "discarded":
+            self._per_user[key] = self._clock()
 
-    def _discarded(
-        self,
-        server_id: uuid.UUID,
-        handed: tuple[float, bool, bool] | None,
-        before: tuple[float, bool, bool] | None,
-    ) -> None:
-        """Take back the throttle entry of a contact that was not stored, so a real failure after it is."""
-        self._per_user[server_id] = self._clock()
-        if handed is None or self._seen.get(server_id) != handed:
-            return
-        if before is None:
-            del self._seen[server_id]
-        else:
-            self._seen[server_id] = before
+    async def _store(self, contact: McpServerContact) -> Literal["decided", "discarded", "stale"]:
+        """Write what ``contact`` says to the server's row, when it says something new.
+
+        ``decided``: the row now says what the contact says. ``discarded``: one user's refusal on a
+        per-user server, never stored. ``stale``: the server is gone or no longer at the contact's URL.
+        """
+        async with self._unit_of_work() as uow, uow:
+            server = await WorkspaceMcpServerRepository(uow).find(contact.server_id, lock=True)
+            # A request that resolved the server before its URL was edited describes the old one.
+            if server is None or server.url != contact.url:
+                return "stale"
+            per_user = server.credential_mode == McpCredentialMode.PER_USER
+            if per_user and contact.failure in _ONE_USERS_REFUSAL:
+                return "discarded"
+            health = health_after_contact(
+                server.health,
+                allowed_tools=server.allowed_tools,
+                per_user=per_user,
+                contact=contact,
+                interval_s=self._interval_s,
+            )
+            if health is None:
+                return "decided"
+            server.health = health
+        logger.info("MCP server contact recorded server_id=%s outcome=%s", contact.server_id, contact.failure or "ok")
+        return "decided"
 
     async def drain(self) -> None:
         """Wait for the writes in flight, for a shutdown or a test that reads what they stored."""
