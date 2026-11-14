@@ -10,6 +10,9 @@ from gateway.services.organizations._claimed_domains import (
     ClaimedDomains,
     OrganizationClaimedDomains,
 )
+from gateway.services.organizations._delivery import InvitationDelivery
+from gateway.services.organizations._delivery_rule import DeliveryRule
+from gateway.services.organizations._invitation_facts import InvitationFactsReader
 from gateway.services.organizations._invitation_mail_limit import InvitationMailLimit
 from gateway.services.organizations._sso_enforcement import SsoEnforcement
 from gateway.services.organizations._user_access import UserAccess
@@ -20,6 +23,9 @@ __all__ = [
     "BudgetUse",
     "ClaimedDomain",
     "ClaimedDomains",
+    "DeliveryRule",
+    "InvitationDelivery",
+    "InvitationFactsReader",
     "InvitationMailLimit",
     "OrganizationClaimedDomains",
     "SsoEnforcement",

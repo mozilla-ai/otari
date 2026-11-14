@@ -29,6 +29,7 @@ from gateway.api.deps import (
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_invitation_delivery,
     build_scheduled_catalog_update,
     build_search_tool_refresh,
     build_search_tool_service,
@@ -118,6 +119,7 @@ from gateway.services.model_discovery_service import (
     run_discovery_refresher,
 )
 from gateway.services.oauth_service import callback_landing_target
+from gateway.services.organizations import InvitationDelivery
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -640,6 +642,10 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
+    _LifespanWorker(
+        "invitation email",
+        lambda config, _container: InvitationDelivery.poll(lambda uow: build_invitation_delivery(uow, config)),
+    ),
     # A trace is kept for its retention and no longer.
 )
 

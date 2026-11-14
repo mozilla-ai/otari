@@ -22,12 +22,15 @@ class OrganizationInvitation(Base):
     """An invitation to join an organization that has not been accepted.
 
     An accepted or canceled invitation has no row.
+    ``next_send_at`` is when the invitation email is next due, and is None when no email is due.
+    ``delivery_attempts`` counts the attempts to deliver the invitation email.
     """
 
     __tablename__ = "organization_invitation"
     __table_args__ = (
         UniqueConstraint("organization_id", "email", name="uq_organization_invitation_organization_email"),
         Index("ix_organization_invitation_expires_at", "expires_at"),
+        Index("ix_organization_invitation_next_send_at", "next_send_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -45,6 +48,8 @@ class OrganizationInvitation(Base):
     declined_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     send_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_send_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    next_send_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC), nullable=False)
 
 
