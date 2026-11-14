@@ -2528,9 +2528,9 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
         )
 
     assert exc_info.value.status_code == 500
-    # The caller can neither see nor fix a stored server, so the name stays in
-    # the log, as it does for a stored URL that fails its safety check.
-    assert exc_info.value.detail == MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    # The caller can neither see nor fix a stored server: a 5xx through `domain_error`
+    # keeps its message, and the name, in the log.
+    assert MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL not in str(exc_info.value.detail)
     assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
