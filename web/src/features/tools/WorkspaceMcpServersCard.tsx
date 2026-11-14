@@ -411,6 +411,7 @@ export function WorkspaceMcpServersCard({
 
       {manages && hasCatalog ? (
         <McpServerRequestsBlock
+          key={selected.workspace_id}
           workspaceId={selected.workspace_id}
           onAdd={openRequested}
         />
