@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from gateway.core.config import GatewayConfig
 from gateway.services.catalog import metadata_entry, offering_model_type
 from gateway.services.health_checks._probe import HealthCheckOffering, is_chat_model
 from gateway.services.model_catalog_service import cached_models_dev_catalog
@@ -21,7 +20,7 @@ def _call_kwargs(credential: ResolvedHostedProvider) -> dict[str, Any]:
     return kwargs
 
 
-async def list_hosted_offerings(hosted: HostedProviderService, config: GatewayConfig) -> list[HealthCheckOffering]:
+async def list_hosted_offerings(hosted: HostedProviderService) -> list[HealthCheckOffering]:
     """Each model switched on under an enabled hosted provider whose credential reads, in selector order.
 
     The deployment's own view, so a provider restricted to one organization is

@@ -191,7 +191,7 @@ class OrganizationScopedBudgetAlreadyExistsError(TenancyConflictError):
     not.
     """
 
-    def __init__(self, scope_type: object, scope_id: object):
+    def __init__(self, scope_type: object):
         super().__init__(
             f"A spend ceiling already exists for this {scope_type} and provider. Edit that ceiling instead."
         )
