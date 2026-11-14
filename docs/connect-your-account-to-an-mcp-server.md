@@ -83,7 +83,10 @@ a member is asked to connect again the next time their token is renewed.
 After you save a client secret again, Otari renews no one's sign-in on that
 server until somebody signs in once more, which records the sign-in server the
 secret may go to. A member whose sign-in expires before then is asked to sign
-in again; the first sign-in by anyone sets renewals going for everyone else.
+in again. Once somebody has signed in, renewals resume for every connection
+made through the same sign-in server. If the server moved its sign-in to a new
+address, connections made before the move cannot renew, and each of those
+members signs in again when their sign-in expires.
 
 ## Connect your account
 
