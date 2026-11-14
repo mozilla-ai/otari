@@ -3,7 +3,7 @@
 The Fetch spec hides a response header from cross-origin script unless
 ``Access-Control-Expose-Headers`` names it, so a header left off
 ``_CORS_EXPOSE_HEADERS`` reaches a browser and stays invisible to the page that
-asked for it (#3016). Each ``Otari-*`` literal under ``src/gateway`` is therefore
+asked for it. Each ``Otari-*`` literal under ``src/gateway`` is therefore
 either exposed or named below as a header only requests carry, and anything
 unclassified fails, so a new response header cannot be added without that
 decision being made.
