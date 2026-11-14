@@ -214,6 +214,46 @@ describe("McpServerRequestsBlock", () => {
     expect(calls.at(-1)?.url).toMatch(/\?skip=25&limit=25$/)
   })
 
+  it("offers Retry and the previous page when a later page fails", async () => {
+    const servers = Array.from({ length: 26 }, (_, index) =>
+      group({ catalog_name: `server-${index}`, title: `Server ${index}` }),
+    )
+    const calls = mockApi(servers)
+    const listed = vi.mocked(globalThis.fetch).getMockImplementation()
+    let fails = true
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (fails && String(input).includes("skip=25")) {
+        calls.push({ url: String(input), method: "GET", body: undefined })
+        return Response.json({ detail: "Down" }, { status: 503 })
+      }
+      return (listed as typeof fetch)(input, init)
+    })
+    const user = userEvent.setup()
+    renderBlock()
+
+    await screen.findByRole("region", { name: "Requests for Server 0" })
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    expect(await screen.findByRole("alert")).toBeVisible()
+    expect(
+      screen.queryByRole("region", { name: /^Requests for / }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Previous page" }))
+    expect(
+      await screen.findByRole("region", { name: "Requests for Server 0" }),
+    ).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+    expect(await screen.findByRole("alert")).toBeVisible()
+    fails = false
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    expect(
+      await screen.findByRole("region", { name: "Requests for Server 25" }),
+    ).toBeVisible()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("has no pager while every server fits on one page", async () => {
     mockApi([group()])
     renderBlock()

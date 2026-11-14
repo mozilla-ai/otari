@@ -93,7 +93,32 @@ export function McpServerRequestsBlock({
   if (page > lastPage) setPage(lastPage)
 
   const groups = requests.data?.data ?? []
-  if (groups.length === 0) return <ErrorBanner error={requests.error} />
+  if (groups.length === 0) {
+    if (!requests.isError) return null
+    // A page that failed with nothing kept for it has no pager to leave by.
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ErrorBanner error={requests.error} />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onPress={() => void requests.refetch()}
+            isPending={requests.isFetching}
+            className="min-h-11 md:min-h-0"
+          >
+            Retry
+          </Button>
+          {page > 0 ? (
+            <Button
+              onPress={() => setPage(page - 1)}
+              className="min-h-11 md:min-h-0"
+            >
+              Previous page
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   const openDecline = (group: McpServerRequestGroup) => {
     decline.reset()
