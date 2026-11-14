@@ -613,7 +613,7 @@ def test_a_workspace_count_the_library_refuses_leaves_the_instances_count(caplog
 
 @pytest.mark.parametrize("count", [0, True, "5", 2.5])
 def test_on_the_old_code_a_count_that_is_not_a_positive_whole_number_sets_no_count(count: object) -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly")
 
     resolved = _in_loop(config, request={"max_results": count})
 
@@ -814,7 +814,7 @@ def test_the_direct_endpoint_leaves_the_workspace_layer_out() -> None:
 
 
 def test_what_runs_on_the_old_backend_takes_its_options_unchecked() -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly")
 
     resolved = _in_loop(config, workspace={"anything": 1}, request={"whatever": 2, "max_chars": 3})
 

@@ -1737,7 +1737,7 @@ def test_an_unnamed_call_runs_on_the_credential_the_port_answers(
 ) -> None:
     client = default_tool_client
     headers = _keyed(client, master_key_header, "port-key")
-    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    credential = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tavily-key")
     _stub_policy(client, _policy(credential=credential))
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
     with patch("gateway.services.search_backend.run_keyed_search", keyed):
@@ -1752,15 +1752,15 @@ def test_a_failure_on_the_organization_key_names_the_keys_provider_in_the_header
 ) -> None:
     client = default_tool_client
     headers = _keyed(client, master_key_header, "port-key-failure")
-    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    credential = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tavily-key")
     _stub_policy(client, _policy(credential=credential))
-    keyed = AsyncMock(side_effect=SearchProviderError("brave answered 503", tag="http_error", status=503))
+    keyed = AsyncMock(side_effect=SearchProviderError("tavily answered 503", tag="http_error", status=503))
     with patch("gateway.services.search_backend.run_keyed_search", keyed):
         resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 502
-    # Brave, not the default tool's fake provider.
-    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("brave", "503", "http_error", "true")
+    # Tavily, not the default tool's fake provider.
+    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("tavily", "503", "http_error", "true")
 
 
 def test_the_ceiling_the_port_answers_lowers_the_count(client: TestClient, api_key_header: dict[str, str]) -> None:
@@ -2434,3 +2434,50 @@ def test_a_fetch_tool_named_like_the_legacy_engine_keeps_it_from_direct_search(
         assert named.json()["detail"].startswith("No search tools are configured.")
         assert catalog.json()["data"] == []
         assert seen == []
+
+
+_BRAVE_ANSWER = {
+    "web": {"results": [{"url": "https://example.com/brave", "title": "Brave", "description": "A snippet."}]}
+}
+
+
+def test_a_legacy_brave_pair_serves_a_direct_search_on_its_adapter(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    legacy = {"search_tools": {}, "web_search_provider": "brave", "web_search_provider_api_key": "brv-ours"}
+    for client in _client_on(test_config, **legacy):
+        headers = _keyed(client, master_key_header, "legacy-brave")
+        seen = _provider_answers(client, _BRAVE_ANSWER)
+
+        resp = client.post(
+            f"{API_ROOT}/search/brave",
+            json={**SEARCH_PAYLOAD, "include_raw": True, "provider_options": {"country": "DE"}},
+            headers=headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["search_tool"] == "brave"
+        assert resp.json()["results"][0]["url"] == "https://example.com/brave"
+        assert resp.json()["raw"] == _BRAVE_ANSWER
+        [request] = seen
+        assert (request.url.host, request.url.path) == ("api.search.brave.com", "/res/v1/web/search")
+        assert request.headers["x-subscription-token"] == "brv-ours"
+        assert (request.url.params["q"], request.url.params["country"]) == (SEARCH_PAYLOAD["query"], "DE")
+
+
+def test_an_unnamed_call_on_a_brave_organization_key_runs_on_its_adapter(
+    default_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = default_tool_client
+    headers = _keyed(client, master_key_header, "brave-key-user")
+    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    _stub_policy(client, _policy(credential=credential))
+    seen = _provider_answers(client, _BRAVE_ANSWER)
+
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["results"][0]["url"] == "https://example.com/brave"
+    [request] = seen
+    assert (request.url.host, request.headers["x-subscription-token"]) == ("api.search.brave.com", "brave-key")

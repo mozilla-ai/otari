@@ -386,3 +386,31 @@ The first provider whose price per call depends on an option.
 - Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
+
+### 2026-11-14, Brave (any-search)
+
+The first provider that replaced old gateway code for a provider otari's own settings still name.
+
+- A refused key need not be a 401: Brave answers it with a 422 and `error.code`
+  `SUBSCRIPTION_TOKEN_INVALID`, the same status as a count out of range (`VALIDATION`). Take the
+  tag from the code, so the two stay apart; `detail` and `meta` can quote the request (a missing
+  header's `input`), so neither is read.
+- A provider can ignore a value it does not validate: Brave answers `freshness=zz` with results,
+  as if no filter was set. Map the shared parameters to values the provider documents, since
+  nothing will say a wrong one was dropped.
+- "Found nothing" can be a missing section: a Brave search with no web results has no `web` at
+  all, not an empty list. Treat the section's absence as no hits, and a section of the wrong type
+  as `unexpected_response`.
+- A provider's answer can hold more than the envelope reads: Brave's default answer adds videos,
+  news and a `mixed` ranking beside `web`. Leave them in `raw`, keep the provider's default, and
+  offer its own filter (`result_filter`).
+- A key's plan can be slower than the provider's published rate: the recording key allowed one
+  request a second (`x-ratelimit-limit: 1, 2000`), so back-to-back live tests got 429s. `EXPECTED`
+  takes a `wait` for such a provider, and the live tests sleep that long before each of its calls.
+- httpx writes a boolean parameter as `true` or `false`, which is Brave's spelling, so the adapter
+  passes booleans as they are. A `None` goes out as an empty value, so leave it out.
+- The gateway refuses an option value outside its `enum` when a tool or a key is saved. Give an
+  option an `enum` only for a short list the provider is unlikely to extend (`safesearch`), and
+  leave a long one that it validates itself (`country`) to the provider.
+- Fixture recipes: `normal` with `--max-results 2` and `result_filter=web` keeps it small; `empty`
+  with `site:` set to a domain that does not exist; `error` with a made-up key.

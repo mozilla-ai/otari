@@ -1613,7 +1613,7 @@ unset an exported `OTARI_WEB_SEARCH_URL` there too.
 ### The older in-loop backend
 
 The older in-loop backend still serves some requests until it is removed: a
-search on `web_search_provider`, or on a Tavily or Brave organization key, and a
+search on `web_search_provider: tavily`, or on a Tavily organization key, and a
 request that declares only the fetch tool. `web_fetch_default_tool` governs every
 fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
 search instance serves the request: the older backend keeps its fixed limit of 10

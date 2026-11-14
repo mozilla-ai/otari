@@ -565,7 +565,8 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         {"provider": "mojeek", "kind": "fetch"},
         {"provider": "exa", "api_key": None},
         {"provider": "tavily", "api_base": "https://tavily.example"},
-        {"provider": "brave", "options": {"country": "de"}},
+        {"provider": "tavily", "options": {"topic": "news"}},
+        {"provider": "brave", "options": {"no_such_option": 1}},
         {"provider": "exa", "api_base": "http://exa.example"},
         {"provider": "exa", "options": {"no_such_option": 1}},
     ],
@@ -577,7 +578,8 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         "fetch-on-a-search-provider",
         "keyless-on-a-keyed-provider",
         "tavily-endpoint",
-        "brave-options",
+        "tavily-options",
+        "brave-unknown-option",
         "key-over-http",
         "unknown-option",
     ],
@@ -885,6 +887,50 @@ def test_a_pinned_exa_key_searches_in_the_loop_and_is_billed_as_the_organization
     line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
     assert (line["label"], line["units"]) == ("org:exa", 1)
     assert line["cost"] == pytest.approx(billed)
+
+
+def test_a_pinned_brave_key_searches_in_the_loop_on_its_adapter(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    no_search_of_its_own: None,
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    key = _add_key(client, master_key_header, provider="brave", api_key="brave-org-secret")
+    client.patch(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key['id']}",
+        json={"is_default": True},
+        headers=master_key_header,
+    )
+    _price(client, master_key_header, "otari:web_search", 0.002)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        hit = {"url": "https://a.example", "title": "A", "description": "About A."}
+        return httpx.Response(200, json={"web": {"results": [hit]}})
+
+    _answer_provider_calls(client, answer)
+    with _scripted(_call("web_search", '{"query": "otari"}'), _call("", "")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "q"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    [request] = seen
+    assert (request.url.host, request.url.path) == ("api.search.brave.com", "/res/v1/web/search")
+    assert request.headers["x-subscription-token"] == "brave-org-secret"
+    line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
+    assert (line["label"], line["units"]) == ("org:brave", 1)
+    assert line["cost"] == pytest.approx(0.002)
 
 
 def test_a_fetch_key_serves_the_fetch_tool(
