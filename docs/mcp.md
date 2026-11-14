@@ -193,8 +193,10 @@ server's page and in the form that adds one; the server's row under
   reached, does not answer within 10 seconds, whose URL fails its safety check or
   whose stored credential will not decrypt is dropped from that request, with the
   reason in the log, and the request goes on without it. A request's attached
-  servers get 15 seconds between them, so several that hang cost one wait, not
-  one each. A server the request named still fails it.
+  servers get 15 seconds between them to renew their tokens, and another 15
+  between them to connect, so several that hang cost one wait of each kind, not
+  one each, and the worst case before the model is called is about 30 seconds.
+  A server the request named still fails it.
 - **Streaming works the same way.** The loop runs gateway tool calls between
   rounds and streams only what the model writes for the user.
 - **Loop limits and the bill.** The loop stops after `max_tool_iterations` rounds
@@ -287,7 +289,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   change to the server's URL, its OAuth client or its credential mode. For
   each of these, Otari also asks the authorization server to revoke the
   tokens, best effort and only after the removal has committed; a removal
-  that rolls back revokes nothing. The request goes only to the revocation
+  that rolls back revokes nothing. One removal asks for at most 500
+  connections to be revoked: past that, the rest are removed here without
+  being revoked, so a server with more connected users than that needs its
+  tokens ended at the provider. The request goes only to the revocation
   endpoint recorded at sign-in: where that is no longer the approved one,
   nothing is sent and the connection is still removed.
 - **Moving the server to another origin drops its OAuth client.** A client ID
@@ -319,9 +324,10 @@ curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
 - **The access list still comes first.** A key the ACL denies is told the
   server does not exist, whether or not its user has signed in.
 
-A per-user server's connection check runs with the connection of the person
-asking. Until a manager who has signed in checks it, saving the server checks
-its sign-in setup instead: `health` reports `sign_in_unsupported` for an
+A per-user server's connection check never uses a stored connection, the
+manager's own included. Checking it starts a sign-in made for that check alone:
+its token is used once, for the check, and kept nowhere. Until a manager has
+checked it that way, saving the server checks its sign-in setup instead: `health` reports `sign_in_unsupported` for an
 authorization server without S256 PKCE and `sign_in_unavailable` for metadata
 that could not be read, and stays `null` when the setup is usable.
 
