@@ -140,7 +140,8 @@ async def list_mcp_server_connections(
     """List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
 
     Each entry names the user the connection belongs to and, when that user
-    is a dashboard account, its email and name, oldest connection first.
+    is a dashboard account, its email and name: the caller's own connection
+    first, then the rest oldest first.
     `count` is the total. Tokens are never included.
     """
     return await service.server_connections(

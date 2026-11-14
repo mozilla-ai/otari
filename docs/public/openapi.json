@@ -13960,11 +13960,17 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "server_count": {
+            "description": "How many catalog servers have a request pending, for paging `data`",
+            "title": "Server Count",
+            "type": "integer"
           }
         },
         "required": [
           "data",
-          "count"
+          "count",
+          "server_count"
         ],
         "title": "McpServerRequestGroupsPublic",
         "type": "object"
@@ -60561,7 +60567,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
       "get": {
-        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names the first five\nwho asked, with their notes, and `requester_count` says how many asked in all; the\n`requesters` list pages through the rest. Each also carries the catalog's entry for the server\nas it is now. A page holds `limit` servers after the first `skip`; `count` says how many\nrequests wait in all.",
+        "description": "The workspace's pending requests, one entry per catalog server, the longest-waiting first.\n\nOrganization owners/admins or this workspace's owners/admins. Each entry names the first five\nwho asked, with their notes, and `requester_count` says how many asked in all; the\n`requesters` list pages through the rest. Each also carries the catalog's entry for the server\nas it is now. A page holds `limit` servers after the first `skip`; `count` says how many\nrequests wait in all, and `server_count` how many servers they ask for.",
         "operationId": "mcp-servers-list_mcp_server_requests",
         "parameters": [
           {
@@ -62115,7 +62121,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections": {
       "get": {
-        "description": "List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.\n\nEach entry names the user the connection belongs to and, when that user\nis a dashboard account, its email and name, oldest connection first.\n`count` is the total. Tokens are never included.",
+        "description": "List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.\n\nEach entry names the user the connection belongs to and, when that user\nis a dashboard account, its email and name: the caller's own connection\nfirst, then the rest oldest first.\n`count` is the total. Tokens are never included.",
         "operationId": "mcp-connections-list_mcp_server_connections",
         "parameters": [
           {

@@ -11,7 +11,7 @@ from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Never
 
-from sqlalchemy import ColumnElement, delete, event, func, select
+from sqlalchemy import ColumnElement, case, delete, event, func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,12 +84,18 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return (await self.db.execute(counted)).scalar_one()
 
-    async def for_server(self, server_id: uuid.UUID, *, skip: int, limit: int) -> list[McpUserConnection]:
-        """A page of a server's connections, oldest first."""
+    async def for_server(
+        self, server_id: uuid.UUID, *, skip: int, limit: int, first_user_id: str | None = None
+    ) -> list[McpUserConnection]:
+        """A page of a server's connections, ``first_user_id``'s first when it has one, then oldest first."""
         rows = await self.db.execute(
             select(McpUserConnection)
             .where(McpUserConnection.server_id == server_id)
-            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+            .order_by(
+                case((McpUserConnection.user_id == first_user_id, 0), else_=1),
+                McpUserConnection.created_at,
+                McpUserConnection.id,
+            )
             .offset(skip)
             .limit(limit)
         )

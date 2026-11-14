@@ -2417,15 +2417,19 @@ class WorkspaceMcpServerService:
     async def server_connections(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, skip: int = 0, limit: int = 100
     ) -> McpServerConnectionsPublic:
-        """A page of who is connected to a server, oldest first, plus the total. Workspace managers only.
+        """A page of who is connected to a server, plus the total. Workspace managers only.
 
-        A connection's user is named by the dashboard account it belongs to, when it is one's.
+        The caller's own connection comes first, then the rest oldest first, so a page the dashboard
+        shows is the one this returns. A connection's user is named by the dashboard account it
+        belongs to, when it is one's.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
         connections = McpUserConnectionRepository(self.db)
         count = await connections.count_for_server(server.id)
-        rows = await connections.for_server(server.id, skip=skip, limit=min(limit, _MAX_LIST_LIMIT))
+        rows = await connections.for_server(
+            server.id, skip=skip, limit=min(limit, _MAX_LIST_LIMIT), first_user_id=str(user.id)
+        )
         identity_ids: dict[str, uuid.UUID] = {}
         for row in rows:
             try:

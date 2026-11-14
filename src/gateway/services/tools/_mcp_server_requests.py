@@ -309,7 +309,8 @@ class McpServerRequestService:
 
         A page holds ``limit`` servers after the first ``skip``, the one waited for longest first, and
         the first ``MAX_REQUESTERS_LISTED`` requests of each. Each server's ``requester_count`` says
-        how many wait for it, and :meth:`requesters` pages through the rest.
+        how many wait for it, and :meth:`requesters` pages through the rest. ``count`` totals the
+        requests and ``server_count`` the servers, which is what pages ``data``.
         """
         workspace = await self._workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self._workspaces.require_workspace_management_access(user=user, workspace=workspace)
@@ -321,8 +322,10 @@ class McpServerRequestService:
             )
             waiting = await self._requests.count_pending_by_server(workspace.id, names)
             count = sum(waiting.values())
+            server_count = len(names)
             if skip > 0 or len(names) == limit:
                 count = await self._requests.count_pending_in_workspace(workspace.id)
+                server_count = await self._requests.count_pending_servers(workspace.id)
         people = await self._people(rows)
         entries = await self._catalog.servers_by_names(list({row.catalog_name for row in rows}))
         groups: dict[str, McpServerRequestGroupPublic] = {}
@@ -339,7 +342,7 @@ class McpServerRequestService:
                     first_requested_at=row.created_at,
                 )
             group.requesters.append(_requester(row, people))
-        return McpServerRequestGroupsPublic(data=list(groups.values()), count=count)
+        return McpServerRequestGroupsPublic(data=list(groups.values()), count=count, server_count=server_count)
 
     async def requesters(
         self,
