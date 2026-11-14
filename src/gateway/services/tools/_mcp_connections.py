@@ -1017,8 +1017,9 @@ class McpConnectionService:
         if pending.identity_id is not None and pending.identity_id != identity_id:
             logger.warning("MCP sign-in refused reason=other_identity server_id=%s", pending.server_id)
             raise McpConnectionFlowError("This sign-in was started by another person. Start your own.")
+        # Simple string comparison (RFC 9207 section 2.4) with the issuer the metadata named, verbatim.
         if (iss is not None or pending.requires_iss) and (
-            iss is None or pending.issuer is None or iss.rstrip("/") != pending.issuer.rstrip("/")
+            iss is None or pending.issuer is None or iss != pending.issuer
         ):
             logger.warning("MCP sign-in refused reason=issuer_mismatch server_id=%s", pending.server_id)
             raise McpConnectionFlowError("This answer did not come from the server you were signing in to.")

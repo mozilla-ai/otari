@@ -1878,7 +1878,7 @@ async def test_an_organization_manager_outside_the_workspace_may_still_connect(
     ("sends_iss", "iss", "connects"),
     [
         (True, ISSUER, True),
-        (True, ISSUER + "/", True),
+        (True, ISSUER + "/", False),
         (True, None, False),
         (True, "https://93.184.216.99", False),
         (False, None, True),
