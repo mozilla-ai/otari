@@ -8067,7 +8067,7 @@ export interface paths {
          *     who asked, with their notes, and `requester_count` says how many asked in all; the
          *     `requesters` list pages through the rest. Each also carries the catalog's entry for the server
          *     as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
-         *     requests wait in all.
+         *     requests wait in all, and `server_count` how many servers they ask for.
          */
         get: operations["mcp-servers-list_mcp_server_requests"];
         put?: never;
@@ -8523,7 +8523,8 @@ export interface paths {
          * @description List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
          *
          *     Each entry names the user the connection belongs to and, when that user
-         *     is a dashboard account, its email and name, oldest connection first.
+         *     is a dashboard account, its email and name: the caller's own connection
+         *     first, then the rest oldest first.
          *     `count` is the total. Tokens are never included.
          */
         get: operations["mcp-connections-list_mcp_server_connections"];
@@ -15660,6 +15661,11 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["McpServerRequestGroupPublic"][];
+            /**
+             * Server Count
+             * @description How many catalog servers have a request pending, for paging `data`
+             */
+            server_count: number;
         };
         /**
          * McpServerRequestPublic

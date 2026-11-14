@@ -424,6 +424,8 @@ async def test_both_lists_page_and_a_managers_page_keeps_each_servers_requests_t
     assert [(group.catalog_name, len(group.requesters)) for group in second.data] == [(LINEAR[0], 1)]
     assert past.data == []
     assert first.count == second.count == past.count == 3
+    # `count` totals the requests; the servers they ask for are what a page of `data` holds.
+    assert first.server_count == second.server_count == past.server_count == 2
 
     newest = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, limit=1)
     older = await world.requests.mine(user=team.ada, workspace_id=team.workspace.id, skip=1, limit=1)
@@ -481,6 +483,7 @@ async def test_one_busy_server_cannot_crowd_another_out_of_the_page_and_says_how
         (LINEAR[0], 1, 1),
     ]
     assert listed.count == cap + 4
+    assert listed.server_count == 2
 
 
 @pytest.mark.asyncio
@@ -537,7 +540,7 @@ def test_the_request_lists_take_a_bounded_page(client: TestClient) -> None:
     assert client.get(f"{base}?limit=501", headers=_MASTER).status_code == 422
     assert client.get(f"{base}/mine?limit=101", headers=_MASTER).status_code == 422
     assert client.get(f"{base}?skip=-1", headers=_MASTER).status_code == 422
-    assert client.get(f"{base}?skip=5&limit=5", headers=_MASTER).json() == {"data": [], "count": 0}
+    assert client.get(f"{base}?skip=5&limit=5", headers=_MASTER).json() == {"data": [], "count": 0, "server_count": 0}
 
 
 @pytest.mark.asyncio

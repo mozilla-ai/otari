@@ -52,7 +52,7 @@ async def list_mcp_server_requests(
     who asked, with their notes, and `requester_count` says how many asked in all; the
     `requesters` list pages through the rest. Each also carries the catalog's entry for the server
     as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
-    requests wait in all.
+    requests wait in all, and `server_count` how many servers they ask for.
     """
     return await service.pending(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
