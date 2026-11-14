@@ -797,7 +797,7 @@ async def test_a_caller_that_may_not_read_files_is_refused_only_for_one_it_named
         config=GatewayConfig(),
         caps=_NATIVE,
         fmt="anthropic" if block.get("type") == "image" else "openai",
-        files=_FakeFiles(),
+        files=_FakeFiles(),  # type: ignore[arg-type]
         user_id="u",
         may_read_files=False,
     )

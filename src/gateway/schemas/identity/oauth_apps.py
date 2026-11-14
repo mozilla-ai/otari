@@ -52,8 +52,14 @@ class AppAuthorizationResponse(BaseModel):
 
 
 class AppTokenResponse(BaseModel):
+    """A minted app key, as RFC 6749 section 5.1 shapes it."""
+
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"
+    scope: str = Field(
+        description="The scopes the key holds, space delimited. Fewer than the registration names "
+        "where the person approved it before an operator narrowed it."
+    )
 
 
 class AppRevocationRequest(BaseModel):

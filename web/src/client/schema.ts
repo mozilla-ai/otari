@@ -9536,7 +9536,7 @@ export interface components {
             response_type: "code";
             /**
              * Scopes
-             * @description The scopes the consent screen showed. A registration that no longer names these is refused.
+             * @description The scopes the consent screen showed. The key holds these and what the registration still names, so one added since the screen was drawn is left out and one removed since takes effect.
              */
             scopes: components["schemas"]["KeyScope"][];
             /** State */
@@ -9595,10 +9595,18 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppTokenResponse */
+        /**
+         * AppTokenResponse
+         * @description A minted app key, as RFC 6749 section 5.1 shapes it.
+         */
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Scope
+             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
+             */
+            scope: string;
             /**
              * Token Type
              * @default Bearer

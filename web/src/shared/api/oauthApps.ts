@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   AppAuthorizationResponse,
   AppDetails,
@@ -38,7 +38,6 @@ export function useAuthorizeOAuthApp(
   params: URLSearchParams,
   scopes: readonly KeyScope[],
 ) {
-  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (workspaceId: string) =>
       apiFetch<AppAuthorizationResponse>("/oauth/apps/authorize", {
@@ -55,9 +54,5 @@ export function useAuthorizeOAuthApp(
         }),
       }),
     onSuccess: (result) => window.location.assign(result.redirect_uri),
-    // A refusal means the app's registration no longer matches what was shown,
-    // so the screen is redrawn from the server rather than resending it.
-    onError: () =>
-      queryClient.invalidateQueries({ queryKey: [OAUTH_APPS, "client"] }),
   })
 }

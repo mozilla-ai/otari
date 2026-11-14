@@ -76,23 +76,22 @@ class OAuthAppService:
         return self.ui_link("/#/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
-        """Record explicit consent without leaving an active key for an abandoned approval.
-
-        The key holds what the consent screen showed and the registration still
-        names, so a registration widened since the screen was drawn cannot
-        exceed what the person approved, and one narrowed since takes effect.
+        """Record explicit consent, for the scopes the screen showed that the registration still names.
 
         Raises:
-            OAuthAppGrantError: the registration and the screen now share no scope.
+            OAuthAppGrantError: the registration and the screen share no scope.
         """
         self.require_registered_redirect(request.client_id, request.redirect_uri)
         registered = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
-        # The caller's own list is read, never checked as a key's: a rule it
-        # breaks is a scope the registration does not name, which narrows it.
-        still_granted = set(request.scopes) & set(registered)
-        if not still_granted:
-            raise OAuthAppGrantError("invalid_request", "The app's access changed while you were approving it")
-        approved = KeyScopeSet.checked(still_granted, is_service_key=False)
+        approved = registered & request.scopes
+        if not approved:
+            raise OAuthAppGrantError("invalid_scope", "The app's access changed while you were approving it")
+        if approved != registered:
+            logger.info(
+                "OAuth app approval narrowed: client_id=%s dropped=%s",
+                request.client_id,
+                ",".join(scope.value for scope in registered if scope not in approved),
+            )
         now = self.clock()
         code = secrets.token_urlsafe(32)
         async with self.uow:
@@ -117,8 +116,13 @@ class OAuthAppService:
             await self.grants.prune_expired(now)
         return request.redirect_uri + "?" + urlencode({"code": code, "state": request.state, "iss": self.issuer})
 
-    async def exchange(self, request: AppTokenRequest) -> str:
-        """Consume the approval and mint its key atomically, under current membership and restrictions."""
+    async def exchange(self, request: AppTokenRequest) -> tuple[str, KeyScopeSet]:
+        """Consume the approval and mint its key atomically, under current membership and restrictions.
+
+        Returns:
+            The key and the scopes it holds, which the token response names because they can be
+            fewer than the app's registration.
+        """
         if request.client_id not in self.apps:
             logger.warning("OAuth app exchange refused: client_id=%s reason=unknown_client", request.client_id)
             raise OAuthAppGrantError("invalid_client", "Unknown app")
@@ -130,7 +134,7 @@ class OAuthAppService:
             logger.warning("OAuth app exchange refused: client_id=%s reason=%s", request.client_id, str(exc))
             raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant") from None
 
-    async def _exchange(self, request: AppTokenRequest) -> str:
+    async def _exchange(self, request: AppTokenRequest) -> tuple[str, KeyScopeSet]:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
@@ -152,7 +156,7 @@ class OAuthAppService:
             )
             if not await self.grants.consume(grant.code_hash, now):
                 raise OAuthAppGrantError("invalid_grant", "Authorization grant was already consumed")
-            return await self.keys.issue_app_key(
+            key = await self.keys.issue_app_key(
                 user=user,
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
@@ -160,6 +164,7 @@ class OAuthAppService:
                 scopes=held,
                 key_format=self.key_format,
             )
+            return key, held
 
     async def revoke(self, token: str) -> None:
         """Revoke only the presented API key; an unknown token is a successful no-op."""

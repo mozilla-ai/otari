@@ -17,6 +17,7 @@ from gateway.schemas.identity.oauth_apps import AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.identity import OAuthAppService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
+from gateway.types.key_scope import KeyScopeSet
 
 
 @pytest.mark.asyncio
@@ -28,7 +29,7 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         code_hash="hash",
         user_id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
-        scopes=["inference:run"],
+        scopes=KeyScopeSet.checked(["inference:run"], is_service_key=False),
         expires_at=now + timedelta(seconds=1),
     )
     grants.consume.return_value = True
@@ -55,7 +56,10 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         code="c" * 43,
         code_verifier="v" * 43,
     )
-    assert await service.exchange(request) == "issued-token"
+    assert await service.exchange(request) == (
+        "issued-token",
+        KeyScopeSet.checked(["inference:run"], is_service_key=False),
+    )
     assert clock.call_count == 1
     assert grants.find_bound.call_args.kwargs["now"] == now
     grants.consume.assert_awaited_once_with("hash", now)

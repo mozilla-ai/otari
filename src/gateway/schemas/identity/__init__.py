@@ -416,5 +416,6 @@ class AppAuthorizationRequest(BaseModel):
     response_type: Literal["code"] = "code"
     workspace_id: uuid.UUID
     scopes: list[KeyScope] = Field(
-        description="The scopes the consent screen showed. A registration that no longer names these is refused."
+        description="The scopes the consent screen showed. The key holds these and what the registration "
+        "still names, so one added since the screen was drawn is left out and one removed since takes effect."
     )

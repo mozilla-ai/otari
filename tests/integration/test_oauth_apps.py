@@ -43,10 +43,14 @@ def test_config(postgres_url: str) -> GatewayConfig:
 
 
 def approve(
-    client: TestClient, world: _World, who: str = "alpha_member", workspace: str = "alpha_one", **changes: str
+    client: TestClient,
+    world: _World,
+    who: str = "alpha_member",
+    workspace: str = "alpha_one",
+    **changes: object,
 ) -> Response:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
-    body = dict(
+    body: dict[str, object] = dict(
         client_id="thunderbolt",
         redirect_uri=REDIRECT,
         state="s" * 43,
@@ -258,14 +262,23 @@ def test_removed_app_cannot_exchange_a_pending_approval(
     assert redeem(client, code).status_code == 400
 
 
-@pytest.mark.parametrize("scopes", [[], ["end-users:read"]], ids=["none", "one no app key may hold"])
-def test_an_approval_naming_scopes_a_key_could_not_hold_is_refused_not_a_server_error(
-    client: TestClient, world: _World, scopes: list[str]
-) -> None:
-    """The approval's scopes are the caller's, so a list that breaks a key's rules is a mismatch, not a fault."""
-    refused = approve(client, world, scopes=scopes)
+def test_an_approval_naming_no_scopes_is_refused_not_a_server_error(client: TestClient, world: _World) -> None:
+    """The approval's scopes are the caller's, so a list a key could not hold is a refusal, not a fault."""
+    refused = approve(client, world, scopes=[])
 
     assert refused.status_code == 400, refused.text
+
+
+def test_an_approval_naming_a_scope_no_app_key_may_hold_drops_it(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """An end-user scope cannot survive the intersection, because no app registration may name one."""
+    approved = approve(client, world, scopes=["inference:run", "end-users:read"])
+
+    assert redeem(client, code_from(approved)).status_code == 200
+    with db_session_factory() as db:
+        key = db.scalars(select(APIKey).where(APIKey.user_id == str(world.users["alpha_member"]))).one()
+        assert key.scopes.stored == ["inference:run"]
 
 
 def test_a_registration_widened_while_the_person_read_it_issues_what_they_saw(
